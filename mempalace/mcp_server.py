@@ -30,6 +30,29 @@ import chromadb
 
 from .knowledge_graph import KnowledgeGraph
 
+# ── Input validation ─────────────────────────────────────────────────
+
+MAX_CONTENT_LENGTH = 50_000
+MAX_QUERY_LENGTH = 2_000
+MAX_FIELD_LENGTH = 200
+MAX_RESULTS_LIMIT = 100
+
+
+def _validate_str(value, max_length, name):
+    """Validate a string parameter's length. Returns sanitized value or raises."""
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string")
+    if len(value) > max_length:
+        raise ValueError(f"{name} exceeds maximum length of {max_length}")
+    return value
+
+
+def _clamp_int(value, low, high, default):
+    """Clamp an integer to [low, high], using default if None."""
+    if value is None:
+        return default
+    return max(low, min(int(value), high))
+
 _kg = KnowledgeGraph()
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
@@ -171,6 +194,12 @@ def tool_get_taxonomy():
 
 
 def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+    _validate_str(query, MAX_QUERY_LENGTH, "query")
+    limit = _clamp_int(limit, 1, MAX_RESULTS_LIMIT, 5)
+    if wing is not None:
+        _validate_str(wing, MAX_FIELD_LENGTH, "wing")
+    if room is not None:
+        _validate_str(room, MAX_FIELD_LENGTH, "room")
     return search_memories(
         query,
         palace_path=_config.palace_path,
@@ -181,6 +210,7 @@ def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
 
 
 def tool_check_duplicate(content: str, threshold: float = 0.9):
+    _validate_str(content, MAX_CONTENT_LENGTH, "content")
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -251,6 +281,9 @@ def tool_add_drawer(
     wing: str, room: str, content: str, source_file: str = None, added_by: str = "mcp"
 ):
     """File verbatim content into a wing/room. Checks for duplicates first."""
+    _validate_str(wing, MAX_FIELD_LENGTH, "wing")
+    _validate_str(room, MAX_FIELD_LENGTH, "room")
+    _validate_str(content, MAX_CONTENT_LENGTH, "content")
     col = _get_collection(create=True)
     if not col:
         return _no_palace()
@@ -308,6 +341,7 @@ def tool_delete_drawer(drawer_id: str):
 
 def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
     """Query the knowledge graph for an entity's relationships."""
+    _validate_str(entity, MAX_FIELD_LENGTH, "entity")
     results = _kg.query_entity(entity, as_of=as_of, direction=direction)
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
 
@@ -316,6 +350,9 @@ def tool_kg_add(
     subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
 ):
     """Add a relationship to the knowledge graph."""
+    _validate_str(subject, MAX_FIELD_LENGTH, "subject")
+    _validate_str(predicate, MAX_FIELD_LENGTH, "predicate")
+    _validate_str(object, MAX_FIELD_LENGTH, "object")
     triple_id = _kg.add_triple(
         subject, predicate, object, valid_from=valid_from, source_closet=source_closet
     )
@@ -354,6 +391,9 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     This is the agent's personal journal — observations, thoughts,
     what it worked on, what it noticed, what it thinks matters.
     """
+    _validate_str(agent_name, MAX_FIELD_LENGTH, "agent_name")
+    _validate_str(entry, MAX_CONTENT_LENGTH, "entry")
+    _validate_str(topic, MAX_FIELD_LENGTH, "topic")
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     room = "diary"
     col = _get_collection(create=True)
@@ -397,6 +437,8 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
     Read an agent's recent diary entries. Returns the last N entries
     in chronological order — the agent's personal journal.
     """
+    _validate_str(agent_name, MAX_FIELD_LENGTH, "agent_name")
+    last_n = _clamp_int(last_n, 1, MAX_RESULTS_LIMIT, 10)
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     col = _get_collection()
     if not col:
@@ -725,8 +767,11 @@ def handle_request(request):
                 "id": req_id,
                 "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
             }
+        # Filter arguments to only those defined in the tool's input_schema
+        schema_keys = set(TOOLS[tool_name]["input_schema"].get("properties", {}).keys())
+        filtered_args = {k: v for k, v in tool_args.items() if k in schema_keys}
         try:
-            result = TOOLS[tool_name]["handler"](**tool_args)
+            result = TOOLS[tool_name]["handler"](**filtered_args)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
