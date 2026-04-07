@@ -55,6 +55,10 @@ def _try_normalize_json(content: str) -> Optional[str]:
     if normalized:
         return normalized
 
+    normalized = _try_codex_jsonl(content)
+    if normalized:
+        return normalized
+
     try:
         data = json.loads(content)
     except json.JSONDecodeError:
@@ -88,6 +92,31 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
         elif msg_type == "assistant":
             text = _extract_content(message.get("content", ""))
             if text:
+                messages.append(("assistant", text))
+    if len(messages) >= 2:
+        return _messages_to_transcript(messages)
+    return None
+
+
+def _try_codex_jsonl(content: str) -> Optional[str]:
+    """OpenAI Codex CLI sessions."""
+    lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
+    messages = []
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        rec_type = entry.get("type", "")
+        payload = entry.get("payload", {})
+        if rec_type == "response_item" and payload.get("type") == "message":
+            role = payload.get("role", "")
+            text = _extract_content(payload.get("content", ""))
+            if role in ("user", "human") and text:
+                messages.append(("user", text))
+            elif role in ("assistant", "ai") and text:
                 messages.append(("assistant", text))
     if len(messages) >= 2:
         return _messages_to_transcript(messages)
