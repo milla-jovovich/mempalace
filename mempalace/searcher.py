@@ -7,9 +7,8 @@ Returns verbatim text — the actual words, never summaries.
 """
 
 import sys
-from pathlib import Path
 
-import chromadb
+from .storage import get_collection, query_drawers
 
 
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
@@ -18,42 +17,25 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     Optionally filter by wing (project) or room (aspect).
     """
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        get_collection(palace_path=palace_path)
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         sys.exit(1)
 
-    # Build where filter
-    where = {}
-    if wing and room:
-        where = {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        where = {"wing": wing}
-    elif room:
-        where = {"room": room}
-
     try:
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            kwargs["where"] = where
-
-        results = col.query(**kwargs)
-
+        hits = query_drawers(
+            query=query,
+            palace_path=palace_path,
+            wing=wing,
+            room=room,
+            n_results=n_results,
+        )
     except Exception as e:
         print(f"\n  Search error: {e}")
         sys.exit(1)
 
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    dists = results["distances"][0]
-
-    if not docs:
+    if not hits:
         print(f'\n  No results found for: "{query}"')
         return
 
@@ -65,18 +47,17 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"  Room: {room}")
     print(f"{'=' * 60}\n")
 
-    for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
-        similarity = round(1 - dist, 3)
-        source = Path(meta.get("source_file", "?")).name
-        wing_name = meta.get("wing", "?")
-        room_name = meta.get("room", "?")
+    for i, hit in enumerate(hits, 1):
+        source = hit["source_file"]
+        wing_name = hit["wing"]
+        room_name = hit["room"]
 
         print(f"  [{i}] {wing_name} / {room_name}")
         print(f"      Source: {source}")
-        print(f"      Match:  {similarity}")
+        print(f"      Match:  {hit['similarity']}")
         print()
         # Print the verbatim text, indented
-        for line in doc.strip().split("\n"):
+        for line in hit["text"].strip().split("\n"):
             print(f"      {line}")
         print()
         print(f"  {'─' * 56}")
@@ -92,48 +73,15 @@ def search_memories(
     Used by the MCP server and other callers that need data.
     """
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
-    except Exception as e:
-        return {"error": f"No palace found at {palace_path}: {e}"}
-
-    # Build where filter
-    where = {}
-    if wing and room:
-        where = {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        where = {"wing": wing}
-    elif room:
-        where = {"room": room}
-
-    try:
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            kwargs["where"] = where
-
-        results = col.query(**kwargs)
+        hits = query_drawers(
+            query=query,
+            palace_path=palace_path,
+            wing=wing,
+            room=room,
+            n_results=n_results,
+        )
     except Exception as e:
         return {"error": f"Search error: {e}"}
-
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    dists = results["distances"][0]
-
-    hits = []
-    for doc, meta, dist in zip(docs, metas, dists):
-        hits.append(
-            {
-                "text": doc,
-                "wing": meta.get("wing", "unknown"),
-                "room": meta.get("room", "unknown"),
-                "source_file": Path(meta.get("source_file", "?")).name,
-                "similarity": round(1 - dist, 3),
-            }
-        )
 
     return {
         "query": query,
