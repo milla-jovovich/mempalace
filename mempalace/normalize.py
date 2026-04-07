@@ -7,6 +7,7 @@ Supported:
     - Claude.ai JSON export
     - ChatGPT conversations.json
     - Claude Code JSONL
+    - SoulForge JSONL sessions
     - Slack JSON export
     - Plain text (pass through for paragraph chunking)
 
@@ -55,6 +56,10 @@ def _try_normalize_json(content: str) -> Optional[str]:
     if normalized:
         return normalized
 
+    normalized = _try_soulforge_jsonl(content)
+    if normalized:
+        return normalized
+
     try:
         data = json.loads(content)
     except json.JSONDecodeError:
@@ -92,6 +97,118 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
     if len(messages) >= 2:
         return _messages_to_transcript(messages)
     return None
+
+
+def _try_soulforge_jsonl(content: str) -> Optional[str]:
+    """SoulForge JSONL sessions.
+
+    SoulForge (https://github.com/proxysoul/soulforge) stores sessions as
+    messages.jsonl — one JSON object per line with the shape:
+        {"role": "user"|"assistant"|"system", "content": "...", ...}
+
+    Assistant messages may contain tool calls in a ``toolCalls`` array and
+    interleaved ``segments`` (text, tools, reasoning, plan).  We extract
+    the human-readable text and summarise tool activity so the palace
+    captures *what happened* without the raw tool output noise.
+    """
+    lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
+    if len(lines) < 2:
+        return None
+
+    messages = []
+    is_soulforge = False
+
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+
+        role = entry.get("role", "")
+        if role not in ("user", "assistant", "system"):
+            continue
+
+        # Detect SoulForge by its unique fields
+        if not is_soulforge:
+            if any(k in entry for k in ("segments", "toolCalls", "durationMs", "isSteering")):
+                is_soulforge = True
+
+        # Skip system messages unless they were shown inline
+        if role == "system" and not entry.get("showInChat"):
+            continue
+
+        text = _extract_soulforge_text(entry)
+        if not text:
+            continue
+
+        mapped_role = "user" if role == "user" else "assistant"
+        messages.append((mapped_role, text))
+
+    if not is_soulforge:
+        return None
+    if len(messages) >= 2:
+        return _messages_to_transcript(messages)
+    return None
+
+
+def _extract_soulforge_text(entry: dict) -> str:
+    """Extract human-readable text from a SoulForge ChatMessage.
+
+    Handles both the segments-based format (interleaved text/tool/reasoning)
+    and the flat content + toolCalls fallback.
+    """
+    parts = []
+
+    segments = entry.get("segments")
+    if segments and isinstance(segments, list):
+        tool_calls = {tc["id"]: tc for tc in (entry.get("toolCalls") or []) if "id" in tc}
+        for seg in segments:
+            seg_type = seg.get("type", "")
+            if seg_type == "text":
+                text = seg.get("content", "").strip()
+                if text:
+                    parts.append(text)
+            elif seg_type == "tools":
+                # Summarise tool calls as one-liners instead of dumping raw output
+                for tc_id in seg.get("toolCallIds", []):
+                    tc = tool_calls.get(tc_id)
+                    if tc:
+                        parts.append(_summarise_tool_call(tc))
+            elif seg_type == "reasoning":
+                text = seg.get("content", "").strip()
+                if text:
+                    parts.append(f"[reasoning] {text[:500]}")
+            elif seg_type == "plan":
+                plan = seg.get("plan", {})
+                steps = plan.get("steps", [])
+                if steps:
+                    step_labels = [s.get("label", "") for s in steps[:10]]
+                    parts.append("[plan] " + "; ".join(step_labels))
+    else:
+        # Flat format fallback
+        content = entry.get("content", "").strip()
+        if content:
+            parts.append(content)
+        for tc in entry.get("toolCalls") or []:
+            parts.append(_summarise_tool_call(tc))
+
+    return "\n".join(parts).strip()
+
+
+def _summarise_tool_call(tc: dict) -> str:
+    """One-line summary of a tool call: name + key args."""
+    name = tc.get("name", "tool")
+    args = tc.get("args", {})
+    # Pick the most informative arg (file path, pattern, command, query)
+    for key in ("path", "file", "pattern", "command", "query", "symbol"):
+        val = args.get(key)
+        if val and isinstance(val, str):
+            short = val if len(val) <= 80 else val[:77] + "..."
+            return f"[{name}: {short}]"
+    # Fallback: just the tool name
+    return f"[{name}]"
 
 
 def _try_claude_ai_json(data) -> Optional[str]:
