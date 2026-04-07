@@ -8,11 +8,15 @@ Two ways to ingest:
 
 Same palace. Same search. Different ingest strategies.
 
+For AI agents: see AGENT.md at the repo root for zero-interactive setup.
+
 Commands:
     mempalace init <dir>                  Detect rooms from folder structure
     mempalace split <dir>                 Split concatenated mega-files into per-session files
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
+    mempalace mine <dir> --auto           Auto-detect content type and mine
+    mempalace agent-setup <dir>           Non-interactive: init + auto-mine + status
     mempalace search "query"              Find anything, exact words
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
@@ -22,6 +26,8 @@ Examples:
     mempalace init ~/projects/my_app
     mempalace mine ~/projects/my_app
     mempalace mine ~/chats/claude-sessions --mode convos
+    mempalace mine ~/chats/ --auto
+    mempalace agent-setup ~/projects/my_app
     mempalace search "why did we switch to GraphQL"
     mempalace search "pricing discussion" --wing my_app --room costs
 """
@@ -66,7 +72,12 @@ def cmd_init(args):
 def cmd_mine(args):
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
-    if args.mode == "convos":
+    mode = args.mode
+    if mode == "auto":
+        mode = _detect_mine_mode(args.dir)
+        print(f"  Auto-detected mode: {mode}")
+
+    if mode == "convos":
         from .convo_miner import mine_convos
 
         mine_convos(
@@ -89,6 +100,147 @@ def cmd_mine(args):
             limit=args.limit,
             dry_run=args.dry_run,
         )
+
+
+def _detect_mine_mode(target_dir: str) -> str:
+    """Auto-detect whether to use 'projects' or 'convos' mining mode.
+
+    Scans the target directory for conversation export patterns.
+    If conversation patterns dominate, returns 'convos'.
+    Otherwise returns 'projects'.
+    """
+    from pathlib import Path as _Path
+
+    target = _Path(target_dir).expanduser().resolve()
+    if not target.is_dir():
+        return "projects"
+
+    convo_extensions = {".txt", ".md", ".json", ".jsonl"}
+    convo_indicators = [
+        # Claude/ChatGPT transcript formats
+        lambda content: content.count("> ") > 3,
+        lambda content: "You:" in content and ("Assistant:" in content or "User:" in content),
+        # Slack export patterns
+        lambda content: '"user":' in content and '"type":' in content,
+        # Generic dialogue
+        lambda content: content.count("[Human:") > 1 or content.count("[User:") > 1,
+        # OpenAI API format
+        lambda content: '"role":' in content and ('"user"' in content or '"assistant"' in content),
+    ]
+
+    total_files = 0
+    convo_files = 0
+
+    for root, dirs, files in os.walk(target):
+        dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", ".venv", "venv", "env", "dist", "build", ".next", ".mempalace"}]
+        for filename in files:
+            filepath = _Path(root) / filename
+            ext = filepath.suffix.lower()
+            if ext not in convo_extensions:
+                continue
+
+            total_files += 1
+            try:
+                content = filepath.read_text(encoding="utf-8", errors="ignore")
+                # Only scan first 8KB for detection
+                sample = content[:8192]
+                if any(indicator(sample) for indicator in convo_indicators):
+                    convo_files += 1
+            except (OSError, UnicodeDecodeError):
+                continue
+
+            if total_files >= 30:  # Cap detection at 30 files
+                break
+        if total_files >= 30:
+            break
+
+    # If >50% of detected files look like conversations, use convos mode
+    if total_files > 0 and convo_files / total_files > 0.5:
+        return "convos"
+
+    return "projects"
+
+
+def cmd_agent_setup(args):
+    """Non-interactive setup: init + auto-mine + status. Agent-friendly."""
+    import json
+    from pathlib import Path as _Path
+    from .entity_detector import scan_for_detection, detect_entities, confirm_entities
+    from .room_detector_local import detect_rooms_local
+
+    # Force non-interactive mode
+    os.environ["MEMPALACE_NONINTERACTIVE"] = "1"
+
+    target_path = _Path(args.dir).expanduser().resolve()
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+
+    print("=" * 60)
+    print(f"  MemPalace — Agent Setup")
+    print(f"  Target: {target_path}")
+    print(f"  Palace: {palace_path}")
+    print("=" * 60)
+
+    # Step 1: Init (non-interactive)
+    print("\n  [1/3] Initializing — detecting entities and rooms...")
+    files = scan_for_detection(str(target_path))
+    if files:
+        print(f"  Reading {len(files)} files for entity detection...")
+        detected = detect_entities(files)
+        total = len(detected["people"]) + len(detected["projects"]) + len(detected["uncertain"])
+        if total > 0:
+            confirmed = confirm_entities(detected, yes=True)
+            if confirmed["people"] or confirmed["projects"]:
+                entities_path = target_path / "entities.json"
+                with open(entities_path, "w") as f:
+                    json.dump(confirmed, f, indent=2)
+                print(f"  Entities saved: {entities_path}")
+        else:
+            print("  No entities detected — proceeding with directory-based rooms.")
+
+    detect_rooms_local(project_dir=str(target_path))
+    MempalaceConfig().init()
+    print("  Init complete.")
+
+    # Step 2: Auto-mine
+    print("\n  [2/3] Mining content...")
+    mode = _detect_mine_mode(str(target_path))
+    print(f"  Detected mode: {mode}")
+
+    if mode == "convos":
+        from .convo_miner import mine_convos
+
+        mine_convos(
+            convo_dir=str(target_path),
+            palace_path=palace_path,
+            wing=args.wing,
+            agent=args.agent,
+            limit=getattr(args, "limit", 0),
+            dry_run=False,
+            extract_mode="exchange",
+        )
+    else:
+        from .miner import mine
+
+        mine(
+            project_dir=str(target_path),
+            palace_path=palace_path,
+            wing_override=args.wing,
+            agent=args.agent,
+            limit=getattr(args, "limit", 0),
+            dry_run=False,
+        )
+    print("  Mining complete.")
+
+    # Step 3: Status
+    print("\n  [3/3] Verifying palace...")
+    from .miner import status as palace_status
+
+    try:
+        palace_status(palace_path=palace_path)
+        print("\n  Setup complete. Palace is ready.")
+    except Exception as e:
+        print(f"\n  Warning: Status check encountered an issue: {e}")
+        print("  The palace was initialized and mined, but verification had an error.")
 
 
 def cmd_search(args):
@@ -283,9 +435,9 @@ def main():
     p_mine.add_argument("dir", help="Directory to mine")
     p_mine.add_argument(
         "--mode",
-        choices=["projects", "convos"],
+        choices=["projects", "convos", "auto"],
         default="projects",
-        help="Ingest mode: 'projects' for code/docs (default), 'convos' for chat exports",
+        help="Ingest mode: 'projects' for code/docs (default), 'convos' for chat exports, 'auto' for content-type detection",
     )
     p_mine.add_argument("--wing", default=None, help="Wing name (default: directory name)")
     p_mine.add_argument(
@@ -350,6 +502,29 @@ def main():
         help="Only split files containing at least N sessions (default: 2)",
     )
 
+    # agent-setup
+    p_agent_setup = sub.add_parser(
+        "agent-setup",
+        help="Non-interactive setup: init + auto-detect content + mine + status (zero prompts)",
+    )
+    p_agent_setup.add_argument("dir", help="Directory to set up (projects or conversations)")
+    p_agent_setup.add_argument(
+        "--wing",
+        default=None,
+        help="Wing name (default: detected from directory)",
+    )
+    p_agent_setup.add_argument(
+        "--agent",
+        default="mempalace",
+        help="Your name — recorded on every drawer (default: mempalace)",
+    )
+    p_agent_setup.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Max files/convos to process (0 = all)",
+    )
+
     # status
     sub.add_parser("status", help="Show what's been filed")
 
@@ -366,6 +541,7 @@ def main():
         "search": cmd_search,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
+        "agent-setup": cmd_agent_setup,
         "status": cmd_status,
     }
     dispatch[args.command](args)

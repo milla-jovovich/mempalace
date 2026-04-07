@@ -721,7 +721,10 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
     Returns confirmed {people: [names], projects: [names]}
 
     Pass yes=True to auto-accept all detected entities without prompting.
+    Also respects the MEMPALACE_NONINTERACTIVE environment variable.
     """
+    yes = yes or os.environ.get("MEMPALACE_NONINTERACTIVE", "").lower() in ("1", "true", "yes")
+
     print(f"\n{'=' * 58}")
     print("  MemPalace — Entity Detection")
     print(f"{'=' * 58}")
