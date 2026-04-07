@@ -18,11 +18,30 @@ import os
 from pathlib import Path
 from typing import Optional
 
+SEGMENT_SEPARATOR = "\n\n---\n\n"
+
 
 def normalize(filepath: str) -> str:
     """
     Load a file and normalize to transcript format if it's a chat export.
     Plain text files pass through unchanged.
+    """
+    return join_normalized_segments(normalize_segments(filepath))
+
+
+def join_normalized_segments(segments: list[str]) -> str:
+    if not segments:
+        return ""
+    if len(segments) == 1:
+        return segments[0]
+    return SEGMENT_SEPARATOR.join(segment.strip() for segment in segments if segment.strip())
+
+
+def normalize_segments(filepath: str) -> list[str]:
+    """
+    Load a file and normalize it to one or more transcript segments.
+    Most current formats produce a single segment, but callers can use this
+    helper to preserve boundaries when that changes.
     """
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
@@ -31,21 +50,21 @@ def normalize(filepath: str) -> str:
         raise IOError(f"Could not read {filepath}: {e}")
 
     if not content.strip():
-        return content
+        return [content]
 
     # Already has > markers — pass through
     lines = content.split("\n")
     if sum(1 for line in lines if line.strip().startswith(">")) >= 3:
-        return content
+        return [content]
 
     # Try JSON normalization
     ext = Path(filepath).suffix.lower()
     if ext in (".json", ".jsonl") or content.strip()[:1] in ("{", "["):
         normalized = _try_normalize_json(content)
         if normalized:
-            return normalized
+            return [normalized]
 
-    return content
+    return [content]
 
 
 def _try_normalize_json(content: str) -> Optional[str]:

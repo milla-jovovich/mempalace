@@ -1,6 +1,7 @@
-import os
 import json
 import tempfile
+from pathlib import Path
+
 from mempalace.config import MempalaceConfig
 
 
@@ -10,23 +11,28 @@ def test_default_config():
     assert cfg.collection_name == "mempalace_drawers"
 
 
-def test_config_from_file():
+def test_config_from_file_expands_user_path():
     tmpdir = tempfile.mkdtemp()
-    with open(os.path.join(tmpdir, "config.json"), "w") as f:
-        json.dump({"palace_path": "/custom/palace"}, f)
+    with open(Path(tmpdir) / "config.json", "w") as f:
+        json.dump({"palace_path": "~/custom/palace"}, f)
+
     cfg = MempalaceConfig(config_dir=tmpdir)
-    assert cfg.palace_path == "/custom/palace"
+
+    assert cfg.palace_path == str(Path.home() / "custom" / "palace")
 
 
-def test_env_override():
-    os.environ["MEMPALACE_PALACE_PATH"] = "/env/palace"
+def test_env_override_expands_user_path(monkeypatch):
+    monkeypatch.setenv("MEMPALACE_PALACE_PATH", "~/env/palace")
+
     cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
-    assert cfg.palace_path == "/env/palace"
-    del os.environ["MEMPALACE_PALACE_PATH"]
+
+    assert cfg.palace_path == str(Path.home() / "env" / "palace")
 
 
 def test_init():
     tmpdir = tempfile.mkdtemp()
     cfg = MempalaceConfig(config_dir=tmpdir)
+
     cfg.init()
-    assert os.path.exists(os.path.join(tmpdir, "config.json"))
+
+    assert (Path(tmpdir) / "config.json").exists()

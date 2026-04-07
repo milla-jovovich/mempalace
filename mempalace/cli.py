@@ -32,6 +32,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .drawer_store import DrawerStore
 
 
 def cmd_init(args):
@@ -64,14 +65,13 @@ def cmd_init(args):
 
 
 def cmd_mine(args):
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-
     if args.mode == "convos":
         from .convo_miner import mine_convos
 
         mine_convos(
             convo_dir=args.dir,
-            palace_path=palace_path,
+            palace_path=args.palace,
+            collection_name=args.collection,
             wing=args.wing,
             agent=args.agent,
             limit=args.limit,
@@ -83,7 +83,8 @@ def cmd_mine(args):
 
         mine(
             project_dir=args.dir,
-            palace_path=palace_path,
+            palace_path=args.palace,
+            collection_name=args.collection,
             wing_override=args.wing,
             agent=args.agent,
             limit=args.limit,
@@ -94,13 +95,13 @@ def cmd_mine(args):
 def cmd_search(args):
     from .searcher import search
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     search(
         query=args.query,
-        palace_path=palace_path,
+        palace_path=args.palace,
         wing=args.wing,
         room=args.room,
         n_results=args.results,
+        collection_name=args.collection,
     )
 
 
@@ -108,8 +109,7 @@ def cmd_wakeup(args):
     """Show L0 (identity) + L1 (essential story) — the wake-up context."""
     from .layers import MemoryStack
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-    stack = MemoryStack(palace_path=palace_path)
+    stack = MemoryStack(palace_path=args.palace, collection_name=args.collection)
 
     text = stack.wake_up(wing=args.wing)
     tokens = len(text) // 4
@@ -143,8 +143,7 @@ def cmd_split(args):
 def cmd_status(args):
     from .miner import status
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-    status(palace_path=palace_path)
+    status(palace_path=args.palace, collection_name=args.collection)
 
 
 def cmd_compress(args):
@@ -152,12 +151,12 @@ def cmd_compress(args):
     import chromadb
     from .dialect import Dialect
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    store = DrawerStore(palace_path=args.palace, collection_name=args.collection)
 
     # Load dialect (with optional entity config)
     config_path = args.config
     if not config_path:
-        for candidate in ["entities.json", os.path.join(palace_path, "entities.json")]:
+        for candidate in ["entities.json", os.path.join(store.palace_path, "entities.json")]:
             if os.path.exists(candidate):
                 config_path = candidate
                 break
@@ -170,10 +169,10 @@ def cmd_compress(args):
 
     # Connect to palace
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        client = chromadb.PersistentClient(path=store.palace_path)
+        col = store.get_collection()
     except Exception:
-        print(f"\n  No palace found at {palace_path}")
+        print(f"\n  No palace found at {store.palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         sys.exit(1)
 
@@ -267,6 +266,11 @@ def main():
         "--palace",
         default=None,
         help="Where the palace lives (default: from ~/.mempalace/config.json or ~/.mempalace/palace)",
+    )
+    parser.add_argument(
+        "--collection",
+        default=None,
+        help="Drawer collection name (default: config value, or mempalace_drawers when --palace is set explicitly)",
     )
 
     sub = parser.add_subparsers(dest="command")
