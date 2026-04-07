@@ -90,13 +90,13 @@ graph TD
     B --> C[Claude Code fires Stop hook]
     C --> D[Hook counts human messages in JSONL transcript]
     D --> E{Messages count?}
-    E -->|< 15 since last save| F[echo '{}' - let AI stop]
-    E -->|>= 15 since last save| G[Block with reason: save...]
+    E -->|Less than 15 since last save| F["echo '{}' - let AI stop"]
+    E -->|15 or more since last save| G[Block with reason: save...]
     G --> H[AI saves to palace]
     H --> I[AI tries to stop again]
     I --> J[stop_hook_active = true]
     J --> K[Hook sees flag]
-    K --> L[echo '{}' - let it through]
+    K --> L["echo '{}' - let it through"]
 ```
 
 The `stop_hook_active` flag prevents infinite loops: block once → AI saves → tries to stop → flag is true → we let it through.
