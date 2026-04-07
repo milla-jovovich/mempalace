@@ -38,6 +38,23 @@ READABLE_EXTENSIONS = {
     ".csv",
     ".sql",
     ".toml",
+    # PHP ecosystem
+    ".php",
+    ".twig",
+    ".blade",
+    # Frontend frameworks
+    ".vue",
+    ".svelte",
+    # Other languages
+    ".dart",
+    ".c",
+    ".cpp",
+    ".h",
+    ".cs",
+    # Config formats
+    ".ini",
+    ".xml",
+    ".env.example",
 }
 
 SKIP_DIRS = {
