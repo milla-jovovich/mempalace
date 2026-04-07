@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 .pytest_cache/
 mempal.yaml
+.coverage
+htmlcov/

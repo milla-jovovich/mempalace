@@ -21,9 +21,9 @@
 | **Version** | 3 different values (`2.0.0`, `2.0.0`, `3.0.0`) | 1 via `importlib.metadata` |
 | **KG queries** | Brittle `row[10]`, `row[11]` positional access | `sqlite3.Row` → `row["obj_name"]` |
 | **Miner scan** | `limit=10000` silently drops data | No limit |
-| **Tests** | 9/9 | 9/9 (zero regressions) |
+| **Tests** | 4 files, 9 tests | 16 files, 275 tests, 58% coverage |
 
-**Net: −1,310 lines, 0 behavior changes, 0 test regressions.**
+**Net: −1,310 lines, 0 behavior changes, 275 passing tests.**
 
 ---
 

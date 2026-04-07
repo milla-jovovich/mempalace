@@ -45,7 +45,14 @@ include = ["mempalace*"]
 mempalace = "mempalace:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "build>=1.0", "twine>=4.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-xdist>=3.5",
+    "pytest-mock>=3.14",
+    "build>=1.0",
+    "twine>=4.0",
+]
 
 [tool.ruff]
 line-length = 100
@@ -60,3 +67,16 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--cov=mempalace",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=html:htmlcov",
+    "--cov-fail-under=55",
+]
+markers = [
+    "slow: marks tests that hit real DB or are slow",
+    "integration: marks integration tests that need ChromaDB",
+]
