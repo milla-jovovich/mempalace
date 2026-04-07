@@ -34,6 +34,11 @@ from pathlib import Path
 from .config import MempalaceConfig
 
 
+def _error(msg: str) -> None:
+    """Print an error message to stderr."""
+    print(f"error: {msg}", file=sys.stderr)
+
+
 def cmd_init(args):
     import json
     from pathlib import Path
@@ -173,8 +178,8 @@ def cmd_compress(args):
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
     except Exception:
-        print(f"\n  No palace found at {palace_path}")
-        print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        _error(f"No palace found at {palace_path}")
+        _error("Run: mempalace init <dir> then mempalace mine <dir>")
         sys.exit(1)
 
     # Query drawers in the wing
@@ -185,7 +190,7 @@ def cmd_compress(args):
             kwargs["where"] = where
         results = col.get(**kwargs)
     except Exception as e:
-        print(f"\n  Error reading drawers: {e}")
+        _error(f"Error reading drawers: {e}")
         sys.exit(1)
 
     docs = results["documents"]
@@ -245,7 +250,7 @@ def cmd_compress(args):
                 f"  Stored {len(compressed_entries)} compressed drawers in 'mempalace_compressed' collection."
             )
         except Exception as e:
-            print(f"  Error storing compressed drawers: {e}")
+            _error(f"Error storing compressed drawers: {e}")
             sys.exit(1)
 
     # Summary
@@ -357,7 +362,7 @@ def main():
 
     if not args.command:
         parser.print_help()
-        return
+        sys.exit(0)
 
     dispatch = {
         "init": cmd_init,
@@ -368,7 +373,15 @@ def main():
         "wake-up": cmd_wakeup,
         "status": cmd_status,
     }
-    dispatch[args.command](args)
+
+    try:
+        dispatch[args.command](args)
+    except KeyboardInterrupt:
+        _error("interrupted")
+        sys.exit(130)
+    except Exception as e:
+        _error(str(e))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

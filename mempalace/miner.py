@@ -81,8 +81,8 @@ def load_config(project_dir: str) -> dict:
         if legacy_path.exists():
             config_path = legacy_path
         else:
-            print(f"ERROR: No mempalace.yaml found in {project_dir}")
-            print(f"Run: mempalace init {project_dir}")
+            print(f"error: No mempalace.yaml found in {project_dir}", file=sys.stderr)
+            print(f"Run: mempalace init {project_dir}", file=sys.stderr)
             sys.exit(1)
     with open(config_path) as f:
         return yaml.safe_load(f)
@@ -401,8 +401,8 @@ def status(palace_path: str) -> None:
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
     except Exception:
-        print(f"\n  No palace found at {palace_path}")
-        print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        print(f"error: No palace found at {palace_path}", file=sys.stderr)
+        print("  Run: mempalace init <dir> then mempalace mine <dir>", file=sys.stderr)
         return
 
     # Count by wing and room (paginated to avoid OOM on large palaces)
