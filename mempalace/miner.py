@@ -183,10 +183,7 @@ def chunk_text(content: str, source_file: str) -> list:
 def get_collection(palace_path: str):
     os.makedirs(palace_path, exist_ok=True)
     client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
+    return client.get_or_create_collection("mempalace_drawers")
 
 
 def file_already_mined(collection, source_file: str) -> bool:
@@ -203,26 +200,21 @@ def add_drawer(
 ):
     """Add one drawer to the palace."""
     drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk_index)).encode()).hexdigest()[:16]}"
-    try:
-        collection.add(
-            documents=[content],
-            ids=[drawer_id],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file,
-                    "chunk_index": chunk_index,
-                    "added_by": agent,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
-        )
-        return True
-    except Exception as e:
-        if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
-            return False
-        raise
+    collection.upsert(
+        documents=[content],
+        ids=[drawer_id],
+        metadatas=[
+            {
+                "wing": wing,
+                "room": room,
+                "source_file": source_file,
+                "chunk_index": chunk_index,
+                "added_by": agent,
+                "filed_at": datetime.now().isoformat(),
+            }
+        ],
+    )
+    return True
 
 
 # =============================================================================
