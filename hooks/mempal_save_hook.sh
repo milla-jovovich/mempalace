@@ -64,20 +64,37 @@ MEMPAL_DIR=""
 # Read JSON input from stdin
 INPUT=$(cat)
 
-# Parse all fields in a single Python call (3x faster than separate invocations)
-eval $(echo "$INPUT" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-sid = data.get('session_id', 'unknown')
-sha = data.get('stop_hook_active', False)
-tp = data.get('transcript_path', '')
-# Shell-safe output — only allow alphanumeric, underscore, hyphen, slash, dot, tilde
+# Parse fields from Claude Code's JSON
+# Parse stdin JSON once and keep transcript_path as data, not inline code.
+readarray -t HOOK_FIELDS < <(
+    printf '%s' "$INPUT" | python3 -c '
+import json
+import sys
+
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    payload = {}
+
+print(payload.get("session_id", "unknown"))
+print(payload.get("stop_hook_active", False))
+print(payload.get("transcript_path", ""))
+'
+)
+
+SESSION_ID="${HOOK_FIELDS[0]:-unknown}"
+STOP_HOOK_ACTIVE="${HOOK_FIELDS[1]:-False}"
+TRANSCRIPT_PATH="${HOOK_FIELDS[2]:-}"
+
+# Normalize session id so it cannot escape the hook state directory.
+SAFE_SESSION_ID=$(printf '%s' "$SESSION_ID" | python3 -c '
 import re
-safe = lambda s: re.sub(r'[^a-zA-Z0-9_/.\-~]', '', str(s))
-print(f'SESSION_ID=\"{safe(sid)}\"')
-print(f'STOP_HOOK_ACTIVE=\"{sha}\"')
-print(f'TRANSCRIPT_PATH=\"{safe(tp)}\"')
-" 2>/dev/null)
+import sys
+
+value = sys.stdin.read().strip()
+safe = re.sub(r"[^A-Za-z0-9_.-]", "_", value) or "unknown"
+print(safe)
+')
 
 # Expand ~ in path
 TRANSCRIPT_PATH="${TRANSCRIPT_PATH/#\~/$HOME}"
@@ -94,6 +111,7 @@ fi
 if [ -f "$TRANSCRIPT_PATH" ]; then
     EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
 import json, sys
+
 count = 0
 with open(sys.argv[1]) as f:
     for line in f:
@@ -115,7 +133,7 @@ else
 fi
 
 # Track last save point for this session
-LAST_SAVE_FILE="$STATE_DIR/${SESSION_ID}_last_save"
+LAST_SAVE_FILE="$STATE_DIR/${SAFE_SESSION_ID}_last_save"
 LAST_SAVE=0
 if [ -f "$LAST_SAVE_FILE" ]; then
     LAST_SAVE=$(cat "$LAST_SAVE_FILE")
