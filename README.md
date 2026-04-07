@@ -82,6 +82,17 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 >
 > — *Milla Jovovich & Ben Sigman*
 
+
+---
+
+## Community fork, collaboration, and language
+
+**Another project also uses the MemPalace name** — an unrelated community org at [github.com/mempalace/mempalace](https://github.com/mempalace/mempalace). This repo (**milla-jovovich/mempalace**) is the one described in this README. If you landed from a link or fork, double-check which codebase you are using ([#105](https://github.com/milla-jovovich/mempalace/issues/105)).
+
+**Collaboration across people and devices** — MemPalace stores your palace as local files (ChromaDB + config under your home directory by default). There is no built-in real-time sync or merge for two people editing the same palace. Practical patterns: each person keeps their own palace path; share **source** materials (exported chats, repos) via Git and re-mine; or use one shared machine / copy of the palace directory with normal file-sync discipline and avoid concurrent `mine` on the same DB ([#7](https://github.com/milla-jovovich/mempalace/issues/7)).
+
+**Multilingual search** — Default embeddings are English-centric (`all-MiniLM-L6-v2`). Cross-lingual quality varies; improving it usually means a different embedding model or provider. See the discussion in [#50](https://github.com/milla-jovovich/mempalace/issues/50) and [#92](https://github.com/milla-jovovich/mempalace/issues/92). Chinese-speaking users may also want [#37](https://github.com/milla-jovovich/mempalace/issues/37).
+
 ---
 
 ## Quick Start
