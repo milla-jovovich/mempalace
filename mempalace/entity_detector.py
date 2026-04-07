@@ -434,6 +434,10 @@ SKIP_DIRS = {
     ".next",
     "coverage",
     ".mempalace",
+    "target",
+    "Pods",
+    ".build",
+    "DerivedData",
 }
 
 

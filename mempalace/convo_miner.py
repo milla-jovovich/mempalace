@@ -39,6 +39,10 @@ SKIP_DIRS = {
     "build",
     ".next",
     ".mempalace",
+    "target",
+    "Pods",
+    ".build",
+    "DerivedData",
 }
 
 MIN_CHUNK_SIZE = 30

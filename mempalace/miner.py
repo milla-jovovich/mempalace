@@ -51,6 +51,10 @@ SKIP_DIRS = {
     ".next",
     "coverage",
     ".mempalace",
+    "target",
+    "Pods",
+    ".build",
+    "DerivedData",
 }
 
 CHUNK_SIZE = 800  # chars per drawer
