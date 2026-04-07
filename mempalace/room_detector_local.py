@@ -15,6 +15,8 @@ import yaml
 from pathlib import Path
 from collections import defaultdict
 
+from .constants import SKIP_DIRS
+
 # Common room patterns — detected from folder names and filenames
 # Format: {folder_keyword: room_name}
 FOLDER_ROOM_MAP = {
@@ -103,19 +105,6 @@ def detect_rooms_from_folders(project_dir: str) -> list:
     project_path = Path(project_dir).expanduser().resolve()
     found_rooms = {}
 
-    SKIP_DIRS = {
-        ".git",
-        "node_modules",
-        "__pycache__",
-        ".venv",
-        "venv",
-        "env",
-        "dist",
-        "build",
-        ".next",
-        "coverage",
-    }
-
     # Check top-level directories first (most reliable signal)
     for item in project_path.iterdir():
         if item.is_dir() and item.name not in SKIP_DIRS:
@@ -172,8 +161,6 @@ def detect_rooms_from_files(project_dir: str) -> list:
     """
     project_path = Path(project_dir).expanduser().resolve()
     keyword_counts = defaultdict(int)
-
-    SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build"}
 
     for root, dirs, filenames in os.walk(project_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]

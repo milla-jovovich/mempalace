@@ -9,44 +9,20 @@ Returns verbatim text — the actual words, never summaries.
 import sys
 from pathlib import Path
 
-import chromadb
+from .palace_db import query_palace
 
 
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
-    """
-    Search the palace. Returns verbatim drawer content.
-    Optionally filter by wing (project) or room (aspect).
-    """
+    """CLI search — prints verbatim drawer content."""
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
-    except Exception:
-        print(f"\n  No palace found at {palace_path}")
-        print("  Run: mempalace init <dir> then mempalace mine <dir>")
-        sys.exit(1)
-
-    # Build where filter
-    where = {}
-    if wing and room:
-        where = {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        where = {"wing": wing}
-    elif room:
-        where = {"room": room}
-
-    try:
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            kwargs["where"] = where
-
-        results = col.query(**kwargs)
-
+        results = query_palace(query, n_results, wing, room, palace_path)
     except Exception as e:
         print(f"\n  Search error: {e}")
+        sys.exit(1)
+
+    if results is None:
+        print(f"\n  No palace found at {palace_path}")
+        print("  Run: mempalace init <dir> then mempalace mine <dir>")
         sys.exit(1)
 
     docs = results["documents"][0]
@@ -75,7 +51,6 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"      Source: {source}")
         print(f"      Match:  {similarity}")
         print()
-        # Print the verbatim text, indented
         for line in doc.strip().split("\n"):
             print(f"      {line}")
         print()
@@ -87,37 +62,14 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 def search_memories(
     query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
 ) -> dict:
-    """
-    Programmatic search — returns a dict instead of printing.
-    Used by the MCP server and other callers that need data.
-    """
+    """Programmatic search — returns a dict. Used by the MCP server."""
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
-    except Exception as e:
-        return {"error": f"No palace found at {palace_path}: {e}"}
-
-    # Build where filter
-    where = {}
-    if wing and room:
-        where = {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        where = {"wing": wing}
-    elif room:
-        where = {"room": room}
-
-    try:
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            kwargs["where"] = where
-
-        results = col.query(**kwargs)
+        results = query_palace(query, n_results, wing, room, palace_path)
     except Exception as e:
         return {"error": f"Search error: {e}"}
+
+    if results is None:
+        return {"error": f"No palace found at {palace_path}"}
 
     docs = results["documents"][0]
     metas = results["metadatas"][0]

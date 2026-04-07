@@ -206,25 +206,13 @@ def _extract_content(content) -> str:
     return ""
 
 
-def _messages_to_transcript(messages: list, spellcheck: bool = True) -> str:
+def _messages_to_transcript(messages: list) -> str:
     """Convert [(role, text), ...] to transcript format with > markers."""
-    if spellcheck:
-        try:
-            from mempalace.spellcheck import spellcheck_user_text
-
-            _fix = spellcheck_user_text
-        except Exception:
-            _fix = None
-    else:
-        _fix = None
-
     lines = []
     i = 0
     while i < len(messages):
         role, text = messages[i]
         if role == "user":
-            if _fix is not None:
-                text = _fix(text)
             lines.append(f"> {text}")
             if i + 1 < len(messages) and messages[i + 1][0] == "assistant":
                 lines.append(messages[i + 1][1])

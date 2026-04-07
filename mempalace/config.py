@@ -21,47 +21,6 @@ DEFAULT_TOPIC_WINGS = [
     "creative",
 ]
 
-DEFAULT_HALL_KEYWORDS = {
-    "emotions": [
-        "scared",
-        "afraid",
-        "worried",
-        "happy",
-        "sad",
-        "love",
-        "hate",
-        "feel",
-        "cry",
-        "tears",
-    ],
-    "consciousness": [
-        "consciousness",
-        "conscious",
-        "aware",
-        "real",
-        "genuine",
-        "soul",
-        "exist",
-        "alive",
-    ],
-    "memory": ["memory", "remember", "forget", "recall", "archive", "palace", "store"],
-    "technical": [
-        "code",
-        "python",
-        "script",
-        "bug",
-        "error",
-        "function",
-        "api",
-        "database",
-        "server",
-    ],
-    "identity": ["identity", "name", "who am i", "persona", "self"],
-    "family": ["family", "kids", "children", "daughter", "son", "parent", "mother", "father"],
-    "creative": ["game", "gameplay", "player", "app", "design", "art", "music", "story"],
-}
-
-
 class MempalaceConfig:
     """Configuration manager for MemPalace.
 
@@ -118,11 +77,6 @@ class MempalaceConfig:
         """List of topic wing names."""
         return self._file_config.get("topic_wings", DEFAULT_TOPIC_WINGS)
 
-    @property
-    def hall_keywords(self):
-        """Mapping of hall names to keyword lists."""
-        return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
-
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
@@ -131,7 +85,6 @@ class MempalaceConfig:
                 "palace_path": DEFAULT_PALACE_PATH,
                 "collection_name": DEFAULT_COLLECTION_NAME,
                 "topic_wings": DEFAULT_TOPIC_WINGS,
-                "hall_keywords": DEFAULT_HALL_KEYWORDS,
             }
             with open(self._config_file, "w") as f:
                 json.dump(default_config, f, indent=2)

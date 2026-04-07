@@ -35,30 +35,8 @@ from .config import MempalaceConfig
 
 
 def cmd_init(args):
-    import json
-    from pathlib import Path
-    from .entity_detector import scan_for_detection, detect_entities, confirm_entities
     from .room_detector_local import detect_rooms_local
 
-    # Pass 1: auto-detect people and projects from file content
-    print(f"\n  Scanning for entities in: {args.dir}")
-    files = scan_for_detection(args.dir)
-    if files:
-        print(f"  Reading {len(files)} files...")
-        detected = detect_entities(files)
-        total = len(detected["people"]) + len(detected["projects"]) + len(detected["uncertain"])
-        if total > 0:
-            confirmed = confirm_entities(detected, yes=getattr(args, "yes", False))
-            # Save confirmed entities to <project>/entities.json for the miner
-            if confirmed["people"] or confirmed["projects"]:
-                entities_path = Path(args.dir).expanduser().resolve() / "entities.json"
-                with open(entities_path, "w") as f:
-                    json.dump(confirmed, f, indent=2)
-                print(f"  Entities saved: {entities_path}")
-        else:
-            print("  No entities detected — proceeding with directory-based rooms.")
-
-    # Pass 2: detect rooms from folder structure
     detect_rooms_local(project_dir=args.dir)
     MempalaceConfig().init()
 
@@ -149,12 +127,11 @@ def cmd_status(args):
 
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
-    import chromadb
     from .dialect import Dialect
+    from .palace_db import get_collection, get_client
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
-    # Load dialect (with optional entity config)
     config_path = args.config
     if not config_path:
         for candidate in ["entities.json", os.path.join(palace_path, "entities.json")]:
@@ -168,16 +145,12 @@ def cmd_compress(args):
     else:
         dialect = Dialect()
 
-    # Connect to palace
-    try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
-    except Exception:
+    col = get_collection(palace_path=palace_path)
+    if not col:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         sys.exit(1)
 
-    # Query drawers in the wing
     where = {"wing": args.wing} if args.wing else None
     try:
         kwargs = {"include": ["documents", "metadatas"]}
@@ -231,6 +204,7 @@ def cmd_compress(args):
     # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
+            client = get_client(palace_path)
             comp_col = client.get_or_create_collection("mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)

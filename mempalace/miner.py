@@ -14,48 +14,8 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
-
-READABLE_EXTENSIONS = {
-    ".txt",
-    ".md",
-    ".py",
-    ".js",
-    ".ts",
-    ".jsx",
-    ".tsx",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".html",
-    ".css",
-    ".java",
-    ".go",
-    ".rs",
-    ".rb",
-    ".sh",
-    ".csv",
-    ".sql",
-    ".toml",
-}
-
-SKIP_DIRS = {
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "venv",
-    "env",
-    "dist",
-    "build",
-    ".next",
-    "coverage",
-    ".mempalace",
-}
-
-CHUNK_SIZE = 800  # chars per drawer
-CHUNK_OVERLAP = 100  # overlap between chunks
-MIN_CHUNK_SIZE = 50  # skip tiny chunks
+from .constants import READABLE_EXTENSIONS, SKIP_DIRS, CHUNK_SIZE, CHUNK_OVERLAP, MIN_CHUNK_SIZE
+from .palace_db import get_collection, file_already_mined
 
 
 # =============================================================================
@@ -173,29 +133,6 @@ def chunk_text(content: str, source_file: str) -> list:
         start = end - CHUNK_OVERLAP if end < len(content) else end
 
     return chunks
-
-
-# =============================================================================
-# PALACE — ChromaDB operations
-# =============================================================================
-
-
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
-
-
-def file_already_mined(collection, source_file: str) -> bool:
-    """Fast check: has this file been filed before?"""
-    try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
-        return len(results.get("ids", [])) > 0
-    except Exception:
-        return False
 
 
 def add_drawer(
@@ -344,7 +281,7 @@ def mine(
     print(f"{'─' * 55}\n")
 
     if not dry_run:
-        collection = get_collection(palace_path)
+        collection = get_collection(palace_path=palace_path, create=True)
     else:
         collection = None
 
@@ -390,16 +327,13 @@ def mine(
 
 def status(palace_path: str):
     """Show what's been filed in the palace."""
-    try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
-    except Exception:
+    col = get_collection(palace_path=palace_path)
+    if not col:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
+    r = col.get(include=["metadatas"])
     metas = r["metadatas"]
 
     wing_rooms = defaultdict(lambda: defaultdict(int))

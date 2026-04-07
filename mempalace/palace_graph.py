@@ -5,7 +5,6 @@ palace_graph.py — Graph traversal layer for MemPalace
 Builds a navigable graph from the palace structure:
   - Nodes = rooms (named ideas)
   - Edges = shared rooms across wings (tunnels)
-  - Edge types = halls (the corridors)
 
 Enables queries like:
   "Start at chromadb-setup in wing_code, walk to wing_myproject"
@@ -16,18 +15,8 @@ No external graph DB needed — built from ChromaDB metadata.
 """
 
 from collections import defaultdict, Counter
-from .config import MempalaceConfig
 
-import chromadb
-
-
-def _get_collection(config=None):
-    config = config or MempalaceConfig()
-    try:
-        client = chromadb.PersistentClient(path=config.palace_path)
-        return client.get_collection(config.collection_name)
-    except Exception:
-        return None
+from .palace_db import get_collection as _get_collection
 
 
 def build_graph(col=None, config=None):
@@ -35,16 +24,16 @@ def build_graph(col=None, config=None):
     Build the palace graph from ChromaDB metadata.
 
     Returns:
-        nodes: dict of {room: {wings: set, halls: set, count: int}}
-        edges: list of {room, wing_a, wing_b, hall} — one per tunnel crossing
+        nodes: dict of {room: {wings: list, count: int, dates: list}}
+        edges: list of {room, wing_a, wing_b, count} — one per tunnel crossing
     """
     if col is None:
-        col = _get_collection(config)
+        col = _get_collection()
     if not col:
         return {}, []
 
     total = col.count()
-    room_data = defaultdict(lambda: {"wings": set(), "halls": set(), "count": 0, "dates": set()})
+    room_data = defaultdict(lambda: {"wings": set(), "count": 0, "dates": set()})
 
     offset = 0
     while offset < total:
@@ -52,12 +41,9 @@ def build_graph(col=None, config=None):
         for meta in batch["metadatas"]:
             room = meta.get("room", "")
             wing = meta.get("wing", "")
-            hall = meta.get("hall", "")
             date = meta.get("date", "")
             if room and room != "general" and wing:
                 room_data[room]["wings"].add(wing)
-                if hall:
-                    room_data[room]["halls"].add(hall)
                 if date:
                     room_data[room]["dates"].add(date)
                 room_data[room]["count"] += 1
@@ -65,30 +51,25 @@ def build_graph(col=None, config=None):
             break
         offset += len(batch["ids"])
 
-    # Build edges from rooms that span multiple wings
     edges = []
     for room, data in room_data.items():
         wings = sorted(data["wings"])
         if len(wings) >= 2:
             for i, wa in enumerate(wings):
                 for wb in wings[i + 1 :]:
-                    for hall in data["halls"]:
-                        edges.append(
-                            {
-                                "room": room,
-                                "wing_a": wa,
-                                "wing_b": wb,
-                                "hall": hall,
-                                "count": data["count"],
-                            }
-                        )
+                    edges.append(
+                        {
+                            "room": room,
+                            "wing_a": wa,
+                            "wing_b": wb,
+                            "count": data["count"],
+                        }
+                    )
 
-    # Convert sets to lists for JSON serialization
     nodes = {}
     for room, data in room_data.items():
         nodes[room] = {
             "wings": sorted(data["wings"]),
-            "halls": sorted(data["halls"]),
             "count": data["count"],
             "dates": sorted(data["dates"])[-5:] if data["dates"] else [],
         }
@@ -101,7 +82,7 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
     Walk the graph from a starting room. Find connected rooms
     through shared wings.
 
-    Returns list of paths: [{room, wing, hall, hop_distance}]
+    Returns list of paths: [{room, wings, count, hop}]
     """
     nodes, edges = build_graph(col, config)
 
@@ -117,7 +98,6 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
         {
             "room": start_room,
             "wings": start["wings"],
-            "halls": start["halls"],
             "count": start["count"],
             "hop": 0,
         }
@@ -144,7 +124,6 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
                     {
                         "room": room,
                         "wings": data["wings"],
-                        "halls": data["halls"],
                         "count": data["count"],
                         "hop": depth + 1,
                         "connected_via": sorted(shared_wings),
@@ -180,7 +159,6 @@ def find_tunnels(wing_a: str = None, wing_b: str = None, col=None, config=None):
             {
                 "room": room,
                 "wings": wings,
-                "halls": data["halls"],
                 "count": data["count"],
                 "recent": data["dates"][-1] if data["dates"] else "",
             }

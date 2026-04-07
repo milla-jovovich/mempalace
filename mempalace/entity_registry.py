@@ -551,43 +551,8 @@ class EntityRegistry:
     # ── Learn from sessions ──────────────────────────────────────────────────
 
     def learn_from_text(self, text: str, min_confidence: float = 0.75) -> list:
-        """
-        Scan session text for new entity candidates.
-        Returns list of newly discovered candidates for review.
-        """
-        from mempalace.entity_detector import extract_candidates, score_entity, classify_entity
-
-        lines = text.splitlines()
-        candidates = extract_candidates(text)
-        new_candidates = []
-
-        for name, frequency in candidates.items():
-            # Skip if already known
-            if name in self.people or name in self.projects:
-                continue
-
-            scores = score_entity(name, text, lines)
-            entity = classify_entity(name, frequency, scores)
-
-            if entity["type"] == "person" and entity["confidence"] >= min_confidence:
-                self._data["people"][name] = {
-                    "source": "learned",
-                    "contexts": [self.mode if self.mode != "combo" else "personal"],
-                    "aliases": [],
-                    "relationship": "",
-                    "confidence": entity["confidence"],
-                    "seen_count": frequency,
-                }
-                if name.lower() in COMMON_ENGLISH_WORDS:
-                    flags = self._data.setdefault("ambiguous_flags", [])
-                    if name.lower() not in flags:
-                        flags.append(name.lower())
-                new_candidates.append(entity)
-
-        if new_candidates:
-            self.save()
-
-        return new_candidates
+        """Stub — entity detection removed. Returns empty list."""
+        return []
 
     # ── Query helpers for retrieval ──────────────────────────────────────────
 

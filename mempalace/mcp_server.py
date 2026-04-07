@@ -5,12 +5,9 @@ MemPalace MCP Server — read/write palace access for Claude Code
 Install: claude mcp add mempalace -- python /path/to/mcp_server.py
 
 Tools (read):
-  mempalace_status          — total drawers, wing/room breakdown
-  mempalace_list_wings      — all wings with drawer counts
-  mempalace_list_rooms      — rooms within a wing
-  mempalace_get_taxonomy    — full wing → room → count tree
+  mempalace_status          — total drawers, wing/room breakdown, graph stats
+  mempalace_browse          — full wing → room → count tree (optional wing filter)
   mempalace_search          — semantic search, optional wing/room filter
-  mempalace_check_duplicate — check if content already exists before filing
 
 Tools (write):
   mempalace_add_drawer      — file verbatim content into a wing/room
@@ -22,11 +19,12 @@ import json
 import logging
 import hashlib
 from datetime import datetime
+from importlib.metadata import version as pkg_version
 
 from .config import MempalaceConfig
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
-import chromadb
+from .palace_db import get_collection, no_palace_error
 
 from .knowledge_graph import KnowledgeGraph
 
@@ -38,32 +36,13 @@ logger = logging.getLogger("mempalace_mcp")
 _config = MempalaceConfig()
 
 
-def _get_collection(create=False):
-    """Return the ChromaDB collection, or None on failure."""
-    try:
-        client = chromadb.PersistentClient(path=_config.palace_path)
-        if create:
-            return client.get_or_create_collection(_config.collection_name)
-        return client.get_collection(_config.collection_name)
-    except Exception:
-        return None
-
-
-def _no_palace():
-    return {
-        "error": "No palace found",
-        "palace_path": _config.palace_path,
-        "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
-    }
-
-
 # ==================== READ TOOLS ====================
 
 
 def tool_status():
-    col = _get_collection()
+    col = get_collection()
     if not col:
-        return _no_palace()
+        return no_palace_error()
     count = col.count()
     wings = {}
     rooms = {}
@@ -76,19 +55,29 @@ def tool_status():
             rooms[r] = rooms.get(r, 0) + 1
     except Exception:
         pass
+
+    gs = {}
+    try:
+        gs = graph_stats(col=col)
+    except Exception:
+        pass
+
     return {
         "total_drawers": count,
         "wings": wings,
         "rooms": rooms,
         "palace_path": _config.palace_path,
+        "graph": {
+            "total_rooms": gs.get("total_rooms", 0),
+            "tunnel_rooms": gs.get("tunnel_rooms", 0),
+            "total_edges": gs.get("total_edges", 0),
+        },
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
     }
 
 
 # ── AAAK Dialect Spec ─────────────────────────────────────────────────────────
-# Included in status response so the AI learns it on first wake-up call.
-# Also available via mempalace_get_aaak_spec tool.
 
 PALACE_PROTOCOL = """IMPORTANT — MemPalace Memory Protocol:
 1. ON WAKE-UP: Call mempalace_status to load palace overview + AAAK spec.
@@ -96,6 +85,7 @@ PALACE_PROTOCOL = """IMPORTANT — MemPalace Memory Protocol:
 3. IF UNSURE about a fact (name, gender, age, relationship): say "let me check" and query the palace. Wrong is worse than slow.
 4. AFTER EACH SESSION: call mempalace_diary_write to record what happened, what you learned, what matters.
 5. WHEN FACTS CHANGE: call mempalace_kg_invalidate on the old fact, mempalace_kg_add for the new one.
+6. BROWSE THE PALACE: call mempalace_browse to see the full taxonomy (wing → room → count).
 
 This protocol ensures the AI KNOWS before it speaks. Storage is not memory — but storage + this protocol = memory."""
 
@@ -108,7 +98,6 @@ FORMAT:
   STRUCTURE: Pipe-separated fields. FAM: family | PROJ: projects | ⚠: warnings/reminders.
   DATES: ISO format (2026-03-31). COUNTS: Nx = N mentions (e.g., 570x).
   IMPORTANCE: ★ to ★★★★★ (1-5 scale).
-  HALLS: hall_facts, hall_events, hall_discoveries, hall_preferences, hall_advice.
   WINGS: wing_user, wing_agent, wing_team, wing_code, wing_myproject, wing_hardware, wing_ue5, wing_ai_research.
   ROOMS: Hyphenated slugs representing named ideas (e.g., chromadb-setup, gpu-pricing).
 
@@ -119,46 +108,17 @@ Read AAAK naturally — expand codes mentally, treat *markers* as emotional cont
 When WRITING AAAK: use entity codes, mark emotions, keep structure tight."""
 
 
-def tool_list_wings():
-    col = _get_collection()
+def tool_browse(wing: str = None):
+    """Full taxonomy: wing → room → drawer count, with optional wing filter."""
+    col = get_collection()
     if not col:
-        return _no_palace()
-    wings = {}
-    try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-    except Exception:
-        pass
-    return {"wings": wings}
-
-
-def tool_list_rooms(wing: str = None):
-    col = _get_collection()
-    if not col:
-        return _no_palace()
-    rooms = {}
+        return no_palace_error()
+    taxonomy = {}
     try:
         kwargs = {"include": ["metadatas"]}
         if wing:
             kwargs["where"] = {"wing": wing}
         all_meta = col.get(**kwargs)["metadatas"]
-        for m in all_meta:
-            r = m.get("room", "unknown")
-            rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
-    return {"wing": wing or "all", "rooms": rooms}
-
-
-def tool_get_taxonomy():
-    col = _get_collection()
-    if not col:
-        return _no_palace()
-    taxonomy = {}
-    try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -167,7 +127,7 @@ def tool_get_taxonomy():
             taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
     except Exception:
         pass
-    return {"taxonomy": taxonomy}
+    return {"wing": wing or "all", "taxonomy": taxonomy}
 
 
 def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
@@ -180,10 +140,11 @@ def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
     )
 
 
-def tool_check_duplicate(content: str, threshold: float = 0.9):
-    col = _get_collection()
+def _check_duplicate(content: str, threshold: float = 0.9):
+    """Internal duplicate check — called by tool_add_drawer."""
+    col = get_collection()
     if not col:
-        return _no_palace()
+        return no_palace_error()
     try:
         results = col.query(
             query_texts=[content],
@@ -215,33 +176,20 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
         return {"error": str(e)}
 
 
-def tool_get_aaak_spec():
-    """Return the AAAK dialect specification."""
-    return {"aaak_spec": AAAK_SPEC}
-
-
 def tool_traverse_graph(start_room: str, max_hops: int = 2):
     """Walk the palace graph from a room. Find connected ideas across wings."""
-    col = _get_collection()
+    col = get_collection()
     if not col:
-        return _no_palace()
+        return no_palace_error()
     return traverse(start_room, col=col, max_hops=max_hops)
 
 
 def tool_find_tunnels(wing_a: str = None, wing_b: str = None):
     """Find rooms that bridge two wings — the hallways connecting domains."""
-    col = _get_collection()
+    col = get_collection()
     if not col:
-        return _no_palace()
+        return no_palace_error()
     return find_tunnels(wing_a, wing_b, col=col)
-
-
-def tool_graph_stats():
-    """Palace graph overview: nodes, tunnels, edges, connectivity."""
-    col = _get_collection()
-    if not col:
-        return _no_palace()
-    return graph_stats(col=col)
 
 
 # ==================== WRITE TOOLS ====================
@@ -251,12 +199,11 @@ def tool_add_drawer(
     wing: str, room: str, content: str, source_file: str = None, added_by: str = "mcp"
 ):
     """File verbatim content into a wing/room. Checks for duplicates first."""
-    col = _get_collection(create=True)
+    col = get_collection(create=True)
     if not col:
-        return _no_palace()
+        return no_palace_error()
 
-    # Duplicate check
-    dup = tool_check_duplicate(content, threshold=0.9)
+    dup = _check_duplicate(content, threshold=0.9)
     if dup.get("is_duplicate"):
         return {
             "success": False,
@@ -289,9 +236,9 @@ def tool_add_drawer(
 
 def tool_delete_drawer(drawer_id: str):
     """Delete a single drawer by ID."""
-    col = _get_collection()
+    col = get_collection()
     if not col:
-        return _no_palace()
+        return no_palace_error()
     existing = col.get(ids=[drawer_id])
     if not existing["ids"]:
         return {"success": False, "error": f"Drawer not found: {drawer_id}"}
@@ -350,15 +297,12 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     """
     Write a diary entry for this agent. Each agent gets its own wing
     with a diary room. Entries are timestamped and accumulate over time.
-
-    This is the agent's personal journal — observations, thoughts,
-    what it worked on, what it noticed, what it thinks matters.
     """
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     room = "diary"
-    col = _get_collection(create=True)
+    col = get_collection(create=True)
     if not col:
-        return _no_palace()
+        return no_palace_error()
 
     now = datetime.now()
     entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(entry[:50].encode()).hexdigest()[:8]}"
@@ -371,7 +315,6 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
                 {
                     "wing": wing,
                     "room": room,
-                    "hall": "hall_diary",
                     "topic": topic,
                     "type": "diary_entry",
                     "agent": agent_name,
@@ -398,9 +341,9 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
     in chronological order — the agent's personal journal.
     """
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
-    col = _get_collection()
+    col = get_collection()
     if not col:
-        return _no_palace()
+        return no_palace_error()
 
     try:
         results = col.get(
@@ -411,7 +354,6 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         if not results["ids"]:
             return {"agent": agent_name, "entries": [], "message": "No diary entries yet."}
 
-        # Combine and sort by timestamp
         entries = []
         for doc, meta in zip(results["documents"], results["metadatas"]):
             entries.append(
@@ -440,34 +382,65 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
 
 TOOLS = {
     "mempalace_status": {
-        "description": "Palace overview — total drawers, wing and room counts",
+        "description": "Palace overview — total drawers, wing and room counts, graph stats, protocol, AAAK spec. Call this first on every session.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_status,
     },
-    "mempalace_list_wings": {
-        "description": "List all wings with drawer counts",
-        "input_schema": {"type": "object", "properties": {}},
-        "handler": tool_list_wings,
-    },
-    "mempalace_list_rooms": {
-        "description": "List rooms within a wing (or all rooms if no wing given)",
+    "mempalace_browse": {
+        "description": "Browse the palace taxonomy: wing → room → drawer count. Optionally filter by wing.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "wing": {"type": "string", "description": "Wing to list rooms for (optional)"},
+                "wing": {"type": "string", "description": "Wing to browse (optional — omit for all)"},
             },
         },
-        "handler": tool_list_rooms,
+        "handler": tool_browse,
     },
-    "mempalace_get_taxonomy": {
-        "description": "Full taxonomy: wing → room → drawer count",
-        "input_schema": {"type": "object", "properties": {}},
-        "handler": tool_get_taxonomy,
+    "mempalace_search": {
+        "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to search for"},
+                "limit": {"type": "integer", "description": "Max results (default 5)"},
+                "wing": {"type": "string", "description": "Filter by wing (optional)"},
+                "room": {"type": "string", "description": "Filter by room (optional)"},
+            },
+            "required": ["query"],
+        },
+        "handler": tool_search,
     },
-    "mempalace_get_aaak_spec": {
-        "description": "Get the AAAK dialect specification — the compressed memory format MemPalace uses. Call this if you need to read or write AAAK-compressed memories.",
-        "input_schema": {"type": "object", "properties": {}},
-        "handler": tool_get_aaak_spec,
+    "mempalace_add_drawer": {
+        "description": "File verbatim content into the palace. Checks for duplicates first.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Wing (project name)"},
+                "room": {
+                    "type": "string",
+                    "description": "Room (aspect: backend, decisions, meetings...)",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Verbatim content to store — exact words, never summarized",
+                },
+                "source_file": {"type": "string", "description": "Where this came from (optional)"},
+                "added_by": {"type": "string", "description": "Who is filing this (default: mcp)"},
+            },
+            "required": ["wing", "room", "content"],
+        },
+        "handler": tool_add_drawer,
+    },
+    "mempalace_delete_drawer": {
+        "description": "Delete a drawer by ID. Irreversible.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "drawer_id": {"type": "string", "description": "ID of the drawer to delete"},
+            },
+            "required": ["drawer_id"],
+        },
+        "handler": tool_delete_drawer,
     },
     "mempalace_kg_query": {
         "description": "Query the knowledge graph for an entity's relationships. Returns typed facts with temporal validity. E.g. 'Max' → child_of Alice, loves chess, does swimming. Filter by date with as_of to see what was true at a point in time.",
@@ -579,72 +552,6 @@ TOOLS = {
         },
         "handler": tool_find_tunnels,
     },
-    "mempalace_graph_stats": {
-        "description": "Palace graph overview: total rooms, tunnel connections, edges between wings.",
-        "input_schema": {"type": "object", "properties": {}},
-        "handler": tool_graph_stats,
-    },
-    "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "What to search for"},
-                "limit": {"type": "integer", "description": "Max results (default 5)"},
-                "wing": {"type": "string", "description": "Filter by wing (optional)"},
-                "room": {"type": "string", "description": "Filter by room (optional)"},
-            },
-            "required": ["query"],
-        },
-        "handler": tool_search,
-    },
-    "mempalace_check_duplicate": {
-        "description": "Check if content already exists in the palace before filing",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string", "description": "Content to check"},
-                "threshold": {
-                    "type": "number",
-                    "description": "Similarity threshold 0-1 (default 0.9)",
-                },
-            },
-            "required": ["content"],
-        },
-        "handler": tool_check_duplicate,
-    },
-    "mempalace_add_drawer": {
-        "description": "File verbatim content into the palace. Checks for duplicates first.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "wing": {"type": "string", "description": "Wing (project name)"},
-                "room": {
-                    "type": "string",
-                    "description": "Room (aspect: backend, decisions, meetings...)",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Verbatim content to store — exact words, never summarized",
-                },
-                "source_file": {"type": "string", "description": "Where this came from (optional)"},
-                "added_by": {"type": "string", "description": "Who is filing this (default: mcp)"},
-            },
-            "required": ["wing", "room", "content"],
-        },
-        "handler": tool_add_drawer,
-    },
-    "mempalace_delete_drawer": {
-        "description": "Delete a drawer by ID. Irreversible.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "drawer_id": {"type": "string", "description": "ID of the drawer to delete"},
-            },
-            "required": ["drawer_id"],
-        },
-        "handler": tool_delete_drawer,
-    },
     "mempalace_diary_write": {
         "description": "Write to your personal agent diary in AAAK format. Your observations, thoughts, what you worked on, what matters. Each agent has their own diary with full history. Write in AAAK for compression — e.g. 'SESSION:2026-04-04|built.palace.graph+diary.tools|ALC.req:agent.diaries.in.aaak|★★★'. Use entity codes from the AAAK spec.",
         "input_schema": {
@@ -688,6 +595,13 @@ TOOLS = {
 }
 
 
+def _get_version():
+    try:
+        return pkg_version("mempalace")
+    except Exception:
+        return "3.0.0"
+
+
 def handle_request(request):
     method = request.get("method", "")
     params = request.get("params", {})
@@ -700,7 +614,7 @@ def handle_request(request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "mempalace", "version": "2.0.0"},
+                "serverInfo": {"name": "mempalace", "version": _get_version()},
             },
         }
     elif method == "notifications/initialized":

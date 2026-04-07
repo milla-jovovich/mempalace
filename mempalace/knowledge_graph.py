@@ -87,7 +87,9 @@ class KnowledgeGraph:
         conn.close()
 
     def _conn(self):
-        return sqlite3.connect(self.db_path, timeout=10)
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def _entity_id(self, name: str) -> str:
         return name.lower().replace(" ", "_").replace("'", "")
@@ -206,13 +208,13 @@ class KnowledgeGraph:
                     {
                         "direction": "outgoing",
                         "subject": name,
-                        "predicate": row[2],
-                        "object": row[10],  # obj_name
-                        "valid_from": row[4],
-                        "valid_to": row[5],
-                        "confidence": row[6],
-                        "source_closet": row[7],
-                        "current": row[5] is None,
+                        "predicate": row["predicate"],
+                        "object": row["obj_name"],
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
                     }
                 )
 
@@ -226,14 +228,14 @@ class KnowledgeGraph:
                 results.append(
                     {
                         "direction": "incoming",
-                        "subject": row[10],  # sub_name
-                        "predicate": row[2],
+                        "subject": row["sub_name"],
+                        "predicate": row["predicate"],
                         "object": name,
-                        "valid_from": row[4],
-                        "valid_to": row[5],
-                        "confidence": row[6],
-                        "source_closet": row[7],
-                        "current": row[5] is None,
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
                     }
                 )
 
@@ -260,12 +262,12 @@ class KnowledgeGraph:
         for row in conn.execute(query, params).fetchall():
             results.append(
                 {
-                    "subject": row[10],
+                    "subject": row["sub_name"],
                     "predicate": pred,
-                    "object": row[11],
-                    "valid_from": row[4],
-                    "valid_to": row[5],
-                    "current": row[5] is None,
+                    "object": row["obj_name"],
+                    "valid_from": row["valid_from"],
+                    "valid_to": row["valid_to"],
+                    "current": row["valid_to"] is None,
                 }
             )
         conn.close()
@@ -300,12 +302,12 @@ class KnowledgeGraph:
         conn.close()
         return [
             {
-                "subject": r[10],
-                "predicate": r[2],
-                "object": r[11],
-                "valid_from": r[4],
-                "valid_to": r[5],
-                "current": r[5] is None,
+                "subject": r["sub_name"],
+                "predicate": r["predicate"],
+                "object": r["obj_name"],
+                "valid_from": r["valid_from"],
+                "valid_to": r["valid_to"],
+                "current": r["valid_to"] is None,
             }
             for r in rows
         ]

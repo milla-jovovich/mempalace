@@ -15,31 +15,9 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
-
 from .normalize import normalize
-
-
-# File types that might contain conversations
-CONVO_EXTENSIONS = {
-    ".txt",
-    ".md",
-    ".json",
-    ".jsonl",
-}
-
-SKIP_DIRS = {
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "venv",
-    "env",
-    "dist",
-    "build",
-    ".next",
-    ".mempalace",
-}
+from .constants import CONVO_EXTENSIONS, SKIP_DIRS
+from .palace_db import get_collection, file_already_mined
 
 MIN_CHUNK_SIZE = 30
 
@@ -205,28 +183,6 @@ def detect_convo_room(content: str) -> str:
 
 
 # =============================================================================
-# PALACE OPERATIONS
-# =============================================================================
-
-
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
-
-
-def file_already_mined(collection, source_file: str) -> bool:
-    try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
-        return len(results.get("ids", [])) > 0
-    except Exception:
-        return False
-
-
-# =============================================================================
 # SCAN FOR CONVERSATION FILES
 # =============================================================================
 
@@ -284,7 +240,7 @@ def mine_convos(
         print("  DRY RUN — nothing will be filed")
     print(f"{'─' * 55}\n")
 
-    collection = get_collection(palace_path) if not dry_run else None
+    collection = get_collection(palace_path=palace_path, create=True) if not dry_run else None
 
     total_drawers = 0
     files_skipped = 0

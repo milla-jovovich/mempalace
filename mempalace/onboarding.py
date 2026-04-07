@@ -18,7 +18,6 @@ Usage:
 
 from pathlib import Path
 from mempalace.entity_registry import EntityRegistry
-from mempalace.entity_detector import detect_entities, scan_for_detection
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -221,22 +220,8 @@ def _ask_wings(mode: str) -> list:
 
 
 def _auto_detect(directory: str, known_people: list) -> list:
-    """Scan directory for additional entity candidates."""
-    known_names = {p["name"].lower() for p in known_people}
-
-    try:
-        files = scan_for_detection(directory)
-        if not files:
-            return []
-        detected = detect_entities(files)
-        new_people = [
-            e
-            for e in detected["people"]
-            if e["name"].lower() not in known_names and e["confidence"] >= 0.7
-        ]
-        return new_people
-    except Exception:
-        return []
+    """Stub — entity detection removed. Returns empty list."""
+    return []
 
 
 # ─────────────────────────────────────────────────────────────────────────────

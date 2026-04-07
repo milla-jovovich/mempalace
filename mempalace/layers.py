@@ -21,9 +21,8 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
-import chromadb
-
 from .config import MempalaceConfig
+from .palace_db import get_collection, build_where_filter, query_palace
 
 
 # ---------------------------------------------------------------------------
@@ -90,10 +89,8 @@ class Layer1:
 
     def generate(self) -> str:
         """Pull top drawers from ChromaDB and format as compact L1 text."""
-        try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
-        except Exception:
+        col = get_collection(palace_path=self.palace_path)
+        if not col:
             return "## L1 — No palace found. Run: mempalace mine <dir>"
 
         # Fetch all drawers (with optional wing filter)
@@ -186,19 +183,11 @@ class Layer2:
 
     def retrieve(self, wing: str = None, room: str = None, n_results: int = 10) -> str:
         """Retrieve drawers filtered by wing and/or room."""
-        try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
-        except Exception:
+        col = get_collection(palace_path=self.palace_path)
+        if not col:
             return "No palace found."
 
-        where = {}
-        if wing and room:
-            where = {"$and": [{"wing": wing}, {"room": room}]}
-        elif wing:
-            where = {"wing": wing}
-        elif room:
-            where = {"room": room}
+        where = build_where_filter(wing, room)
 
         kwargs = {"include": ["documents", "metadatas"], "limit": n_results}
         if where:
@@ -251,31 +240,12 @@ class Layer3:
     def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
         """Semantic search, returns compact result text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
-        except Exception:
-            return "No palace found."
-
-        where = {}
-        if wing and room:
-            where = {"$and": [{"wing": wing}, {"room": room}]}
-        elif wing:
-            where = {"wing": wing}
-        elif room:
-            where = {"room": room}
-
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            kwargs["where"] = where
-
-        try:
-            results = col.query(**kwargs)
+            results = query_palace(query, n_results, wing, room, self.palace_path)
         except Exception as e:
             return f"Search error: {e}"
+
+        if results is None:
+            return "No palace found."
 
         docs = results["documents"][0]
         metas = results["metadatas"][0]
@@ -307,30 +277,11 @@ class Layer3:
     ) -> list:
         """Return raw dicts instead of formatted text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            results = query_palace(query, n_results, wing, room, self.palace_path)
         except Exception:
             return []
 
-        where = {}
-        if wing and room:
-            where = {"$and": [{"wing": wing}, {"room": room}]}
-        elif wing:
-            where = {"wing": wing}
-        elif room:
-            where = {"room": room}
-
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            kwargs["where"] = where
-
-        try:
-            results = col.query(**kwargs)
-        except Exception:
+        if results is None:
             return []
 
         hits = []
@@ -426,14 +377,8 @@ class MemoryStack:
             },
         }
 
-        # Count drawers
-        try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
-            count = col.count()
-            result["total_drawers"] = count
-        except Exception:
-            result["total_drawers"] = 0
+        col = get_collection(palace_path=self.palace_path)
+        result["total_drawers"] = col.count() if col else 0
 
         return result
 
