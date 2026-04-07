@@ -458,9 +458,7 @@ class TestAuth:
 
         monkeypatch.setattr(mcp_server, "_auth_token", "secret-token-123")
 
-        resp = handle_request(
-            {"method": "tools/list", "id": 206, "params": {}}
-        )
+        resp = handle_request({"method": "tools/list", "id": 206, "params": {}})
         assert resp["error"]["code"] == -32001
 
 
@@ -580,11 +578,9 @@ class TestEncryption:
 
         assert decrypt(f, meta["encrypted_content"]) == "Top secret family information."
 
-    def test_search_returns_decrypted_content(
-        self, monkeypatch, config, palace_path, kg
-    ):
+    def test_search_returns_decrypted_content(self, monkeypatch, config, palace_path, kg):
         _patch_mcp_server(monkeypatch, config, palace_path, kg)
-        f = self._enable_encryption(monkeypatch)
+        self._enable_encryption(monkeypatch)
         _get_collection(palace_path, create=True)
         from mempalace.mcp_server import tool_add_drawer, tool_search
 
@@ -599,9 +595,7 @@ class TestEncryption:
         top = result["results"][0]
         assert "encryption key" in top["text"].lower() or "keychain" in top["text"].lower()
 
-    def test_diary_write_read_encrypted_roundtrip(
-        self, monkeypatch, config, palace_path, kg
-    ):
+    def test_diary_write_read_encrypted_roundtrip(self, monkeypatch, config, palace_path, kg):
         _patch_mcp_server(monkeypatch, config, palace_path, kg)
         self._enable_encryption(monkeypatch)
         _get_collection(palace_path, create=True)

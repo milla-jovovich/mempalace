@@ -141,12 +141,8 @@ class TestAuthToken:
     def test_load_or_create_token_creates(self, monkeypatch):
         """Token is created and returned on first call (file fallback)."""
         # Force keyring to fail so we test file fallback
-        monkeypatch.setattr(
-            "mempalace.security._try_keyring_get", lambda account: None
-        )
-        monkeypatch.setattr(
-            "mempalace.security._try_keyring_set", lambda account, value: False
-        )
+        monkeypatch.setattr("mempalace.security._try_keyring_get", lambda account: None)
+        monkeypatch.setattr("mempalace.security._try_keyring_set", lambda account, value: False)
         d = tempfile.mkdtemp()
         token = load_or_create_token(d)
         assert isinstance(token, str)
@@ -160,12 +156,8 @@ class TestAuthToken:
 
     def test_load_or_create_token_reads_existing(self, monkeypatch):
         """Second call returns the same token."""
-        monkeypatch.setattr(
-            "mempalace.security._try_keyring_get", lambda account: None
-        )
-        monkeypatch.setattr(
-            "mempalace.security._try_keyring_set", lambda account, value: False
-        )
+        monkeypatch.setattr("mempalace.security._try_keyring_get", lambda account: None)
+        monkeypatch.setattr("mempalace.security._try_keyring_set", lambda account, value: False)
         d = tempfile.mkdtemp()
         token1 = load_or_create_token(d)
         token2 = load_or_create_token(d)
@@ -214,12 +206,8 @@ class TestEncryption:
 
     def test_load_or_create_key_creates(self, monkeypatch):
         """Key is created and returned on first call (file fallback)."""
-        monkeypatch.setattr(
-            "mempalace.security._try_keyring_get", lambda account: None
-        )
-        monkeypatch.setattr(
-            "mempalace.security._try_keyring_set", lambda account, value: False
-        )
+        monkeypatch.setattr("mempalace.security._try_keyring_get", lambda account: None)
+        monkeypatch.setattr("mempalace.security._try_keyring_set", lambda account, value: False)
         d = tempfile.mkdtemp()
         fernet = load_or_create_key(d)
         # Verify it's a working Fernet instance
@@ -230,12 +218,8 @@ class TestEncryption:
 
     def test_load_or_create_key_reads_existing(self, monkeypatch):
         """Second call returns a Fernet with the same key."""
-        monkeypatch.setattr(
-            "mempalace.security._try_keyring_get", lambda account: None
-        )
-        monkeypatch.setattr(
-            "mempalace.security._try_keyring_set", lambda account, value: False
-        )
+        monkeypatch.setattr("mempalace.security._try_keyring_get", lambda account: None)
+        monkeypatch.setattr("mempalace.security._try_keyring_set", lambda account, value: False)
         d = tempfile.mkdtemp()
         f1 = load_or_create_key(d)
         f2 = load_or_create_key(d)

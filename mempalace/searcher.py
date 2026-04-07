@@ -93,7 +93,11 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5,
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
     fernet=None,
 ) -> dict:
     """
