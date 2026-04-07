@@ -1,0 +1,16 @@
+/* ==========================================================================
+   Badge — small inline pill, used for labels like "BETA" or "NEW".
+   ========================================================================== */
+
+.badge {
+  display: inline-block;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 500;
+  border-radius: 999px;
+  background: var(--accent-wash);
+  color: var(--accent-bright);
+  border: 1px solid var(--accent-border);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}

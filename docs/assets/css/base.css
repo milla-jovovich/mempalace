@@ -1,0 +1,204 @@
+/* ==========================================================================
+   Base — reset, typography, code blocks, syntax highlighting, copy button.
+   Anything that styles raw HTML elements (no class hooks) lives here.
+   ========================================================================== */
+
+/* ---------- Reset ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: calc(var(--topbar-h) + 24px);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01", "ss03";
+}
+
+img { max-width: 100%; display: block; }
+
+button { font-family: inherit; }
+
+/* ---------- Typography ---------- */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  margin: 0 0 0.6em;
+}
+
+h1 {
+  font-size: 2.1rem;
+  font-weight: 600;
+  letter-spacing: -0.028em;
+}
+h2 {
+  font-size: 1.45rem;
+  margin-top: 2.6rem;
+  padding-top: 0.2rem;
+  letter-spacing: -0.02em;
+}
+h3 {
+  font-size: 1.1rem;
+  margin-top: 2rem;
+  letter-spacing: -0.01em;
+}
+h4 {
+  font-size: 0.92rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+  margin-top: 1.5rem;
+}
+
+p {
+  margin: 0 0 1.05em;
+  color: var(--text-dim);
+}
+
+p.lead {
+  font-size: 1.1rem;
+  line-height: 1.55;
+  color: var(--text);
+  max-width: 62ch;
+}
+
+a {
+  color: var(--accent-bright);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+a:hover { color: var(--accent-soft); }
+
+strong, b { color: var(--text); font-weight: 600; }
+em, i { color: var(--text-dim); }
+
+ul, ol {
+  padding-left: 1.4em;
+  color: var(--text-dim);
+  margin: 0 0 1.1em;
+}
+li { margin-bottom: 0.3em; }
+li::marker { color: var(--text-mute); }
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 3rem 0;
+}
+
+::selection {
+  background: var(--accent-wash);
+  color: var(--accent-soft);
+}
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ---------- Inline code & code blocks ---------- */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 0.1em 0.4em;
+  border-radius: var(--r-sm);
+  color: var(--accent-soft);
+  font-feature-settings: "calt" 0;
+}
+
+pre {
+  font-family: var(--font-mono);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: var(--text);
+  position: relative;
+  margin: 1.2em 0;
+}
+
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* ---------- Rouge (Jekyll) syntax highlighting ---------- */
+.highlighter-rouge { margin: 1.2em 0; }
+.highlight { background: transparent; }
+.highlight pre { margin: 0; }
+
+.highlight .c,  .highlight .c1, .highlight .cm, .highlight .cp, .highlight .cs {
+  color: var(--text-mute); font-style: italic;
+}
+.highlight .s,  .highlight .s1, .highlight .s2, .highlight .sb, .highlight .sc,
+.highlight .sd, .highlight .se, .highlight .sh, .highlight .si, .highlight .sr,
+.highlight .sx, .highlight .ss {
+  color: #a8e6c0;
+}
+.highlight .k,  .highlight .kc, .highlight .kd, .highlight .kn, .highlight .kp,
+.highlight .kr, .highlight .kt {
+  color: #e89bcf;
+}
+.highlight .nf, .highlight .nb, .highlight .nc, .highlight .fm {
+  color: var(--accent-bright);
+}
+.highlight .m,  .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo,
+.highlight .il {
+  color: #f0c674;
+}
+.highlight .o,  .highlight .ow, .highlight .p { color: var(--text-dim); }
+.highlight .n,  .highlight .na, .highlight .nd, .highlight .ne, .highlight .ni,
+.highlight .nl, .highlight .nn, .highlight .no, .highlight .nt, .highlight .nv,
+.highlight .nx, .highlight .vc, .highlight .vg, .highlight .vi {
+  color: var(--text);
+}
+.highlight .gd { color: var(--danger); }
+.highlight .gi { color: var(--success); }
+.highlight .err { color: var(--danger); background: none; }
+
+/* ---------- Copy button (auto-attached to <pre> via main.js) ---------- */
+.copy-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-mute);
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--r-sm);
+  font-size: 0.7rem;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+  letter-spacing: 0.02em;
+}
+pre:hover .copy-btn { opacity: 1; }
+.copy-btn:hover {
+  color: var(--accent-bright);
+  border-color: var(--accent-border);
+  background: var(--bg-hover);
+}
+.copy-btn.copied { color: var(--success); border-color: var(--success); }

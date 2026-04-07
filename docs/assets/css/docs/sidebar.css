@@ -1,0 +1,91 @@
+/* ==========================================================================
+   Docs sidebar — left column with grouped nav links.
+   Sticky on desktop, slide-in drawer on mobile (toggled by .sidebar-toggle).
+   ========================================================================== */
+
+.docs-sidebar {
+  position: sticky;
+  top: var(--topbar-h);
+  align-self: start;
+  height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
+  padding: 1.6rem 1.2rem 2rem 1.5rem;
+  border-right: 1px solid var(--border);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.docs-sidebar::-webkit-scrollbar { width: 6px; }
+.docs-sidebar::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+/* ---------- Grouped nav (one group per section) ---------- */
+.sidebar-group { margin-bottom: 1.4rem; }
+
+.sidebar-group-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-mute);
+  font-weight: 600;
+  padding: 0 0.6rem;
+  margin: 0 0 0.4rem;
+}
+
+.sidebar-group ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.sidebar-group li { margin: 0; }
+
+.sidebar-group a {
+  display: block;
+  padding: 0.35rem 0.6rem;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  font-weight: 400;
+  border-radius: var(--r-sm);
+  transition: background 0.12s, color 0.12s;
+}
+.sidebar-group a:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.sidebar-group a.active {
+  color: var(--accent-bright);
+  background: var(--accent-wash);
+  font-weight: 500;
+}
+
+/* ---------- Mobile drawer ---------- */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 35;
+}
+
+@media (max-width: 1024px) {
+  .docs-sidebar {
+    position: fixed;
+    top: var(--topbar-h);
+    left: 0;
+    width: var(--sidebar-w);
+    height: calc(100vh - var(--topbar-h));
+    background: var(--bg);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    z-index: 40;
+    border-right: 1px solid var(--border);
+  }
+  .docs-sidebar.open { transform: translateX(0); }
+
+  .sidebar-backdrop.open { display: block; }
+}

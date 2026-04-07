@@ -1,0 +1,30 @@
+/* ==========================================================================
+   Quick start section — large terminal with the install/init/mine/search
+   commands plus a meta row of feature checkmarks underneath.
+   ========================================================================== */
+
+.qs-shell {
+  max-width: 820px;
+  margin: 0 auto;
+}
+.qs-shell .terminal { margin: 0; }
+
+.qs-meta {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 2rem;
+  color: var(--text-mute);
+  font-size: 0.82rem;
+}
+.qs-meta div {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.qs-meta strong { color: var(--text); font-weight: 500; }
+.qs-meta .check {
+  color: var(--success);
+  font-weight: 700;
+}

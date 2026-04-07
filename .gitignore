@@ -5,3 +5,14 @@ __pycache__/
 *.pyc
 .pytest_cache/
 mempal.yaml
+
+# Jekyll (docs site)
+_site/
+.jekyll-cache/
+.jekyll-metadata
+docs/_site/
+docs/.jekyll-cache/
+docs/.jekyll-metadata
+docs/.bundle/
+docs/vendor/
+docs/Gemfile.lock

@@ -1,0 +1,18 @@
+/* ==========================================================================
+   ASCII diagram block — for box-drawing trees, wireframes, etc. in docs.
+   Uses monospace + preserved whitespace, accent-soft text on a card surface.
+   ========================================================================== */
+
+.ascii {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 1.2rem 1.4rem;
+  color: var(--accent-soft);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 1.6rem 0;
+}

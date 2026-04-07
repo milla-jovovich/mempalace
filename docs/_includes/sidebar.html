@@ -1,0 +1,25 @@
+{%- comment -%}
+  Jekyll's page.url drops the .html extension (e.g. "/palace"),
+  but sidebar data uses "/palace.html". Normalize both sides.
+{%- endcomment -%}
+{%- assign current = page.url | replace: '.html', '' -%}
+
+<aside class="docs-sidebar" id="sidebar">
+  {% for group in site.data.sidebar %}
+    <div class="sidebar-group">
+      <h4 class="sidebar-group-title">{{ group.title }}</h4>
+      <ul>
+        {% for item in group.items %}
+          {%- assign item_url = item.href | relative_url -%}
+          {%- assign item_path = item.href | replace: '.html', '' -%}
+          <li>
+            <a href="{{ item_url }}"{% if current == item_path %} class="active"{% endif %}>
+              {{ item.label }}
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+</aside>
+<div class="sidebar-backdrop" id="sidebar-backdrop"></div>

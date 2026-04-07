@@ -1,0 +1,123 @@
+/* ==========================================================================
+   Bento grid — three pillar cards (Palace / AAAK / Knowledge Graph).
+   Each card has a preview area at top (ASCII art) and a body underneath
+   with eyebrow + h3 + description + "Learn more" arrow.
+   Single-column on narrow screens.
+   ========================================================================== */
+
+.bento {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.2rem;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.bento-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.18s, transform 0.18s, background 0.18s;
+}
+.bento-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+  background: var(--bg-hover);
+}
+
+/* ---------- Preview area at the top of each card ---------- */
+.bento-preview {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 1.5rem 1.4rem;
+  min-height: 170px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+.bento-preview::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at top, rgba(62,203,255,0.07), transparent 60%);
+  pointer-events: none;
+}
+.bento-preview pre {
+  margin: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre;
+  text-align: left;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+/* Inline color tokens for the ASCII previews (b- prefix to avoid clashing
+   with the terminal's t-* tokens) */
+.bento-preview .b-accent { color: var(--accent-bright); }
+.bento-preview .b-mute   { color: var(--text-mute); }
+.bento-preview .b-hi     { color: var(--text); }
+.bento-preview .b-good   { color: var(--success); }
+.bento-preview .b-arrow  { color: var(--accent-bright); }
+
+/* ---------- Card body (text content) ---------- */
+.bento-body {
+  padding: 1.4rem 1.6rem 1.6rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.bento-body .icon-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-bright);
+  margin-bottom: 0.7rem;
+}
+.bento-body .icon-tag .icon-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  box-shadow: 0 0 0 3px rgba(62,203,255,0.18);
+}
+.bento-body h3 {
+  margin: 0 0 0.55rem;
+  font-size: 1.08rem;
+  color: var(--text);
+  font-weight: 600;
+}
+.bento-body p {
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+.bento-body .learn {
+  margin-top: auto;
+  font-size: 0.83rem;
+  color: var(--accent-bright);
+  font-weight: 500;
+}
+.bento-body .learn .arrow { display: inline-block; transition: transform 0.2s; }
+.bento-card:hover .bento-body .learn .arrow { transform: translateX(3px); }
+
+@media (max-width: 960px) {
+  .bento { grid-template-columns: 1fr; }
+}

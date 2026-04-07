@@ -1,0 +1,60 @@
+/* ==========================================================================
+   Buttons — shared between docs (404, page CTAs) and landing v2.
+   .btn is the base, .btn-primary / .btn-ghost are variants, .btn-lg sizes up.
+   .arrow / .gh-icon are icons used inside buttons.
+   ========================================================================== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: var(--r);
+  font-weight: 500;
+  font-size: 0.9rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  text-decoration: none;
+  letter-spacing: -0.005em;
+}
+
+.btn-primary {
+  background: var(--text);
+  color: var(--bg);
+  font-weight: 500;
+}
+.btn-primary:hover {
+  background: #fff;
+  color: var(--bg);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.btn-ghost:hover {
+  border-color: var(--text-mute);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.btn-lg {
+  padding: 0.78rem 1.4rem;
+  font-size: 0.95rem;
+  border-radius: 8px;
+}
+
+.btn .arrow {
+  display: inline-block;
+  transition: transform 0.2s;
+}
+.btn:hover .arrow { transform: translateX(3px); }
+
+.btn .gh-icon {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}

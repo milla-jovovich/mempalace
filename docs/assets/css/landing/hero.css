@@ -1,0 +1,123 @@
+/* ==========================================================================
+   Landing hero (v2) — full-width centered headline + CTA + terminal demo.
+   Background is a layered dot grid (::before) and an aurora glow (::after),
+   both clipped to the hero box via overflow: hidden.
+   ========================================================================== */
+
+.hero-v2 {
+  position: relative;
+  padding: 5.5rem 0 5rem;
+  text-align: center;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.hero-v2::before,
+.hero-v2::after { content: ""; position: absolute; pointer-events: none; }
+
+/* Subtle dot grid */
+.hero-v2::before {
+  inset: 0;
+  background-image:
+    radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse 60% 70% at 50% 35%, #000 40%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 60% 70% at 50% 35%, #000 40%, transparent 80%);
+  z-index: -2;
+}
+
+/* Aurora glow behind the headline */
+.hero-v2::after {
+  top: -30%;
+  left: 50%;
+  width: 1100px;
+  height: 900px;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(closest-side, rgba(62, 203, 255, 0.18), transparent 70%),
+    radial-gradient(closest-side at 30% 60%, rgba(125, 220, 255, 0.10), transparent 70%);
+  filter: blur(2px);
+  z-index: -1;
+}
+
+.hero-v2 .hero-content {
+  position: relative;
+  z-index: 1;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* ---------- Optional pill above the headline ---------- */
+.hero-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  color: var(--accent-soft);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  margin-bottom: 1.6rem;
+}
+.hero-pill .pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  box-shadow: 0 0 0 3px rgba(62,203,255,0.18);
+}
+.hero-pill .pill-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--accent-border);
+}
+.hero-pill a {
+  color: var(--accent-bright);
+  font-weight: 500;
+}
+
+/* ---------- Logo ---------- */
+.hero-v2 .hero-logo {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 1.4rem;
+  border-radius: 16px;
+  filter: drop-shadow(0 0 32px rgba(62, 203, 255, 0.35));
+}
+
+/* ---------- Headline ---------- */
+.hero-v2 h1 {
+  font-size: clamp(2.6rem, 6vw, 4.4rem);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.02;
+  margin: 0 0 1.2rem;
+  color: var(--text);
+}
+.hero-v2 h1 .accent-line {
+  background: linear-gradient(180deg, #d8f0ff 0%, #3ecbff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: inline-block;
+}
+
+.hero-v2 .hero-tagline {
+  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+  color: var(--text-dim);
+  max-width: 640px;
+  margin: 0 auto 2.2rem;
+  line-height: 1.55;
+}
+
+.hero-v2 .hero-cta {
+  display: flex;
+  gap: 0.7rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}

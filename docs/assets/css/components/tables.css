@@ -1,0 +1,35 @@
+/* ==========================================================================
+   Tables — auto-styled <table> + .table-wrap for horizontal overflow.
+   Used in docs markdown and on the landing page benchmark/comparison content.
+   ========================================================================== */
+
+.table-wrap {
+  overflow-x: auto;
+  margin: 1.3rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+table th, table td {
+  padding: 0.7rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+table th {
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+table tr:last-child td { border-bottom: none; }
+table tbody tr { transition: background 0.12s; }
+table tbody tr:hover { background: var(--bg-hover); }
+table td strong { color: var(--accent-bright); font-weight: 500; }
+table code { font-size: 0.82em; }

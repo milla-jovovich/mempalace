@@ -1,0 +1,121 @@
+/* ==========================================================================
+   Compare grid — "old way vs MemPalace" two-card comparison in The Problem
+   section. Two cards side-by-side with an arrow chip in the middle.
+   .bad is muted/neutral, .good carries the cyan accent + drop shadow.
+   Collapses to a single column on narrow screens; arrow rotates 90deg.
+   ========================================================================== */
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 1.4rem;
+  align-items: stretch;
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.compare-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.8rem 1.7rem;
+  display: flex;
+  flex-direction: column;
+}
+.compare-card.bad {
+  border-color: var(--border);
+  background: var(--bg-card);
+  opacity: 0.92;
+}
+.compare-card.good {
+  border-color: var(--accent-border);
+  background: linear-gradient(180deg, rgba(62, 203, 255, 0.06), transparent 60%), var(--bg-card);
+  box-shadow: 0 0 0 1px rgba(62, 203, 255, 0.06), 0 30px 60px -30px rgba(62, 203, 255, 0.22);
+}
+
+/* ---------- Tag (eyebrow) at the top of each compare card ---------- */
+.compare-card .compare-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.8rem;
+}
+.compare-card .compare-tag::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+.compare-card.bad .compare-tag { color: var(--text-mute); }
+.compare-card.good .compare-tag { color: var(--accent-bright); }
+.compare-card.good .compare-tag::before {
+  opacity: 1;
+  box-shadow: 0 0 0 3px rgba(62, 203, 255, 0.18);
+}
+
+.compare-card h3 {
+  margin: 0 0 1.4rem;
+  font-size: 1.08rem;
+  color: var(--text);
+}
+.compare-card.bad h3 { color: var(--text-dim); }
+
+/* ---------- Key/value list of facts ---------- */
+.compare-card ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.4rem;
+  display: grid;
+  gap: 0.85rem;
+}
+.compare-card li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  margin: 0;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+.compare-card li:last-child { border-bottom: none; padding-bottom: 0; }
+.compare-card li .key { color: var(--text-mute); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.compare-card li .val { color: var(--text); font-weight: 500; font-family: var(--font-mono); font-size: 0.92rem; }
+.compare-card.bad li .val { color: var(--text-dim); }
+.compare-card.good li .val { color: var(--accent-bright); }
+
+.compare-card .footnote {
+  color: var(--text-mute);
+  font-size: 0.78rem;
+  margin: 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  line-height: 1.5;
+}
+
+/* ---------- Center arrow chip ---------- */
+.compare-arrow {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--accent-bright);
+  font-size: 1.3rem;
+}
+
+@media (max-width: 820px) {
+  .compare-grid { grid-template-columns: 1fr; }
+  .compare-arrow { transform: rotate(90deg); justify-self: center; }
+}

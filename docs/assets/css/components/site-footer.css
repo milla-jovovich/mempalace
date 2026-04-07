@@ -1,0 +1,24 @@
+/* ==========================================================================
+   Site footer — appears at the bottom of every page (rendered by
+   _includes/footer.html). Brand text on the left, link list on the right.
+   ========================================================================== */
+
+footer.site-footer {
+  border-top: 1px solid var(--border);
+  padding: 2rem 0;
+  color: var(--text-mute);
+  font-size: 0.85rem;
+}
+footer.site-footer .foot-inner {
+  max-width: var(--site-max);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+footer.site-footer .foot-links { display: flex; gap: 1.3rem; }
+footer.site-footer a { color: var(--text-dim); }
+footer.site-footer a:hover { color: var(--text); }

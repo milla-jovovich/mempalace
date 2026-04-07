@@ -1,0 +1,208 @@
+/* ==========================================================================
+   Top bar — fixed header on every page.
+   Logo + glow halo, gradient wordmark, version pill, animated nav underlines,
+   pill-shaped GitHub button, gradient hairline at the bottom edge.
+
+   Also: body padding-top to offset the fixed bar, and the mobile sidebar
+   toggle button (which lives inside the topbar on docs pages).
+   ========================================================================== */
+
+/* Offset the fixed topbar so page content doesn't sit underneath it. */
+body { padding-top: var(--topbar-h); }
+
+.topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--topbar-h);
+  z-index: 50;
+  background: rgba(10, 10, 10, 0.72);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(62, 203, 255, 0) 15%,
+    rgba(62, 203, 255, 0.35) 50%,
+    rgba(62, 203, 255, 0) 85%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+.topbar-inner {
+  max-width: var(--site-max);
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+
+/* ---------- Brand: logo halo + gradient wordmark + version pill ---------- */
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.98rem;
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+  text-decoration: none;
+}
+.topbar-logo-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  transition: transform 0.25s ease;
+}
+.topbar-logo-wrap::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 12px;
+  background: radial-gradient(circle, rgba(62, 203, 255, 0.35), transparent 65%);
+  opacity: 0.7;
+  filter: blur(4px);
+  z-index: -1;
+  transition: opacity 0.25s ease;
+}
+.topbar-logo-wrap img {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: block;
+}
+.topbar-brand:hover .topbar-logo-wrap { transform: scale(1.06); }
+.topbar-brand:hover .topbar-logo-wrap::before { opacity: 1; }
+
+.topbar-brand-text {
+  background: linear-gradient(180deg, #ffffff 0%, #b3e8ff 180%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.015em;
+}
+.topbar-version {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  margin-left: 0.15rem;
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--accent-bright);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  text-transform: lowercase;
+}
+
+/* "/ Docs" label that appears on docs pages next to the brand */
+.topbar-sep {
+  color: var(--border-strong);
+  font-weight: 300;
+  user-select: none;
+}
+.topbar-label {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+/* ---------- Right-side nav ---------- */
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 1.6rem;
+  margin-left: auto;
+}
+
+.topbar-nav a {
+  position: relative;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 0.35rem 0;
+  transition: color 0.18s;
+}
+/* Animated underline grows from center on hover/active. .gh is excluded
+   because it's already a pill button. */
+.topbar-nav a:not(.gh)::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.1rem;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-bright), transparent);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 0.22s ease;
+}
+.topbar-nav a:hover { color: var(--text); }
+.topbar-nav a:not(.gh):hover::after,
+.topbar-nav a:not(.gh).active::after { transform: scaleX(1); }
+.topbar-nav a.active { color: var(--text); }
+
+.topbar-nav .gh {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  padding: 0.4rem 0.8rem 0.4rem 0.7rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  transition: all 0.18s;
+}
+.topbar-nav .gh:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px rgba(62, 203, 255, 0.08);
+}
+.topbar-nav .gh svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+/* ---------- Mobile sidebar toggle (docs pages only) ---------- */
+.sidebar-toggle {
+  display: none;
+  background: none;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  margin-right: 0.4rem;
+}
+.sidebar-toggle svg { width: 16px; height: 16px; fill: currentColor; display: block; }
+
+@media (max-width: 1024px) {
+  .sidebar-toggle { display: inline-flex; }
+}
+@media (max-width: 720px) {
+  .topbar-version { display: none; }
+  .topbar-nav { gap: 1.1rem; }
+  .topbar-nav .gh { padding: 0.35rem 0.65rem; }
+}

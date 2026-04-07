@@ -1,0 +1,47 @@
+/* ==========================================================================
+   Design tokens — colors, fonts, layout dimensions, radii.
+   Single source of truth. All other partials read from here.
+   ========================================================================== */
+:root {
+  /* Colors — neutral dark base with restrained cyan accent */
+  --bg:            #0a0a0a;
+  --bg-alt:        #0f0f10;
+  --bg-elev:       #141416;
+  --bg-card:       #111113;
+  --bg-hover:      #181819;
+
+  --border:        #1e1e22;
+  --border-strong: #2a2a30;
+
+  --text:          #ededef;
+  --text-dim:      #a0a0a8;
+  --text-mute:     #6b6b74;
+
+  --accent:        #3ecbff;
+  --accent-bright: #7ddcff;
+  --accent-soft:   #b3e8ff;
+  --accent-wash:   rgba(62, 203, 255, 0.08);
+  --accent-border: rgba(62, 203, 255, 0.28);
+
+  --success:       #6fcf97;
+  --warn:          #f5c86a;
+  --danger:        #ff7a7a;
+
+  /* Typography */
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Inter",
+    "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas,
+    monospace;
+
+  /* Layout dimensions */
+  --topbar-h:     56px;
+  --sidebar-w:    256px;
+  --toc-w:        220px;
+  --content-max:  760px;
+  --site-max:     1440px;
+
+  /* Radii */
+  --r-sm: 4px;
+  --r:    6px;
+  --r-lg: 10px;
+}

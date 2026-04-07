@@ -1,0 +1,117 @@
+/* ==========================================================================
+   Docs layout — three-column grid (sidebar | content | TOC).
+   Includes the main content column styling and the prev/next page footer nav.
+   The sidebar and TOC partials handle their own columns.
+   ========================================================================== */
+
+.docs-layout {
+  max-width: var(--site-max);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--toc-w);
+  gap: 0;
+}
+
+@media (max-width: 1200px) {
+  .docs-layout {
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  }
+  .docs-toc { display: none; }
+}
+
+@media (max-width: 1024px) {
+  .docs-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------- Content column ---------- */
+.docs-content {
+  min-width: 0;
+  padding: 2.8rem 3rem 5rem;
+}
+
+.docs-content .content-inner {
+  max-width: var(--content-max);
+}
+
+@media (max-width: 1024px) {
+  .docs-content { padding: 2rem 1.5rem 4rem; }
+}
+
+.docs-content h1 {
+  font-size: 2.1rem;
+  margin-top: 0;
+  margin-bottom: 0.3em;
+}
+
+.docs-content .page-eyebrow {
+  display: block;
+  color: var(--accent-bright);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.8rem;
+}
+
+.docs-content .page-subtitle {
+  font-size: 1.1rem;
+  color: var(--text-dim);
+  margin-top: 0;
+  margin-bottom: 2.5rem;
+  max-width: 62ch;
+  line-height: 1.55;
+}
+
+/* h2's in docs content get a top divider for visual rhythm */
+.docs-content h2 {
+  border-top: 1px solid var(--border);
+  padding-top: 2.2rem;
+  margin-top: 3rem;
+}
+.docs-content h2:first-of-type { border-top: none; padding-top: 0; }
+
+/* ---------- Prev/next page nav at the bottom of each docs page ---------- */
+.page-footer-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 4rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+}
+
+.page-footer-nav a {
+  display: block;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--bg-card);
+  color: var(--text);
+  transition: border-color 0.15s, background 0.15s;
+}
+.page-footer-nav a:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.page-footer-nav .pfn-label {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-mute);
+  margin-bottom: 0.3rem;
+}
+.page-footer-nav .pfn-title {
+  display: block;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.page-footer-nav .pfn-next { text-align: right; }
+.page-footer-nav.pfn-single { grid-template-columns: 1fr; }
+
+@media (max-width: 640px) {
+  .page-footer-nav { grid-template-columns: 1fr; }
+}

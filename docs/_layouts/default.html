@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% if page.title and page.title != "" %}{{ page.title }} &mdash; {% endif %}{{ site.title }}</title>
+  <meta name="description" content="{{ page.description | default: site.description }}">
+  <meta property="og:title" content="{% if page.title and page.title != "" %}{{ page.title }} &mdash; {% endif %}{{ site.title }}">
+  <meta property="og:description" content="{{ page.description | default: site.description }}">
+  <meta property="og:image" content="{{ '/assets/logo.png' | relative_url }}">
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="icon" type="image/png" href="{{ '/assets/logo.png' | relative_url }}">
+
+  <!-- Geist fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}">
+</head>
+<body class="{% if page.layout == 'docs' %}has-sidebar{% else %}landing{% endif %}">
+
+  {% include topbar.html %}
+
+  {{ content }}
+
+  {% include footer.html %}
+
+  <script src="{{ '/assets/main.js' | relative_url }}"></script>
+</body>
+</html>

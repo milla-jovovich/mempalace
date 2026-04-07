@@ -1,0 +1,42 @@
+/* ==========================================================================
+   Right TOC — sticky "On this page" outline.
+   Active item is highlighted by main.js scrollspy.
+   ========================================================================== */
+
+.docs-toc {
+  position: sticky;
+  top: var(--topbar-h);
+  align-self: start;
+  height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
+  padding: 2.8rem 1.5rem 2rem;
+  font-size: 0.85rem;
+}
+
+.docs-toc h5 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-mute);
+  font-weight: 600;
+  margin: 0 0 0.7rem;
+}
+
+.docs-toc ul { list-style: none; padding: 0; margin: 0; }
+.docs-toc li { margin: 0; }
+
+.docs-toc a {
+  display: block;
+  padding: 0.3rem 0 0.3rem 0.7rem;
+  color: var(--text-mute);
+  border-left: 2px solid transparent;
+  margin-left: -0.7rem;
+  transition: color 0.12s, border-color 0.12s;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.docs-toc a:hover { color: var(--text-dim); }
+.docs-toc a.active {
+  color: var(--accent-bright);
+  border-left-color: var(--accent);
+}

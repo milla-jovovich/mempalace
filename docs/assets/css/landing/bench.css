@@ -1,0 +1,147 @@
+/* ==========================================================================
+   Benchmark bars — horizontal bar chart comparing memory systems.
+   Each .bench-row is a 4-col grid: name | bar | score | tag.
+   .bench-row.us highlights MemPalace rows via text color (no row bg).
+   Bar widths in HTML are scaled to an 80-100% range to amplify the small
+   differences between scores; the .bench-scale label explains this.
+   ========================================================================== */
+
+.bench-bars {
+  max-width: 960px;
+  margin: 0 auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 1rem 1.2rem;
+  box-shadow:
+    0 30px 60px -30px rgba(0,0,0,0.6),
+    0 0 0 1px rgba(255,255,255,0.02);
+}
+
+.bench-row {
+  display: grid;
+  grid-template-columns: 1.6fr minmax(0, 3.5fr) auto auto;
+  gap: 1.4rem;
+  align-items: center;
+  padding: 1rem 1.2rem;
+  border-radius: 8px;
+  position: relative;
+  transition: background 0.15s;
+}
+/* Hairline divider drawn between consecutive rows */
+.bench-row + .bench-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 1.2rem;
+  right: 1.2rem;
+  height: 1px;
+  background: var(--border);
+}
+.bench-row.us {
+  background: transparent;
+}
+
+/* ---------- Row name column ---------- */
+.bench-name {
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+.bench-row.us .bench-name {
+  color: var(--accent-bright);
+  font-weight: 600;
+}
+
+/* ---------- Progress bar ---------- */
+.bench-bar {
+  position: relative;
+  height: 10px;
+  background: var(--bg-elev);
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.bench-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, #3a3a44, #5a5a68);
+  border-radius: 999px;
+}
+.bench-row.us .bench-fill {
+  background: linear-gradient(90deg, #2a9cd6, var(--accent-bright));
+  box-shadow:
+    0 0 0 1px rgba(62,203,255,0.3),
+    0 0 20px -2px rgba(62,203,255,0.55);
+}
+
+/* ---------- Score & tag columns ---------- */
+.bench-score {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  font-weight: 600;
+  min-width: 60px;
+  text-align: right;
+  letter-spacing: -0.01em;
+}
+.bench-row.us .bench-score {
+  color: var(--accent-bright);
+  font-size: 1rem;
+}
+.bench-tag {
+  font-size: 0.7rem;
+  color: var(--text-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  min-width: 110px;
+  text-align: right;
+  font-weight: 500;
+}
+.bench-row.us .bench-tag { color: var(--success); }
+
+/* ---------- Footer: scale label + descriptive note ---------- */
+.bench-scale {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  justify-content: flex-end;
+  margin: 0.9rem 1.2rem 0.2rem;
+  color: var(--text-mute);
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.bench-scale .scale-line {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.bench-note {
+  text-align: center;
+  margin: 2rem auto 0;
+  max-width: 920px;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  text-wrap: balance;
+}
+.bench-note strong { color: var(--accent-bright); font-weight: 600; }
+
+.bench-actions {
+  display: flex;
+  gap: 0.7rem;
+  justify-content: center;
+  margin-top: 1.6rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 720px) {
+  .bench-bars { padding: 0.6rem 0.8rem; }
+  .bench-row { grid-template-columns: 1fr auto; gap: 0.5rem 1rem; padding: 0.9rem 0.9rem; }
+  .bench-bar { grid-column: 1 / -1; order: 3; }
+  .bench-tag { display: none; }
+}

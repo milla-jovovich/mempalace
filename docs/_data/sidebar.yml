@@ -1,0 +1,21 @@
+- title: Getting Started
+  items:
+    - { label: Introduction,    href: /intro }
+    - { label: Quick Start,     href: /quick-start }
+
+- title: Core Concepts
+  items:
+    - { label: The Palace,      href: /palace }
+    - { label: AAAK Dialect,    href: /aaak }
+    - { label: Knowledge Graph, href: /knowledge-graph }
+
+- title: Integrations
+  items:
+    - { label: MCP Server,      href: /mcp }
+    - { label: Auto-Save Hooks, href: /hooks }
+    - { label: Specialist Agents, href: /agents }
+
+- title: Reference
+  items:
+    - { label: CLI Commands,    href: /cli }
+    - { label: Benchmarks,      href: /benchmarks }

@@ -1,0 +1,9 @@
+/* ==========================================================================
+   Utility classes — single-purpose helpers usable from any markdown file.
+   ========================================================================== */
+.text-center { text-align: center; }
+.text-dim    { color: var(--text-dim); }
+.text-accent { color: var(--accent-bright); }
+.mt-0        { margin-top: 0; }
+.mb-0        { margin-bottom: 0; }
+.mt-3        { margin-top: 2rem; }

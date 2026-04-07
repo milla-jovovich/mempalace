@@ -1,0 +1,52 @@
+/* ==========================================================================
+   Callouts — flat tinted note boxes with a small accent dot indicator.
+   Variants: default (cyan), .success (green), .warn (yellow).
+   The accent dot is positioned to align with the first text line.
+   Also styles plain <blockquote> content inside docs pages.
+   ========================================================================== */
+
+.callout,
+blockquote.callout {
+  position: relative;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 1.05rem 1.25rem 1.05rem 2.6rem;
+  margin: 1.4rem 0;
+  color: var(--text);
+  font-style: normal;
+}
+.callout::before,
+blockquote.callout::before {
+  content: "";
+  position: absolute;
+  /* (padding-top) + (~half line-height) - (half dot height) */
+  top: calc(1.05rem + 0.8em - 4px);
+  left: 1.15rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  box-shadow: 0 0 0 3px rgba(62, 203, 255, 0.18);
+}
+
+.callout.success::before, blockquote.callout.success::before {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(111, 207, 151, 0.18);
+}
+.callout.warn::before, blockquote.callout.warn::before {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(245, 200, 106, 0.18);
+}
+
+.callout p:last-child, blockquote.callout p:last-child { margin-bottom: 0; }
+.callout strong, blockquote.callout strong { color: var(--text); }
+
+/* Plain markdown blockquotes (no .callout class) — quieter style */
+.docs-content blockquote:not(.callout) {
+  margin: 1.4rem 0;
+  padding: 0.2rem 1.1rem;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-dim);
+  font-style: italic;
+}

@@ -1,0 +1,110 @@
+/* ==========================================================================
+   Legacy landing styles — kept for the 404 page (404.html), which still
+   uses the original .hero / .landing-container / .tagline / .subtitle markup.
+
+   The current homepage uses the v2 system in css/landing/* and does NOT
+   need anything in this file. If 404.html is ever rewritten to use v2,
+   this whole file can be deleted.
+   ========================================================================== */
+
+.landing { background: var(--bg); }
+
+.landing-container {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.hero {
+  padding: 6rem 0 4.5rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  top: -40%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1000px;
+  height: 1000px;
+  background: radial-gradient(circle, rgba(62, 203, 255, 0.08), transparent 60%);
+  pointer-events: none;
+}
+.hero-content { position: relative; z-index: 1; }
+
+.hero-logo {
+  width: 88px;
+  height: 88px;
+  margin: 0 auto 1.8rem;
+  border-radius: 14px;
+  filter: drop-shadow(0 0 26px rgba(62, 203, 255, 0.25));
+}
+
+.hero h1 {
+  font-size: clamp(2.4rem, 5.2vw, 3.8rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  margin-bottom: 1rem;
+  background: linear-gradient(180deg, #ffffff 0%, #c6e8f5 140%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero .tagline {
+  font-size: clamp(1.05rem, 2vw, 1.3rem);
+  color: var(--text);
+  font-weight: 400;
+  margin-bottom: 1rem;
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.4;
+}
+.hero .subtitle {
+  font-size: 1rem;
+  color: var(--text-dim);
+  max-width: 600px;
+  margin: 0 auto 2.2rem;
+  line-height: 1.6;
+}
+
+.hero-cta {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 3rem;
+}
+
+/* Selectors scoped to body.landing — apply to direct <section> children
+   on the legacy 404 page. The v2 landing uses .section-v2 instead. */
+.landing section {
+  padding: 4.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.landing section:last-of-type { border-bottom: none; }
+.landing .section-alt { background: var(--bg-alt); }
+
+.landing .section-label {
+  display: block;
+  color: var(--accent-bright);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.7rem;
+}
+
+.landing h2 {
+  font-size: clamp(1.6rem, 3vw, 2rem);
+  letter-spacing: -0.025em;
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.landing .text-center { text-align: center; }
+.landing .text-dim { color: var(--text-dim); }

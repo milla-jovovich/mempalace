@@ -1,0 +1,49 @@
+---
+layout: default
+---
+<div class="docs-layout">
+
+  {% include sidebar.html %}
+
+  <main class="docs-content">
+    <div class="content-inner">
+
+      {% if page.eyebrow %}<span class="page-eyebrow">{{ page.eyebrow }}</span>{% endif %}
+      <h1>{{ page.heading | default: page.title }}</h1>
+      {% if page.subtitle %}<p class="page-subtitle">{{ page.subtitle }}</p>{% endif %}
+
+      {{ content }}
+
+      {% if page.prev or page.next %}
+      <nav class="page-footer-nav{% if page.prev and page.next == nil %} pfn-single{% endif %}{% if page.next and page.prev == nil %} pfn-single{% endif %}">
+        {% if page.prev %}
+        <a href="{{ page.prev.href | relative_url }}" class="pfn-prev">
+          <span class="pfn-label">&larr; Previous</span>
+          <span class="pfn-title">{{ page.prev.label }}</span>
+        </a>
+        {% endif %}
+
+        {% if page.next %}
+        <a href="{{ page.next.href | relative_url }}" class="pfn-next">
+          <span class="pfn-label">Next &rarr;</span>
+          <span class="pfn-title">{{ page.next.label }}</span>
+        </a>
+        {% endif %}
+      </nav>
+      {% endif %}
+
+    </div>
+  </main>
+
+  {% if page.toc %}
+  <aside class="docs-toc">
+    <h5>On This Page</h5>
+    <ul>
+      {% for item in page.toc %}
+      <li><a href="#{{ item.id }}">{{ item.label }}</a></li>
+      {% endfor %}
+    </ul>
+  </aside>
+  {% endif %}
+
+</div>

@@ -1,0 +1,108 @@
+/* ==========================================================================
+   Footer CTA — final "Get MemPalace" block at the bottom of the landing.
+   Layered radial gradients on the section bg + a dot grid (::after) for
+   depth, an install command spotlight in the middle, and the Get/Read
+   buttons underneath.
+   ========================================================================== */
+
+.cta-block {
+  padding: 10rem 0;
+  text-align: center;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 40%, rgba(62, 203, 255, 0.13), transparent 70%),
+    radial-gradient(ellipse 40% 35% at 50% 45%, rgba(125, 220, 255, 0.08), transparent 75%),
+    var(--bg-alt);
+  position: relative;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+}
+.cta-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse 60% 70% at 50% 40%, #000 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 60% 70% at 50% 40%, #000 30%, transparent 80%);
+  pointer-events: none;
+}
+.cta-block .inner {
+  position: relative;
+  z-index: 1;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.cta-block .cta-eyebrow {
+  display: inline-block;
+  color: var(--accent-bright);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 1rem;
+}
+.cta-block h2 {
+  font-size: clamp(2.2rem, 4.5vw, 3.2rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  margin: 0 0 1rem;
+  color: var(--text);
+  line-height: 1.05;
+  text-wrap: balance;
+}
+.cta-block .lead {
+  color: var(--text-dim);
+  font-size: 1.08rem;
+  margin: 0 auto 1.8rem;
+  max-width: 580px;
+  line-height: 1.55;
+}
+
+/* ---------- Install command spotlight ---------- */
+.cta-spotlight {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.85rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 0.85rem 1rem 0.85rem 1.2rem;
+  margin: 0 auto 1.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  color: var(--text);
+  box-shadow:
+    0 30px 60px -25px rgba(0,0,0,0.7),
+    0 0 0 1px rgba(255,255,255,0.03);
+}
+.cta-spotlight .ps { color: var(--accent-bright); user-select: none; }
+.cta-spotlight .copy {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 0.4rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: all 0.15s;
+}
+.cta-spotlight .copy:hover {
+  color: var(--accent-bright);
+  border-color: var(--accent-border);
+  background: var(--accent-wash);
+}
+.cta-spotlight .copy.copied { color: var(--success); border-color: var(--success); }
+
+.cta-block .cta-buttons {
+  display: flex;
+  gap: 0.7rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}

@@ -1,0 +1,35 @@
+title: MemPalace
+description: >-
+  The highest-scoring AI memory system ever benchmarked. 96.6% LongMemEval R@5
+  with zero API calls, 100% with optional rerank. Open source, local-first, free.
+url: https://milla-jovovich.github.io
+baseurl: /mempalace
+
+permalink: /:basename.html
+
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    css_class: highlight
+  input: GFM
+  hard_wrap: false
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - README.md
+  - vendor
+  - .bundle
+
+# Shared values used by layouts and includes
+github_url: https://github.com/milla-jovovich/mempalace
+discord_url: https://discord.com/invite/ycTQQCu6kn
+
+nav_links:
+  - { label: Home,          href: / }
+  - { label: Architecture,  href: /architecture }
+  - { label: Integrations,  href: /integrations }
+  - { label: Benchmarks,    href: /benchmarks }
+  - { label: CLI,           href: /cli }

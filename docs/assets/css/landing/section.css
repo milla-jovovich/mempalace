@@ -1,0 +1,57 @@
+/* ==========================================================================
+   Landing v2 — generic section frame.
+   .section-v2 is the outer wrapper for every landing section after the hero.
+   .section-head holds the eyebrow + h2 + lead intro.
+   .landing-wide is the max-width container used inside sections.
+   ========================================================================== */
+
+/* Container variant used by v2 sections (wider than docs prose) */
+.landing-wide {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.section-v2 {
+  padding: 6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.section-v2.alt { background: var(--bg-alt); }
+.section-v2:last-of-type { border-bottom: none; }
+
+/* ---------- Section header (eyebrow / h2 / lead) ---------- */
+.section-head {
+  max-width: 920px;
+  margin: 0 auto 3rem;
+  text-align: center;
+}
+.section-head.left { text-align: left; margin-left: 0; }
+
+.section-head .section-label {
+  display: inline-block;
+  color: var(--accent-bright);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 0.9rem;
+}
+
+.section-head h2 {
+  font-size: clamp(1.85rem, 3.2vw, 2.4rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text);
+  margin: 0 0 0.8rem;
+  text-wrap: balance;
+}
+
+.section-head .lead {
+  font-size: 1.05rem;
+  color: var(--text-dim);
+  max-width: 620px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+.section-head.left .lead { margin-left: 0; }

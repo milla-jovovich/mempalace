@@ -1,0 +1,16 @@
+/* ==========================================================================
+   Feature grid — generic two-column comparison block usable inside docs
+   markdown. Collapses to a single column on narrow screens.
+   ========================================================================== */
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+}
+.feature-grid h4 { margin-top: 0; }
+
+@media (max-width: 720px) {
+  .feature-grid { grid-template-columns: 1fr; gap: 1rem; }
+}

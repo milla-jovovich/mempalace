@@ -1,0 +1,93 @@
+/* ==========================================================================
+   Day-to-day use section — two side-by-side cards (cloud agents / offline
+   LLMs). Each card has eyebrow + title + description + quote + terminal.
+   Cards stretch to equal height via grid; terminals stretch via flex so
+   their bottom edges line up regardless of how much text precedes them.
+   ========================================================================== */
+
+.dual-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.4rem;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.dual-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.8rem 1.8rem 2rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.dual-card .dual-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent-bright);
+  margin-bottom: 0.6rem;
+}
+.dual-card h3 {
+  margin: 0 0 0.8rem;
+  font-size: 1.15rem;
+  color: var(--text);
+}
+.dual-card p {
+  margin: 0 0 1.2rem;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+/* Terminals stretch to the bottom of the card so both sides match height. */
+.dual-card .terminal {
+  margin-top: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  box-shadow: none;
+  border-color: var(--border);
+  min-height: 11em;
+}
+.dual-card .terminal-body {
+  flex: 1;
+  padding: 1.1rem 1.2rem;
+  font-size: 0.78rem;
+  line-height: 1.75;
+  min-height: 0;
+}
+
+/* ---------- Inline quote with accent dot indicator ---------- */
+.dual-card .quote {
+  position: relative;
+  margin: 0 0 1.2rem;
+  padding: 1rem 1.2rem 1rem 2.6rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  font-style: italic;
+  color: var(--text);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+.dual-card .quote::before {
+  content: "";
+  position: absolute;
+  top: calc(1rem + 0.75em - 4px);
+  left: 1.15rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  box-shadow: 0 0 0 3px rgba(62, 203, 255, 0.18);
+}
+
+@media (max-width: 880px) {
+  .dual-grid { grid-template-columns: 1fr; }
+}

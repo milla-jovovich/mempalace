@@ -1,0 +1,383 @@
+---
+layout: default
+title: ""
+description: "Open-source, local-first AI memory. 96.6% LongMemEval R@5 with zero API calls. 100% with optional rerank. Works with Claude, GPT, Gemini, Llama, Mistral."
+---
+
+<!-- ============================================================ HERO -->
+<header class="hero-v2">
+  <div class="hero-content">
+    <img src="{{ '/assets/logo.png' | relative_url }}" alt="MemPalace" class="hero-logo">
+
+    <h1>
+      Give your AI<br>
+      <span class="accent-line">a perfect memory.</span>
+    </h1>
+
+    <p class="hero-tagline">
+      The highest-scoring AI memory system ever benchmarked. Open source, local-first,
+      and free. Every conversation stored verbatim &mdash; no extraction, no summarization,
+      no information loss.
+    </p>
+
+    <div class="hero-cta">
+      <a href="{{ '/quick-start' | relative_url }}" class="btn btn-primary btn-lg">
+        Get started <span class="arrow">&rarr;</span>
+      </a>
+      <a href="{{ '/benchmarks' | relative_url }}" class="btn btn-ghost btn-lg">
+        View benchmarks
+      </a>
+    </div>
+
+    <div class="terminal terminal-hero">
+      <div class="terminal-header">
+        <span class="term-dots">
+          <span class="term-dot r"></span>
+          <span class="term-dot y"></span>
+          <span class="term-dot g"></span>
+        </span>
+        <span class="terminal-title">~/projects/myapp &mdash; mempalace</span>
+      </div>
+      <pre class="terminal-body"><code><span class="t-comment"># Install. Index. Search anything you've ever discussed.</span>
+<span class="t-prompt">$</span> <span class="t-cmd">pip install mempalace</span>
+<span class="t-prompt">$</span> <span class="t-cmd">mempalace init ~/projects/myapp</span>
+<span class="t-prompt">$</span> <span class="t-cmd">mempalace mine ~/chats/ <span class="t-flag">--mode</span> convos</span>
+<span class="t-prompt">$</span> <span class="t-cmd">mempalace search <span class="t-string">"why did we switch to GraphQL"</span></span>
+
+<span class="t-result">&rarr; 12 verbatim results in 47ms &middot; zero API calls</span></code></pre>
+    </div>
+  </div>
+</header>
+
+<!-- ============================================================ THE PROBLEM -->
+<section class="section-v2">
+  <div class="landing-wide">
+    <div class="section-head">
+      <span class="section-label">The problem</span>
+      <h2>Your AI forgets everything.</h2>
+      <p class="lead">
+        Every decision, every debugging session, every architecture debate disappears
+        when the session ends. Six months of work, gone. You start over every time.
+      </p>
+    </div>
+
+    <div class="compare-grid">
+      <div class="compare-card bad">
+        <span class="compare-tag">The old way</span>
+        <h3>LLM summaries that lose context</h3>
+        <ul>
+          <li><span class="key">Tokens loaded</span><span class="val">~650K</span></li>
+          <li><span class="key">Annual cost</span><span class="val">$507/yr</span></li>
+          <li><span class="key">Recall</span><span class="val">Lossy</span></li>
+          <li><span class="key">Privacy</span><span class="val">Cloud</span></li>
+        </ul>
+        <p class="footnote">
+          Other systems extract <em>"user prefers Postgres"</em> and throw away the
+          conversation that explained <em>why</em>.
+        </p>
+      </div>
+
+      <div class="compare-arrow" aria-hidden="true">&rarr;</div>
+
+      <div class="compare-card good">
+        <span class="compare-tag">MemPalace</span>
+        <h3>Verbatim recall, structured palace</h3>
+        <ul>
+          <li><span class="key">Tokens loaded</span><span class="val">~13.5K</span></li>
+          <li><span class="key">Annual cost</span><span class="val">$10/yr</span></li>
+          <li><span class="key">Recall</span><span class="val">Verbatim</span></li>
+          <li><span class="key">Privacy</span><span class="val">Local</span></li>
+        </ul>
+        <p class="footnote">
+          MemPalace stores everything, then makes it findable. <strong>$10/year</strong>
+          to remember everything &middot; 50&times; cheaper, with full context.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ THREE PILLARS (BENTO) -->
+<section class="section-v2 alt">
+  <div class="landing-wide">
+    <div class="section-head">
+      <span class="section-label">Three pillars</span>
+      <h2>A palace. A dialect. A graph.</h2>
+      <p class="lead">
+        Three ideas that work together to make AI memory actually work.
+      </p>
+    </div>
+
+    <div class="bento">
+      <a href="{{ '/palace' | relative_url }}" class="bento-card">
+        <div class="bento-preview" data-no-copy>
+<pre><span class="b-mute">PALACE/</span>
+<span class="b-mute">├─</span> <span class="b-accent">engineering/</span>
+<span class="b-mute">│  ├─</span> <span class="b-hi">auth-decisions/</span>
+<span class="b-mute">│  │  ├─</span> 2025-q1-oauth2.md
+<span class="b-mute">│  │  └─</span> 2025-q2-jwt-ttl.md
+<span class="b-mute">│  └─</span> <span class="b-hi">graphql-migration/</span>
+<span class="b-mute">└─</span> <span class="b-accent">team/</span>
+   <span class="b-mute">└─</span> <span class="b-hi">people-and-roles/</span></pre>
+        </div>
+        <div class="bento-body">
+          <span class="icon-tag"><span class="icon-dot"></span>The Palace</span>
+          <h3>Wings, rooms, halls, drawers.</h3>
+          <p>
+            Ancient Greek method of loci, applied to AI. Every idea has a place.
+            Boosts retrieval by <strong>34%</strong> versus flat storage.
+          </p>
+          <span class="learn">Learn how it works <span class="arrow">&rarr;</span></span>
+        </div>
+      </a>
+
+      <a href="{{ '/aaak' | relative_url }}" class="bento-card">
+        <div class="bento-preview" data-no-copy>
+<pre><span class="b-mute"># JSON &middot; 642 tokens</span>
+<span class="b-hi">{</span><span class="b-hi">"team"</span>:<span class="b-accent">"core"</span>,<span class="b-hi">"decided"</span>:<span class="b-accent">"oauth2"</span><span class="b-hi">}</span>
+
+<span class="b-arrow">          &darr;  30&times;</span>
+
+<span class="b-good">team=core;decided=oauth2</span>
+<span class="b-mute"># AAAK &middot; 21 tokens</span></pre>
+        </div>
+        <div class="bento-body">
+          <span class="icon-tag"><span class="icon-dot"></span>AAAK Dialect</span>
+          <h3>Lossless compression for AI.</h3>
+          <p>
+            <strong>30&times;</strong> compression, zero information loss, no decoder
+            required. Works with any text-reading model.
+          </p>
+          <span class="learn">See the format <span class="arrow">&rarr;</span></span>
+        </div>
+      </a>
+
+      <a href="{{ '/knowledge-graph' | relative_url }}" class="bento-card">
+        <div class="bento-preview" data-no-copy>
+<pre><span class="b-accent">(alice)</span>   <span class="b-mute">-[uses]-&gt;</span>    <span class="b-hi">(oauth2)</span>
+<span class="b-hi">(oauth2)</span>  <span class="b-mute">-[needs]-&gt;</span>   <span class="b-hi">(jwt)</span>
+<span class="b-hi">(oauth2)</span>  <span class="b-mute">-[since]-&gt;</span>   <span class="b-good">2025-Q1</span>
+<span class="b-hi">(jwt)</span>     <span class="b-mute">-[ttl]-&gt;</span>     <span class="b-good">7d</span></pre>
+        </div>
+        <div class="bento-body">
+          <span class="icon-tag"><span class="icon-dot"></span>Knowledge Graph</span>
+          <h3>Temporal entity-relationship triples.</h3>
+          <p>
+            Validity windows for facts that change over time. Like Zep&rsquo;s Graphiti,
+            but SQLite-backed, local-first, free.
+          </p>
+          <span class="learn">Explore the graph <span class="arrow">&rarr;</span></span>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ QUICK START -->
+<section class="section-v2">
+  <div class="landing-wide">
+    <div class="section-head">
+      <span class="section-label">Quick start</span>
+      <h2>Four commands to a searchable memory.</h2>
+      <p class="lead">
+        Install, initialize, mine, search. Everything stays on your machine &mdash; no API
+        key, no cloud, no subscription.
+      </p>
+    </div>
+
+    <div class="qs-shell">
+      <div class="terminal">
+        <div class="terminal-header">
+          <span class="term-dots">
+            <span class="term-dot r"></span>
+            <span class="term-dot y"></span>
+            <span class="term-dot g"></span>
+          </span>
+          <span class="terminal-title">setup &mdash; bash</span>
+        </div>
+        <pre class="terminal-body"><code><span class="t-comment"># Install the package</span>
+<span class="t-prompt">$</span> <span class="t-cmd">pip install mempalace</span>
+
+<span class="t-comment"># Set up your world &mdash; team, projects, preferences</span>
+<span class="t-prompt">$</span> <span class="t-cmd">mempalace init ~/projects/myapp</span>
+
+<span class="t-comment"># Mine your data (code, docs, chats &mdash; all of it)</span>
+<span class="t-prompt">$</span> <span class="t-cmd">mempalace mine ~/projects/myapp</span>
+<span class="t-prompt">$</span> <span class="t-cmd">mempalace mine ~/chats/ <span class="t-flag">--mode</span> convos</span>
+<span class="t-prompt">$</span> <span class="t-cmd">mempalace mine ~/chats/ <span class="t-flag">--mode</span> convos <span class="t-flag">--extract</span> general</span>
+
+<span class="t-comment"># Search anything you&rsquo;ve ever discussed</span>
+<span class="t-prompt">$</span> <span class="t-cmd">mempalace search <span class="t-string">"why did we switch to GraphQL"</span></span>
+<span class="t-result">&rarr; 12 results &middot; verbatim &middot; 47ms</span></code></pre>
+      </div>
+
+      <div class="qs-meta">
+        <div><span class="check">&#10003;</span> <strong>Two</strong> Python deps</div>
+        <div><span class="check">&#10003;</span> Works <strong>offline</strong></div>
+        <div><span class="check">&#10003;</span> <strong>SQLite + Chroma</strong>, no servers</div>
+        <div><span class="check">&#10003;</span> <strong>MIT</strong> licensed</div>
+      </div>
+
+      <div style="text-align: center; margin-top: 2.2rem;">
+        <a href="{{ '/quick-start' | relative_url }}" class="btn btn-ghost">Full quick start <span class="arrow">&rarr;</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ DAY-TO-DAY USE -->
+<section class="section-v2 alt">
+  <div class="landing-wide">
+    <div class="section-head">
+      <span class="section-label">Day-to-day use</span>
+      <h2>You don&rsquo;t run commands. Your AI does.</h2>
+      <p class="lead">
+        After the one-time setup, you never type <code>mempalace search</code> again.
+        Your AI calls it automatically &mdash; through MCP, or directly into context.
+      </p>
+    </div>
+
+    <div class="dual-grid">
+      <div class="dual-card">
+        <span class="dual-eyebrow">Cloud agents</span>
+        <h3>Claude, ChatGPT, Cursor &mdash; via MCP</h3>
+        <p>
+          Connect MemPalace once. Your AI gets <strong>19 tools</strong> over MCP and
+          calls them automatically when you ask anything that needs memory.
+        </p>
+        <p class="quote">&ldquo;What did we decide about auth last month?&rdquo;</p>
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="term-dots">
+              <span class="term-dot r"></span>
+              <span class="term-dot y"></span>
+              <span class="term-dot g"></span>
+            </span>
+          </div>
+          <pre class="terminal-body"><code><span class="t-prompt">$</span> <span class="t-cmd">claude mcp add mempalace \</span>
+    <span class="t-cmd">-- python -m mempalace.mcp_server</span>
+<span class="t-result">&rarr; 19 tools registered</span>
+
+<span class="t-comment"># Now Claude calls them automatically:</span>
+<span class="t-comment"># mempalace_search, mempalace_wake_up,</span>
+<span class="t-comment"># mempalace_palace, mempalace_facts, ...</span></code></pre>
+        </div>
+      </div>
+
+      <div class="dual-card">
+        <span class="dual-eyebrow">Offline LLMs</span>
+        <h3>Llama, Mistral, local models</h3>
+        <p>
+          Local models don&rsquo;t speak MCP yet. Two patterns: load your <strong>~170-token
+          wake-up</strong> into context, or query verbatim on demand.
+        </p>
+        <p class="quote">Entire memory stack runs offline &mdash; zero cloud calls.</p>
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="term-dots">
+              <span class="term-dot r"></span>
+              <span class="term-dot y"></span>
+              <span class="term-dot g"></span>
+            </span>
+          </div>
+          <pre class="terminal-body"><code><span class="t-comment"># Load entire world (~170 tokens)</span>
+<span class="t-prompt">$</span> <span class="t-cmd">mempalace wake-up &gt; ctx.txt</span>
+
+<span class="t-comment"># Or query on demand</span>
+<span class="t-prompt">$</span> <span class="t-cmd">mempalace search <span class="t-string">"auth"</span> &gt; r.txt</span></code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ BENCHMARKS -->
+<section class="section-v2">
+  <div class="landing-wide">
+    <div class="section-head">
+      <span class="section-label">Benchmarks</span>
+      <h2>Tested against the hardest academic datasets.</h2>
+      <p class="lead">
+        Reproducible runs on LongMemEval, LoCoMo, and ConvoMem. Published datasets,
+        open methodology, auditable JSONL results.
+      </p>
+    </div>
+
+    <div class="bench-bars">
+      <div class="bench-row us">
+        <div class="bench-name">MemPalace (hybrid)</div>
+        <div class="bench-bar"><div class="bench-fill" style="width: 100%;"></div></div>
+        <div class="bench-score">100%</div>
+        <div class="bench-tag">Free &middot; optional API</div>
+      </div>
+      <div class="bench-row">
+        <div class="bench-name">Supermemory ASMR</div>
+        <div class="bench-bar"><div class="bench-fill" style="width: 95%;"></div></div>
+        <div class="bench-score">~99%</div>
+        <div class="bench-tag">API required</div>
+      </div>
+      <div class="bench-row us">
+        <div class="bench-name">MemPalace (raw)</div>
+        <div class="bench-bar"><div class="bench-fill" style="width: 83%;"></div></div>
+        <div class="bench-score">96.6%</div>
+        <div class="bench-tag">Free &middot; no API</div>
+      </div>
+      <div class="bench-row">
+        <div class="bench-name">Mastra</div>
+        <div class="bench-bar"><div class="bench-fill" style="width: 74%;"></div></div>
+        <div class="bench-score">94.87%</div>
+        <div class="bench-tag">Yes (GPT)</div>
+      </div>
+      <div class="bench-row">
+        <div class="bench-name">Mem0</div>
+        <div class="bench-bar"><div class="bench-fill" style="width: 25%;"></div></div>
+        <div class="bench-score">~85%</div>
+        <div class="bench-tag">$19&ndash;249/mo</div>
+      </div>
+      <div class="bench-row">
+        <div class="bench-name">Zep</div>
+        <div class="bench-bar"><div class="bench-fill" style="width: 25%;"></div></div>
+        <div class="bench-score">~85%</div>
+        <div class="bench-tag">$25/mo+</div>
+      </div>
+      <div class="bench-scale">
+        <span class="scale-line"></span>
+        <span>Scale 80&ndash;100% to highlight differences</span>
+      </div>
+    </div>
+
+    <p class="bench-note">
+      <strong>96.6%</strong> raw is the highest published LongMemEval score that requires
+      no API key, no cloud, and no LLM at any stage.
+    </p>
+
+    <div class="bench-actions">
+      <a href="{{ '/benchmarks' | relative_url }}" class="btn btn-ghost">Full benchmark results <span class="arrow">&rarr;</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ FOOTER CTA -->
+<section class="cta-block">
+  <div class="inner">
+    <span class="cta-eyebrow">Get started in 30 seconds</span>
+    <h2>Give your AI a memory<br>that never forgets.</h2>
+    <p class="lead">
+      Free, open source, MIT licensed. Two Python dependencies. Runs entirely on
+      your machine &mdash; no cloud, no API keys, no subscription.
+    </p>
+
+    <div class="cta-spotlight">
+      <span class="ps">$</span>
+      <span>pip install mempalace</span>
+      <button class="copy" data-copy="pip install mempalace" aria-label="Copy install command">Copy</button>
+    </div>
+
+    <div class="cta-buttons">
+      <a href="{{ site.github_url }}" target="_blank" rel="noopener" class="btn btn-primary btn-lg">
+        Get MemPalace <span class="arrow">&rarr;</span>
+      </a>
+      <a href="{{ '/intro' | relative_url }}" class="btn btn-ghost btn-lg">Read the docs</a>
+    </div>
+  </div>
+</section>

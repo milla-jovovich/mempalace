@@ -1,0 +1,79 @@
+/* ==========================================================================
+   Mac-style terminal card — used in the hero, quick-start, and dual cards.
+   .terminal is the chrome (window with traffic-light dots and title bar).
+   .terminal-body is the <pre> code area inside.
+   .t-* classes are inline syntax tokens used by the bespoke "terminal" code.
+   ========================================================================== */
+
+.terminal {
+  background: #0a0a0c;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 40px 80px -30px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 0 80px -20px rgba(62, 203, 255, 0.12);
+  text-align: left;
+}
+
+/* Variant: terminal sized for the hero section */
+.terminal-hero {
+  max-width: 720px;
+  margin: 3.2rem auto 0;
+}
+
+.terminal-header {
+  background: #15151a;
+  padding: 0.7rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.term-dots { display: flex; gap: 0.42rem; }
+.term-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.term-dot.r { background: #ff5f56; }
+.term-dot.y { background: #ffbd2e; }
+.term-dot.g { background: #27c93f; }
+
+.terminal-title {
+  color: var(--text-mute);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  margin: 0 auto;
+  padding-right: 2.2rem;
+  letter-spacing: 0.02em;
+}
+
+.terminal-body {
+  margin: 0;
+  padding: 1.3rem 1.5rem;
+  background: #0a0a0c;
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  line-height: 1.85;
+  color: var(--text);
+  overflow-x: auto;
+  border: none;
+  border-radius: 0;
+}
+.terminal-body code { background: none; border: none; padding: 0; color: inherit; font-size: inherit; }
+
+/* ---------- Inline syntax tokens (used by hand-marked-up <span>s) ---------- */
+.t-prompt    { color: var(--accent-bright); user-select: none; margin-right: 0.55rem; }
+.t-cmd       { color: var(--text); }
+.t-comment   { color: var(--text-mute); font-style: italic; }
+.t-string    { color: #a8e6c0; }
+.t-flag      { color: #f0c674; }
+.t-result    { color: var(--success); font-style: italic; }
+
+@media (max-width: 600px) {
+  .terminal-body { font-size: 0.74rem; padding: 1rem 1.1rem; }
+  .terminal-title { display: none; }
+}
