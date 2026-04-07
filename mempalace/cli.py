@@ -191,7 +191,7 @@ def cmd_agent_setup(args):
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
     print("=" * 60)
-    print(f"  MemPalace — Agent Setup")
+    print("  MemPalace — Agent Setup")
     print(f"  Target: {target_path}")
     print(f"  Palace: {palace_path}")
     print("=" * 60)
