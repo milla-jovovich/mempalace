@@ -24,6 +24,7 @@ import json
 import logging
 import hashlib
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -91,12 +92,39 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
+_client = None
+
+
+def _get_client():
+    """Return a singleton ChromaDB PersistentClient."""
+    global _client
+    if _client is None:
+        _client = chromadb.PersistentClient(path=_config.palace_path)
+    return _client
+
+
+_meta_cache = {"data": None, "timestamp": 0, "ttl": 30}  # 30 second TTL
+
+
+def _get_cached_metadata():
+    """Return all record metadatas with a time-based cache to avoid repeated full scans."""
+    now = time.time()
+    if _meta_cache["data"] is not None and (now - _meta_cache["timestamp"]) < _meta_cache["ttl"]:
+        return _meta_cache["data"]
+    col = _get_collection()
+    if not col:
+        return None
+    all_meta = col.get(include=["metadatas"])["metadatas"]
+    _meta_cache["data"] = all_meta
+    _meta_cache["timestamp"] = now
+    return all_meta
+
+
 def _get_collection(create=False):
     """Return the ChromaDB collection, caching the client between calls."""
     global _client_cache, _collection_cache
     try:
-        if _client_cache is None:
-            _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+        client = _get_client()
         if create:
             _collection_cache = _client_cache.get_or_create_collection(_config.collection_name)
         elif _collection_cache is None:
@@ -124,12 +152,13 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-            rooms[r] = rooms.get(r, 0) + 1
+        all_meta = _get_cached_metadata()
+        if all_meta:
+            for m in all_meta:
+                w = m.get("wing", "unknown")
+                r = m.get("room", "unknown")
+                wings[w] = wings.get(w, 0) + 1
+                rooms[r] = rooms.get(r, 0) + 1
     except Exception:
         pass
     return {
@@ -181,10 +210,11 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            wings[w] = wings.get(w, 0) + 1
+        all_meta = _get_cached_metadata()
+        if all_meta:
+            for m in all_meta:
+                w = m.get("wing", "unknown")
+                wings[w] = wings.get(w, 0) + 1
     except Exception:
         pass
     return {"wings": wings}
@@ -196,10 +226,12 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
         if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
+            # Filtered query — cannot use the full metadata cache
+            all_meta = col.get(include=["metadatas"], where={"wing": wing})["metadatas"]
+        else:
+            # No filter — use the cached metadata
+            all_meta = _get_cached_metadata() or []
         for m in all_meta:
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
@@ -214,13 +246,14 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            if w not in taxonomy:
-                taxonomy[w] = {}
-            taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
+        all_meta = _get_cached_metadata()
+        if all_meta:
+            for m in all_meta:
+                w = m.get("wing", "unknown")
+                r = m.get("room", "unknown")
+                if w not in taxonomy:
+                    taxonomy[w] = {}
+                taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
     except Exception:
         pass
     return {"taxonomy": taxonomy}
@@ -347,6 +380,7 @@ def tool_add_drawer(
                 }
             ],
         )
+        _meta_cache["data"] = None  # Invalidate metadata cache
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
     except Exception as e:
@@ -369,6 +403,7 @@ def tool_delete_drawer(drawer_id: str):
 
     try:
         col.delete(ids=[drawer_id])
+        _meta_cache["data"] = None  # Invalidate metadata cache
         logger.info(f"Deleted drawer: {drawer_id}")
         return {"success": True, "drawer_id": drawer_id}
     except Exception as e:
@@ -453,6 +488,10 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     _wal_log("diary_write", {"agent_name": agent_name, "topic": topic, "entry_id": entry_id, "entry_preview": entry[:200]})
 
     try:
+        # TODO: Future versions should expand AAAK before embedding to improve
+        # semantic search quality. For now, store raw AAAK in metadata so it's
+        # preserved, and keep the document as-is for embedding (even though
+        # compressed AAAK degrades embedding quality).
         col.add(
             ids=[entry_id],
             documents=[entry],
@@ -466,9 +505,11 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
                     "agent": agent_name,
                     "filed_at": now.isoformat(),
                     "date": now.strftime("%Y-%m-%d"),
+                    "raw_aaak": entry,
                 }
             ],
         )
+        _meta_cache["data"] = None  # Invalidate metadata cache
         logger.info(f"Diary entry: {entry_id} → {wing}/diary/{topic}")
         return {
             "success": True,

@@ -17,6 +17,8 @@ from collections import defaultdict
 
 import chromadb
 
+from .palace import SKIP_DIRS, get_collection, file_already_mined
+
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
@@ -38,41 +40,6 @@ READABLE_EXTENSIONS = {
     ".csv",
     ".sql",
     ".toml",
-}
-
-SKIP_DIRS = {
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "venv",
-    "env",
-    "dist",
-    "build",
-    ".next",
-    "coverage",
-    ".mempalace",
-    ".ruff_cache",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".cache",
-    ".tox",
-    ".nox",
-    ".idea",
-    ".vscode",
-    ".ipynb_checkpoints",
-    ".eggs",
-    "htmlcov",
-    "target",
-}
-
-SKIP_FILENAMES = {
-    "mempalace.yaml",
-    "mempalace.yml",
-    "mempal.yaml",
-    "mempal.yml",
-    ".gitignore",
-    "package-lock.json",
 }
 
 CHUNK_SIZE = 800  # chars per drawer
@@ -392,41 +359,6 @@ def chunk_text(content: str, source_file: str) -> list:
 # =============================================================================
 # PALACE — ChromaDB operations
 # =============================================================================
-
-
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    # Restrict palace directory to owner only
-    try:
-        os.chmod(palace_path, 0o700)
-    except (OSError, NotImplementedError):
-        pass
-    client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
-
-
-def file_already_mined(collection, source_file: str) -> bool:
-    """Fast check: has this file been filed before and is unchanged?
-
-    Compares the stored mtime in drawer metadata against the file's current
-    mtime.  Returns False (needs re-mining) when the file has been modified
-    since it was last mined, or when no mtime was stored.
-    """
-    try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
-        if not results.get("ids"):
-            return False
-        stored_meta = results["metadatas"][0] if results.get("metadatas") else {}
-        stored_mtime = stored_meta.get("source_mtime")
-        if stored_mtime is None:
-            return False
-        current_mtime = os.path.getmtime(source_file)
-        return float(stored_mtime) == current_mtime
-    except Exception:
-        return False
 
 
 def add_drawer(

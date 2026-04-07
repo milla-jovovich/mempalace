@@ -18,6 +18,7 @@ from collections import defaultdict
 import chromadb
 
 from .normalize import normalize
+from .palace import SKIP_DIRS, get_collection, file_already_mined
 
 
 # File types that might contain conversations
@@ -26,21 +27,6 @@ CONVO_EXTENSIONS = {
     ".md",
     ".json",
     ".jsonl",
-}
-
-SKIP_DIRS = {
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "venv",
-    "env",
-    "dist",
-    "build",
-    ".next",
-    ".mempalace",
-    "tool-results",
-    "memory",
 }
 
 MIN_CHUNK_SIZE = 30
@@ -210,23 +196,6 @@ def detect_convo_room(content: str) -> str:
 # =============================================================================
 # PALACE OPERATIONS
 # =============================================================================
-
-
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
-
-
-def file_already_mined(collection, source_file: str) -> bool:
-    try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
-        return len(results.get("ids", [])) > 0
-    except Exception:
-        return False
 
 
 # =============================================================================
