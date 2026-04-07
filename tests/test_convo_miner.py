@@ -15,12 +15,12 @@ def test_convo_mining():
     palace_path = os.path.join(tmpdir, "palace")
     mine_convos(tmpdir, palace_path, wing="test_convos")
 
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_collection("mempalace_drawers")
-    assert col.count() >= 2
+    with chromadb.PersistentClient(path=palace_path) as client:
+        col = client.get_collection("mempalace_drawers")
+        assert col.count() >= 2
 
-    # Verify search works
-    results = col.query(query_texts=["memory persistence"], n_results=1)
-    assert len(results["documents"][0]) > 0
+        # Verify search works
+        results = col.query(query_texts=["memory persistence"], n_results=1)
+        assert len(results["documents"][0]) > 0
 
     shutil.rmtree(tmpdir)

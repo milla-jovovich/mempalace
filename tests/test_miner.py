@@ -29,8 +29,8 @@ def test_project_mining():
     mine(tmpdir, palace_path)
 
     # Verify
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_collection("mempalace_drawers")
-    assert col.count() > 0
+    with chromadb.PersistentClient(path=palace_path) as client:
+        col = client.get_collection("mempalace_drawers")
+        assert col.count() > 0
 
     shutil.rmtree(tmpdir)

@@ -209,9 +209,7 @@ def detect_convo_room(content: str) -> str:
 # =============================================================================
 
 
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    client = chromadb.PersistentClient(path=palace_path)
+def get_collection(client):
     try:
         return client.get_collection("mempalace_drawers")
     except Exception:
@@ -284,7 +282,13 @@ def mine_convos(
         print("  DRY RUN — nothing will be filed")
     print(f"{'─' * 55}\n")
 
-    collection = get_collection(palace_path) if not dry_run else None
+    client = None
+    if dry_run:
+        collection = None
+    else:
+        os.makedirs(palace_path, exist_ok=True)
+        client = chromadb.PersistentClient(path=palace_path)
+        collection = get_collection(client)
 
     total_drawers = 0
     files_skipped = 0
@@ -379,6 +383,9 @@ def mine_convos(
         print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
 
     print(f"\n{'=' * 55}")
+    if client is not None:
+        client.close()
+
     print("  Done.")
     print(f"  Files processed: {len(files) - files_skipped}")
     print(f"  Files skipped (already filed): {files_skipped}")

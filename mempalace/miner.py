@@ -180,9 +180,7 @@ def chunk_text(content: str, source_file: str) -> list:
 # =============================================================================
 
 
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    client = chromadb.PersistentClient(path=palace_path)
+def get_collection(client):
     try:
         return client.get_collection("mempalace_drawers")
     except Exception:
@@ -343,10 +341,13 @@ def mine(
         print("  DRY RUN — nothing will be filed")
     print(f"{'─' * 55}\n")
 
-    if not dry_run:
-        collection = get_collection(palace_path)
-    else:
+    client = None
+    if dry_run:
         collection = None
+    else:
+        os.makedirs(palace_path, exist_ok=True)
+        client = chromadb.PersistentClient(path=palace_path)
+        collection = get_collection(client)
 
     total_drawers = 0
     files_skipped = 0
@@ -372,6 +373,9 @@ def mine(
                 print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
 
     print(f"\n{'=' * 55}")
+    if client is not None:
+        client.close()
+
     print("  Done.")
     print(f"  Files processed: {len(files) - files_skipped}")
     print(f"  Files skipped (already filed): {files_skipped}")
@@ -393,14 +397,13 @@ def status(palace_path: str):
     try:
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
+        r = col.get(limit=10000, include=["metadatas"])
+        metas = r["metadatas"]
+        client.close()
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
-
-    # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
-    metas = r["metadatas"]
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:
