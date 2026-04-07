@@ -305,8 +305,7 @@ class KnowledgeGraph:
             """)
 
         cols = [d[0] for d in cur.description]
-        conn.close()
-        return [
+        results = [
             {
                 "subject": row["sub_name"],
                 "predicate": row["predicate"],
@@ -317,6 +316,8 @@ class KnowledgeGraph:
             }
             for row in (dict(zip(cols, raw)) for raw in cur.fetchall())
         ]
+        conn.close()
+        return results
 
     # ── Stats ─────────────────────────────────────────────────────────────
 
