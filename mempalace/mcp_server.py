@@ -743,21 +743,46 @@ def handle_request(request):
     }
 
 
+def _read_message():
+    """Read a JSON-RPC message using Content-Length framing (MCP spec)."""
+    # Read headers until empty line
+    content_length = None
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            return None  # EOF
+        line = line.strip()
+        if not line:
+            # Empty line = end of headers
+            if content_length is not None:
+                break
+            continue
+        if line.lower().startswith("content-length:"):
+            content_length = int(line.split(":", 1)[1].strip())
+    # Read exactly content_length bytes
+    body = sys.stdin.read(content_length)
+    return json.loads(body)
+
+
+def _write_message(response):
+    """Write a JSON-RPC response using Content-Length framing (MCP spec)."""
+    body = json.dumps(response)
+    header = f"Content-Length: {len(body)}\r\n\r\n"
+    sys.stdout.write(header)
+    sys.stdout.write(body)
+    sys.stdout.flush()
+
+
 def main():
     logger.info("MemPalace MCP Server starting...")
     while True:
         try:
-            line = sys.stdin.readline()
-            if not line:
+            request = _read_message()
+            if request is None:
                 break
-            line = line.strip()
-            if not line:
-                continue
-            request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
+                _write_message(response)
         except KeyboardInterrupt:
             break
         except Exception as e:
