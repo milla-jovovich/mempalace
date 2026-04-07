@@ -107,3 +107,127 @@ def test_from_config_and_save(tmp_dir):
     loaded = Dialect.from_config(config_path)
     assert loaded.encode_entity("Alice") == "ALC"
     assert loaded.encode_entity("Bob") == "BOB"
+
+
+def test_encode_zettel_format():
+    d = Dialect(entities={"Alice": "ALC", "Bob": "BOB"})
+    zettel = {
+        "id": "file_001-z003",
+        "people": ["Alice", "Bob"],
+        "topics": ["graphql", "backend"],
+        "emotional_weight": 0.8,
+        "emotional_tone": ["joy", "trust"],
+    }
+    result = d.encode_zettel(zettel)
+    # Should be pipe-separated fields
+    assert "|" in result
+    parts = result.split("|")
+    # First field: ZID:ENTITIES (last segment of id : entity codes)
+    assert parts[0].startswith("z003:")
+    # Entity codes should appear in the first field
+    assert "ALC" in parts[0] and "BOB" in parts[0]
+    # Topics joined with underscore
+    assert "graphql_backend" in result
+    # Weight should appear as a field
+    assert "0.8" in result
+    # Emotions should be encoded
+    assert "joy" in result
+
+
+def test_encode_zettel_pipe_count():
+    d = Dialect()
+    zettel = {
+        "id": "file_001-z001",
+        "people": [],
+        "topics": ["testing"],
+        "emotional_weight": 0.5,
+        "emotional_tone": [],
+    }
+    result = d.encode_zettel(zettel)
+    # Minimum fields: ZID:ENTITIES | topic | weight  → at least 2 pipes
+    assert result.count("|") >= 2
+
+
+def test_encode_file_header_and_zettels():
+    d = Dialect(entities={"Alice": "ALC"})
+    zettel_file = {
+        "source_file": "001-alice-chat.txt",
+        "zettels": [
+            {
+                "id": "001-z001",
+                "date_context": "2026-01-01",
+                "people": ["Alice"],
+                "topics": ["memory"],
+                "emotional_weight": 0.7,
+                "emotional_tone": ["hope"],
+            },
+            {
+                "id": "001-z002",
+                "date_context": "2026-01-01",
+                "people": ["Alice"],
+                "topics": ["code"],
+                "emotional_weight": 0.6,
+                "emotional_tone": [],
+            },
+        ],
+        "tunnels": [],
+    }
+    result = d.encode_file(zettel_file)
+    lines = result.strip().splitlines()
+    # First line is the header: file_num|primary_entity|date|title
+    header = lines[0]
+    assert "|" in header
+    header_parts = header.split("|")
+    assert header_parts[0] == "001"        # file_num from "001-alice-chat.txt"
+    assert "ALC" in header_parts[1]        # primary entity code
+    assert header_parts[2] == "2026-01-01" # date from first zettel
+    # Remaining lines are zettel encodings
+    assert len(lines) >= 3  # header + 2 zettel lines
+    # Each zettel line should be pipe-separated
+    for line in lines[1:]:
+        assert "|" in line
+
+
+def test_encode_file_with_tunnels():
+    d = Dialect()
+    zettel_file = {
+        "source_file": "002-test.txt",
+        "zettels": [
+            {
+                "id": "002-z001",
+                "date_context": "2026-02-01",
+                "people": [],
+                "topics": ["test"],
+                "emotional_weight": 0.5,
+                "emotional_tone": [],
+            }
+        ],
+        "tunnels": [
+            {"from": "002-z001", "to": "002-z002", "label": "connects:ideas"}
+        ],
+    }
+    result = d.encode_file(zettel_file)
+    # Tunnel lines start with "T:"
+    assert "T:" in result
+    assert "z001<->z002" in result
+
+
+def test_count_tokens_basic():
+    d = Dialect()
+    # A 10-word sentence: 10 * 1.3 = 13 tokens
+    text = "one two three four five six seven eight nine ten"
+    result = d.count_tokens(text)
+    assert result == 13
+
+
+def test_count_tokens_static_method():
+    # count_tokens is a @staticmethod — callable without instance
+    text = "hello world foo bar"  # 4 words → int(4 * 1.3) = 5
+    result = Dialect.count_tokens(text)
+    assert result == 5
+
+
+def test_count_tokens_minimum_one():
+    # Empty string edge case — minimum is 1
+    result = Dialect.count_tokens("")
+    assert result == 1
