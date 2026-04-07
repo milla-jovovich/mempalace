@@ -111,9 +111,14 @@ class TestCompressionStats:
         stats = d.compression_stats(original, compressed)
         assert stats["size_ratio"] > 1
         assert stats["original_chars"] > stats["summary_chars"]
+        assert stats["original_tokens_est"] > stats["summary_tokens_est"]
 
     def test_count_tokens(self):
+        # count_tokens uses a word-based heuristic (~1.3 tokens per word).
+        # "hello world" is 2 words -> max(1, int(2 * 1.3)) == 2.
         assert Dialect.count_tokens("hello world") == 2
+        assert Dialect.count_tokens("") == 1
+        assert Dialect.count_tokens("one") == 1
 
     def test_compression_stats_keys(self):
         """Verify compression_stats() returns the expected key set."""
