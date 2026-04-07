@@ -688,6 +688,43 @@ TOOLS = {
 }
 
 
+def _validate_tool_args(tool_name: str, tool_args: dict, req_id) -> dict:
+    """
+    Validate tool arguments against the tool's input_schema.
+    Returns a JSON-RPC error response dict if invalid, or None if valid.
+    """
+    schema = TOOLS[tool_name]["input_schema"]
+    required = schema.get("required", [])
+    properties = schema.get("properties", {})
+
+    for param in required:
+        if param not in tool_args:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32602, "message": f"Missing required parameter: '{param}'"},
+            }
+
+    _type_map = {"string": str, "integer": int, "number": (int, float), "boolean": bool}
+    for param, value in tool_args.items():
+        if param not in properties:
+            continue
+        expected = properties[param].get("type")
+        if expected in _type_map and not isinstance(value, _type_map[expected]):
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32602,
+                    "message": (
+                        f"Parameter '{param}' must be {expected}, "
+                        f"got {type(value).__name__}"
+                    ),
+                },
+            }
+    return None
+
+
 def handle_request(request):
     method = request.get("method", "")
     params = request.get("params", {})
@@ -725,6 +762,9 @@ def handle_request(request):
                 "id": req_id,
                 "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
             }
+        validation_error = _validate_tool_args(tool_name, tool_args, req_id)
+        if validation_error:
+            return validation_error
         try:
             result = TOOLS[tool_name]["handler"](**tool_args)
             return {
