@@ -61,6 +61,17 @@ SKIP_DIRS = {
     ".idea",
     ".vscode",
     ".ipynb_checkpoints",
+    # Obsidian
+    ".obsidian",
+    ".smart-connections",
+    ".smart-env",
+    ".trash",
+    # Build/cache
+    ".vite",
+    ".parcel-cache",
+    ".turbo",
+    # PHP dependencies
+    "vendor",
     ".eggs",
     "htmlcov",
     "target",
