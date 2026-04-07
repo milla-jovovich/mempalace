@@ -121,11 +121,48 @@ mempalace/
 
 ---
 
-## 4. Verification
+## 4. Test Suite
+
+**Stack**: pytest 8 + pytest-cov + pytest-xdist + pytest-mock
+
+| Test File | Module | Tests | Coverage |
+|---|---|---|---|
+| `test_palace_db.py` | `palace_db.py` | 12 | 97% |
+| `test_config.py` | `config.py` | 13 | 96% |
+| `test_knowledge_graph.py` | `knowledge_graph.py` | 16 | 95% |
+| `test_miner.py` | `miner.py` | 17 | 94% |
+| `test_palace_graph.py` | `palace_graph.py` | 12 | 92% |
+| `test_convo_miner.py` | `convo_miner.py` | 16 | 86% |
+| `test_normalize.py` | `normalize.py` | 22 | 86% |
+| `test_searcher.py` | `searcher.py` | 9 | 85% |
+| `test_general_extractor.py` | `general_extractor.py` | 22 | 81% |
+| `test_layers.py` | `layers.py` | 17 | 70% |
+| `test_entity_registry.py` | `entity_registry.py` | 14 | 68% |
+| `test_split_mega_files.py` | `split_mega_files.py` | 12 | 57% |
+| `test_room_detector.py` | `room_detector_local.py` | 8 | 55% |
+| `test_cli.py` | `cli.py` | 8 | 44% |
+| `test_dialect.py` | `dialect.py` | 12 | 31% |
+| `conftest.py` | shared fixtures | — | — |
+
+**Total: 275 tests, 58% line coverage, 0 failures.**
+
+Shared `conftest.py` provides: `tmp_path` palaces, pre-loaded ChromaDB collections, sample projects with `mempalace.yaml`, conversation fixtures, identity files. All tests use `tmp_path` (no home dir pollution), `monkeypatch` for env vars, `capsys` for CLI output.
+
+```bash
+pytest                  # all tests + coverage
+pytest -n auto          # parallel
+pytest -m integration   # ChromaDB-dependent only
+pytest -m "not integration"  # fast unit tests only
+```
+
+---
+
+## 5. Verification
 
 | Check | Result |
 |---|---|
-| `pytest tests/` | 9/9 passed |
+| `pytest tests/` | 275/275 passed |
+| Coverage | 58% (excluding `mcp_server.py`, `onboarding.py`) |
 | All 18 module imports | OK |
 | `pip install -e .` | mempalace-3.0.0 |
 | Linter | 0 errors |
@@ -134,13 +171,14 @@ mempalace/
 
 ---
 
-## 5. Unresolved / Future
+## 6. Unresolved / Future
 
 - Merge `mempalace_traverse` + `mempalace_find_tunnels` into one graph tool (14→13)
 - Extract `PALACE_PROTOCOL` as a separate MCP resource
 - `palace_db.py` metadata caching with TTL
 - Switch to official MCP Python SDK (separate RFC)
-- Test coverage expansion (separate RFC)
+- `mcp_server.py` integration tests (needs MCP test harness)
+- `onboarding.py` tests (interactive CLI — needs stdin mocking)
 - Replace `entity_detector` with LLM-based extraction (if entity detection is needed)
 
 ---
