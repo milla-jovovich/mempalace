@@ -88,6 +88,7 @@ def cmd_mine(args):
             agent=args.agent,
             limit=args.limit,
             dry_run=args.dry_run,
+            respect_gitignore=not args.no_gitignore,
         )
 
 
@@ -302,6 +303,11 @@ def main():
         choices=["exchange", "general"],
         default="exchange",
         help="Extraction strategy for convos mode: 'exchange' (default) or 'general' (5 memory types)",
+    )
+    p_mine.add_argument(
+        "--no-gitignore",
+        action="store_true",
+        help="Don't respect .gitignore files when scanning (index everything)",
     )
 
     # search

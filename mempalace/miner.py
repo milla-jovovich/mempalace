@@ -15,6 +15,7 @@ from datetime import datetime
 from collections import defaultdict
 
 import chromadb
+import pathspec
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -51,6 +52,21 @@ SKIP_DIRS = {
     ".next",
     "coverage",
     ".mempalace",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".cache",
+    ".uv",
+    ".vscode",
+    ".idea",
+    ".ipynb_checkpoints",
+    ".eggs",
+    ".local",
+    "local",
+    "scratch",
+    "target",
+    "logs",
+    "htmlcov",
 }
 
 CHUNK_SIZE = 800  # chars per drawer
@@ -280,30 +296,95 @@ def process_file(
 
 
 # =============================================================================
-# SCAN PROJECT
+# GITIGNORE SUPPORT
 # =============================================================================
 
 
-def scan_project(project_dir: str) -> list:
-    """Return list of all readable file paths."""
+def _load_gitignore(dir_path: Path):
+    """Read .gitignore from dir_path, return (dir_path, PathSpec) or None."""
+    gitignore_path = dir_path / ".gitignore"
+    if not gitignore_path.is_file():
+        return None
+    try:
+        lines = gitignore_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        spec = pathspec.PathSpec.from_lines("gitignore", lines)
+        return (dir_path, spec)
+    except Exception:
+        return None
+
+
+def _is_gitignored(path: Path, gitignore_stack: list, is_dir: bool = False) -> bool:
+    """Check if path matches any active .gitignore spec in the stack."""
+    for gitignore_dir, spec in gitignore_stack:
+        try:
+            relative = path.relative_to(gitignore_dir)
+        except ValueError:
+            continue
+        match_path = str(relative) + "/" if is_dir else str(relative)
+        if spec.match_file(match_path):
+            return True
+    return False
+
+
+# =============================================================================
+# SCAN PROJECT
+# =============================================================================
+
+SKIP_FILENAMES = {
+    "mempalace.yaml",
+    "mempalace.yml",
+    "mempal.yaml",
+    "mempal.yml",
+    ".gitignore",
+    "package-lock.json",
+}
+
+
+def scan_project(project_dir: str, respect_gitignore: bool = True) -> list:
+    """Return list of all readable file paths, respecting .gitignore when present."""
     project_path = Path(project_dir).expanduser().resolve()
     files = []
+    gitignore_stack = []
+
+    if respect_gitignore:
+        entry = _load_gitignore(project_path)
+        if entry:
+            gitignore_stack.append(entry)
+
     for root, dirs, filenames in os.walk(project_path):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        root_path = Path(root)
+
+        # Prune gitignore stack entries that are no longer ancestors
+        if respect_gitignore:
+            gitignore_stack[:] = [
+                (d, s) for d, s in gitignore_stack
+                if root_path == d or d in root_path.parents
+            ]
+            # Load .gitignore in current directory
+            if root_path != project_path:
+                entry = _load_gitignore(root_path)
+                if entry:
+                    gitignore_stack.append(entry)
+
+        # Prune directories: SKIP_DIRS first, then gitignore
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.endswith(".egg-info")]
+        if respect_gitignore and gitignore_stack:
+            dirs[:] = [
+                d for d in dirs
+                if not _is_gitignored(root_path / d, gitignore_stack, is_dir=True)
+            ]
+
         for filename in filenames:
-            filepath = Path(root) / filename
-            if filepath.suffix.lower() in READABLE_EXTENSIONS:
-                # Skip config files
-                if filename in (
-                    "mempalace.yaml",
-                    "mempalace.yml",
-                    "mempal.yaml",
-                    "mempal.yml",
-                    ".gitignore",
-                    "package-lock.json",
-                ):
+            if filename in SKIP_FILENAMES:
+                continue
+            filepath = root_path / filename
+            if filepath.suffix.lower() not in READABLE_EXTENSIONS:
+                continue
+            if respect_gitignore and gitignore_stack:
+                if _is_gitignored(filepath, gitignore_stack, is_dir=False):
                     continue
-                files.append(filepath)
+            files.append(filepath)
+
     return files
 
 
@@ -319,6 +400,7 @@ def mine(
     agent: str = "mempalace",
     limit: int = 0,
     dry_run: bool = False,
+    respect_gitignore: bool = True,
 ):
     """Mine a project directory into the palace."""
 
@@ -328,7 +410,7 @@ def mine(
     wing = wing_override or config["wing"]
     rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
 
-    files = scan_project(project_dir)
+    files = scan_project(project_dir, respect_gitignore=respect_gitignore)
     if limit > 0:
         files = files[:limit]
 
@@ -341,6 +423,8 @@ def mine(
     print(f"  Palace:  {palace_path}")
     if dry_run:
         print("  DRY RUN — nothing will be filed")
+    if not respect_gitignore:
+        print("  .gitignore: DISABLED")
     print(f"{'─' * 55}\n")
 
     if not dry_run:
