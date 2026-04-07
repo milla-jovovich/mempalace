@@ -6,6 +6,7 @@ The Python package that powers MemPalace. All modules, all logic.
 
 | Module | What it does |
 |--------|-------------|
+| `chromadb_utils.py` | Safe batched reads from ChromaDB — prevents silent truncation on large palaces |
 | `cli.py` | CLI entry point — routes to mine, search, init, compress, wake-up |
 | `config.py` | Configuration loading — `~/.mempalace/config.json`, env vars, defaults |
 | `normalize.py` | Converts 5 chat formats (Claude Code JSONL, Claude.ai JSON, ChatGPT JSON, Slack JSON, plain text) to standard transcript format |
