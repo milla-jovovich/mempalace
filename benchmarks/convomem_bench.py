@@ -331,7 +331,11 @@ if __name__ == "__main__":
         default="raw",
         help="Retrieval mode",
     )
-    parser.add_argument("--cache-dir", default="/tmp/convomem_cache", help="Cache directory")
+    parser.add_argument(
+        "--cache-dir",
+        default=str(Path(tempfile.gettempdir()) / "convomem_cache"),
+        help="Cache directory",
+    )
     parser.add_argument("--out", default=None, help="Output JSON file")
     args = parser.parse_args()
 
