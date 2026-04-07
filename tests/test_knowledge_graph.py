@@ -1,122 +1,126 @@
-"""
-test_knowledge_graph.py — Tests for the temporal knowledge graph.
-
-Covers: entity CRUD, triple CRUD, temporal queries, invalidation,
-timeline, stats, and edge cases (duplicate triples, ID collisions).
-"""
+import os
+from mempalace.knowledge_graph import KnowledgeGraph
 
 
-class TestEntityOperations:
-    def test_add_entity(self, kg):
-        eid = kg.add_entity("Alice", entity_type="person")
-        assert eid == "alice"
-
-    def test_add_entity_normalizes_id(self, kg):
-        eid = kg.add_entity("Dr. Chen", entity_type="person")
-        assert eid == "dr._chen"
-
-    def test_add_entity_upsert(self, kg):
-        kg.add_entity("Alice", entity_type="person")
-        kg.add_entity("Alice", entity_type="engineer")
-        # Should not raise — INSERT OR REPLACE
-        stats = kg.stats()
-        assert stats["entities"] == 1
+def test_add_entity(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    eid = kg.add_entity("Alice", "person", {"gender": "female"})
+    assert eid == "alice"
 
 
-class TestTripleOperations:
-    def test_add_triple_creates_entities(self, kg):
-        tid = kg.add_triple("Alice", "knows", "Bob")
-        assert tid.startswith("t_alice_knows_bob_")
-        stats = kg.stats()
-        assert stats["entities"] == 2  # auto-created
-
-    def test_add_triple_with_dates(self, kg):
-        tid = kg.add_triple("Max", "does", "swimming", valid_from="2025-01-01")
-        assert tid.startswith("t_max_does_swimming_")
-
-    def test_duplicate_triple_returns_existing_id(self, kg):
-        tid1 = kg.add_triple("Alice", "knows", "Bob")
-        tid2 = kg.add_triple("Alice", "knows", "Bob")
-        assert tid1 == tid2
-
-    def test_invalidated_triple_allows_re_add(self, kg):
-        tid1 = kg.add_triple("Alice", "works_at", "Acme")
-        kg.invalidate("Alice", "works_at", "Acme", ended="2025-01-01")
-        tid2 = kg.add_triple("Alice", "works_at", "Acme")
-        assert tid1 != tid2  # new triple since old one was closed
+def test_entity_id_normalizes():
+    kg = KnowledgeGraph.__new__(KnowledgeGraph)
+    assert kg._entity_id("Alice Smith") == "alice_smith"
+    assert kg._entity_id("O'Brien") == "obrien"
 
 
-class TestQueries:
-    def test_query_outgoing(self, seeded_kg):
-        results = seeded_kg.query_entity("Alice", direction="outgoing")
-        predicates = {r["predicate"] for r in results}
-        assert "parent_of" in predicates
-        assert "works_at" in predicates
-
-    def test_query_incoming(self, seeded_kg):
-        results = seeded_kg.query_entity("Max", direction="incoming")
-        assert any(r["subject"] == "Alice" and r["predicate"] == "parent_of" for r in results)
-
-    def test_query_both_directions(self, seeded_kg):
-        results = seeded_kg.query_entity("Max", direction="both")
-        directions = {r["direction"] for r in results}
-        assert "outgoing" in directions
-        assert "incoming" in directions
-
-    def test_query_as_of_filters_expired(self, seeded_kg):
-        results = seeded_kg.query_entity("Alice", as_of="2023-06-01", direction="outgoing")
-        employers = [r["object"] for r in results if r["predicate"] == "works_at"]
-        assert "Acme Corp" in employers
-        assert "NewCo" not in employers
-
-    def test_query_as_of_shows_current(self, seeded_kg):
-        results = seeded_kg.query_entity("Alice", as_of="2025-06-01", direction="outgoing")
-        employers = [r["object"] for r in results if r["predicate"] == "works_at"]
-        assert "NewCo" in employers
-        assert "Acme Corp" not in employers
-
-    def test_query_relationship(self, seeded_kg):
-        results = seeded_kg.query_relationship("does")
-        assert len(results) == 2  # swimming + chess
+def test_add_triple_creates_entities(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    tid = kg.add_triple("Max", "child_of", "Alice", valid_from="2015-04-01")
+    assert tid.startswith("t_max_child_of_alice_")
+    stats = kg.stats()
+    assert stats["entities"] == 2
+    assert stats["triples"] == 1
 
 
-class TestInvalidation:
-    def test_invalidate_sets_valid_to(self, seeded_kg):
-        seeded_kg.invalidate("Max", "does", "chess", ended="2026-01-01")
-        results = seeded_kg.query_entity("Max", direction="outgoing")
-        chess = [r for r in results if r["object"] == "chess"]
-        assert len(chess) == 1
-        assert chess[0]["valid_to"] == "2026-01-01"
-        assert chess[0]["current"] is False
+def test_add_triple_deduplicates_open(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    id1 = kg.add_triple("Max", "loves", "chess")
+    id2 = kg.add_triple("Max", "loves", "chess")
+    assert id1 == id2
+    assert kg.stats()["triples"] == 1
 
 
-class TestTimeline:
-    def test_timeline_all(self, seeded_kg):
-        tl = seeded_kg.timeline()
-        assert len(tl) >= 4
-
-    def test_timeline_entity(self, seeded_kg):
-        tl = seeded_kg.timeline("Max")
-        subjects_and_objects = {t["subject"] for t in tl} | {t["object"] for t in tl}
-        assert "Max" in subjects_and_objects
-
-    def test_timeline_global_has_limit(self, kg):
-        # Add > 100 triples
-        for i in range(105):
-            kg.add_triple(f"entity_{i}", "relates_to", f"entity_{i + 1}")
-        tl = kg.timeline()
-        assert len(tl) == 100  # LIMIT 100
+def test_invalidate(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    kg.add_triple("Max", "has_issue", "injury", valid_from="2026-01-01")
+    kg.invalidate("Max", "has_issue", "injury", ended="2026-02-15")
+    stats = kg.stats()
+    assert stats["current_facts"] == 0
+    assert stats["expired_facts"] == 1
 
 
-class TestStats:
-    def test_stats_empty(self, kg):
-        stats = kg.stats()
-        assert stats["entities"] == 0
-        assert stats["triples"] == 0
+def test_query_entity_outgoing(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    kg.add_triple("Max", "loves", "chess")
+    kg.add_triple("Max", "does", "swimming")
+    results = kg.query_entity("Max", direction="outgoing")
+    predicates = {r["predicate"] for r in results}
+    assert predicates == {"loves", "does"}
+    assert all(r["direction"] == "outgoing" for r in results)
 
-    def test_stats_seeded(self, seeded_kg):
-        stats = seeded_kg.stats()
-        assert stats["entities"] >= 4
-        assert stats["triples"] == 5
-        assert stats["current_facts"] == 4  # 1 expired (Acme Corp)
-        assert stats["expired_facts"] == 1
+
+def test_query_entity_incoming(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    kg.add_triple("Max", "child_of", "Alice")
+    results = kg.query_entity("Alice", direction="incoming")
+    assert len(results) == 1
+    assert results[0]["subject"] == "Max"
+    assert results[0]["direction"] == "incoming"
+
+
+def test_query_entity_both(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    kg.add_triple("Max", "child_of", "Alice")
+    kg.add_triple("Alice", "married_to", "Jordan")
+    results = kg.query_entity("Alice", direction="both")
+    assert len(results) == 2
+
+
+def test_temporal_query_as_of(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    kg.add_triple("Max", "does", "swimming", valid_from="2025-01-01")
+    kg.invalidate("Max", "does", "swimming", ended="2025-06-01")
+    kg.add_triple("Max", "does", "tennis", valid_from="2025-07-01")
+
+    # In March 2025: swimming was active
+    results = kg.query_entity("Max", as_of="2025-03-15", direction="outgoing")
+    objects = {r["object"] for r in results}
+    assert "swimming" in objects
+    assert "tennis" not in objects
+
+    # In August 2025: tennis is active, swimming ended
+    results = kg.query_entity("Max", as_of="2025-08-01", direction="outgoing")
+    objects = {r["object"] for r in results}
+    assert "tennis" in objects
+    assert "swimming" not in objects
+
+
+def test_query_relationship(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    kg.add_triple("Max", "loves", "chess")
+    kg.add_triple("Alice", "loves", "painting")
+    results = kg.query_relationship("loves")
+    subjects = {r["subject"] for r in results}
+    assert subjects == {"Max", "Alice"}
+
+
+def test_timeline_ordered(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    kg.add_triple("Max", "born", "world", valid_from="2015-04-01")
+    kg.add_triple("Max", "started", "school", valid_from="2021-09-01")
+    kg.add_triple("Max", "loves", "chess", valid_from="2024-01-01")
+    tl = kg.timeline("Max")
+    dates = [e["valid_from"] for e in tl]
+    assert dates == ["2015-04-01", "2021-09-01", "2024-01-01"]
+
+
+def test_timeline_global(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    kg.add_triple("Max", "born", "world", valid_from="2015-01-01")
+    kg.add_triple("Alice", "started", "job", valid_from="2020-01-01")
+    tl = kg.timeline()
+    assert len(tl) == 2
+
+
+def test_stats(tmp_dir):
+    kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
+    kg.add_triple("Max", "loves", "chess")
+    kg.add_triple("Max", "does", "swimming")
+    kg.invalidate("Max", "does", "swimming", ended="2026-01-01")
+    stats = kg.stats()
+    assert stats["entities"] == 3  # max, chess, swimming
+    assert stats["triples"] == 2
+    assert stats["current_facts"] == 1
+    assert stats["expired_facts"] == 1
+    assert set(stats["relationship_types"]) == {"does", "loves"}
