@@ -37,6 +37,8 @@ READABLE_EXTENSIONS = {
     ".csv",
     ".sql",
     ".toml",
+    ".php",
+    ".twig",
 }
 
 SKIP_DIRS = {
