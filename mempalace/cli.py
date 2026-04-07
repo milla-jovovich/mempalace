@@ -132,7 +132,23 @@ def _detect_mine_mode(target_dir: str) -> str:
     convo_files = 0
 
     for root, dirs, files in os.walk(target):
-        dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", ".venv", "venv", "env", "dist", "build", ".next", ".mempalace"}]
+        dirs[:] = [
+            d
+            for d in dirs
+            if d
+            not in {
+                ".git",
+                "node_modules",
+                "__pycache__",
+                ".venv",
+                "venv",
+                "env",
+                "dist",
+                "build",
+                ".next",
+                ".mempalace",
+            }
+        ]
         for filename in files:
             filepath = _Path(root) / filename
             ext = filepath.suffix.lower()
