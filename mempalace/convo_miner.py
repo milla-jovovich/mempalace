@@ -50,7 +50,7 @@ MIN_CHUNK_SIZE = CONVO_MIN_CHUNK_SIZE
 # =============================================================================
 
 
-def chunk_exchanges(content: str) -> list:
+def chunk_exchanges(content: str) -> list[dict]:
     """
     Chunk by exchange pair: one > turn + AI response = one unit.
     Falls back to paragraph chunking if no > markers.
@@ -64,7 +64,7 @@ def chunk_exchanges(content: str) -> list:
         return _chunk_by_paragraph(content)
 
 
-def _chunk_by_exchange(lines: list) -> list:
+def _chunk_by_exchange(lines: list) -> list[dict]:
     """One user turn (>) + the AI response that follows = one chunk."""
     chunks = []
     i = 0
@@ -100,7 +100,7 @@ def _chunk_by_exchange(lines: list) -> list:
     return chunks
 
 
-def _chunk_by_paragraph(content: str) -> list:
+def _chunk_by_paragraph(content: str) -> list[dict]:
     """Fallback: chunk by paragraph breaks."""
     chunks = []
     paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
@@ -210,7 +210,7 @@ def detect_convo_room(content: str) -> str:
 # =============================================================================
 
 
-def get_collection(palace_path: str):
+def get_collection(palace_path: str) -> chromadb.Collection:
     os.makedirs(palace_path, exist_ok=True)
     client = chromadb.PersistentClient(path=palace_path)
     try:
@@ -232,7 +232,7 @@ def file_already_mined(collection, source_file: str) -> bool:
 # =============================================================================
 
 
-def scan_convos(convo_dir: str) -> list:
+def scan_convos(convo_dir: str) -> list[Path]:
     """Find all potential conversation files."""
     convo_path = Path(convo_dir).expanduser().resolve()
     files = []
@@ -258,7 +258,7 @@ def mine_convos(
     limit: int = 0,
     dry_run: bool = False,
     extract_mode: str = "exchange",
-):
+) -> None:
     """Mine a directory of conversation files into the palace.
 
     extract_mode:

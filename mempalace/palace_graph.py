@@ -31,7 +31,7 @@ def _get_collection(config=None):
         return None
 
 
-def build_graph(col=None, config=None):
+def build_graph(col=None, config=None) -> tuple[dict, list[dict]]:
     """
     Build the palace graph from ChromaDB metadata.
 
@@ -97,7 +97,7 @@ def build_graph(col=None, config=None):
     return nodes, edges
 
 
-def traverse(start_room: str, col=None, config=None, max_hops: int = DEFAULT_MAX_HOPS):
+def traverse(start_room: str, col=None, config=None, max_hops: int = DEFAULT_MAX_HOPS) -> list[dict] | dict:
     """
     Walk the graph from a starting room. Find connected rooms
     through shared wings.
@@ -159,7 +159,7 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = DEFAULT_MAX
     return results[:GRAPH_MAX_RESULTS]
 
 
-def find_tunnels(wing_a: str = None, wing_b: str = None, col=None, config=None):
+def find_tunnels(wing_a: str = None, wing_b: str = None, col=None, config=None) -> list[dict]:
     """
     Find rooms that connect two wings (or all tunnel rooms if no wings specified).
     These are the "hallways" — same named idea appearing in multiple domains.
@@ -191,7 +191,7 @@ def find_tunnels(wing_a: str = None, wing_b: str = None, col=None, config=None):
     return tunnels[:GRAPH_MAX_RESULTS]
 
 
-def graph_stats(col=None, config=None):
+def graph_stats(col=None, config=None) -> dict:
     """Summary statistics about the palace graph."""
     nodes, edges = build_graph(col, config)
 
@@ -214,7 +214,7 @@ def graph_stats(col=None, config=None):
     }
 
 
-def _fuzzy_match(query: str, nodes: dict, n: int = 5):
+def _fuzzy_match(query: str, nodes: dict, n: int = 5) -> list[str]:
     """Find rooms that approximately match a query string."""
     query_lower = query.lower()
     scored = []

@@ -139,7 +139,7 @@ def detect_room(filepath: Path, content: str, rooms: list, project_path: Path) -
 # =============================================================================
 
 
-def chunk_text(content: str, source_file: str) -> list:
+def chunk_text(content: str, source_file: str) -> list[dict]:
     """
     Split content into drawer-sized chunks.
     Tries to split on paragraph/line boundaries.
@@ -187,7 +187,7 @@ def chunk_text(content: str, source_file: str) -> list:
 # =============================================================================
 
 
-def get_collection(palace_path: str):
+def get_collection(palace_path: str) -> chromadb.Collection:
     os.makedirs(palace_path, exist_ok=True)
     client = chromadb.PersistentClient(path=palace_path)
     try:
@@ -207,7 +207,7 @@ def file_already_mined(collection, source_file: str) -> bool:
 
 def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
-):
+) -> bool:
     """Add one drawer to the palace."""
     drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk_index)).encode()).hexdigest()[:16]}"
     try:
@@ -291,7 +291,7 @@ def process_file(
 # =============================================================================
 
 
-def scan_project(project_dir: str) -> list:
+def scan_project(project_dir: str) -> list[Path]:
     """Return list of all readable file paths."""
     project_path = Path(project_dir).expanduser().resolve()
     files = []
@@ -326,7 +326,7 @@ def mine(
     agent: str = "mempalace",
     limit: int = 0,
     dry_run: bool = False,
-):
+) -> None:
     """Mine a project directory into the palace."""
 
     project_path = Path(project_dir).expanduser().resolve()
@@ -395,7 +395,7 @@ def mine(
 # =============================================================================
 
 
-def status(palace_path: str):
+def status(palace_path: str) -> None:
     """Show what's been filed in the palace."""
     try:
         client = chromadb.PersistentClient(path=palace_path)

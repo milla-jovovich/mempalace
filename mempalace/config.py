@@ -123,7 +123,7 @@ class MempalaceConfig:
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
-    def init(self):
+    def init(self) -> Path:
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
         if not self._config_file.exists():
@@ -137,7 +137,7 @@ class MempalaceConfig:
                 json.dump(default_config, f, indent=2)
         return self._config_file
 
-    def save_people_map(self, people_map):
+    def save_people_map(self, people_map: dict) -> Path:
         """Write people_map.json to config directory.
 
         Args:

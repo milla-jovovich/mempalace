@@ -47,7 +47,7 @@ logger = logging.getLogger("mempalace_mcp")
 _config = MempalaceConfig()
 
 
-def _get_collection(create=False):
+def _get_collection(create: bool = False) -> chromadb.Collection | None:
     """Return the ChromaDB collection, or None on failure."""
     try:
         client = chromadb.PersistentClient(path=_config.palace_path)
@@ -58,7 +58,7 @@ def _get_collection(create=False):
         return None
 
 
-def _no_palace():
+def _no_palace() -> dict:
     return {
         "error": "No palace found",
         "palace_path": _config.palace_path,
@@ -69,7 +69,7 @@ def _no_palace():
 # ==================== READ TOOLS ====================
 
 
-def tool_status():
+def tool_status() -> dict:
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -128,7 +128,7 @@ Read AAAK naturally — expand codes mentally, treat *markers* as emotional cont
 When WRITING AAAK: use entity codes, mark emotions, keep structure tight."""
 
 
-def tool_list_wings():
+def tool_list_wings() -> dict:
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -143,7 +143,7 @@ def tool_list_wings():
     return {"wings": wings}
 
 
-def tool_list_rooms(wing: str = None):
+def tool_list_rooms(wing: str = None) -> dict:
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -161,7 +161,7 @@ def tool_list_rooms(wing: str = None):
     return {"wing": wing or "all", "rooms": rooms}
 
 
-def tool_get_taxonomy():
+def tool_get_taxonomy() -> dict:
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -179,7 +179,7 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = DEFAULT_SEARCH_RESULTS, wing: str = None, room: str = None):
+def tool_search(query: str, limit: int = DEFAULT_SEARCH_RESULTS, wing: str = None, room: str = None) -> dict:
     return search_memories(
         query,
         palace_path=_config.palace_path,
@@ -189,7 +189,7 @@ def tool_search(query: str, limit: int = DEFAULT_SEARCH_RESULTS, wing: str = Non
     )
 
 
-def tool_check_duplicate(content: str, threshold: float = DUPLICATE_THRESHOLD):
+def tool_check_duplicate(content: str, threshold: float = DUPLICATE_THRESHOLD) -> dict:
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -226,12 +226,12 @@ def tool_check_duplicate(content: str, threshold: float = DUPLICATE_THRESHOLD):
         return {"error": str(e)}
 
 
-def tool_get_aaak_spec():
+def tool_get_aaak_spec() -> dict:
     """Return the AAAK dialect specification."""
     return {"aaak_spec": AAAK_SPEC}
 
 
-def tool_traverse_graph(start_room: str, max_hops: int = DEFAULT_MAX_HOPS):
+def tool_traverse_graph(start_room: str, max_hops: int = DEFAULT_MAX_HOPS) -> list[dict] | dict:
     """Walk the palace graph from a room. Find connected ideas across wings."""
     col = _get_collection()
     if not col:
@@ -239,7 +239,7 @@ def tool_traverse_graph(start_room: str, max_hops: int = DEFAULT_MAX_HOPS):
     return traverse(start_room, col=col, max_hops=max_hops)
 
 
-def tool_find_tunnels(wing_a: str = None, wing_b: str = None):
+def tool_find_tunnels(wing_a: str = None, wing_b: str = None) -> list[dict] | dict:
     """Find rooms that bridge two wings — the hallways connecting domains."""
     col = _get_collection()
     if not col:
@@ -247,7 +247,7 @@ def tool_find_tunnels(wing_a: str = None, wing_b: str = None):
     return find_tunnels(wing_a, wing_b, col=col)
 
 
-def tool_graph_stats():
+def tool_graph_stats() -> dict:
     """Palace graph overview: nodes, tunnels, edges, connectivity."""
     col = _get_collection()
     if not col:
@@ -260,7 +260,7 @@ def tool_graph_stats():
 
 def tool_add_drawer(
     wing: str, room: str, content: str, source_file: str = None, added_by: str = "mcp"
-):
+) -> dict:
     """File verbatim content into a wing/room. Checks for duplicates first."""
     col = _get_collection(create=True)
     if not col:
@@ -298,7 +298,7 @@ def tool_add_drawer(
         return {"success": False, "error": str(e)}
 
 
-def tool_delete_drawer(drawer_id: str):
+def tool_delete_drawer(drawer_id: str) -> dict:
     """Delete a single drawer by ID."""
     col = _get_collection()
     if not col:
@@ -317,7 +317,7 @@ def tool_delete_drawer(drawer_id: str):
 # ==================== KNOWLEDGE GRAPH ====================
 
 
-def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
+def tool_kg_query(entity: str, as_of: str = None, direction: str = "both") -> dict:
     """Query the knowledge graph for an entity's relationships."""
     results = _kg.query_entity(entity, as_of=as_of, direction=direction)
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
@@ -325,7 +325,7 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
 
 def tool_kg_add(
     subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
-):
+) -> dict:
     """Add a relationship to the knowledge graph."""
     triple_id = _kg.add_triple(
         subject, predicate, object, valid_from=valid_from, source_closet=source_closet
@@ -333,7 +333,7 @@ def tool_kg_add(
     return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {object}"}
 
 
-def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
+def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None) -> dict:
     """Mark a fact as no longer true (set end date)."""
     _kg.invalidate(subject, predicate, object, ended=ended)
     return {
@@ -343,13 +343,13 @@ def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = N
     }
 
 
-def tool_kg_timeline(entity: str = None):
+def tool_kg_timeline(entity: str = None) -> dict:
     """Get chronological timeline of facts, optionally for one entity."""
     results = _kg.timeline(entity)
     return {"entity": entity or "all", "timeline": results, "count": len(results)}
 
 
-def tool_kg_stats():
+def tool_kg_stats() -> dict:
     """Knowledge graph overview: entities, triples, relationship types."""
     return _kg.stats()
 
@@ -357,7 +357,7 @@ def tool_kg_stats():
 # ==================== AGENT DIARY ====================
 
 
-def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
+def tool_diary_write(agent_name: str, entry: str, topic: str = "general") -> dict:
     """
     Write a diary entry for this agent. Each agent gets its own wing
     with a diary room. Entries are timestamped and accumulate over time.
@@ -403,7 +403,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return {"success": False, "error": str(e)}
 
 
-def tool_diary_read(agent_name: str, last_n: int = DIARY_DEFAULT_LAST_N):
+def tool_diary_read(agent_name: str, last_n: int = DIARY_DEFAULT_LAST_N) -> dict:
     """
     Read an agent's recent diary entries. Returns the last N entries
     in chronological order — the agent's personal journal.
@@ -699,7 +699,7 @@ TOOLS = {
 }
 
 
-def handle_request(request):
+def handle_request(request: dict) -> dict | None:
     method = request.get("method", "")
     params = request.get("params", {})
     req_id = request.get("id")
@@ -754,7 +754,7 @@ def handle_request(request):
     }
 
 
-def main():
+def main() -> None:
     logger.info("MemPalace MCP Server starting...")
     while True:
         try:
