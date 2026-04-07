@@ -109,11 +109,12 @@ class TestCompressionStats:
         original = "We decided to use GraphQL instead of REST. " * 10
         compressed = d.compress(original)
         stats = d.compression_stats(original, compressed)
-        assert stats["ratio"] > 1
-        assert stats["original_chars"] > stats["compressed_chars"]
+        assert stats["size_ratio"] > 1
+        assert stats["original_chars"] > stats["summary_chars"]
 
     def test_count_tokens(self):
-        assert Dialect.count_tokens("hello world") == len("hello world") // 3
+        # Word-based heuristic: ~1.3 tokens per word
+        assert Dialect.count_tokens("hello world") == 2  # 2 words * 1.3 = 2.6 → 2
 
 
 class TestZettelEncoding:
