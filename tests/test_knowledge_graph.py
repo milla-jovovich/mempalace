@@ -1,4 +1,5 @@
 from mempalace.knowledge_graph import KnowledgeGraph
+import pytest
 
 
 def test_add_entity(tmp_dir):
@@ -121,3 +122,57 @@ def test_stats(tmp_dir):
     assert stats["current_facts"] == 1
     assert stats["expired_facts"] == 1
     assert set(stats["relationship_types"]) == {"does", "loves"}
+
+
+# ── New tests ─────────────────────────────────────────────────────────────────
+
+
+def test_seed_from_entity_facts(kg):
+    """seed_from_entity_facts should create entities and interest triples from a facts dict."""
+    facts = {
+        "alice": {
+            "full_name": "Alice",
+            "type": "person",
+            "gender": "female",
+            "interests": ["chess", "painting"],
+        }
+    }
+    kg.seed_from_entity_facts(facts)
+
+    stats = kg.stats()
+    # Entities: Alice + chess + painting (auto-created)
+    assert stats["entities"] >= 3
+
+    # Interest triples should exist for both interests
+    results = kg.query_entity("Alice", direction="outgoing")
+    objects = {r["object"] for r in results}
+    assert "Chess" in objects
+    assert "Painting" in objects
+
+    # Relationship type should be "loves"
+    predicates = {r["predicate"] for r in results}
+    assert "loves" in predicates
+
+
+def test_query_entity_null_valid_from_always_valid(kg):
+    """A triple with NULL valid_from should be returned regardless of as_of date."""
+    # Add a triple with no valid_from — represents a timeless fact
+    kg.add_triple("Alice", "knows", "Bob")  # valid_from=None, valid_to=None
+
+    # Querying with an as_of date far in the past should still return this triple
+    results = kg.query_entity("Alice", as_of="2000-01-01", direction="outgoing")
+    predicates = {r["predicate"] for r in results}
+    assert "knows" in predicates
+
+    # Querying with a future date also returns it
+    results = kg.query_entity("Alice", as_of="2099-12-31", direction="outgoing")
+    predicates = {r["predicate"] for r in results}
+    assert "knows" in predicates
+
+
+def test_query_relationship_no_matches(kg):
+    """query_relationship on a predicate that doesn't exist should return an empty list."""
+    kg.add_triple("Max", "loves", "chess")
+
+    results = kg.query_relationship("invented_by")
+    assert results == []
