@@ -15,7 +15,31 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
+import fcntl
+import signal
+
 import chromadb
+
+def _acquire_palace_lock(palace_path: str):
+    """Acquire exclusive lock on palace. Exit with clear message if already locked."""
+    lock_path = Path(palace_path) / ".mine.lock"
+    lock_file = open(lock_path, "w")
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (IOError, OSError):
+        print("\nERROR: Another mine is already running on this palace.")
+        print("Wait for it to finish, or delete .mempalace/palace/.mine.lock if it crashed.\n")
+        sys.exit(1)
+    return lock_file
+
+def _release_palace_lock(lock_file):
+    lock_file.close()
+    Path(lock_file.name).unlink(missing_ok=True)
+
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -78,6 +102,7 @@ SKIP_FILENAMES = {
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
+BATCH_SIZE = 50  # max chunks per ChromaDB call — prevents OOM on large files
 
 
 # =============================================================================
@@ -437,6 +462,21 @@ def add_drawer(
         raise
 
 
+def add_drawers_batch(collection, batch: list):
+    """Add a batch of drawers. Capped at BATCH_SIZE to prevent OOM."""
+    for i in range(0, len(batch), BATCH_SIZE):
+        chunk = batch[i:i + BATCH_SIZE]
+        try:
+            collection.add(
+                documents=[d["content"] for d in chunk],
+                ids=[d["id"] for d in chunk],
+                metadatas=[d["metadata"] for d in chunk],
+            )
+        except Exception as e:
+            if "already exists" not in str(e).lower():
+                raise
+
+
 # =============================================================================
 # PROCESS ONE FILE
 # =============================================================================
@@ -567,6 +607,14 @@ def mine(
     include_ignored: list = None,
 ):
     """Mine a project directory into the palace."""
+    interrupted = False
+
+    def _handle_interrupt(sig, frame):
+        nonlocal interrupted
+        print("\n\n  Interrupted — finishing current file then stopping cleanly...")
+        interrupted = True
+
+    signal.signal(signal.SIGINT, _handle_interrupt)
 
     project_path = Path(project_dir).expanduser().resolve()
     config = load_config(project_dir)
@@ -597,44 +645,55 @@ def mine(
         print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
     print(f"{'─' * 55}\n")
 
+    lock = None
     if not dry_run:
+        lock = _acquire_palace_lock(palace_path)
         collection = get_collection(palace_path)
     else:
         collection = None
 
-    total_drawers = 0
-    files_skipped = 0
-    room_counts = defaultdict(int)
+    try:
+        total_drawers = 0
+        files_skipped = 0
+        room_counts = defaultdict(int)
 
-    for i, filepath in enumerate(files, 1):
-        drawers = process_file(
-            filepath=filepath,
-            project_path=project_path,
-            collection=collection,
-            wing=wing,
-            rooms=rooms,
-            agent=agent,
-            dry_run=dry_run,
-        )
-        if drawers == 0 and not dry_run:
-            files_skipped += 1
-        else:
-            total_drawers += drawers
-            room = detect_room(filepath, "", rooms, project_path)
-            room_counts[room] += 1
-            if not dry_run:
-                print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+        for i, filepath in enumerate(files, 1):
+            if interrupted:
+                break
+            drawers = process_file(
+                filepath=filepath,
+                project_path=project_path,
+                collection=collection,
+                wing=wing,
+                rooms=rooms,
+                agent=agent,
+                dry_run=dry_run,
+            )
+            if drawers == 0 and not dry_run:
+                files_skipped += 1
+            else:
+                total_drawers += drawers
+                room = detect_room(filepath, "", rooms, project_path)
+                room_counts[room] += 1
+                if not dry_run:
+                    print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
 
-    print(f"\n{'=' * 55}")
-    print("  Done.")
-    print(f"  Files processed: {len(files) - files_skipped}")
-    print(f"  Files skipped (already filed): {files_skipped}")
-    print(f"  Drawers filed: {total_drawers}")
-    print("\n  By room:")
-    for room, count in sorted(room_counts.items(), key=lambda x: x[1], reverse=True):
-        print(f"    {room:20} {count} files")
-    print('\n  Next: mempalace search "what you\'re looking for"')
-    print(f"{'=' * 55}\n")
+        if interrupted:
+            print("  Stopped early. Palace is intact. Re-run to continue (already-mined files are skipped).")
+
+        print(f"\n{'=' * 55}")
+        print("  Done.")
+        print(f"  Files processed: {len(files) - files_skipped}")
+        print(f"  Files skipped (already filed): {files_skipped}")
+        print(f"  Drawers filed: {total_drawers}")
+        print("\n  By room:")
+        for room, count in sorted(room_counts.items(), key=lambda x: x[1], reverse=True):
+            print(f"    {room:20} {count} files")
+        print('\n  Next: mempalace search "what you\'re looking for"')
+        print(f"{'=' * 55}\n")
+    finally:
+        if lock is not None:
+            _release_palace_lock(lock)
 
 
 # =============================================================================
