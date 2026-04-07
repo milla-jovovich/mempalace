@@ -8,6 +8,8 @@ via monkeypatch to avoid touching real data.
 
 import json
 
+import pytest
+
 
 def _patch_mcp_server(monkeypatch, config, palace_path, kg):
     """Patch the mcp_server module globals to use test fixtures."""
@@ -339,6 +341,21 @@ class TestDiaryTools:
 
 
 # ── Input Validation ───────────────────────────────────────────────────
+
+
+class TestLocalhostGuard:
+    def test_start_http_server_rejects_public_address(self):
+        from mempalace.mcp_server import start_http_server
+
+        with pytest.raises(ValueError, match="non-localhost"):
+            start_http_server(host="0.0.0.0", port=8766)
+
+    def test_start_http_server_accepts_localhost(self):
+        from mempalace.mcp_server import start_http_server
+
+        # Should pass validation but raise NotImplementedError (HTTP not built yet)
+        with pytest.raises(NotImplementedError):
+            start_http_server(host="127.0.0.1", port=8766)
 
 
 class TestAuth:

@@ -31,6 +31,7 @@ from .security import (
     encrypt,
     load_or_create_key,
     load_or_create_token,
+    validate_bind_address,
     verify_token,
 )
 from .palace_graph import traverse, find_tunnels, graph_stats
@@ -859,6 +860,20 @@ def handle_request(request):
     }
 
 
+def start_http_server(host="127.0.0.1", port=8766):
+    """Start an HTTP transport for the MCP server.
+
+    Only localhost addresses are allowed. This is a defensive guard —
+    the MCP server must never be exposed to the network.
+
+    Raises ValueError if host is not localhost.
+    """
+    validate_bind_address(host)
+    raise NotImplementedError(
+        "HTTP transport is not yet implemented. Use stdio transport (default)."
+    )
+
+
 def main():
     global _auth_token, _fernet
     logger.info("MemPalace MCP Server starting...")
@@ -868,6 +883,15 @@ def main():
     if _config.encryption_enabled:
         _fernet = load_or_create_key(_config._config_dir)
         logger.info("Encryption at rest enabled.")
+
+    transport = _config._file_config.get("security", {}).get("transport", "stdio")
+    if transport == "http":
+        host = _config._file_config.get("security", {}).get("http_host", "127.0.0.1")
+        port = _config._file_config.get("security", {}).get("http_port", 8766)
+        start_http_server(host, port)
+        return
+
+    # Default: stdio transport
     while True:
         try:
             line = sys.stdin.readline()
