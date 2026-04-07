@@ -201,18 +201,21 @@ class KnowledgeGraph:
             if as_of:
                 query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
                 params.extend([as_of, as_of])
-            for row in conn.execute(query, params).fetchall():
+            cur = conn.execute(query, params)
+            cols = [d[0] for d in cur.description]
+            for raw in cur.fetchall():
+                row = dict(zip(cols, raw))
                 results.append(
                     {
                         "direction": "outgoing",
                         "subject": name,
-                        "predicate": row[2],
-                        "object": row[10],  # obj_name
-                        "valid_from": row[4],
-                        "valid_to": row[5],
-                        "confidence": row[6],
-                        "source_closet": row[7],
-                        "current": row[5] is None,
+                        "predicate": row["predicate"],
+                        "object": row["obj_name"],
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
                     }
                 )
 
@@ -222,18 +225,21 @@ class KnowledgeGraph:
             if as_of:
                 query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
                 params.extend([as_of, as_of])
-            for row in conn.execute(query, params).fetchall():
+            cur = conn.execute(query, params)
+            cols = [d[0] for d in cur.description]
+            for raw in cur.fetchall():
+                row = dict(zip(cols, raw))
                 results.append(
                     {
                         "direction": "incoming",
-                        "subject": row[10],  # sub_name
-                        "predicate": row[2],
+                        "subject": row["sub_name"],
+                        "predicate": row["predicate"],
                         "object": name,
-                        "valid_from": row[4],
-                        "valid_to": row[5],
-                        "confidence": row[6],
-                        "source_closet": row[7],
-                        "current": row[5] is None,
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
                     }
                 )
 
@@ -256,18 +262,19 @@ class KnowledgeGraph:
             query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
             params.extend([as_of, as_of])
 
-        results = []
-        for row in conn.execute(query, params).fetchall():
-            results.append(
-                {
-                    "subject": row[10],
-                    "predicate": pred,
-                    "object": row[11],
-                    "valid_from": row[4],
-                    "valid_to": row[5],
-                    "current": row[5] is None,
-                }
-            )
+        cur = conn.execute(query, params)
+        cols = [d[0] for d in cur.description]
+        results = [
+            {
+                "subject": row["sub_name"],
+                "predicate": pred,
+                "object": row["obj_name"],
+                "valid_from": row["valid_from"],
+                "valid_to": row["valid_to"],
+                "current": row["valid_to"] is None,
+            }
+            for row in (dict(zip(cols, raw)) for raw in cur.fetchall())
+        ]
         conn.close()
         return results
 
@@ -276,7 +283,7 @@ class KnowledgeGraph:
         conn = self._conn()
         if entity_name:
             eid = self._entity_id(entity_name)
-            rows = conn.execute(
+            cur = conn.execute(
                 """
                 SELECT t.*, s.name as sub_name, o.name as obj_name
                 FROM triples t
@@ -286,29 +293,31 @@ class KnowledgeGraph:
                 ORDER BY t.valid_from ASC NULLS LAST
             """,
                 (eid, eid),
-            ).fetchall()
+            )
         else:
-            rows = conn.execute("""
+            cur = conn.execute("""
                 SELECT t.*, s.name as sub_name, o.name as obj_name
                 FROM triples t
                 JOIN entities s ON t.subject = s.id
                 JOIN entities o ON t.object = o.id
                 ORDER BY t.valid_from ASC NULLS LAST
                 LIMIT 100
-            """).fetchall()
+            """)
 
-        conn.close()
-        return [
+        cols = [d[0] for d in cur.description]
+        results = [
             {
-                "subject": r[10],
-                "predicate": r[2],
-                "object": r[11],
-                "valid_from": r[4],
-                "valid_to": r[5],
-                "current": r[5] is None,
+                "subject": row["sub_name"],
+                "predicate": row["predicate"],
+                "object": row["obj_name"],
+                "valid_from": row["valid_from"],
+                "valid_to": row["valid_to"],
+                "current": row["valid_to"] is None,
             }
-            for r in rows
+            for row in (dict(zip(cols, raw)) for raw in cur.fetchall())
         ]
+        conn.close()
+        return results
 
     # ── Stats ─────────────────────────────────────────────────────────────
 
