@@ -156,34 +156,31 @@ There are also **halls**, which connect rooms within a wing, and **tunnels**, wh
 
 You say what you're looking for and boom, it already knows which wing to go to. Just *that* in itself would have made a big difference. But this is beautiful, elegant, organic, and most importantly, efficient.
 
-```
-  ┌─────────────────────────────────────────────────────────────┐
-  │  WING: Person                                              │
-  │                                                            │
-  │    ┌──────────┐  ──hall──  ┌──────────┐                    │
-  │    │  Room A  │            │  Room B  │                    │
-  │    └────┬─────┘            └──────────┘                    │
-  │         │                                                  │
-  │         ▼                                                  │
-  │    ┌──────────┐      ┌──────────┐                          │
-  │    │  Closet  │ ───▶ │  Drawer  │                          │
-  │    └──────────┘      └──────────┘                          │
-  └─────────┼──────────────────────────────────────────────────┘
-            │
-          tunnel
-            │
-  ┌─────────┼──────────────────────────────────────────────────┐
-  │  WING: Project                                             │
-  │         │                                                  │
-  │    ┌────┴─────┐  ──hall──  ┌──────────┐                    │
-  │    │  Room A  │            │  Room C  │                    │
-  │    └────┬─────┘            └──────────┘                    │
-  │         │                                                  │
-  │         ▼                                                  │
-  │    ┌──────────┐      ┌──────────┐                          │
-  │    │  Closet  │ ───▶ │  Drawer  │                          │
-  │    └──────────┘      └──────────┘                          │
-  └─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph WING_Person["WING: Person"]
+        RoomA_P["Room A"]
+        RoomB_P["Room B"]
+        Closet_P["Closet"]
+        Drawer_P["Drawer"]
+        
+        RoomA_P ---|hall| RoomB_P
+        RoomA_P --> Closet_P
+        Closet_P --> Drawer_P
+    end
+    
+    subgraph WING_Project["WING: Project"]
+        RoomA_Pr["Room A"]
+        RoomC_Pr["Room C"]
+        Closet_Pr["Closet"]
+        Drawer_Pr["Drawer"]
+        
+        RoomA_Pr ---|hall| RoomC_Pr
+        RoomA_Pr --> Closet_Pr
+        Closet_Pr --> Drawer_Pr
+    end
+    
+    RoomA_P -.tunnel.- RoomA_Pr
 ```
 
 **Wings** — a person or project. As many as you need.
