@@ -11,6 +11,8 @@ from pathlib import Path
 
 import chromadb
 
+from .security import decrypt
+
 logger = logging.getLogger("mempalace_mcp")
 
 
@@ -91,7 +93,8 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5,
+    fernet=None,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
@@ -135,9 +138,15 @@ def search_memories(
 
     hits = []
     for doc, meta, dist in zip(docs, metas, dists):
+        text = doc
+        if fernet and meta.get("encrypted_content"):
+            try:
+                text = decrypt(fernet, meta["encrypted_content"])
+            except Exception:
+                pass  # Fall back to raw document
         hits.append(
             {
-                "text": doc,
+                "text": text,
                 "wing": meta.get("wing", "unknown"),
                 "room": meta.get("room", "unknown"),
                 "source_file": Path(meta.get("source_file", "?")).name,

@@ -11,7 +11,11 @@ import pytest
 
 from mempalace.security import (
     content_hash,
+    decrypt,
+    encrypt,
     generate_auth_token,
+    generate_encryption_key,
+    load_or_create_key,
     load_or_create_token,
     secure_dir,
     secure_file,
@@ -166,3 +170,75 @@ class TestAuthToken:
         token1 = load_or_create_token(d)
         token2 = load_or_create_token(d)
         assert token1 == token2
+
+
+# ── Encryption ───────────────────────────────────────────────────────────
+
+
+class TestEncryption:
+    def test_generate_encryption_key(self):
+        key = generate_encryption_key()
+        assert isinstance(key, bytes)
+        assert len(key) == 44  # Fernet key is 44 bytes base64-encoded
+
+    def test_encrypt_decrypt_roundtrip(self):
+        from cryptography.fernet import Fernet
+
+        f = Fernet(Fernet.generate_key())
+        plaintext = "This is sensitive palace data about family relationships."
+        ciphertext = encrypt(f, plaintext)
+        assert ciphertext != plaintext
+        assert decrypt(f, ciphertext) == plaintext
+
+    def test_encrypt_produces_different_ciphertext(self):
+        """Fernet uses random IV, so two encryptions of the same text differ."""
+        from cryptography.fernet import Fernet
+
+        f = Fernet(Fernet.generate_key())
+        plaintext = "same input"
+        ct1 = encrypt(f, plaintext)
+        ct2 = encrypt(f, plaintext)
+        assert ct1 != ct2
+        # Both decrypt to same plaintext
+        assert decrypt(f, ct1) == plaintext
+        assert decrypt(f, ct2) == plaintext
+
+    def test_decrypt_wrong_key_fails(self):
+        from cryptography.fernet import Fernet, InvalidToken
+
+        f1 = Fernet(Fernet.generate_key())
+        f2 = Fernet(Fernet.generate_key())
+        ciphertext = encrypt(f1, "secret")
+        with pytest.raises(InvalidToken):
+            decrypt(f2, ciphertext)
+
+    def test_load_or_create_key_creates(self, monkeypatch):
+        """Key is created and returned on first call (file fallback)."""
+        monkeypatch.setattr(
+            "mempalace.security._try_keyring_get", lambda account: None
+        )
+        monkeypatch.setattr(
+            "mempalace.security._try_keyring_set", lambda account, value: False
+        )
+        d = tempfile.mkdtemp()
+        fernet = load_or_create_key(d)
+        # Verify it's a working Fernet instance
+        ct = encrypt(fernet, "test")
+        assert decrypt(fernet, ct) == "test"
+        # Key file exists
+        assert os.path.exists(os.path.join(d, "palace.key"))
+
+    def test_load_or_create_key_reads_existing(self, monkeypatch):
+        """Second call returns a Fernet with the same key."""
+        monkeypatch.setattr(
+            "mempalace.security._try_keyring_get", lambda account: None
+        )
+        monkeypatch.setattr(
+            "mempalace.security._try_keyring_set", lambda account, value: False
+        )
+        d = tempfile.mkdtemp()
+        f1 = load_or_create_key(d)
+        f2 = load_or_create_key(d)
+        # Both should decrypt each other's ciphertext
+        ct = encrypt(f1, "cross-test")
+        assert decrypt(f2, ct) == "cross-test"

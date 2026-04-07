@@ -40,6 +40,7 @@ mempalace = "mempalace:main"
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.4.0"]
 spellcheck = ["autocorrect>=2.0"]
+security = ["cryptography>=41.0", "keyring>=25.0"]
 
 [dependency-groups]
 dev = ["pytest>=7.0", "ruff>=0.4.0"]

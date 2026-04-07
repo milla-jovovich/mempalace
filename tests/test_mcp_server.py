@@ -525,3 +525,91 @@ class TestInputValidation:
             }
         )
         assert "result" in resp
+
+
+# ── Encryption ─────────────────────────────────────────────────────────
+
+
+class TestEncryption:
+    def _enable_encryption(self, monkeypatch):
+        from cryptography.fernet import Fernet
+        from mempalace import mcp_server
+
+        f = Fernet(Fernet.generate_key())
+        monkeypatch.setattr(mcp_server, "_fernet", f)
+        return f
+
+    def test_add_drawer_stores_encrypted_content(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        f = self._enable_encryption(monkeypatch)
+        col = _get_collection(palace_path, create=True)
+        from mempalace.mcp_server import tool_add_drawer
+
+        result = tool_add_drawer(
+            wing="enc_test",
+            room="secrets",
+            content="Top secret family information.",
+        )
+        assert result["success"] is True
+
+        # Verify encrypted_content is in metadata
+        stored = col.get(ids=[result["drawer_id"]], include=["metadatas"])
+        meta = stored["metadatas"][0]
+        assert "encrypted_content" in meta
+        assert meta["encrypted_content"] != "Top secret family information."
+
+        # Verify it decrypts correctly
+        from mempalace.security import decrypt
+
+        assert decrypt(f, meta["encrypted_content"]) == "Top secret family information."
+
+    def test_search_returns_decrypted_content(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        f = self._enable_encryption(monkeypatch)
+        _get_collection(palace_path, create=True)
+        from mempalace.mcp_server import tool_add_drawer, tool_search
+
+        tool_add_drawer(
+            wing="enc_test",
+            room="secrets",
+            content="The encryption key is stored in the OS keychain for safety.",
+        )
+
+        result = tool_search(query="encryption key keychain")
+        assert len(result["results"]) > 0
+        top = result["results"][0]
+        assert "encryption key" in top["text"].lower() or "keychain" in top["text"].lower()
+
+    def test_diary_write_read_encrypted_roundtrip(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        self._enable_encryption(monkeypatch)
+        _get_collection(palace_path, create=True)
+        from mempalace.mcp_server import tool_diary_read, tool_diary_write
+
+        w = tool_diary_write(
+            agent_name="SecureAgent",
+            entry="Encrypted diary: today we added Fernet encryption.",
+            topic="security",
+        )
+        assert w["success"] is True
+
+        r = tool_diary_read(agent_name="SecureAgent")
+        assert r["total"] == 1
+        assert "Fernet encryption" in r["entries"][0]["content"]
+
+    def test_unencrypted_drawers_still_readable(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        """Drawers added before encryption was enabled should still be readable."""
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        self._enable_encryption(monkeypatch)
+        from mempalace.mcp_server import tool_search
+
+        # seeded_collection has drawers without encrypted_content
+        result = tool_search(query="JWT authentication")
+        assert len(result["results"]) > 0
+        assert "JWT" in result["results"][0]["text"]

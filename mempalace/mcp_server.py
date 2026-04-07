@@ -25,7 +25,14 @@ from datetime import datetime
 from .config import MempalaceConfig
 from .version import __version__
 from .searcher import search_memories
-from .security import content_hash, load_or_create_token, verify_token
+from .security import (
+    content_hash,
+    decrypt,
+    encrypt,
+    load_or_create_key,
+    load_or_create_token,
+    verify_token,
+)
 from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
 
@@ -40,6 +47,19 @@ _config = MempalaceConfig()
 
 # Auth state — loaded at startup if auth is enabled
 _auth_token = None
+
+# Encryption state — loaded at startup if encryption is enabled
+_fernet = None
+
+
+def _decrypt_doc(doc, meta):
+    """Return decrypted content if encryption is active and encrypted_content exists."""
+    if _fernet and meta.get("encrypted_content"):
+        try:
+            return decrypt(_fernet, meta["encrypted_content"])
+        except Exception:
+            logger.warning("Failed to decrypt content, returning raw document")
+    return doc
 
 
 def _get_collection(create=False):
@@ -180,6 +200,7 @@ def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
         wing=wing,
         room=room,
         n_results=limit,
+        fernet=_fernet,
     )
 
 
@@ -200,7 +221,7 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
                 similarity = round(1 - dist, 3)
                 if similarity >= threshold:
                     meta = results["metadatas"][0][i]
-                    doc = results["documents"][0][i]
+                    doc = _decrypt_doc(results["documents"][0][i], meta)
                     duplicates.append(
                         {
                             "id": drawer_id,
@@ -269,20 +290,23 @@ def tool_add_drawer(
 
     drawer_id = f"drawer_{wing}_{room}_{content_hash(content[:100] + datetime.now().isoformat())}"
 
+    metadata = {
+        "wing": wing,
+        "room": room,
+        "source_file": source_file or "",
+        "chunk_index": 0,
+        "added_by": added_by,
+        "filed_at": datetime.now().isoformat(),
+    }
+
+    if _fernet:
+        metadata["encrypted_content"] = encrypt(_fernet, content)
+
     try:
         col.add(
             ids=[drawer_id],
             documents=[content],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file or "",
-                    "chunk_index": 0,
-                    "added_by": added_by,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
+            metadatas=[metadata],
         )
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
@@ -366,22 +390,25 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     now = datetime.now()
     entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{content_hash(entry[:50], length=8)}"
 
+    metadata = {
+        "wing": wing,
+        "room": room,
+        "hall": "hall_diary",
+        "topic": topic,
+        "type": "diary_entry",
+        "agent": agent_name,
+        "filed_at": now.isoformat(),
+        "date": now.strftime("%Y-%m-%d"),
+    }
+
+    if _fernet:
+        metadata["encrypted_content"] = encrypt(_fernet, entry)
+
     try:
         col.add(
             ids=[entry_id],
             documents=[entry],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "hall": "hall_diary",
-                    "topic": topic,
-                    "type": "diary_entry",
-                    "agent": agent_name,
-                    "filed_at": now.isoformat(),
-                    "date": now.strftime("%Y-%m-%d"),
-                }
-            ],
+            metadatas=[metadata],
         )
         logger.info(f"Diary entry: {entry_id} → {wing}/diary/{topic}")
         return {
@@ -423,7 +450,7 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
                     "date": meta.get("date", ""),
                     "timestamp": meta.get("filed_at", ""),
                     "topic": meta.get("topic", ""),
-                    "content": doc,
+                    "content": _decrypt_doc(doc, meta),
                 }
             )
 
@@ -833,11 +860,14 @@ def handle_request(request):
 
 
 def main():
-    global _auth_token
+    global _auth_token, _fernet
     logger.info("MemPalace MCP Server starting...")
     if _config.auth_enabled:
         _auth_token = load_or_create_token(_config._config_dir)
         logger.info("Authentication enabled.")
+    if _config.encryption_enabled:
+        _fernet = load_or_create_key(_config._config_dir)
+        logger.info("Encryption at rest enabled.")
     while True:
         try:
             line = sys.stdin.readline()

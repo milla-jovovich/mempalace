@@ -41,15 +41,16 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-from .security import content_hash, secure_file
+from .security import content_hash, decrypt as sec_decrypt, encrypt as sec_encrypt, secure_file
 
 
 DEFAULT_KG_PATH = os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
 
 
 class KnowledgeGraph:
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str = None, fernet=None):
         self.db_path = db_path or DEFAULT_KG_PATH
+        self._fernet = fernet
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -98,10 +99,25 @@ class KnowledgeGraph:
 
     # ── Write operations ──────────────────────────────────────────────────
 
+    def _encrypt_props(self, props_json: str) -> str:
+        """Encrypt properties JSON if encryption is enabled."""
+        if self._fernet:
+            return sec_encrypt(self._fernet, props_json)
+        return props_json
+
+    def _decrypt_props(self, props_str: str) -> str:
+        """Decrypt properties string if encryption is enabled."""
+        if self._fernet and props_str and not props_str.startswith("{"):
+            try:
+                return sec_decrypt(self._fernet, props_str)
+            except Exception:
+                pass  # Fall back to raw string (unencrypted data)
+        return props_str
+
     def add_entity(self, name: str, entity_type: str = "unknown", properties: dict = None):
         """Add or update an entity node."""
         eid = self._entity_id(name)
-        props = json.dumps(properties or {})
+        props = self._encrypt_props(json.dumps(properties or {}))
         conn = self._conn()
         conn.execute(
             "INSERT OR REPLACE INTO entities (id, name, type, properties) VALUES (?, ?, ?, ?)",
