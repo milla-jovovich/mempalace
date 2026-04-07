@@ -16,6 +16,13 @@ from collections import defaultdict
 
 import chromadb
 
+from .constants import (
+    PROJECT_CHUNK_SIZE,
+    PROJECT_CHUNK_OVERLAP,
+    PROJECT_MIN_CHUNK_SIZE,
+    STATUS_MAX_DRAWERS,
+)
+
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
@@ -53,9 +60,9 @@ SKIP_DIRS = {
     ".mempalace",
 }
 
-CHUNK_SIZE = 800  # chars per drawer
-CHUNK_OVERLAP = 100  # overlap between chunks
-MIN_CHUNK_SIZE = 50  # skip tiny chunks
+CHUNK_SIZE = PROJECT_CHUNK_SIZE
+CHUNK_OVERLAP = PROJECT_CHUNK_OVERLAP
+MIN_CHUNK_SIZE = PROJECT_MIN_CHUNK_SIZE
 
 
 # =============================================================================
@@ -399,7 +406,7 @@ def status(palace_path: str):
         return
 
     # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
+    r = col.get(limit=STATUS_MAX_DRAWERS, include=["metadatas"])
     metas = r["metadatas"]
 
     wing_rooms = defaultdict(lambda: defaultdict(int))

@@ -25,6 +25,14 @@ from datetime import datetime
 
 from . import __version__
 from .config import MempalaceConfig
+from .constants import (
+    DEFAULT_SEARCH_RESULTS,
+    DEFAULT_MAX_HOPS,
+    DUPLICATE_THRESHOLD,
+    DUPLICATE_CANDIDATES,
+    DUPLICATE_PREVIEW_MAX,
+    DIARY_DEFAULT_LAST_N,
+)
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
@@ -171,7 +179,7 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+def tool_search(query: str, limit: int = DEFAULT_SEARCH_RESULTS, wing: str = None, room: str = None):
     return search_memories(
         query,
         palace_path=_config.palace_path,
@@ -181,14 +189,14 @@ def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
     )
 
 
-def tool_check_duplicate(content: str, threshold: float = 0.9):
+def tool_check_duplicate(content: str, threshold: float = DUPLICATE_THRESHOLD):
     col = _get_collection()
     if not col:
         return _no_palace()
     try:
         results = col.query(
             query_texts=[content],
-            n_results=5,
+            n_results=DUPLICATE_CANDIDATES,
             include=["metadatas", "documents", "distances"],
         )
         duplicates = []
@@ -205,7 +213,9 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
                             "wing": meta.get("wing", "?"),
                             "room": meta.get("room", "?"),
                             "similarity": similarity,
-                            "content": doc[:200] + "..." if len(doc) > 200 else doc,
+                            "content": doc[:DUPLICATE_PREVIEW_MAX] + "..."
+                            if len(doc) > DUPLICATE_PREVIEW_MAX
+                            else doc,
                         }
                     )
         return {
@@ -221,7 +231,7 @@ def tool_get_aaak_spec():
     return {"aaak_spec": AAAK_SPEC}
 
 
-def tool_traverse_graph(start_room: str, max_hops: int = 2):
+def tool_traverse_graph(start_room: str, max_hops: int = DEFAULT_MAX_HOPS):
     """Walk the palace graph from a room. Find connected ideas across wings."""
     col = _get_collection()
     if not col:
@@ -393,7 +403,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return {"success": False, "error": str(e)}
 
 
-def tool_diary_read(agent_name: str, last_n: int = 10):
+def tool_diary_read(agent_name: str, last_n: int = DIARY_DEFAULT_LAST_N):
     """
     Read an agent's recent diary entries. Returns the last N entries
     in chronological order — the agent's personal journal.

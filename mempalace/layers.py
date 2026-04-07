@@ -24,6 +24,14 @@ from collections import defaultdict
 import chromadb
 
 from .config import MempalaceConfig
+from .constants import (
+    L1_MAX_DRAWERS,
+    L1_MAX_CHARS,
+    L1_SNIPPET_MAX,
+    L2_SNIPPET_MAX,
+    DEFAULT_L2_RESULTS,
+    DEFAULT_SEARCH_RESULTS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -80,8 +88,8 @@ class Layer1:
     Groups by room, picks the top N moments, compresses to a compact summary.
     """
 
-    MAX_DRAWERS = 15  # at most 15 moments in wake-up
-    MAX_CHARS = 3200  # hard cap on total L1 text (~800 tokens)
+    MAX_DRAWERS = L1_MAX_DRAWERS
+    MAX_CHARS = L1_MAX_CHARS
 
     def __init__(self, palace_path: str = None, wing: str = None):
         cfg = MempalaceConfig()
@@ -151,8 +159,8 @@ class Layer1:
 
                 # Truncate doc to keep L1 compact
                 snippet = doc.strip().replace("\n", " ")
-                if len(snippet) > 200:
-                    snippet = snippet[:197] + "..."
+                if len(snippet) > L1_SNIPPET_MAX:
+                    snippet = snippet[:L1_SNIPPET_MAX - 3] + "..."
 
                 entry_line = f"  - {snippet}"
                 if source:
@@ -184,7 +192,7 @@ class Layer2:
         cfg = MempalaceConfig()
         self.palace_path = palace_path or cfg.palace_path
 
-    def retrieve(self, wing: str = None, room: str = None, n_results: int = 10) -> str:
+    def retrieve(self, wing: str = None, room: str = None, n_results: int = DEFAULT_L2_RESULTS) -> str:
         """Retrieve drawers filtered by wing and/or room."""
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
@@ -223,8 +231,8 @@ class Layer2:
             room_name = meta.get("room", "?")
             source = Path(meta.get("source_file", "")).name if meta.get("source_file") else ""
             snippet = doc.strip().replace("\n", " ")
-            if len(snippet) > 300:
-                snippet = snippet[:297] + "..."
+            if len(snippet) > L2_SNIPPET_MAX:
+                snippet = snippet[:L2_SNIPPET_MAX - 3] + "..."
             entry = f"  [{room_name}] {snippet}"
             if source:
                 entry += f"  ({source})"
@@ -248,7 +256,7 @@ class Layer3:
         cfg = MempalaceConfig()
         self.palace_path = palace_path or cfg.palace_path
 
-    def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
+    def search(self, query: str, wing: str = None, room: str = None, n_results: int = DEFAULT_SEARCH_RESULTS) -> str:
         """Semantic search, returns compact result text."""
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
@@ -292,8 +300,8 @@ class Layer3:
             source = Path(meta.get("source_file", "")).name if meta.get("source_file") else ""
 
             snippet = doc.strip().replace("\n", " ")
-            if len(snippet) > 300:
-                snippet = snippet[:297] + "..."
+            if len(snippet) > L2_SNIPPET_MAX:
+                snippet = snippet[:L2_SNIPPET_MAX - 3] + "..."
 
             lines.append(f"  [{i}] {wing_name}/{room_name} (sim={similarity})")
             lines.append(f"      {snippet}")
@@ -402,7 +410,7 @@ class MemoryStack:
         """On-demand L2 retrieval filtered by wing/room."""
         return self.l2.retrieve(wing=wing, room=room, n_results=n_results)
 
-    def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
+    def search(self, query: str, wing: str = None, room: str = None, n_results: int = DEFAULT_SEARCH_RESULTS) -> str:
         """Deep L3 semantic search."""
         return self.l3.search(query, wing=wing, room=room, n_results=n_results)
 

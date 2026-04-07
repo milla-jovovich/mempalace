@@ -17,6 +17,7 @@ No external graph DB needed — built from ChromaDB metadata.
 
 from collections import defaultdict, Counter
 from .config import MempalaceConfig
+from .constants import DEFAULT_MAX_HOPS, GRAPH_BATCH_SIZE, GRAPH_MAX_RESULTS
 
 import chromadb
 
@@ -48,7 +49,7 @@ def build_graph(col=None, config=None):
 
     offset = 0
     while offset < total:
-        batch = col.get(limit=1000, offset=offset, include=["metadatas"])
+        batch = col.get(limit=GRAPH_BATCH_SIZE, offset=offset, include=["metadatas"])
         for meta in batch["metadatas"]:
             room = meta.get("room", "")
             wing = meta.get("wing", "")
@@ -96,7 +97,7 @@ def build_graph(col=None, config=None):
     return nodes, edges
 
 
-def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
+def traverse(start_room: str, col=None, config=None, max_hops: int = DEFAULT_MAX_HOPS):
     """
     Walk the graph from a starting room. Find connected rooms
     through shared wings.
@@ -155,7 +156,7 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
 
     # Sort by relevance (hop distance, then count)
     results.sort(key=lambda x: (x["hop"], -x["count"]))
-    return results[:50]  # cap results
+    return results[:GRAPH_MAX_RESULTS]
 
 
 def find_tunnels(wing_a: str = None, wing_b: str = None, col=None, config=None):
@@ -187,7 +188,7 @@ def find_tunnels(wing_a: str = None, wing_b: str = None, col=None, config=None):
         )
 
     tunnels.sort(key=lambda x: -x["count"])
-    return tunnels[:50]
+    return tunnels[:GRAPH_MAX_RESULTS]
 
 
 def graph_stats(col=None, config=None):

@@ -18,6 +18,7 @@ from collections import defaultdict
 import chromadb
 
 from .normalize import normalize
+from .constants import CONVO_MIN_CHUNK_SIZE
 
 
 # File types that might contain conversations
@@ -41,7 +42,7 @@ SKIP_DIRS = {
     ".mempalace",
 }
 
-MIN_CHUNK_SIZE = 30
+MIN_CHUNK_SIZE = CONVO_MIN_CHUNK_SIZE
 
 
 # =============================================================================
