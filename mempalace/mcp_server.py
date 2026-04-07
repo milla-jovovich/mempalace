@@ -25,7 +25,7 @@ from datetime import datetime
 from .config import MempalaceConfig
 from .version import __version__
 from .searcher import search_memories
-from .security import content_hash
+from .security import content_hash, load_or_create_token, verify_token
 from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
 
@@ -37,6 +37,9 @@ logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
 
 _config = MempalaceConfig()
+
+# Auth state — loaded at startup if auth is enabled
+_auth_token = None
 
 
 def _get_collection(create=False):
@@ -689,24 +692,44 @@ TOOLS = {
 }
 
 
+def _check_auth(params, req_id):
+    """Check auth token if authentication is enabled. Returns error response or None."""
+    if _auth_token is None:
+        return None  # Auth not enabled
+    token = params.get("_meta", {}).get("auth_token", "")
+    if not token or not verify_token(token, _auth_token):
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {"code": -32001, "message": "Unauthorized — invalid or missing auth token"},
+        }
+    return None
+
+
 def handle_request(request):
     method = request.get("method", "")
     params = request.get("params", {})
     req_id = request.get("id")
 
     if method == "initialize":
+        server_info = {"name": "mempalace", "version": __version__}
+        if _auth_token is not None:
+            server_info["authRequired"] = True
         return {
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "mempalace", "version": __version__},
+                "serverInfo": server_info,
             },
         }
     elif method == "notifications/initialized":
         return None
     elif method == "tools/list":
+        auth_err = _check_auth(params, req_id)
+        if auth_err:
+            return auth_err
         return {
             "jsonrpc": "2.0",
             "id": req_id,
@@ -718,6 +741,9 @@ def handle_request(request):
             },
         }
     elif method == "tools/call":
+        auth_err = _check_auth(params, req_id)
+        if auth_err:
+            return auth_err
         tool_name = params.get("name")
         tool_args = params.get("arguments", {})
         if tool_name not in TOOLS:
@@ -807,7 +833,11 @@ def handle_request(request):
 
 
 def main():
+    global _auth_token
     logger.info("MemPalace MCP Server starting...")
+    if _config.auth_enabled:
+        _auth_token = load_or_create_token(_config._config_dir)
+        logger.info("Authentication enabled.")
     while True:
         try:
             line = sys.stdin.readline()

@@ -11,9 +11,12 @@ import pytest
 
 from mempalace.security import (
     content_hash,
+    generate_auth_token,
+    load_or_create_token,
     secure_dir,
     secure_file,
     validate_bind_address,
+    verify_token,
 )
 
 
@@ -108,3 +111,58 @@ class TestValidateBindAddress:
     def test_rejects_empty_string(self):
         with pytest.raises(ValueError, match="non-localhost"):
             validate_bind_address("")
+
+
+# ── Authentication ───────────────────────────────────────────────────────
+
+
+class TestAuthToken:
+    def test_generate_auth_token_format(self):
+        token = generate_auth_token()
+        assert isinstance(token, str)
+        assert len(token) == 43  # secrets.token_urlsafe(32) produces 43 chars
+
+    def test_generate_auth_token_unique(self):
+        assert generate_auth_token() != generate_auth_token()
+
+    def test_verify_token_correct(self):
+        assert verify_token("my-secret", "my-secret") is True
+
+    def test_verify_token_wrong(self):
+        assert verify_token("wrong", "my-secret") is False
+
+    def test_verify_token_empty(self):
+        assert verify_token("", "my-secret") is False
+
+    def test_load_or_create_token_creates(self, monkeypatch):
+        """Token is created and returned on first call (file fallback)."""
+        # Force keyring to fail so we test file fallback
+        monkeypatch.setattr(
+            "mempalace.security._try_keyring_get", lambda account: None
+        )
+        monkeypatch.setattr(
+            "mempalace.security._try_keyring_set", lambda account, value: False
+        )
+        d = tempfile.mkdtemp()
+        token = load_or_create_token(d)
+        assert isinstance(token, str)
+        assert len(token) == 43
+        # Token file exists with restrictive permissions
+        token_path = os.path.join(d, "auth_token")
+        assert os.path.exists(token_path)
+        if sys.platform != "win32":
+            mode = stat.S_IMODE(os.stat(token_path).st_mode)
+            assert mode == 0o600
+
+    def test_load_or_create_token_reads_existing(self, monkeypatch):
+        """Second call returns the same token."""
+        monkeypatch.setattr(
+            "mempalace.security._try_keyring_get", lambda account: None
+        )
+        monkeypatch.setattr(
+            "mempalace.security._try_keyring_set", lambda account, value: False
+        )
+        d = tempfile.mkdtemp()
+        token1 = load_or_create_token(d)
+        token2 = load_or_create_token(d)
+        assert token1 == token2

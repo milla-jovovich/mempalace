@@ -341,6 +341,112 @@ class TestDiaryTools:
 # ── Input Validation ───────────────────────────────────────────────────
 
 
+class TestAuth:
+    def test_auth_disabled_no_token_needed(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        from mempalace import mcp_server
+        from mempalace.mcp_server import handle_request
+
+        monkeypatch.setattr(mcp_server, "_auth_token", None)
+        _get_collection(palace_path, create=True)
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 200,
+                "params": {"name": "mempalace_status", "arguments": {}},
+            }
+        )
+        assert "result" in resp
+
+    def test_auth_enabled_missing_token(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        from mempalace import mcp_server
+        from mempalace.mcp_server import handle_request
+
+        monkeypatch.setattr(mcp_server, "_auth_token", "secret-token-123")
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 201,
+                "params": {"name": "mempalace_status", "arguments": {}},
+            }
+        )
+        assert resp["error"]["code"] == -32001
+
+    def test_auth_enabled_wrong_token(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        from mempalace import mcp_server
+        from mempalace.mcp_server import handle_request
+
+        monkeypatch.setattr(mcp_server, "_auth_token", "secret-token-123")
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 202,
+                "params": {
+                    "name": "mempalace_status",
+                    "arguments": {},
+                    "_meta": {"auth_token": "wrong-token"},
+                },
+            }
+        )
+        assert resp["error"]["code"] == -32001
+
+    def test_auth_enabled_valid_token(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        from mempalace import mcp_server
+        from mempalace.mcp_server import handle_request
+
+        monkeypatch.setattr(mcp_server, "_auth_token", "secret-token-123")
+        _get_collection(palace_path, create=True)
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 203,
+                "params": {
+                    "name": "mempalace_status",
+                    "arguments": {},
+                    "_meta": {"auth_token": "secret-token-123"},
+                },
+            }
+        )
+        assert "result" in resp
+
+    def test_initialize_reports_auth_required(self, monkeypatch):
+        from mempalace import mcp_server
+        from mempalace.mcp_server import handle_request
+
+        monkeypatch.setattr(mcp_server, "_auth_token", "some-token")
+
+        resp = handle_request({"method": "initialize", "id": 204, "params": {}})
+        assert resp["result"]["serverInfo"]["authRequired"] is True
+
+    def test_initialize_no_auth_required_when_disabled(self, monkeypatch):
+        from mempalace import mcp_server
+        from mempalace.mcp_server import handle_request
+
+        monkeypatch.setattr(mcp_server, "_auth_token", None)
+
+        resp = handle_request({"method": "initialize", "id": 205, "params": {}})
+        assert "authRequired" not in resp["result"]["serverInfo"]
+
+    def test_tools_list_requires_auth(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        from mempalace import mcp_server
+        from mempalace.mcp_server import handle_request
+
+        monkeypatch.setattr(mcp_server, "_auth_token", "secret-token-123")
+
+        resp = handle_request(
+            {"method": "tools/list", "id": 206, "params": {}}
+        )
+        assert resp["error"]["code"] == -32001
+
+
 class TestInputValidation:
     def test_missing_required_field(self, monkeypatch, config, palace_path, kg):
         _patch_mcp_server(monkeypatch, config, palace_path, kg)
