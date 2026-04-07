@@ -66,6 +66,11 @@ INPUT=$(cat)
 
 # Parse fields from Claude Code's JSON
 SESSION_ID=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id','unknown'))" 2>/dev/null)
+# Sanitize SESSION_ID to prevent path traversal (e.g., "../../etc/cron.d/evil")
+# Only allow alphanumeric, underscore, and hyphen characters
+SESSION_ID=$(echo "$SESSION_ID" | tr -cd '[:alnum:]_-')
+[ -z "$SESSION_ID" ] && SESSION_ID="unknown"
+
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('stop_hook_active', False))" 2>/dev/null)
 TRANSCRIPT_PATH=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))" 2>/dev/null)
 

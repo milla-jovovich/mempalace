@@ -58,6 +58,10 @@ MEMPAL_DIR=""
 INPUT=$(cat)
 
 SESSION_ID=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id','unknown'))" 2>/dev/null)
+# Sanitize SESSION_ID to prevent path traversal and log injection
+# Only allow alphanumeric, underscore, and hyphen characters
+SESSION_ID=$(echo "$SESSION_ID" | tr -cd '[:alnum:]_-')
+[ -z "$SESSION_ID" ] && SESSION_ID="unknown"
 
 echo "[$(date '+%H:%M:%S')] PRE-COMPACT triggered for session $SESSION_ID" >> "$STATE_DIR/hook.log"
 
