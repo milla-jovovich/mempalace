@@ -714,6 +714,15 @@ def _print_entity_list(entities: list, label: str):
         print(f"    {i + 1:2}. {e['name']:20} [{confidence_bar}] {signals_str}")
 
 
+def _prompt(prompt: str, default: str = "") -> str:
+    """Read user input safely; fall back to a default on EOF/non-interactive stdin."""
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        print(f"\n  No interactive input available — defaulting to: {default or 'accept'}")
+        return default
+
+
 def confirm_entities(detected: dict, yes: bool = False) -> dict:
     """
     Interactive confirmation step.
@@ -750,7 +759,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
     print("    [add]    Add missing people or projects")
     print()
 
-    choice = input("  Your choice [enter/edit/add]: ").strip().lower()
+    choice = _prompt("  Your choice [enter/edit/add]: ").lower()
 
     confirmed_people = [e["name"] for e in detected["people"]]
     confirmed_projects = [e["name"] for e in detected["projects"]]
@@ -760,7 +769,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
         if detected["uncertain"]:
             print("\n  Uncertain entities — classify each:")
             for e in detected["uncertain"]:
-                ans = input(f"    {e['name']} — (p)erson, (r)roject, or (s)kip? ").strip().lower()
+                ans = _prompt(f"    {e['name']} — (p)erson, (r)roject, or (s)kip? ").lower()
                 if ans == "p":
                     confirmed_people.append(e["name"])
                 elif ans == "r":
@@ -768,28 +777,28 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
 
         # Remove wrong people
         print(f"\n  Current people: {', '.join(confirmed_people) or '(none)'}")
-        remove = input(
+        remove = _prompt(
             "  Numbers to REMOVE from people (comma-separated, or enter to skip): "
-        ).strip()
+        )
         if remove:
             to_remove = {int(x.strip()) - 1 for x in remove.split(",") if x.strip().isdigit()}
             confirmed_people = [p for i, p in enumerate(confirmed_people) if i not in to_remove]
 
         # Remove wrong projects
         print(f"\n  Current projects: {', '.join(confirmed_projects) or '(none)'}")
-        remove = input(
+        remove = _prompt(
             "  Numbers to REMOVE from projects (comma-separated, or enter to skip): "
-        ).strip()
+        )
         if remove:
             to_remove = {int(x.strip()) - 1 for x in remove.split(",") if x.strip().isdigit()}
             confirmed_projects = [p for i, p in enumerate(confirmed_projects) if i not in to_remove]
 
-    if choice == "add" or input("\n  Add any missing? [y/N]: ").strip().lower() == "y":
+    if choice == "add" or _prompt("\n  Add any missing? [y/N]: ").lower() == "y":
         while True:
-            name = input("  Name (or enter to stop): ").strip()
+            name = _prompt("  Name (or enter to stop): ")
             if not name:
                 break
-            kind = input(f"  Is '{name}' a (p)erson or (r)roject? ").strip().lower()
+            kind = _prompt(f"  Is '{name}' a (p)erson or (r)roject? ").lower()
             if kind == "p":
                 confirmed_people.append(name)
             elif kind == "r":
