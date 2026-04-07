@@ -9,12 +9,15 @@ Stores verbatim chunks as drawers. No summaries. Ever.
 
 import os
 import sys
+import signal
 import hashlib
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
 import chromadb
+
+from .checkpoint import MineCheckpoint
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -56,6 +59,7 @@ SKIP_DIRS = {
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
+BATCH_SIZE = 50  # drawers per ChromaDB write
 
 
 # =============================================================================
@@ -189,6 +193,50 @@ def get_collection(palace_path: str):
         return client.create_collection("mempalace_drawers")
 
 
+def check_palace_health(palace_path: str) -> bool:
+    """Return True if the palace is readable, False if corrupted."""
+    try:
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection("mempalace_drawers")
+        col.count()
+        return True
+    except Exception:
+        return False
+
+
+def _find_hnsw_dir(palace_path: str):
+    """Walk palace_path to find the directory containing link_lists.bin."""
+    for root, _dirs, files in os.walk(palace_path):
+        if "link_lists.bin" in files:
+            return root
+    return None
+
+
+def repair_palace(palace_path: str, force: bool = False) -> bool:
+    """Delete corrupted HNSW index files so ChromaDB rebuilds on next access.
+
+    Returns True if repair was performed.
+    """
+    hnsw_dir = _find_hnsw_dir(palace_path)
+    if hnsw_dir is None:
+        return False
+
+    link_lists = os.path.join(hnsw_dir, "link_lists.bin")
+    size_bytes = os.path.getsize(link_lists) if os.path.exists(link_lists) else 0
+    size_gb = size_bytes / (1024 ** 3)
+
+    # Heuristic: link_lists.bin should never exceed ~100 MB for reasonable collections
+    if force or size_gb > 1.0:
+        label = f"{size_gb:.1f} GB" if size_gb >= 1.0 else f"{size_bytes} bytes"
+        print(f"  ⚠️  Corrupted HNSW index detected ({label}). Rebuilding...")
+        for fname in ["link_lists.bin", "data_level0.bin", "length.bin", "header.bin"]:
+            path = os.path.join(hnsw_dir, fname)
+            if os.path.exists(path):
+                os.remove(path)
+        return True
+    return False
+
+
 def file_already_mined(collection, source_file: str) -> bool:
     """Fast check: has this file been filed before?"""
     try:
@@ -198,11 +246,15 @@ def file_already_mined(collection, source_file: str) -> bool:
         return False
 
 
+def make_drawer_id(wing: str, room: str, source_file: str, chunk_index: int) -> str:
+    return f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk_index)).encode()).hexdigest()[:16]}"
+
+
 def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
 ):
     """Add one drawer to the palace."""
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk_index)).encode()).hexdigest()[:16]}"
+    drawer_id = make_drawer_id(wing, room, source_file, chunk_index)
     try:
         collection.add(
             documents=[content],
@@ -225,6 +277,55 @@ def add_drawer(
         raise
 
 
+class DrawerBatch:
+    """Accumulates drawers and flushes to ChromaDB in batches."""
+
+    def __init__(self, collection, batch_size: int = BATCH_SIZE):
+        self._collection = collection
+        self._batch_size = batch_size
+        self._ids = []
+        self._documents = []
+        self._metadatas = []
+
+    def add(self, drawer_id: str, content: str, metadata: dict):
+        self._ids.append(drawer_id)
+        self._documents.append(content)
+        self._metadatas.append(metadata)
+        if len(self._ids) >= self._batch_size:
+            self.flush()
+
+    def flush(self):
+        if not self._ids:
+            return
+        try:
+            self._collection.add(
+                ids=self._ids,
+                documents=self._documents,
+                metadatas=self._metadatas,
+            )
+        except Exception as e:
+            # If batch add fails due to some duplicates, fall back to one-by-one
+            if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+                for i in range(len(self._ids)):
+                    try:
+                        self._collection.add(
+                            ids=[self._ids[i]],
+                            documents=[self._documents[i]],
+                            metadatas=[self._metadatas[i]],
+                        )
+                    except Exception:
+                        pass
+            else:
+                raise
+        self._ids.clear()
+        self._documents.clear()
+        self._metadatas.clear()
+
+    @property
+    def pending(self) -> int:
+        return len(self._ids)
+
+
 # =============================================================================
 # PROCESS ONE FILE
 # =============================================================================
@@ -238,13 +339,19 @@ def process_file(
     rooms: list,
     agent: str,
     dry_run: bool,
+    checkpoint: MineCheckpoint = None,
+    batch: DrawerBatch = None,
 ) -> int:
     """Read, chunk, route, and file one file. Returns drawer count."""
 
-    # Skip if already filed
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file):
-        return 0
+
+    # Skip if already filed (checkpoint first, then ChromaDB)
+    if not dry_run:
+        if checkpoint and checkpoint.is_completed(source_file):
+            return 0
+        if file_already_mined(collection, source_file):
+            return 0
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
@@ -264,17 +371,30 @@ def process_file(
 
     drawers_added = 0
     for chunk in chunks:
-        added = add_drawer(
-            collection=collection,
-            wing=wing,
-            room=room,
-            content=chunk["content"],
-            source_file=source_file,
-            chunk_index=chunk["chunk_index"],
-            agent=agent,
-        )
-        if added:
+        drawer_id = make_drawer_id(wing, room, source_file, chunk["chunk_index"])
+        metadata = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file,
+            "chunk_index": chunk["chunk_index"],
+            "added_by": agent,
+            "filed_at": datetime.now().isoformat(),
+        }
+        if batch is not None:
+            batch.add(drawer_id, chunk["content"], metadata)
             drawers_added += 1
+        else:
+            added = add_drawer(
+                collection=collection,
+                wing=wing,
+                room=room,
+                content=chunk["content"],
+                source_file=source_file,
+                chunk_index=chunk["chunk_index"],
+                agent=agent,
+            )
+            if added:
+                drawers_added += 1
 
     return drawers_added
 
@@ -343,10 +463,44 @@ def mine(
         print("  DRY RUN — nothing will be filed")
     print(f"{'─' * 55}\n")
 
+    collection = None
+    checkpoint = None
+    batch = None
+
     if not dry_run:
+        # Health check: detect and repair corrupted HNSW index before proceeding
+        os.makedirs(palace_path, exist_ok=True)
+        if not check_palace_health(palace_path):
+            print("  Palace health check failed — attempting repair...")
+            if repair_palace(palace_path):
+                print("  HNSW index removed. ChromaDB will rebuild it.")
+            else:
+                print("  Could not auto-repair. Try: mempalace repair --force")
+
         collection = get_collection(palace_path)
-    else:
-        collection = None
+        checkpoint = MineCheckpoint(palace_path)
+        batch = DrawerBatch(collection)
+
+        if checkpoint.completed_count > 0:
+            print(f"  Resuming: {checkpoint.completed_count} files already checkpointed")
+
+        # Graceful shutdown: flush pending batch and save checkpoint on SIGINT/SIGTERM
+        def _graceful_shutdown(signum, frame):
+            print("\n  Interrupted — flushing pending batch...")
+            try:
+                if batch is not None:
+                    batch.flush()
+            except Exception:
+                pass
+            try:
+                if checkpoint is not None:
+                    checkpoint.save()
+            except Exception:
+                pass
+            sys.exit(1)
+
+        signal.signal(signal.SIGTERM, _graceful_shutdown)
+        signal.signal(signal.SIGINT, _graceful_shutdown)
 
     total_drawers = 0
     files_skipped = 0
@@ -361,6 +515,8 @@ def mine(
             rooms=rooms,
             agent=agent,
             dry_run=dry_run,
+            checkpoint=checkpoint,
+            batch=batch,
         )
         if drawers == 0 and not dry_run:
             files_skipped += 1
@@ -370,6 +526,12 @@ def mine(
             room_counts[room] += 1
             if not dry_run:
                 print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+
+        # After each file: flush batch and update checkpoint
+        if not dry_run and drawers > 0:
+            batch.flush()
+            checkpoint.mark_completed(str(filepath), drawers)
+            checkpoint.save()
 
     print(f"\n{'=' * 55}")
     print("  Done.")

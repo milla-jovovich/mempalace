@@ -140,6 +140,38 @@ def cmd_split(args):
         sys.argv = old_argv
 
 
+def cmd_repair(args):
+    from .miner import check_palace_health, repair_palace, get_collection
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+
+    if not os.path.exists(palace_path):
+        print(f"\n  No palace found at {palace_path}")
+        return
+
+    if args.force:
+        print(f"  Force-repairing palace at {palace_path}...")
+        if repair_palace(palace_path, force=True):
+            print("  HNSW index removed. It will rebuild on next access.")
+        else:
+            print("  No HNSW index files found — nothing to repair.")
+        return
+
+    print(f"  Checking palace health at {palace_path}...")
+    if check_palace_health(palace_path):
+        print("  ✓ Palace is healthy.")
+    else:
+        print("  ✗ Palace is corrupted. Attempting repair...")
+        if repair_palace(palace_path):
+            print("  HNSW index removed. Verifying...")
+            if check_palace_health(palace_path):
+                print("  ✓ Palace recovered successfully.")
+            else:
+                print("  ✗ Still corrupted. Try: mempalace repair --force")
+        else:
+            print("  Could not auto-detect corruption. Try: mempalace repair --force")
+
+
 def cmd_status(args):
     from .miner import status
 
@@ -350,6 +382,14 @@ def main():
         help="Only split files containing at least N sessions (default: 2)",
     )
 
+    # repair
+    p_repair = sub.add_parser(
+        "repair", help="Detect and repair corrupted HNSW index (caused by interrupted mining)"
+    )
+    p_repair.add_argument(
+        "--force", action="store_true", help="Delete and rebuild index unconditionally"
+    )
+
     # status
     sub.add_parser("status", help="Show what's been filed")
 
@@ -366,6 +406,7 @@ def main():
         "search": cmd_search,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
+        "repair": cmd_repair,
         "status": cmd_status,
     }
     dispatch[args.command](args)
