@@ -20,7 +20,7 @@ from .constants import (
     PROJECT_CHUNK_SIZE,
     PROJECT_CHUNK_OVERLAP,
     PROJECT_MIN_CHUNK_SIZE,
-    STATUS_MAX_DRAWERS,
+    GRAPH_BATCH_SIZE,
 )
 
 READABLE_EXTENSIONS = {
@@ -405,16 +405,20 @@ def status(palace_path: str) -> None:
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
-    r = col.get(limit=STATUS_MAX_DRAWERS, include=["metadatas"])
-    metas = r["metadatas"]
-
+    # Count by wing and room (paginated to avoid OOM on large palaces)
+    total = col.count()
     wing_rooms = defaultdict(lambda: defaultdict(int))
-    for m in metas:
-        wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+    offset = 0
+    while offset < total:
+        batch = col.get(limit=GRAPH_BATCH_SIZE, offset=offset, include=["metadatas"])
+        for m in batch["metadatas"]:
+            wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+        if not batch["ids"]:
+            break
+        offset += len(batch["ids"])
 
     print(f"\n{'=' * 55}")
-    print(f"  MemPalace Status — {len(metas)} drawers")
+    print(f"  MemPalace Status — {total} drawers")
     print(f"{'=' * 55}\n")
     for wing, rooms in sorted(wing_rooms.items()):
         print(f"  WING: {wing}")

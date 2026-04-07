@@ -31,6 +31,7 @@ from .constants import (
     L2_SNIPPET_MAX,
     DEFAULT_L2_RESULTS,
     DEFAULT_SEARCH_RESULTS,
+    GRAPH_BATCH_SIZE,
 )
 
 
@@ -104,18 +105,30 @@ class Layer1:
         except Exception:
             return "## L1 — No palace found. Run: mempalace mine <dir>"
 
-        # Fetch all drawers (with optional wing filter)
-        kwargs = {"include": ["documents", "metadatas"]}
-        if self.wing:
-            kwargs["where"] = {"wing": self.wing}
-
+        # Fetch drawers in batches (with optional wing filter)
+        docs = []
+        metas = []
+        total = col.count()
+        offset = 0
         try:
-            results = col.get(**kwargs)
+            while offset < total:
+                kwargs = {
+                    "include": ["documents", "metadatas"],
+                    "limit": GRAPH_BATCH_SIZE,
+                    "offset": offset,
+                }
+                if self.wing:
+                    kwargs["where"] = {"wing": self.wing}
+                batch = col.get(**kwargs)
+                batch_docs = batch.get("documents", [])
+                batch_metas = batch.get("metadatas", [])
+                if not batch_docs:
+                    break
+                docs.extend(batch_docs)
+                metas.extend(batch_metas)
+                offset += len(batch["ids"])
         except Exception:
             return "## L1 — No drawers found."
-
-        docs = results.get("documents", [])
-        metas = results.get("metadatas", [])
 
         if not docs:
             return "## L1 — No memories yet."

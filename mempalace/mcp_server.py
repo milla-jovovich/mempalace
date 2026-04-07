@@ -58,6 +58,24 @@ def _get_collection(create: bool = False) -> chromadb.Collection | None:
         return None
 
 
+def _iter_metadatas(col, where: dict = None, batch_size: int = 1000) -> list[dict]:
+    """Fetch all metadatas from a collection in batches to avoid OOM on large palaces."""
+    total = col.count()
+    all_meta = []
+    offset = 0
+    while offset < total:
+        kwargs = {"include": ["metadatas"], "limit": batch_size, "offset": offset}
+        if where:
+            kwargs["where"] = where
+        batch = col.get(**kwargs)
+        metas = batch.get("metadatas", [])
+        if not metas:
+            break
+        all_meta.extend(metas)
+        offset += len(batch["ids"])
+    return all_meta
+
+
 def _no_palace() -> dict:
     return {
         "error": "No palace found",
@@ -77,7 +95,7 @@ def tool_status() -> dict:
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
+        all_meta = _iter_metadatas(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -134,7 +152,7 @@ def tool_list_wings() -> dict:
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
+        all_meta = _iter_metadatas(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -149,10 +167,8 @@ def tool_list_rooms(wing: str = None) -> dict:
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"]}
-        if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
+        where = {"wing": wing} if wing else None
+        all_meta = _iter_metadatas(col, where=where)
         for m in all_meta:
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
@@ -167,7 +183,7 @@ def tool_get_taxonomy() -> dict:
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
+        all_meta = _iter_metadatas(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")

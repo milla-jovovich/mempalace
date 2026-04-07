@@ -52,7 +52,3 @@ DUPLICATE_PREVIEW_MAX = 200  # max chars shown in duplicate preview
 # ---------------------------------------------------------------------------
 DIARY_DEFAULT_LAST_N = 10  # default diary entries to return
 
-# ---------------------------------------------------------------------------
-# Status query
-# ---------------------------------------------------------------------------
-STATUS_MAX_DRAWERS = 10000  # upper bound for status metadata fetch
