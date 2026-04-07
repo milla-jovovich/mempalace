@@ -744,32 +744,64 @@ def handle_request(request):
 
 
 def _read_message():
-    """Read a JSON-RPC message using Content-Length framing (MCP spec)."""
-    # Read headers until empty line
+    """Read a JSON-RPC message from stdin.
+
+    Supports two transports:
+    - Newline-delimited JSON (MCP SDK >= 1.28)
+    - Content-Length framing (legacy MCP / LSP)
+
+    Auto-detects on first line: if it starts with '{', it's newline-delimited.
+    """
+    line = sys.stdin.readline()
+    if not line:
+        return None  # EOF
+    line = line.strip()
+    if not line:
+        return _read_message()  # skip blank lines
+
+    # Newline-delimited JSON: line starts with '{'
+    if line.startswith("{"):
+        return json.loads(line)
+
+    # Content-Length framing: read headers, then body
+    global _transport_mode
+    _transport_mode = "content-length"
     content_length = None
+    if line.lower().startswith("content-length:"):
+        content_length = int(line.split(":", 1)[1].strip())
     while True:
-        line = sys.stdin.readline()
-        if not line:
-            return None  # EOF
-        line = line.strip()
-        if not line:
-            # Empty line = end of headers
+        hdr = sys.stdin.readline()
+        if not hdr:
+            return None
+        hdr = hdr.strip()
+        if not hdr:
             if content_length is not None:
                 break
             continue
-        if line.lower().startswith("content-length:"):
-            content_length = int(line.split(":", 1)[1].strip())
-    # Read exactly content_length bytes
+        if hdr.lower().startswith("content-length:"):
+            content_length = int(hdr.split(":", 1)[1].strip())
     body = sys.stdin.read(content_length)
     return json.loads(body)
 
 
+# Auto-detect transport mode: set on first _write_message call
+_transport_mode = None
+
+
 def _write_message(response):
-    """Write a JSON-RPC response using Content-Length framing (MCP spec)."""
+    """Write a JSON-RPC response to stdout.
+
+    Uses newline-delimited JSON by default, matching MCP SDK >= 1.28.
+    Falls back to Content-Length framing if the client sent Content-Length headers.
+    """
+    global _transport_mode
     body = json.dumps(response)
-    header = f"Content-Length: {len(body)}\r\n\r\n"
-    sys.stdout.write(header)
-    sys.stdout.write(body)
+    if _transport_mode == "content-length":
+        header = f"Content-Length: {len(body)}\r\n\r\n"
+        sys.stdout.write(header)
+        sys.stdout.write(body)
+    else:
+        sys.stdout.write(body + "\n")
     sys.stdout.flush()
 
 
