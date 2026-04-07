@@ -29,6 +29,7 @@ from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
 
 from .knowledge_graph import KnowledgeGraph
+from .burgess import scan_human_impact, format_review_block
 
 _kg = KnowledgeGraph()
 
@@ -247,10 +248,27 @@ def tool_graph_stats():
 # ==================== WRITE TOOLS ====================
 
 
+def tool_burgess_review(content: str):
+    """
+    Run a Burgess Principle human-impact review on content.
+    Scans for areas that affect real people and recommends human review.
+
+    Based on the Burgess Principle by Lewis James Burgess:
+    "Was a human member of the team able to personally review
+     the specific facts of my situation?"
+    """
+    scan_result = scan_human_impact(content)
+    return {
+        **scan_result,
+        "review_block": format_review_block(scan_result),
+    }
+
+
 def tool_add_drawer(
     wing: str, room: str, content: str, source_file: str = None, added_by: str = "mcp"
 ):
-    """File verbatim content into a wing/room. Checks for duplicates first."""
+    """File verbatim content into a wing/room. Checks for duplicates first.
+    Also runs a Burgess Principle human-impact scan and includes any flags."""
     col = _get_collection(create=True)
     if not col:
         return _no_palace()
@@ -264,25 +282,34 @@ def tool_add_drawer(
             "matches": dup["matches"],
         }
 
+    # Burgess Principle human-impact scan
+    impact_scan = scan_human_impact(content)
+    impact_areas = ",".join(a["area"] for a in impact_scan["areas"]) if impact_scan["flagged"] else ""
+
     drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((content[:100] + datetime.now().isoformat()).encode()).hexdigest()[:16]}"
 
     try:
+        metadata = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file or "",
+            "chunk_index": 0,
+            "added_by": added_by,
+            "filed_at": datetime.now().isoformat(),
+        }
+        if impact_areas:
+            metadata["burgess_flagged"] = impact_areas
+
         col.add(
             ids=[drawer_id],
             documents=[content],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file or "",
-                    "chunk_index": 0,
-                    "added_by": added_by,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
+            metadatas=[metadata],
         )
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
-        return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
+        result = {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
+        if impact_scan["flagged"]:
+            result["human_impact"] = impact_scan
+        return result
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -684,6 +711,20 @@ TOOLS = {
             "required": ["agent_name"],
         },
         "handler": tool_diary_read,
+    },
+    "mempalace_burgess_review": {
+        "description": "Run a Burgess Principle human-impact review on content. Scans for changes that affect real people — accessibility, privacy, security, user-facing language, billing, automated decisions, deployment. Returns flagged areas with recommended reviewers. Based on the Burgess Principle: 'Was a human member of the team able to personally review the specific facts of my situation?'",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The content (code, text, config) to scan for human impact",
+                },
+            },
+            "required": ["content"],
+        },
+        "handler": tool_burgess_review,
     },
 }
 

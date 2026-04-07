@@ -411,7 +411,7 @@ Letta charges $20–200/mo for agent-managed memory. MemPalace does it with a wi
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-### 19 Tools
+### 20 Tools
 
 **Palace (read)**
 
@@ -429,7 +429,7 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 
 | Tool | What |
 |------|------|
-| `mempalace_add_drawer` | File verbatim content |
+| `mempalace_add_drawer` | File verbatim content (with Burgess impact scan) |
 | `mempalace_delete_drawer` | Remove by ID |
 
 **Knowledge Graph**
@@ -457,7 +457,109 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 | `mempalace_diary_write` | Write AAAK diary entry |
 | `mempalace_diary_read` | Read recent diary entries |
 
+**Human-Impact Review**
+
+| Tool | What |
+|------|------|
+| `mempalace_burgess_review` | Burgess Principle human-impact scan |
+
 The AI learns AAAK and the memory protocol automatically from the `mempalace_status` response. No manual configuration.
+
+---
+
+## The Burgess Principle — Human-Impact Awareness
+
+MemPalace integrates the [Burgess Principle](https://github.com/ljbudgie/burgess-principle) — a minimalist framework that ensures changes affecting real people get human review before shipping. The core question:
+
+> **"Was a human member of the team able to personally review the specific facts of my situation?"**
+
+### How It Works
+
+Every time content is filed into the palace via `mempalace_add_drawer`, MemPalace automatically scans for seven human-impact areas:
+
+| Area | Examples |
+|------|----------|
+| **Accessibility** | ARIA labels, screen reader support, color contrast, keyboard navigation |
+| **Privacy & Personal Data** | GDPR, DSAR, data collection, consent flows, tracking |
+| **Security** | Authentication, credentials, encryption, input validation |
+| **User-Facing Language** | Error messages, onboarding text, notifications |
+| **Pricing & Billing** | Payment flows, subscriptions, refunds, pricing logic |
+| **Automated Decisions** | Credit scoring, content moderation, hiring filters, risk assessment |
+| **Deployment** | Production changes, feature flags, migrations, rollout config |
+
+If any area is flagged, the response includes a `human_impact` field with details and recommended reviewers.
+
+### Standalone Review
+
+Use the `mempalace_burgess_review` MCP tool to scan any content on demand:
+
+```
+> mempalace_burgess_review("Updated JWT auth and changed the error messages")
+
+## 🔍 Human-Impact Review (Burgess Principle)
+
+The following areas affect real people and should be reviewed by a human:
+- **Security** (5 signals) — authentication, credentials
+- **User-Facing Language** (1 signal) — error messages
+
+Recommendation: Review by a security engineer; a UX writer.
+```
+
+### Python API
+
+```python
+from mempalace.burgess import scan_human_impact, format_review_block
+
+result = scan_human_impact("Added GDPR consent flow and ARIA labels")
+print(format_review_block(result))
+```
+
+*The Burgess Principle is a [UK Certification Mark (UK00004343685)](https://github.com/ljbudgie/burgess-principle) by Lewis James Burgess, free for personal use under MIT licence.*
+
+---
+
+## Hermes Agent Integration
+
+MemPalace ships with a [Hermes Agent](https://github.com/ljbudgie/hermes-agent) memory provider plugin, so hermes-agent can use your palace as its persistent memory backend.
+
+### Setup
+
+```bash
+# 1. Install mempalace
+pip install mempalace
+
+# 2. Copy the provider plugin
+cp mempalace/hermes_provider.py /path/to/hermes-agent/plugins/memory/mempalace/__init__.py
+
+# 3. Configure hermes
+# In config.yaml:
+#   memory:
+#     provider: mempalace
+```
+
+### What It Does
+
+- **System prompt**: Injects Layer 0 (identity) and Layer 1 (essentials) into the hermes system prompt
+- **Prefetch**: Semantic search against your palace before each turn — relevant memories surface automatically
+- **Sync**: Each exchange is filed as a drawer in `wing_hermes/hermes-exchanges`
+- **Tools**: Exposes `mempalace_search` and `mempalace_kg_query` as hermes tools
+- **Context compression**: Extracts key facts from the knowledge graph before old messages are discarded
+- **Memory mirroring**: Hermes built-in memory writes (MEMORY.md, USER.md) are mirrored to the palace
+
+### Standalone Usage
+
+```python
+from mempalace.hermes_provider import MempalaceProvider
+
+provider = MempalaceProvider()
+provider.initialize(session_id="session-001")
+
+# Recall relevant context
+context = provider.prefetch("What did we decide about the API?")
+
+# Store a conversation turn
+provider.sync_turn("user question", "assistant answer")
+```
 
 ---
 
@@ -581,7 +683,7 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `cli.py` | CLI entry point |
 | `config.py` | Configuration loading and defaults |
 | `normalize.py` | Converts 5 chat formats to standard transcript |
-| `mcp_server.py` | MCP server — 19 tools, AAAK auto-teach, memory protocol |
+| `mcp_server.py` | MCP server — 20 tools, AAAK auto-teach, memory protocol |
 | `miner.py` | Project file ingest |
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |
 | `searcher.py` | Semantic search via ChromaDB |
@@ -593,6 +695,8 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `entity_registry.py` | Entity code registry |
 | `entity_detector.py` | Auto-detect people and projects from content |
 | `split_mega_files.py` | Split concatenated transcripts into per-session files |
+| `burgess.py` | Burgess Principle human-impact scanner |
+| `hermes_provider.py` | Hermes Agent memory provider plugin |
 | `hooks/mempal_save_hook.sh` | Auto-save every N messages |
 | `hooks/mempal_precompact_hook.sh` | Emergency save before compaction |
 
@@ -605,7 +709,9 @@ mempalace/
 ├── README.md                  ← you are here
 ├── mempalace/                 ← core package (README)
 │   ├── cli.py                 ← CLI entry point
-│   ├── mcp_server.py          ← MCP server (19 tools)
+│   ├── mcp_server.py          ← MCP server (20 tools)
+│   ├── burgess.py             ← Burgess Principle human-impact scanner
+│   ├── hermes_provider.py     ← Hermes Agent memory provider plugin
 │   ├── knowledge_graph.py     ← temporal entity graph
 │   ├── palace_graph.py        ← room navigation graph
 │   ├── dialect.py             ← AAAK compression
