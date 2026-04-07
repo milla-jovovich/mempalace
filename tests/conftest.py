@@ -13,6 +13,7 @@ instead of the real user profile.
 import os
 import shutil
 import tempfile
+from pathlib import Path
 
 # ── Isolate HOME before any mempalace imports ──────────────────────────
 _original_env = {}
@@ -53,30 +54,30 @@ def _isolate_home(tmp_path_factory):
 
 @pytest.fixture
 def tmp_dir():
-    """Create and auto-cleanup a temporary directory."""
+    """Create and auto-cleanup a temporary directory (returns Path)."""
     d = tempfile.mkdtemp(prefix="mempalace_test_")
-    yield d
+    yield Path(d)
     shutil.rmtree(d, ignore_errors=True)
 
 
 @pytest.fixture
 def palace_path(tmp_dir):
     """Path to an empty palace directory inside tmp_dir."""
-    p = os.path.join(tmp_dir, "palace")
-    os.makedirs(p)
-    return p
+    p = tmp_dir / "palace"
+    p.mkdir()
+    return str(p)
 
 
 @pytest.fixture
 def config(tmp_dir, palace_path):
     """A MempalaceConfig pointing at the temp palace."""
-    cfg_dir = os.path.join(tmp_dir, "config")
-    os.makedirs(cfg_dir)
     import json
 
-    with open(os.path.join(cfg_dir, "config.json"), "w") as f:
+    cfg_dir = tmp_dir / "config"
+    cfg_dir.mkdir()
+    with open(cfg_dir / "config.json", "w") as f:
         json.dump({"palace_path": palace_path}, f)
-    return MempalaceConfig(config_dir=cfg_dir)
+    return MempalaceConfig(config_dir=str(cfg_dir))
 
 
 @pytest.fixture
@@ -146,9 +147,32 @@ def seeded_collection(collection):
 
 
 @pytest.fixture
+def populated_palace(palace_path):
+    """Palace with sample drawers pre-loaded. Returns (palace_path, collection)."""
+    client = chromadb.PersistentClient(path=palace_path)
+    col = client.get_or_create_collection("mempalace_drawers")
+    col.add(
+        ids=["d1", "d2", "d3", "d4"],
+        documents=[
+            "Alice loves chess and plays every weekend",
+            "The backend API uses FastAPI with PostgreSQL",
+            "We decided to switch from REST to GraphQL",
+            "Riley scored three goals in Saturday's game",
+        ],
+        metadatas=[
+            {"wing": "family", "room": "hobbies", "hall": "hall_facts", "source_file": "chat1.txt", "date": "2026-01-10"},
+            {"wing": "code", "room": "backend", "hall": "hall_facts", "source_file": "proj.txt", "date": "2026-02-15"},
+            {"wing": "code", "room": "decisions", "hall": "hall_discoveries", "source_file": "proj.txt", "date": "2026-03-01"},
+            {"wing": "family", "room": "sports", "hall": "hall_events", "source_file": "chat2.txt", "date": "2026-03-20"},
+        ],
+    )
+    return palace_path, col
+
+
+@pytest.fixture
 def kg(tmp_dir):
     """An isolated KnowledgeGraph using a temp SQLite file."""
-    db_path = os.path.join(tmp_dir, "test_kg.sqlite3")
+    db_path = str(tmp_dir / "test_kg.sqlite3")
     return KnowledgeGraph(db_path=db_path)
 
 
@@ -167,3 +191,9 @@ def seeded_kg(kg):
     kg.add_triple("Alice", "works_at", "NewCo", valid_from="2025-01-01")
 
     return kg
+
+
+def write_file(path: Path, content: str):
+    """Helper to write a file, creating parent dirs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
