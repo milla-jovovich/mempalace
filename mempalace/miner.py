@@ -63,21 +63,37 @@ MIN_CHUNK_SIZE = 50  # skip tiny chunks
 # =============================================================================
 
 
-def load_config(project_dir: str) -> dict:
-    """Load mempalace.yaml from project directory (falls back to mempal.yaml)."""
+def load_config(project_dir: str, config_path: str = None) -> dict:
+    """Load mempalace.yaml from an explicit path or from the project directory.
+
+    Args:
+        project_dir: Project directory to mine (used as fallback search location).
+        config_path: Explicit path to a mempalace.yaml file. When provided, the
+                     project directory is not searched. This allows storing project
+                     configs in a central location without placing any files inside
+                     the repository.
+    """
     import yaml
 
-    config_path = Path(project_dir).expanduser().resolve() / "mempalace.yaml"
-    if not config_path.exists():
-        # Fallback to legacy name
-        legacy_path = Path(project_dir).expanduser().resolve() / "mempal.yaml"
-        if legacy_path.exists():
-            config_path = legacy_path
-        else:
-            print(f"ERROR: No mempalace.yaml found in {project_dir}")
-            print(f"Run: mempalace init {project_dir}")
+    if config_path:
+        path = Path(config_path).expanduser().resolve()
+        if not path.exists():
+            print(f"ERROR: project config not found: {config_path}")
             sys.exit(1)
-    with open(config_path) as f:
+    else:
+        path = Path(project_dir).expanduser().resolve() / "mempalace.yaml"
+        if not path.exists():
+            # Fallback to legacy name
+            legacy_path = Path(project_dir).expanduser().resolve() / "mempal.yaml"
+            if legacy_path.exists():
+                path = legacy_path
+            else:
+                print(f"ERROR: No mempalace.yaml found in {project_dir}")
+                print("Tip: use --project-config to point to a central config file,")
+                print(f"     or run: mempalace init {project_dir}")
+                sys.exit(1)
+
+    with open(path) as f:
         return yaml.safe_load(f)
 
 
@@ -319,11 +335,12 @@ def mine(
     agent: str = "mempalace",
     limit: int = 0,
     dry_run: bool = False,
+    config_path: str = None,
 ):
     """Mine a project directory into the palace."""
 
     project_path = Path(project_dir).expanduser().resolve()
-    config = load_config(project_dir)
+    config = load_config(project_dir, config_path=config_path)
 
     wing = wing_override or config["wing"]
     rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])

@@ -88,6 +88,7 @@ def cmd_mine(args):
             agent=args.agent,
             limit=args.limit,
             dry_run=args.dry_run,
+            config_path=getattr(args, "project_config", None),
         )
 
 
@@ -296,6 +297,13 @@ def main():
     p_mine.add_argument("--limit", type=int, default=0, help="Max files to process (0 = all)")
     p_mine.add_argument(
         "--dry-run", action="store_true", help="Show what would be filed without filing"
+    )
+    p_mine.add_argument(
+        "--project-config",
+        default=None,
+        metavar="PATH",
+        help="Path to mempalace.yaml (default: <dir>/mempalace.yaml). "
+             "Use this to keep project configs in a central location outside the repository.",
     )
     p_mine.add_argument(
         "--extract",
