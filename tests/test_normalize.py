@@ -1,7 +1,9 @@
 import json
+import pytest
 from mempalace.normalize import (
     normalize,
     _try_chatgpt_json,
+    _try_claude_ai_json,
     _try_slack_json,
     _extract_content,
 )
@@ -124,3 +126,56 @@ def test_extract_content_list_of_blocks():
 
 def test_extract_content_dict():
     assert _extract_content({"text": "from dict"}) == "from dict"
+
+
+def test_claude_ai_privacy_export(tmp_dir):
+    """Privacy export: array of conversation objects each with chat_messages."""
+    data = [
+        {
+            "uuid": "conv-1",
+            "chat_messages": [
+                {"role": "human", "content": "What is the capital of France?"},
+                {"role": "assistant", "content": "The capital of France is Paris."},
+            ],
+        },
+        {
+            "uuid": "conv-2",
+            "chat_messages": [
+                {"role": "user", "content": "Explain recursion."},
+                {"role": "ai", "content": "Recursion is a function calling itself."},
+            ],
+        },
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "> What is the capital of France?" in result
+    assert "The capital of France is Paris." in result
+    assert "> Explain recursion." in result
+    assert "Recursion is a function calling itself." in result
+
+
+def test_slack_username_fallback():
+    """Slack messages with username but no user key should still be parsed."""
+    data = [
+        {"type": "message", "username": "alice", "text": "Anyone around?"},
+        {"type": "message", "username": "bob", "text": "Yep, what do you need?"},
+        {"type": "message", "username": "alice", "text": "Quick question about the API."},
+    ]
+    result = _try_slack_json(data)
+    assert result is not None
+    assert "> Anyone around?" in result
+    assert "Yep, what do you need?" in result
+
+
+def test_extract_content_mixed_list():
+    """List containing both plain strings and text-block dicts."""
+    mixed = ["plain string", {"type": "text", "text": "block text"}]
+    result = _extract_content(mixed)
+    assert "plain string" in result
+    assert "block text" in result
+
+
+def test_normalize_ioerror():
+    """normalize() with a nonexistent path should raise IOError."""
+    with pytest.raises(IOError):
+        normalize("/nonexistent/path/that/does/not/exist.json")
