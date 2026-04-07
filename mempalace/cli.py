@@ -124,7 +124,7 @@ def cmd_split(args):
     import sys
 
     # Rebuild argv for split_mega_files argparse
-    argv = [args.dir]
+    argv = ["--source", args.dir]
     if args.output_dir:
         argv += ["--output-dir", args.output_dir]
     if args.dry_run:

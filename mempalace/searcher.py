@@ -12,6 +12,19 @@ from pathlib import Path
 import chromadb
 
 
+def _ensure_utf8_encoding():
+    if sys.platform == "win32":
+        import io
+
+        if isinstance(sys.stdout, io.TextIOWrapper):
+            try:
+                sys.stdout.reconfigure(encoding="utf-8")
+            except (AttributeError, io.UnsupportedOperation):
+                import codecs
+
+                sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+
+
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
     """
     Search the palace. Returns verbatim drawer content.
@@ -57,6 +70,8 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f'\n  No results found for: "{query}"')
         return
 
+    _ensure_utf8_encoding()
+
     print(f"\n{'=' * 60}")
     print(f'  Results for: "{query}"')
     if wing:
@@ -79,7 +94,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         for line in doc.strip().split("\n"):
             print(f"      {line}")
         print()
-        print(f"  {'-' * 56}")
+        print(f"  {'─' * 56}")
 
     print()
 
