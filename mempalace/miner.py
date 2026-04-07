@@ -8,7 +8,6 @@ Stores verbatim chunks as drawers. No summaries. Ever.
 """
 
 import os
-import sys
 import hashlib
 import fnmatch
 from pathlib import Path
