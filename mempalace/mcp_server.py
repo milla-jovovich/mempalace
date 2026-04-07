@@ -20,12 +20,12 @@ Tools (write):
 import sys
 import json
 import logging
-import hashlib
 from datetime import datetime
 
 from .config import MempalaceConfig
 from .version import __version__
 from .searcher import search_memories
+from .security import content_hash
 from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
 
@@ -264,7 +264,7 @@ def tool_add_drawer(
             "matches": dup["matches"],
         }
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((content[:100] + datetime.now().isoformat()).encode()).hexdigest()[:16]}"
+    drawer_id = f"drawer_{wing}_{room}_{content_hash(content[:100] + datetime.now().isoformat())}"
 
     try:
         col.add(
@@ -361,7 +361,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return _no_palace()
 
     now = datetime.now()
-    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(entry[:50].encode()).hexdigest()[:8]}"
+    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{content_hash(entry[:50], length=8)}"
 
     try:
         col.add(

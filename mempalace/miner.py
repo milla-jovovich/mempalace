@@ -9,7 +9,7 @@ Stores verbatim chunks as drawers. No summaries. Ever.
 
 import os
 import sys
-import hashlib
+from .security import content_hash
 import fnmatch
 from pathlib import Path
 from datetime import datetime
@@ -415,7 +415,7 @@ def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
 ):
     """Add one drawer to the palace."""
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk_index)).encode(), usedforsecurity=False).hexdigest()[:16]}"
+    drawer_id = f"drawer_{wing}_{room}_{content_hash(source_file + str(chunk_index))}"
     try:
         collection.add(
             documents=[content],

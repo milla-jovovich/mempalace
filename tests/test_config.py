@@ -30,3 +30,42 @@ def test_init():
     cfg = MempalaceConfig(config_dir=tmpdir)
     cfg.init()
     assert os.path.exists(os.path.join(tmpdir, "config.json"))
+
+
+# ── Security config ──────────────────────────────────────────────────────
+
+
+def test_security_config_defaults():
+    cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+    assert cfg.auth_enabled is False
+    assert cfg.encryption_enabled is False
+    assert cfg.max_content_size == 1_048_576
+
+
+def test_security_config_from_file():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump(
+            {
+                "security": {
+                    "auth_enabled": True,
+                    "encryption_enabled": True,
+                    "max_content_size": 500_000,
+                }
+            },
+            f,
+        )
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.auth_enabled is True
+    assert cfg.encryption_enabled is True
+    assert cfg.max_content_size == 500_000
+
+
+def test_security_env_override():
+    tmpdir = tempfile.mkdtemp()
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    os.environ["MEMPALACE_AUTH_ENABLED"] = "true"
+    try:
+        assert cfg.auth_enabled is True
+    finally:
+        del os.environ["MEMPALACE_AUTH_ENABLED"]

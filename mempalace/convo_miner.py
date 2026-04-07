@@ -10,7 +10,7 @@ Same palace as project mining. Different ingest strategy.
 
 import os
 import sys
-import hashlib
+from .security import content_hash
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
@@ -356,7 +356,7 @@ def mine_convos(
             chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
             if extract_mode == "general":
                 room_counts[chunk_room] += 1
-            drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.md5((source_file + str(chunk['chunk_index'])).encode(), usedforsecurity=False).hexdigest()[:16]}"
+            drawer_id = f"drawer_{wing}_{chunk_room}_{content_hash(source_file + str(chunk['chunk_index']))}"
             try:
                 collection.add(
                     documents=[chunk["content"]],

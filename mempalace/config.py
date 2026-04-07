@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 
+from .security import secure_dir, secure_file
+
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
 
@@ -123,9 +125,39 @@ class MempalaceConfig:
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
+    # ── Security settings ────────────────────────────────────────────────
+
+    def _security(self, key, default=None):
+        """Read a value from the nested security config block."""
+        env_key = f"MEMPALACE_{key.upper()}"
+        env_val = os.environ.get(env_key)
+        if env_val is not None:
+            if isinstance(default, bool):
+                return env_val.lower() in ("1", "true", "yes")
+            if isinstance(default, int):
+                return int(env_val)
+            return env_val
+        return self._file_config.get("security", {}).get(key, default)
+
+    @property
+    def auth_enabled(self):
+        """Whether MCP token authentication is required."""
+        return self._security("auth_enabled", False)
+
+    @property
+    def encryption_enabled(self):
+        """Whether data-at-rest encryption is active."""
+        return self._security("encryption_enabled", False)
+
+    @property
+    def max_content_size(self):
+        """Maximum allowed content size in bytes for MCP write operations."""
+        return self._security("max_content_size", 1_048_576)  # 1 MB
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
+        secure_dir(self._config_dir)
         if not self._config_file.exists():
             default_config = {
                 "palace_path": DEFAULT_PALACE_PATH,
@@ -135,6 +167,7 @@ class MempalaceConfig:
             }
             with open(self._config_file, "w") as f:
                 json.dump(default_config, f, indent=2)
+            secure_file(self._config_file)
         return self._config_file
 
     def save_people_map(self, people_map):
@@ -146,4 +179,5 @@ class MempalaceConfig:
         self._config_dir.mkdir(parents=True, exist_ok=True)
         with open(self._people_map_file, "w") as f:
             json.dump(people_map, f, indent=2)
+        secure_file(self._people_map_file)
         return self._people_map_file
