@@ -146,8 +146,8 @@ class TestCyrillicDialect:
         )
         sentence = dialect._extract_key_sentence(text)
         assert len(sentence) > 0
-        # Should prefer the decision sentence
-        assert "решили" in sentence.lower() or len(sentence) > 0
+        # Should prefer the decision sentence over generic ones
+        assert "решили" in sentence.lower()
 
     def test_compress_preserves_cyrillic_entities(self):
         dialect = Dialect(entities={"Владлен": "ВЛД", "Никита": "НКТ"})
@@ -164,3 +164,52 @@ class TestCyrillicDialect:
         stopwords = {"это", "просто", "очень", "потому"}
         for t in topics:
             assert t not in stopwords
+
+    def test_profanity_emotion_signals(self):
+        """Profanity carries strong emotional signals in Russian."""
+        dialect = Dialect()
+        assert "joy" in dialect._detect_emotions("Заебись, всё работает!")
+        assert "fear" in dialect._detect_emotions("Пиздец, всё сломалось")
+        assert "rage" in dialect._detect_emotions("Бесит эта хрень")
+        assert "frust" in dialect._detect_emotions("Заебал этот баг")
+
+    def test_profanity_not_entities(self):
+        """Profanity at sentence starts should not become entity candidates."""
+        text = (
+            "Блять, опять ошибка. Блять, не работает. Блять, почему. "
+            "Сука, опять. Сука, сломалось. Сука, почему так."
+        )
+        candidates = extract_candidates(text)
+        assert "Блять" not in candidates
+        assert "Сука" not in candidates
+
+    def test_new_person_verb_patterns(self):
+        """New Russian person verbs should fire as person signals."""
+        text = (
+            "Маша поняла задачу. Маша согласилась помочь. "
+            "Маша объяснила решение. Маша показала результат. "
+            "Маша вспомнила о встрече."
+        )
+        lines = text.splitlines()
+        scores = score_entity("Маша", text, lines)
+        assert scores["person_score"] > 0
+
+    def test_new_flag_signals(self):
+        """New Russian flag signals should be detected."""
+        dialect = Dialect()
+        assert "DECISION" in dialect._detect_flags("Мы отказались от старого подхода")
+        assert "ORIGIN" in dialect._detect_flags("Он придумал новый алгоритм")
+        assert "TECHNICAL" in dialect._detect_flags("Нужен рефакторинг модуля")
+        assert "PIVOT" in dialect._detect_flags("Это было настоящее открытие")
+
+    def test_prepositional_pronoun_proximity(self):
+        """Prepositional pronoun forms should fire as person proximity signals."""
+        text = (
+            "Андрей работал весь день. О нём говорили коллеги. "
+            "Андрей предложил решение. С ним согласились все. "
+            "Андрей показал результат. У него получилось."
+        )
+        lines = text.splitlines()
+        scores = score_entity("Андрей", text, lines)
+        assert scores["person_score"] > 0
+        assert any("pronoun" in s for s in scores["person_signals"])

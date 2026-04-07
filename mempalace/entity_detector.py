@@ -30,12 +30,12 @@ from mempalace.languages import (
 
 # ==================== SIGNAL PATTERNS ====================
 
-# Dialogue markers — language-neutral structural patterns
+# Dialogue markers — structural patterns (mostly language-neutral)
 DIALOGUE_PATTERNS = [
     r"^>\s*{name}[:\s]",  # > Speaker: ...
     r"^{name}:\s",  # Speaker: ...
     r"^\[{name}\]",  # [Speaker]
-    r'"{name}\s+said',
+    r'"{name}\s+said',  # English-specific; other languages covered by PERSON_VERB_PATTERNS
 ]
 
 # For entity detection — prose only, no code files

@@ -31,7 +31,7 @@ classifiers = [
 dependencies = [
     "chromadb>=0.4.0",
     "pyyaml>=6.0",
-    "regex>=2024.0.0",
+    "regex==2026.4.4",
 ]
 
 [project.urls]
