@@ -11,6 +11,8 @@ Same palace as project mining. Different ingest strategy.
 import os
 import sys
 import hashlib
+import json
+import math
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
@@ -18,6 +20,7 @@ from collections import defaultdict
 import chromadb
 
 from .normalize import normalize
+from .miner import BloomFilter, ContentHashDB
 
 
 # File types that might contain conversations
@@ -285,18 +288,23 @@ def mine_convos(
     print(f"{'─' * 55}\n")
 
     collection = get_collection(palace_path) if not dry_run else None
+    hash_db = (
+        ContentHashDB(os.path.join(palace_path, "content_hashes.json")) if not dry_run else None
+    )
 
     total_drawers = 0
     files_skipped = 0
     room_counts = defaultdict(int)
+    source_file = None
 
     for i, filepath in enumerate(files, 1):
         source_file = str(filepath)
 
-        # Skip if already filed
-        if not dry_run and file_already_mined(collection, source_file):
-            files_skipped += 1
-            continue
+        # Skip if already filed (content hash check)
+        if not dry_run and hash_db:
+            if hash_db.check_and_add(filepath):
+                files_skipped += 1
+                continue
 
         # Normalize format
         try:
