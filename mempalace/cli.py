@@ -95,13 +95,17 @@ def cmd_search(args):
     from .searcher import search
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-    search(
-        query=args.query,
-        palace_path=palace_path,
-        wing=args.wing,
-        room=args.room,
-        n_results=args.results,
-    )
+    try:
+        search(
+            query=args.query,
+            palace_path=palace_path,
+            wing=args.wing,
+            room=args.room,
+            n_results=args.results,
+        )
+    except RuntimeError as e:
+        print(f"\n  Error: {e}")
+        sys.exit(1)
 
 
 def cmd_wakeup(args):
