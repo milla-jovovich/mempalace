@@ -150,3 +150,11 @@ def search_memories(
         "filters": {"wing": wing, "room": room},
         "results": hits,
     }
+
+
+def brief(palace_path: str, wing: str = None, room: str = None):
+    """Brief overview of a wing/room - deduplicated top drawers."""
+    from mempalace.layers import MemoryStack
+
+    stack = MemoryStack(palace_path=palace_path)
+    return stack.brief(wing=wing, room=room)

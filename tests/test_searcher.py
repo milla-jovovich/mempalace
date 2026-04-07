@@ -4,7 +4,7 @@ test_searcher.py — Tests for the programmatic search_memories API.
 Tests the library-facing search interface (not the CLI print variant).
 """
 
-from mempalace.searcher import search_memories
+from mempalace.searcher import brief, search_memories
 
 
 class TestSearchMemories:
@@ -43,3 +43,9 @@ class TestSearchMemories:
         assert "source_file" in hit
         assert "similarity" in hit
         assert isinstance(hit["similarity"], float)
+
+    def test_brief(self, palace_path, seeded_collection):
+        """Brief returns a deduplicated overview."""
+        result = brief(palace_path=palace_path)
+        assert "Brief" in result
+        assert "topics" in result
