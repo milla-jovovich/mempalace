@@ -94,8 +94,9 @@ class MempalaceConfig:
         """Path to the memory palace data directory."""
         env_val = os.environ.get("MEMPALACE_PALACE_PATH") or os.environ.get("MEMPAL_PALACE_PATH")
         if env_val:
-            return env_val
-        return self._file_config.get("palace_path", DEFAULT_PALACE_PATH)
+            return os.path.expanduser(env_val)
+        raw = self._file_config.get("palace_path", DEFAULT_PALACE_PATH)
+        return os.path.expanduser(raw)
 
     @property
     def collection_name(self):

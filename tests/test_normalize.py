@@ -29,3 +29,19 @@ def test_empty():
     result = normalize(f.name)
     assert result.strip() == ""
     os.unlink(f.name)
+
+
+def test_claude_code_jsonl_user_type():
+    """Claude Code JSONL uses type \"user\", not \"human\" (#111)."""
+    lines = [
+        '{"type":"user","message":{"content":"fix the bug in auth.py"}}',
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"I will look."}]}}',
+    ]
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8")
+    f.write("\n".join(lines))
+    f.close()
+    try:
+        result = normalize(f.name)
+        assert "fix the bug" in result
+    finally:
+        os.unlink(f.name)

@@ -1,2 +1,2 @@
-chromadb>=0.4.0
+chromadb>=0.6,<1
 pyyaml>=6.0

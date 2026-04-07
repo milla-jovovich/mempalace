@@ -390,6 +390,7 @@ def mine(
 
 def status(palace_path: str):
     """Show what's been filed in the palace."""
+    palace_path = os.path.expanduser(palace_path)
     try:
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
@@ -398,9 +399,19 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
-    metas = r["metadatas"]
+    # Count by wing and room (paginate — Chroma get() is capped per call; #40)
+    metas = []
+    batch = 10000
+    offset = 0
+    while True:
+        r = col.get(limit=batch, offset=offset, include=["metadatas"])
+        chunk = r["metadatas"]
+        if not chunk:
+            break
+        metas.extend(chunk)
+        if len(chunk) < batch:
+            break
+        offset += batch
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:

@@ -57,6 +57,13 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f'\n  No results found for: "{query}"')
         return
 
+    # Windows consoles often default to cp1252; box-drawing chars crash print (#47)
+    if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
     print(f"\n{'=' * 60}")
     print(f'  Results for: "{query}"')
     if wing:

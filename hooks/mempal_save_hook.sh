@@ -64,10 +64,24 @@ MEMPAL_DIR=""
 # Read JSON input from stdin
 INPUT=$(cat)
 
-# Parse fields from Claude Code's JSON
-SESSION_ID=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id','unknown'))" 2>/dev/null)
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('stop_hook_active', False))" 2>/dev/null)
-TRANSCRIPT_PATH=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))" 2>/dev/null)
+# Parse fields from Claude Code's JSON (one pass; path passed to Python via argv — #110)
+eval "$(echo "$INPUT" | python3 -c "
+import json, re, sys
+raw = sys.stdin.read()
+try:
+    d = json.loads(raw)
+except json.JSONDecodeError:
+    d = {}
+sid = str(d.get('session_id', 'unknown'))
+sid_safe = re.sub(r'[^a-zA-Z0-9._-]+', '_', sid)[:200]
+tp = d.get('transcript_path', '') or ''
+sh = d.get('stop_hook_active', False)
+# Emit shell-safe assignments (no user-controlled strings in shell code)
+print('SESSION_ID=' + json.dumps(sid))
+print('SESSION_ID_SAFE=' + json.dumps(sid_safe))
+print('STOP_HOOK_ACTIVE=' + ('true' if sh else 'false'))
+print('TRANSCRIPT_PATH=' + json.dumps(tp))
+" 2>/dev/null)"
 
 # Expand ~ in path
 TRANSCRIPT_PATH="${TRANSCRIPT_PATH/#\~/$HOME}"
@@ -79,32 +93,40 @@ if [ "$STOP_HOOK_ACTIVE" = "True" ] || [ "$STOP_HOOK_ACTIVE" = "true" ]; then
     exit 0
 fi
 
-# Count human messages in the JSONL transcript
+# Count user turns in the JSONL transcript (path via argv; type user|human — #110 / #111)
 if [ -f "$TRANSCRIPT_PATH" ]; then
     EXCHANGE_COUNT=$(python3 -c "
 import json, sys
+path = sys.argv[1]
 count = 0
-with open('$TRANSCRIPT_PATH') as f:
-    for line in f:
-        try:
-            entry = json.loads(line)
-            msg = entry.get('message', {})
-            if isinstance(msg, dict) and msg.get('role') == 'user':
-                content = msg.get('content', '')
-                # Skip system/command messages — only count real human input
+try:
+    with open(path, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            msg = entry.get('message', {}) if isinstance(entry, dict) else {}
+            if entry.get('type') in ('user', 'human'):
+                content = msg.get('content', '') if isinstance(msg, dict) else ''
                 if isinstance(content, str) and '<command-message>' in content:
                     continue
                 count += 1
-        except:
-            pass
+            elif isinstance(msg, dict) and msg.get('role') == 'user':
+                content = msg.get('content', '')
+                if isinstance(content, str) and '<command-message>' in content:
+                    continue
+                count += 1
+except OSError:
+    pass
 print(count)
-" 2>/dev/null)
+" "$TRANSCRIPT_PATH" 2>/dev/null)
 else
     EXCHANGE_COUNT=0
 fi
 
-# Track last save point for this session
-LAST_SAVE_FILE="$STATE_DIR/${SESSION_ID}_last_save"
+# Track last save point for this session (sanitized id — #110)
+LAST_SAVE_FILE="$STATE_DIR/${SESSION_ID_SAFE}_last_save"
 LAST_SAVE=0
 if [ -f "$LAST_SAVE_FILE" ]; then
     LAST_SAVE=$(cat "$LAST_SAVE_FILE")

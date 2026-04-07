@@ -30,3 +30,23 @@ def test_init():
     cfg = MempalaceConfig(config_dir=tmpdir)
     cfg.init()
     assert os.path.exists(os.path.join(tmpdir, "config.json"))
+
+
+def test_palace_path_expanduser_in_config():
+    """Tilde in config.json should expand (#40)."""
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"palace_path": "~/mempalace_unit_test_palace_path_expand"}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.palace_path == os.path.join(
+        os.path.expanduser("~"), "mempalace_unit_test_palace_path_expand"
+    )
+
+
+def test_palace_path_expanduser_env():
+    try:
+        os.environ["MEMPALACE_PALACE_PATH"] = "~/from_env_palace_test"
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.palace_path == os.path.join(os.path.expanduser("~"), "from_env_palace_test")
+    finally:
+        del os.environ["MEMPALACE_PALACE_PATH"]

@@ -57,9 +57,17 @@ MEMPAL_DIR=""
 # Read JSON input from stdin
 INPUT=$(cat)
 
-SESSION_ID=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id','unknown'))" 2>/dev/null)
+SESSION_ID=$(echo "$INPUT" | python3 -c "
+import json, re, sys
+try:
+    d = json.load(sys.stdin)
+except json.JSONDecodeError:
+    d = {}
+sid = str(d.get('session_id', 'unknown'))
+print(re.sub(r'[^a-zA-Z0-9._-]+', '_', sid)[:200])
+" 2>/dev/null)
 
-echo "[$(date '+%H:%M:%S')] PRE-COMPACT triggered for session $SESSION_ID" >> "$STATE_DIR/hook.log"
+echo "[$(date '+%H:%M:%S')] PRE-COMPACT triggered for session ${SESSION_ID:-unknown}" >> "$STATE_DIR/hook.log"
 
 # Optional: run mempalace ingest synchronously so memories land before compaction
 if [ -n "$MEMPAL_DIR" ] && [ -d "$MEMPAL_DIR" ]; then

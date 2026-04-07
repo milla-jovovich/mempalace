@@ -39,6 +39,9 @@ SKIP_DIRS = {
     "build",
     ".next",
     ".mempalace",
+    # Claude Code: tool dumps and file-based memory (see #111)
+    "tool-results",
+    "memory",
 }
 
 MIN_CHUNK_SIZE = 30
@@ -238,6 +241,8 @@ def scan_convos(convo_dir: str) -> list:
     for root, dirs, filenames in os.walk(convo_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for filename in filenames:
+            if filename.endswith(".meta.json"):
+                continue
             filepath = Path(root) / filename
             if filepath.suffix.lower() in CONVO_EXTENSIONS:
                 files.append(filepath)

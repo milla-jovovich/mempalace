@@ -81,7 +81,8 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
             continue
         msg_type = entry.get("type", "")
         message = entry.get("message", {})
-        if msg_type == "human":
+        # Claude Code JSONL uses type "user"; some exports use "human"
+        if msg_type in ("human", "user"):
             text = _extract_content(message.get("content", ""))
             if text:
                 messages.append(("user", text))

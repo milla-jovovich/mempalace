@@ -2,7 +2,7 @@ import os
 import tempfile
 import shutil
 import chromadb
-from mempalace.convo_miner import mine_convos
+from mempalace.convo_miner import mine_convos, scan_convos
 
 
 def test_convo_mining():
@@ -24,3 +24,23 @@ def test_convo_mining():
     assert len(results["documents"][0]) > 0
 
     shutil.rmtree(tmpdir)
+
+
+def test_scan_convos_skips_tool_results_and_meta():
+    """tool-results/ and *.meta.json should not be mined as conversations (#111)."""
+    tmp = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmp, "session", "sub"))
+        good = os.path.join(tmp, "session", "sub", "chat.txt")
+        with open(good, "w") as f:
+            f.write("hello")
+        os.makedirs(os.path.join(tmp, "tool-results"))
+        with open(os.path.join(tmp, "tool-results", "huge.txt"), "w") as f:
+            f.write("noise")
+        with open(os.path.join(tmp, "noise.meta.json"), "w") as f:
+            f.write("{}")
+        files = scan_convos(tmp)
+        assert len(files) == 1
+        assert files[0].name == "chat.txt"
+    finally:
+        shutil.rmtree(tmp)
