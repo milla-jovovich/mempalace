@@ -1,0 +1,8 @@
+wing: everyday_notes
+rooms:
+  - name: journal
+    description: Day-to-day reminders and family happenings
+  - name: plans
+    description: Trips, events, and things we're deciding together
+  - name: general
+    description: Everything else
