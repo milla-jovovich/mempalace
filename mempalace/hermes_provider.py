@@ -116,11 +116,13 @@ class MempalaceProvider(_BaseProvider):
         collection_name: str = "mempalace_drawers",
         wing: str = "wing_hermes",
         prefetch_limit: int = 3,
+        prefetch_min_similarity: float = 0.3,
     ):
         self._palace_path = palace_path
         self._collection_name = collection_name
         self._wing = wing
         self._prefetch_limit = prefetch_limit
+        self._prefetch_min_similarity = prefetch_min_similarity
         self._session_id = ""
         self._collection = None
         self._config = None
@@ -251,7 +253,7 @@ class MempalaceProvider(_BaseProvider):
                 wing = meta.get("wing", "?")
                 room = meta.get("room", "?")
                 # Only include if reasonably similar
-                if similarity >= 0.3:
+                if similarity >= self._prefetch_min_similarity:
                     parts.append(f"[{wing}/{room} sim={similarity}] {doc[:500]}")
 
             return "\n\n".join(parts)

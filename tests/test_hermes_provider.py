@@ -133,15 +133,13 @@ class TestMempalaceProviderWithPalace:
         assert isinstance(context, str)
 
     def test_sync_turn_stores_exchange(self, palace_provider):
-        """sync_turn should store the exchange in the palace."""
+        """sync_turn should not raise when called with valid args."""
+        # sync_turn runs in a background thread; we verify it doesn't crash
         palace_provider.sync_turn(
             "What auth system do we use?",
             "We use JWT tokens with refresh rotation.",
             session_id="test-session",
         )
-        # Give the background thread time to complete
-        import time
-        time.sleep(0.5)
 
     def test_system_prompt_block(self, palace_provider):
         """System prompt should include MemPalace instructions."""
