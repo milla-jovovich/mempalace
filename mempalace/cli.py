@@ -38,7 +38,18 @@ def cmd_init(args):
     import json
     from pathlib import Path
     from .entity_detector import scan_for_detection, detect_entities, confirm_entities
+    from .onboarding import run_onboarding
+    from .prompts import stdin_is_interactive
     from .room_detector_local import detect_rooms_local
+
+    MempalaceConfig().init()
+
+    should_run_onboarding = args.onboarding
+    if should_run_onboarding == "auto":
+        should_run_onboarding = stdin_is_interactive() and not getattr(args, "yes", False)
+
+    if should_run_onboarding:
+        run_onboarding(directory=args.dir)
 
     # Pass 1: auto-detect people and projects from file content
     print(f"\n  Scanning for entities in: {args.dir}")
@@ -60,7 +71,6 @@ def cmd_init(args):
 
     # Pass 2: detect rooms from folder structure
     detect_rooms_local(project_dir=args.dir)
-    MempalaceConfig().init()
 
 
 def cmd_mine(args):
@@ -276,6 +286,21 @@ def main():
     p_init.add_argument("dir", help="Project directory to set up")
     p_init.add_argument(
         "--yes", action="store_true", help="Auto-accept all detected entities (non-interactive)"
+    )
+    p_init.add_argument(
+        "--onboarding",
+        dest="onboarding",
+        action="store_const",
+        const=True,
+        default="auto",
+        help="Run the guided onboarding flow before entity and room detection",
+    )
+    p_init.add_argument(
+        "--no-onboarding",
+        dest="onboarding",
+        action="store_const",
+        const=False,
+        help="Skip guided onboarding even in interactive terminals",
     )
 
     # mine

@@ -15,6 +15,8 @@ import yaml
 from pathlib import Path
 from collections import defaultdict
 
+from .prompts import prompt_text
+
 # Common room patterns — detected from folder names and filenames
 # Format: {folder_keyword: room_name}
 FOLDER_ROOM_MAP = {
@@ -224,7 +226,7 @@ def get_user_approval(rooms: list) -> list:
     print("    [add]    Add a room manually")
     print()
 
-    choice = input("  Your choice [enter/edit/add]: ").strip().lower()
+    choice = prompt_text("  Your choice [enter/edit/add]: ").lower()
 
     if choice in ("", "y", "yes"):
         return rooms
@@ -233,19 +235,17 @@ def get_user_approval(rooms: list) -> list:
         print("\n  Current rooms:")
         for i, room in enumerate(rooms):
             print(f"    {i + 1}. {room['name']} — {room['description']}")
-        remove = input("\n  Room numbers to REMOVE (comma-separated, or enter to skip): ").strip()
+        remove = prompt_text("\n  Room numbers to REMOVE (comma-separated, or enter to skip): ")
         if remove:
             to_remove = {int(x.strip()) - 1 for x in remove.split(",") if x.strip().isdigit()}
             rooms = [r for i, r in enumerate(rooms) if i not in to_remove]
 
-    if choice == "add" or input("\n  Add any missing rooms? [y/N]: ").strip().lower() == "y":
+    if choice == "add" or prompt_text("\n  Add any missing rooms? [y/N]: ").lower() == "y":
         while True:
-            new_name = (
-                input("  New room name (or enter to stop): ").strip().lower().replace(" ", "_")
-            )
+            new_name = prompt_text("  New room name (or enter to stop): ").lower().replace(" ", "_")
             if not new_name:
                 break
-            new_desc = input(f"  Description for '{new_name}': ").strip()
+            new_desc = prompt_text(f"  Description for '{new_name}': ")
             rooms.append({"name": new_name, "description": new_desc, "keywords": [new_name]})
             print(f"  Added: {new_name}")
 

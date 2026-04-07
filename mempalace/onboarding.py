@@ -19,6 +19,7 @@ Usage:
 from pathlib import Path
 from mempalace.entity_registry import EntityRegistry
 from mempalace.entity_detector import detect_entities, scan_for_detection
+from mempalace.prompts import prompt_text, prompt_yes_no
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -67,17 +68,15 @@ def _header(text):
 
 
 def _ask(prompt, default=None):
-    if default:
-        val = input(f"  {prompt} [{default}]: ").strip()
-        return val if val else default
-    return input(f"  {prompt}: ").strip()
+    formatted = f"  {prompt} [{default}]: " if default is not None else f"  {prompt}: "
+    return prompt_text(formatted, default=default or "")
 
 
 def _yn(prompt, default="y"):
-    val = input(f"  {prompt} [{'Y/n' if default == 'y' else 'y/N'}]: ").strip().lower()
-    if not val:
-        return default == "y"
-    return val.startswith("y")
+    return prompt_yes_no(
+        f"  {prompt} [{'Y/n' if default == 'y' else 'y/N'}]: ",
+        default=default,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -102,7 +101,7 @@ def _ask_mode() -> str:
     print()
 
     while True:
-        choice = input("  Your choice [1/2/3]: ").strip()
+        choice = prompt_text("  Your choice [1/2/3]: ")
         if choice == "1":
             return "work"
         elif choice == "2":
@@ -132,7 +131,7 @@ def _ask_people(mode: str) -> tuple[list, dict]:
   Type 'done' when finished.
 """)
         while True:
-            entry = input("  Person: ").strip()
+            entry = prompt_text("  Person: ")
             if entry.lower() in ("done", ""):
                 break
             parts = [p.strip() for p in entry.split(",", 1)]
@@ -140,7 +139,7 @@ def _ask_people(mode: str) -> tuple[list, dict]:
             relationship = parts[1] if len(parts) > 1 else ""
             if name:
                 # Ask about nicknames
-                nick = input(f"  Nickname for {name}? (or enter to skip): ").strip()
+                nick = prompt_text(f"  Nickname for {name}? (or enter to skip): ")
                 if nick:
                     aliases[nick] = name
                 people.append({"name": name, "relationship": relationship, "context": "personal"})
@@ -155,7 +154,7 @@ def _ask_people(mode: str) -> tuple[list, dict]:
   Type 'done' when finished.
 """)
         while True:
-            entry = input("  Person: ").strip()
+            entry = prompt_text("  Person: ")
             if entry.lower() in ("done", ""):
                 break
             parts = [p.strip() for p in entry.split(",", 1)]
@@ -185,7 +184,7 @@ def _ask_projects(mode: str) -> list:
 """)
     projects = []
     while True:
-        proj = input("  Project: ").strip()
+        proj = prompt_text("  Project: ")
         if proj.lower() in ("done", ""):
             break
         if proj:
@@ -209,7 +208,7 @@ def _ask_wings(mode: str) -> list:
 
   Press enter to keep these, or type your own comma-separated list.
 """)
-    custom = input("  Wings: ").strip()
+    custom = prompt_text("  Wings: ")
     if custom:
         return [w.strip() for w in custom.split(",") if w.strip()]
     return defaults
@@ -398,17 +397,16 @@ def run_onboarding(
             print()
             if _yn("  Add any of these to your registry?"):
                 for e in detected:
-                    ans = input(f"    {e['name']} — (p)erson, (s)kip? ").strip().lower()
+                    ans = prompt_text(f"    {e['name']} — (p)erson, (s)kip? ").lower()
                     if ans == "p":
-                        rel = input(f"    Relationship/role for {e['name']}? ").strip()
+                        rel = prompt_text(f"    Relationship/role for {e['name']}? ")
                         ctx = (
                             "personal"
                             if mode == "personal"
                             else (
                                 "work"
                                 if mode == "work"
-                                else input("    Context — (p)ersonal or (w)ork? ")
-                                .strip()
+                                else prompt_text("    Context — (p)ersonal or (w)ork? ")
                                 .lower()
                                 .replace("w", "work")
                                 .replace("p", "personal")

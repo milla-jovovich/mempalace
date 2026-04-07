@@ -20,6 +20,8 @@ import os
 from pathlib import Path
 from collections import defaultdict
 
+from .prompts import prompt_text
+
 
 # ==================== SIGNAL PATTERNS ====================
 
@@ -750,7 +752,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
     print("    [add]    Add missing people or projects")
     print()
 
-    choice = input("  Your choice [enter/edit/add]: ").strip().lower()
+    choice = prompt_text("  Your choice [enter/edit/add]: ").lower()
 
     confirmed_people = [e["name"] for e in detected["people"]]
     confirmed_projects = [e["name"] for e in detected["projects"]]
@@ -760,7 +762,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
         if detected["uncertain"]:
             print("\n  Uncertain entities — classify each:")
             for e in detected["uncertain"]:
-                ans = input(f"    {e['name']} — (p)erson, (r)roject, or (s)kip? ").strip().lower()
+                ans = prompt_text(f"    {e['name']} — (p)erson, (r)roject, or (s)kip? ").lower()
                 if ans == "p":
                     confirmed_people.append(e["name"])
                 elif ans == "r":
@@ -768,28 +770,28 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
 
         # Remove wrong people
         print(f"\n  Current people: {', '.join(confirmed_people) or '(none)'}")
-        remove = input(
+        remove = prompt_text(
             "  Numbers to REMOVE from people (comma-separated, or enter to skip): "
-        ).strip()
+        )
         if remove:
             to_remove = {int(x.strip()) - 1 for x in remove.split(",") if x.strip().isdigit()}
             confirmed_people = [p for i, p in enumerate(confirmed_people) if i not in to_remove]
 
         # Remove wrong projects
         print(f"\n  Current projects: {', '.join(confirmed_projects) or '(none)'}")
-        remove = input(
+        remove = prompt_text(
             "  Numbers to REMOVE from projects (comma-separated, or enter to skip): "
-        ).strip()
+        )
         if remove:
             to_remove = {int(x.strip()) - 1 for x in remove.split(",") if x.strip().isdigit()}
             confirmed_projects = [p for i, p in enumerate(confirmed_projects) if i not in to_remove]
 
-    if choice == "add" or input("\n  Add any missing? [y/N]: ").strip().lower() == "y":
+    if choice == "add" or prompt_text("\n  Add any missing? [y/N]: ").lower() == "y":
         while True:
-            name = input("  Name (or enter to stop): ").strip()
+            name = prompt_text("  Name (or enter to stop): ")
             if not name:
                 break
-            kind = input(f"  Is '{name}' a (p)erson or (r)roject? ").strip().lower()
+            kind = prompt_text(f"  Is '{name}' a (p)erson or (r)roject? ").lower()
             if kind == "p":
                 confirmed_people.append(name)
             elif kind == "r":
