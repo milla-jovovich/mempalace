@@ -9,7 +9,8 @@ Returns verbatim text — the actual words, never summaries.
 import sys
 from pathlib import Path
 
-import chromadb
+from .config import MempalaceConfig
+from .storage import get_collection
 
 
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
@@ -18,8 +19,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     Optionally filter by wing (project) or room (aspect).
     """
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_collection("mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
@@ -92,8 +92,7 @@ def search_memories(
     Used by the MCP server and other callers that need data.
     """
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_collection("mempalace_drawers")
     except Exception as e:
         return {"error": f"No palace found at {palace_path}: {e}"}
 

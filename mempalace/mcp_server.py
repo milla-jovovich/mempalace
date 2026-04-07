@@ -26,25 +26,20 @@ from datetime import datetime
 from .config import MempalaceConfig
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
-import chromadb
-
-from .knowledge_graph import KnowledgeGraph
-
-_kg = KnowledgeGraph()
+from .storage import get_collection as _get_storage_collection
+from .knowledge_graph import get_knowledge_graph
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
 
 _config = MempalaceConfig()
+_kg = get_knowledge_graph(_config)
 
 
 def _get_collection(create=False):
-    """Return the ChromaDB collection, or None on failure."""
+    """Return the storage collection, or None on failure."""
     try:
-        client = chromadb.PersistentClient(path=_config.palace_path)
-        if create:
-            return client.get_or_create_collection(_config.collection_name)
-        return client.get_collection(_config.collection_name)
+        return _get_storage_collection(_config.collection_name, create=create, config=_config)
     except Exception:
         return None
 

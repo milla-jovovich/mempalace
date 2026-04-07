@@ -5,34 +5,16 @@ knowledge_graph.py — Temporal Entity-Relationship Graph for MemPalace
 Real knowledge graph with:
   - Entity nodes (people, projects, tools, concepts)
   - Typed relationship edges (daughter_of, does, loves, works_on, etc.)
-  - Temporal validity (valid_from → valid_to — knows WHEN facts are true)
+  - Temporal validity (valid_from -> valid_to -- knows WHEN facts are true)
   - Closet references (links back to the verbatim memory)
 
-Storage: SQLite (local, no dependencies, no subscriptions)
-Query: entity-first traversal with time filtering
-
-This is what competes with Zep's temporal knowledge graph.
-Zep uses Neo4j in the cloud ($25/mo+). We use SQLite locally (free).
+Backends:
+  - SQLite (default, local, no dependencies)
+  - Elasticsearch (when graph_backend="elasticsearch" in config)
 
 Usage:
-    from mempalace.knowledge_graph import KnowledgeGraph
-
-    kg = KnowledgeGraph()
-    kg.add_triple("Max", "child_of", "Alice", valid_from="2015-04-01")
-    kg.add_triple("Max", "does", "swimming", valid_from="2025-01-01")
-    kg.add_triple("Max", "loves", "chess", valid_from="2025-10-01")
-
-    # Query: everything about Max
-    kg.query_entity("Max")
-
-    # Query: what was true about Max in January 2026?
-    kg.query_entity("Max", as_of="2026-01-15")
-
-    # Query: who is connected to Alice?
-    kg.query_entity("Alice", direction="both")
-
-    # Invalidate: Max's sports injury resolved
-    kg.invalidate("Max", "has_issue", "sports_injury", ended="2026-02-15")
+    from mempalace.knowledge_graph import get_knowledge_graph
+    kg = get_knowledge_graph()
 """
 
 import hashlib
@@ -382,3 +364,386 @@ class KnowledgeGraph:
             # Interests
             for interest in facts.get("interests", []):
                 self.add_triple(name, "loves", interest.capitalize(), valid_from="2025-01-01")
+
+
+# =============================================================================
+# Elasticsearch Knowledge Graph
+# =============================================================================
+
+
+class ElasticsearchKnowledgeGraph:
+    """Knowledge graph stored in Elasticsearch indices.
+
+    Uses two indices:
+      - {prefix}-kg-entities: entity nodes
+      - {prefix}-kg-triples: relationship triples
+    """
+
+    def __init__(self, config=None):
+        from .config import MempalaceConfig
+
+        config = config or MempalaceConfig()
+        es_conf = config._file_config.get("elasticsearch", {})
+
+        self._prefix = es_conf.get("index_prefix", "mempalace")
+        self._entities_index = f"{self._prefix}-kg-entities"
+        self._triples_index = f"{self._prefix}-kg-triples"
+
+        try:
+            from elasticsearch import Elasticsearch
+        except ImportError:
+            raise ImportError(
+                "elasticsearch package required for ES graph backend. "
+                "Install with: pip install 'mempalace[elasticsearch]'"
+            )
+
+        hosts = es_conf.get("hosts", ["http://localhost:9200"])
+        api_key = es_conf.get("api_key")
+        connect_kwargs = {"hosts": hosts, "request_timeout": 30}
+        if api_key:
+            connect_kwargs["api_key"] = api_key
+
+        self._es = Elasticsearch(**connect_kwargs)
+        self._ensure_indices()
+
+    def _ensure_indices(self):
+        if not self._es.indices.exists(index=self._entities_index):
+            self._es.indices.create(
+                index=self._entities_index,
+                body={
+                    "mappings": {
+                        "properties": {
+                            "name": {"type": "keyword"},
+                            "name_text": {"type": "text"},
+                            "type": {"type": "keyword"},
+                            "properties": {"type": "text"},
+                            "created_at": {"type": "keyword"},
+                        }
+                    }
+                },
+            )
+        if not self._es.indices.exists(index=self._triples_index):
+            self._es.indices.create(
+                index=self._triples_index,
+                body={
+                    "mappings": {
+                        "properties": {
+                            "subject": {"type": "keyword"},
+                            "predicate": {"type": "keyword"},
+                            "object": {"type": "keyword"},
+                            "subject_name": {"type": "text"},
+                            "object_name": {"type": "text"},
+                            "valid_from": {"type": "keyword"},
+                            "valid_to": {"type": "keyword"},
+                            "confidence": {"type": "float"},
+                            "source_closet": {"type": "keyword"},
+                            "source_file": {"type": "keyword"},
+                            "extracted_at": {"type": "keyword"},
+                        }
+                    }
+                },
+            )
+
+    def _entity_id(self, name: str) -> str:
+        return name.lower().replace(" ", "_").replace("'", "")
+
+    def add_entity(self, name: str, entity_type: str = "unknown", properties: dict = None):
+        eid = self._entity_id(name)
+        self._es.index(
+            index=self._entities_index,
+            id=eid,
+            document={
+                "name": name,
+                "name_text": name,
+                "type": entity_type,
+                "properties": json.dumps(properties or {}),
+                "created_at": datetime.now().isoformat(),
+            },
+            refresh="wait_for",
+        )
+        return eid
+
+    def add_triple(
+        self,
+        subject,
+        predicate,
+        obj,
+        valid_from=None,
+        valid_to=None,
+        confidence=1.0,
+        source_closet=None,
+        source_file=None,
+    ):
+        sub_id = self._entity_id(subject)
+        obj_id = self._entity_id(obj)
+        pred = predicate.lower().replace(" ", "_")
+
+        # Auto-create entities
+        for eid, name in [(sub_id, subject), (obj_id, obj)]:
+            if not self._es.exists(index=self._entities_index, id=eid):
+                self._es.index(
+                    index=self._entities_index,
+                    id=eid,
+                    document={"name": name, "name_text": name, "type": "unknown", "properties": "{}"},
+                )
+
+        # Check for existing active triple
+        existing = self._es.search(
+            index=self._triples_index,
+            query={
+                "bool": {
+                    "must": [
+                        {"term": {"subject": sub_id}},
+                        {"term": {"predicate": pred}},
+                        {"term": {"object": obj_id}},
+                    ],
+                    "must_not": [{"exists": {"field": "valid_to"}}],
+                }
+            },
+            size=1,
+        )
+        if existing["hits"]["hits"]:
+            return existing["hits"]["hits"][0]["_id"]
+
+        triple_id = (
+            f"t_{sub_id}_{pred}_{obj_id}_"
+            f"{hashlib.md5(f'{valid_from}{datetime.now().isoformat()}'.encode()).hexdigest()[:8]}"
+        )
+        self._es.index(
+            index=self._triples_index,
+            id=triple_id,
+            document={
+                "subject": sub_id,
+                "predicate": pred,
+                "object": obj_id,
+                "subject_name": subject,
+                "object_name": obj,
+                "valid_from": valid_from,
+                "valid_to": valid_to,
+                "confidence": confidence,
+                "source_closet": source_closet,
+                "source_file": source_file,
+                "extracted_at": datetime.now().isoformat(),
+            },
+            refresh="wait_for",
+        )
+        return triple_id
+
+    def invalidate(self, subject, predicate, obj, ended=None):
+        sub_id = self._entity_id(subject)
+        obj_id = self._entity_id(obj)
+        pred = predicate.lower().replace(" ", "_")
+        ended = ended or date.today().isoformat()
+
+        self._es.update_by_query(
+            index=self._triples_index,
+            body={
+                "script": {"source": f"ctx._source.valid_to = '{ended}'"},
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"subject": sub_id}},
+                            {"term": {"predicate": pred}},
+                            {"term": {"object": obj_id}},
+                        ],
+                        "must_not": [{"exists": {"field": "valid_to"}}],
+                    }
+                },
+            },
+            refresh=True,
+        )
+
+    def query_entity(self, name, as_of=None, direction="outgoing"):
+        eid = self._entity_id(name)
+        results = []
+
+        if direction in ("outgoing", "both"):
+            results.extend(self._query_direction(name, eid, "subject", "object", as_of, "outgoing"))
+        if direction in ("incoming", "both"):
+            results.extend(self._query_direction(name, eid, "object", "subject", as_of, "incoming"))
+        return results
+
+    def _query_direction(self, name, eid, match_field, other_field, as_of, direction):
+        must = [{"term": {match_field: eid}}]
+        if as_of:
+            must.append(
+                {
+                    "bool": {
+                        "should": [
+                            {"bool": {"must_not": [{"exists": {"field": "valid_from"}}]}},
+                            {"range": {"valid_from": {"lte": as_of}}},
+                        ],
+                        "minimum_should_match": 1,
+                    }
+                }
+            )
+            must.append(
+                {
+                    "bool": {
+                        "should": [
+                            {"bool": {"must_not": [{"exists": {"field": "valid_to"}}]}},
+                            {"range": {"valid_to": {"gte": as_of}}},
+                        ],
+                        "minimum_should_match": 1,
+                    }
+                }
+            )
+
+        resp = self._es.search(index=self._triples_index, query={"bool": {"must": must}}, size=1000)
+
+        results = []
+        for hit in resp["hits"]["hits"]:
+            src = hit["_source"]
+            other_name = src.get("object_name", src["object"]) if direction == "outgoing" else src.get("subject_name", src["subject"])
+            results.append(
+                {
+                    "direction": direction,
+                    "subject": name if direction == "outgoing" else other_name,
+                    "predicate": src["predicate"],
+                    "object": other_name if direction == "outgoing" else name,
+                    "valid_from": src.get("valid_from"),
+                    "valid_to": src.get("valid_to"),
+                    "confidence": src.get("confidence", 1.0),
+                    "source_closet": src.get("source_closet"),
+                    "current": src.get("valid_to") is None,
+                }
+            )
+        return results
+
+    def query_relationship(self, predicate, as_of=None):
+        pred = predicate.lower().replace(" ", "_")
+        must = [{"term": {"predicate": pred}}]
+        if as_of:
+            must.append(
+                {
+                    "bool": {
+                        "should": [
+                            {"bool": {"must_not": [{"exists": {"field": "valid_from"}}]}},
+                            {"range": {"valid_from": {"lte": as_of}}},
+                        ],
+                        "minimum_should_match": 1,
+                    }
+                }
+            )
+            must.append(
+                {
+                    "bool": {
+                        "should": [
+                            {"bool": {"must_not": [{"exists": {"field": "valid_to"}}]}},
+                            {"range": {"valid_to": {"gte": as_of}}},
+                        ],
+                        "minimum_should_match": 1,
+                    }
+                }
+            )
+
+        resp = self._es.search(index=self._triples_index, query={"bool": {"must": must}}, size=1000)
+        return [
+            {
+                "subject": h["_source"].get("subject_name", h["_source"]["subject"]),
+                "predicate": pred,
+                "object": h["_source"].get("object_name", h["_source"]["object"]),
+                "valid_from": h["_source"].get("valid_from"),
+                "valid_to": h["_source"].get("valid_to"),
+                "current": h["_source"].get("valid_to") is None,
+            }
+            for h in resp["hits"]["hits"]
+        ]
+
+    def timeline(self, entity_name=None):
+        if entity_name:
+            eid = self._entity_id(entity_name)
+            query = {
+                "bool": {
+                    "should": [{"term": {"subject": eid}}, {"term": {"object": eid}}],
+                    "minimum_should_match": 1,
+                }
+            }
+        else:
+            query = {"match_all": {}}
+
+        resp = self._es.search(
+            index=self._triples_index,
+            query=query,
+            sort=[{"valid_from": {"order": "asc", "missing": "_last"}}],
+            size=100,
+        )
+        return [
+            {
+                "subject": h["_source"].get("subject_name", h["_source"]["subject"]),
+                "predicate": h["_source"]["predicate"],
+                "object": h["_source"].get("object_name", h["_source"]["object"]),
+                "valid_from": h["_source"].get("valid_from"),
+                "valid_to": h["_source"].get("valid_to"),
+                "current": h["_source"].get("valid_to") is None,
+            }
+            for h in resp["hits"]["hits"]
+        ]
+
+    def stats(self):
+        entities = self._es.count(index=self._entities_index)["count"]
+        triples = self._es.count(index=self._triples_index)["count"]
+        current = self._es.count(
+            index=self._triples_index,
+            query={"bool": {"must_not": [{"exists": {"field": "valid_to"}}]}},
+        )["count"]
+
+        preds_resp = self._es.search(
+            index=self._triples_index,
+            size=0,
+            aggs={"predicates": {"terms": {"field": "predicate", "size": 100}}},
+        )
+        predicates = [
+            b["key"] for b in preds_resp["aggregations"]["predicates"]["buckets"]
+        ]
+
+        return {
+            "entities": entities,
+            "triples": triples,
+            "current_facts": current,
+            "expired_facts": triples - current,
+            "relationship_types": sorted(predicates),
+        }
+
+    def seed_from_entity_facts(self, entity_facts):
+        for key, facts in entity_facts.items():
+            name = facts.get("full_name", key.capitalize())
+            etype = facts.get("type", "person")
+            self.add_entity(
+                name,
+                etype,
+                {"gender": facts.get("gender", ""), "birthday": facts.get("birthday", "")},
+            )
+            parent = facts.get("parent")
+            if parent:
+                self.add_triple(name, "child_of", parent.capitalize(), valid_from=facts.get("birthday"))
+            partner = facts.get("partner")
+            if partner:
+                self.add_triple(name, "married_to", partner.capitalize())
+            relationship = facts.get("relationship", "")
+            if relationship == "daughter":
+                self.add_triple(name, "is_child_of", facts.get("parent", "").capitalize() or name, valid_from=facts.get("birthday"))
+            elif relationship == "husband":
+                self.add_triple(name, "is_partner_of", facts.get("partner", name).capitalize())
+            elif relationship == "brother":
+                self.add_triple(name, "is_sibling_of", facts.get("sibling", name).capitalize())
+            elif relationship == "dog":
+                self.add_triple(name, "is_pet_of", facts.get("owner", name).capitalize())
+                self.add_entity(name, "animal")
+            for interest in facts.get("interests", []):
+                self.add_triple(name, "loves", interest.capitalize(), valid_from="2025-01-01")
+
+
+# =============================================================================
+# Factory
+# =============================================================================
+
+
+def get_knowledge_graph(config=None):
+    """Return the appropriate KnowledgeGraph backend based on configuration."""
+    from .config import MempalaceConfig
+
+    config = config or MempalaceConfig()
+    if config.graph_backend == "elasticsearch":
+        return ElasticsearchKnowledgeGraph(config)
+    return KnowledgeGraph()

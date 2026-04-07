@@ -99,8 +99,32 @@ class MempalaceConfig:
 
     @property
     def collection_name(self):
-        """ChromaDB collection name."""
+        """Collection name (used across all backends)."""
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
+
+    @property
+    def storage_backend(self):
+        """Storage backend: 'chromadb' (default) or 'elasticsearch'."""
+        env_val = os.environ.get("MEMPALACE_STORAGE_BACKEND")
+        if env_val:
+            return env_val
+        return self._file_config.get("storage_backend", "chromadb")
+
+    @property
+    def graph_backend(self):
+        """Knowledge graph backend: 'sqlite' (default) or 'elasticsearch'."""
+        env_val = os.environ.get("MEMPALACE_GRAPH_BACKEND")
+        if env_val:
+            return env_val
+        return self._file_config.get("graph_backend", "sqlite")
+
+    @property
+    def elasticsearch(self):
+        """Elasticsearch connection settings dict.
+
+        Expected keys: hosts, api_key, index_prefix, inference_id, rerank_id.
+        """
+        return self._file_config.get("elasticsearch", {})
 
     @property
     def people_map(self):

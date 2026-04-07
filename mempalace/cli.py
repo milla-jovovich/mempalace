@@ -149,12 +149,11 @@ def cmd_status(args):
 
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
-    import chromadb
     from .dialect import Dialect
+    from .storage import get_collection
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
-    # Load dialect (with optional entity config)
     config_path = args.config
     if not config_path:
         for candidate in ["entities.json", os.path.join(palace_path, "entities.json")]:
@@ -168,16 +167,13 @@ def cmd_compress(args):
     else:
         dialect = Dialect()
 
-    # Connect to palace
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_collection("mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         sys.exit(1)
 
-    # Query drawers in the wing
     where = {"wing": args.wing} if args.wing else None
     try:
         kwargs = {"include": ["documents", "metadatas"]}
@@ -228,10 +224,9 @@ def cmd_compress(args):
             print(f"    {compressed}")
             print()
 
-    # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
-            comp_col = client.get_or_create_collection("mempalace_compressed")
+            comp_col = get_collection("mempalace_compressed", create=True)
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
                 comp_meta["compression_ratio"] = round(stats["ratio"], 1)
@@ -248,7 +243,6 @@ def cmd_compress(args):
             print(f"  Error storing compressed drawers: {e}")
             sys.exit(1)
 
-    # Summary
     ratio = total_original / max(total_compressed, 1)
     orig_tokens = Dialect.count_tokens("x" * total_original)
     comp_tokens = Dialect.count_tokens("x" * total_compressed)

@@ -7,13 +7,13 @@ name = "mempalace"
 version = "3.0.0"
 description = "Give your AI a memory — mine projects and conversations into a searchable palace. No API key required."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 authors = [
     {name = "milla-jovovich"},
 ]
 keywords = [
-    "ai", "memory", "llm", "rag", "chromadb", "mcp",
+    "ai", "memory", "llm", "rag", "chromadb", "elasticsearch", "mcp",
     "vector-database", "claude", "chatgpt", "embeddings",
 ]
 classifiers = [
@@ -21,10 +21,10 @@ classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Utilities",
 ]
@@ -45,11 +45,12 @@ include = ["mempalace*"]
 mempalace = "mempalace:main"
 
 [project.optional-dependencies]
+elasticsearch = ["elasticsearch>=9.0.0,<10.0.0"]
 dev = ["pytest>=7.0", "build>=1.0", "twine>=4.0"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
