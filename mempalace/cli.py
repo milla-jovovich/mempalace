@@ -147,6 +147,18 @@ def cmd_status(args):
     status(palace_path=palace_path)
 
 
+def cmd_doctor(args):
+    """Run palace health checks and print a colored report."""
+    from .doctor import run_doctor, format_report
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    config_name = MempalaceConfig().collection_name
+    report = run_doctor(palace_path=palace_path, collection_name=config_name)
+    print(format_report(report, use_color=not args.no_color))
+    if not report.healthy:
+        sys.exit(1)
+
+
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
     import chromadb
@@ -353,6 +365,12 @@ def main():
     # status
     sub.add_parser("status", help="Show what's been filed")
 
+    # doctor
+    p_doctor = sub.add_parser("doctor", help="Run palace health checks")
+    p_doctor.add_argument(
+        "--no-color", action="store_true", help="Disable ANSI colors in the report"
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -367,6 +385,7 @@ def main():
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "status": cmd_status,
+        "doctor": cmd_doctor,
     }
     dispatch[args.command](args)
 
