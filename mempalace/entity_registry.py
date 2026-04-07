@@ -16,6 +16,7 @@ Usage:
 """
 
 import json
+import os
 import re
 import urllib.request
 import urllib.parse
@@ -178,10 +179,21 @@ PLACE_INDICATOR_PHRASES = [
 
 def _wikipedia_lookup(word: str) -> dict:
     """
-    Look up a word via Wikipedia REST API.
+    Look up a word via Wikipedia REST API (opt-in only).
+
+    Disabled by default to honour the no-internet-after-install contract.
+    Enable by setting the environment variable MEMPALACE_WIKIPEDIA=1.
+
     Returns inferred type (person/place/concept/unknown) + confidence + summary.
     Free, no API key, handles disambiguation pages.
     """
+    if not os.environ.get("MEMPALACE_WIKIPEDIA"):
+        return {
+            "inferred_type": "unknown",
+            "confidence": 0.0,
+            "wiki_summary": None,
+            "note": "Wikipedia lookup disabled. Set MEMPALACE_WIKIPEDIA=1 to enable.",
+        }
     try:
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(word)}"
         req = urllib.request.Request(url, headers={"User-Agent": "MemPalace/1.0"})
