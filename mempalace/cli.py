@@ -128,7 +128,7 @@ def cmd_status(args):
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
     from .dialect import Dialect
-    from .palace_db import get_collection, get_client
+    from .palace_db import get_collection
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
@@ -204,8 +204,7 @@ def cmd_compress(args):
     # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
-            client = get_client(palace_path)
-            comp_col = client.get_or_create_collection("mempalace_compressed")
+            comp_col = get_collection(palace_path=palace_path, create=True, collection_name="mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
                 comp_meta["compression_ratio"] = round(stats["ratio"], 1)
