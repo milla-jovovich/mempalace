@@ -94,7 +94,7 @@ mempalace init ~/projects/myapp
 
 # Mine your data
 mempalace mine ~/projects/myapp                    # projects — code, docs, notes
-mempalace mine ~/chats/ --mode convos              # convos — Claude, ChatGPT, Slack exports
+mempalace mine ~/chats/ --mode convos              # convos — Claude, ChatGPT, Slack, OpenCode exports
 mempalace mine ~/chats/ --mode convos --extract general  # general — classifies into decisions, milestones, problems
 
 # Search anything you've ever discussed
@@ -611,7 +611,7 @@ Plain text. Becomes Layer 0 — loaded every session.
 |------|------|
 | `cli.py` | CLI entry point |
 | `config.py` | Configuration loading and defaults |
-| `normalize.py` | Converts 5 chat formats to standard transcript |
+| `normalize.py` | Converts 6 chat formats to standard transcript |
 | `mcp_server.py` | MCP server — 19 tools, AAAK auto-teach, memory protocol |
 | `miner.py` | Project file ingest |
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |

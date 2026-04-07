@@ -8,6 +8,7 @@ Supported:
     - ChatGPT conversations.json
     - Claude Code JSONL
     - OpenAI Codex CLI JSONL
+    - OpenCode SQLite (message + part tables)
     - Slack JSON export
     - Plain text (pass through for paragraph chunking)
 
@@ -16,8 +17,9 @@ No API key. No internet. Everything local.
 
 import json
 import os
+import sqlite3
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 
 
 def normalize(filepath: str) -> str:
@@ -39,8 +41,12 @@ def normalize(filepath: str) -> str:
     if sum(1 for line in lines if line.strip().startswith(">")) >= 3:
         return content
 
-    # Try JSON normalization
+    # Try SQLite normalization (OpenCode)
     ext = Path(filepath).suffix.lower()
+    if ext in (".db", ".sqlite3", ".sqlite"):
+        return _normalize_opencode_sqlite(filepath)
+
+    # Try JSON normalization
     if ext in (".json", ".jsonl") or content.strip()[:1] in ("{", "["):
         normalized = _try_normalize_json(content)
         if normalized:
@@ -145,6 +151,104 @@ def _try_codex_jsonl(content: str) -> Optional[str]:
     if len(messages) >= 2 and has_session_meta:
         return _messages_to_transcript(messages)
     return None
+
+
+def _normalize_opencode_sqlite(filepath: str) -> str:
+    """Normalize all sessions from an OpenCode SQLite database into one transcript."""
+    sessions = normalize_opencode_sessions(filepath)
+    if not sessions:
+        return ""
+    return "\n\n".join(s["transcript"] for s in sessions)
+
+
+def _extract_opencode_messages(
+    conn: sqlite3.Connection, session_id: str = None
+) -> List[Tuple[str, str]]:
+    """Extract (role, text) pairs, skipping tool calls and empty parts."""
+    query = """
+        SELECT
+            json_extract(m.data, '$.role') as role,
+            json_extract(p.data, '$.type') as part_type,
+            json_extract(p.data, '$.text') as text
+        FROM message m
+        JOIN part p ON p.message_id = m.id
+    """
+    params = []
+    if session_id:
+        query += " WHERE m.session_id = ?"
+        params.append(session_id)
+    query += " ORDER BY m.time_created, p.time_created"
+
+    messages = []
+    for role, part_type, text in conn.execute(query, params).fetchall():
+        if part_type != "text" or not text or not text.strip():
+            continue
+        # Skip tool-result echo lines that opencode injects as user parts
+        if text.strip().startswith("Called the ") and " tool with the following input" in text:
+            continue
+        if text.strip().startswith("<path>") and "<type>file</type>" in text:
+            continue
+
+        clean = text.strip()
+        if not clean:
+            continue
+
+        # Merge consecutive same-role messages
+        if messages and messages[-1][0] == role:
+            prev_role, prev_text = messages[-1]
+            messages[-1] = (prev_role, prev_text + "\n\n" + clean)
+        else:
+            messages.append((role if role == "user" else "assistant", clean))
+
+    return messages
+
+
+def normalize_opencode_sessions(db_path: str) -> List[dict]:
+    """Extract per-session transcripts from an OpenCode SQLite database."""
+    try:
+        conn = sqlite3.connect(db_path)
+        tables = {
+            r[0]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+    except Exception as e:
+        raise IOError(f"Could not read SQLite database: {db_path}: {e}")
+
+    if not {"session", "message", "part"}.issubset(tables):
+        conn.close()
+        raise IOError(f"Not a recognized OpenCode database (missing tables): {db_path}")
+
+    try:
+        conn.execute("SELECT json_extract('{}', '$')")
+    except Exception:
+        conn.close()
+        raise IOError("SQLite json_extract not available — upgrade SQLite or Python")
+    sessions = conn.execute("""
+        SELECT s.id, s.title, s.directory,
+               datetime(s.time_created/1000, 'unixepoch') as created
+        FROM session s
+        ORDER BY s.time_created
+    """).fetchall()
+
+    results = []
+    for sid, title, directory, created in sessions:
+        messages = _extract_opencode_messages(conn, session_id=sid)
+        if len(messages) < 2:  # skip cancelled sessions
+            continue
+        transcript = _messages_to_transcript(messages)
+        if transcript.strip():
+            results.append(
+                {
+                    "session_id": sid,
+                    "title": title or "",
+                    "project": directory or "",
+                    "created": created or "",
+                    "transcript": transcript,
+                }
+            )
+
+    conn.close()
+    return results
 
 
 def _try_claude_ai_json(data) -> Optional[str]:
