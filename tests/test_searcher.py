@@ -1,45 +1,54 @@
-"""
-test_searcher.py — Tests for the programmatic search_memories API.
-
-Tests the library-facing search interface (not the CLI print variant).
-"""
-
 from mempalace.searcher import search_memories
 
 
-class TestSearchMemories:
-    def test_basic_search(self, palace_path, seeded_collection):
-        result = search_memories("JWT authentication", palace_path)
-        assert "results" in result
-        assert len(result["results"]) > 0
-        assert result["query"] == "JWT authentication"
+def test_search_returns_results(populated_palace):
+    palace_path, _ = populated_palace
+    result = search_memories("chess", palace_path)
+    assert "results" in result
+    assert len(result["results"]) > 0
+    assert "Alice" in result["results"][0]["text"] or "chess" in result["results"][0]["text"]
 
-    def test_wing_filter(self, palace_path, seeded_collection):
-        result = search_memories("planning", palace_path, wing="notes")
-        assert all(r["wing"] == "notes" for r in result["results"])
 
-    def test_room_filter(self, palace_path, seeded_collection):
-        result = search_memories("database", palace_path, room="backend")
-        assert all(r["room"] == "backend" for r in result["results"])
+def test_search_wing_filter(populated_palace):
+    palace_path, _ = populated_palace
+    result = search_memories("query", palace_path, wing="family")
+    for hit in result["results"]:
+        assert hit["wing"] == "family"
 
-    def test_wing_and_room_filter(self, palace_path, seeded_collection):
-        result = search_memories("code", palace_path, wing="project", room="frontend")
-        assert all(r["wing"] == "project" and r["room"] == "frontend" for r in result["results"])
 
-    def test_n_results_limit(self, palace_path, seeded_collection):
-        result = search_memories("code", palace_path, n_results=2)
-        assert len(result["results"]) <= 2
+def test_search_room_filter(populated_palace):
+    palace_path, _ = populated_palace
+    result = search_memories("query", palace_path, room="backend")
+    for hit in result["results"]:
+        assert hit["room"] == "backend"
 
-    def test_no_palace_returns_error(self):
-        result = search_memories("anything", "/nonexistent/path")
-        assert "error" in result
 
-    def test_result_fields(self, palace_path, seeded_collection):
-        result = search_memories("authentication", palace_path)
-        hit = result["results"][0]
-        assert "text" in hit
-        assert "wing" in hit
-        assert "room" in hit
-        assert "source_file" in hit
-        assert "similarity" in hit
-        assert isinstance(hit["similarity"], float)
+def test_search_wing_and_room_filter(populated_palace):
+    palace_path, _ = populated_palace
+    result = search_memories("query", palace_path, wing="code", room="backend")
+    for hit in result["results"]:
+        assert hit["wing"] == "code"
+        assert hit["room"] == "backend"
+
+
+def test_search_result_structure(populated_palace):
+    palace_path, _ = populated_palace
+    result = search_memories("chess", palace_path)
+    hit = result["results"][0]
+    assert "text" in hit
+    assert "wing" in hit
+    assert "room" in hit
+    assert "source_file" in hit
+    assert "similarity" in hit
+    assert 0 <= hit["similarity"] <= 1
+
+
+def test_search_missing_palace(tmp_dir):
+    result = search_memories("query", str(tmp_dir / "nonexistent"))
+    assert "error" in result
+
+
+def test_search_n_results(populated_palace):
+    palace_path, _ = populated_palace
+    result = search_memories("anything", palace_path, n_results=2)
+    assert len(result["results"]) <= 2
