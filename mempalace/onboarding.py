@@ -220,23 +220,32 @@ def _ask_wings(mode: str) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _auto_detect(directory: str, known_people: list) -> list:
-    """Scan directory for additional entity candidates."""
+def _auto_detect(directory: str, known_people: list) -> tuple:
+    """Scan directory for additional entity candidates.
+
+    Returns (new_people, dir_projects) — people not already known,
+    and projects detected from git repository directory names.
+    """
     known_names = {p["name"].lower() for p in known_people}
 
     try:
         files = scan_for_detection(directory)
-        if not files:
-            return []
-        detected = detect_entities(files)
+        detected = (
+            detect_entities(files, base_dir=directory)
+            if files
+            else detect_entities([], base_dir=directory)
+        )
         new_people = [
             e
             for e in detected["people"]
             if e["name"].lower() not in known_names and e["confidence"] >= 0.7
         ]
-        return new_people
+        dir_projects = [
+            e for e in detected["projects"] if "git repository directory" in e.get("signals", [])
+        ]
+        return new_people, dir_projects
     except Exception:
-        return []
+        return [], []
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -383,21 +392,38 @@ def run_onboarding(
     # Step 4: Wings (stored in config, not registry — just show user)
     wings = _ask_wings(mode)
 
-    # Step 5: Auto-detect additional people from files
+    # Step 5: Auto-detect additional people and projects from files
     if auto_detect and _yn("\nScan your files for additional names we might have missed?"):
         directory = _ask("Directory to scan", default=directory)
-        detected = _auto_detect(directory, people)
-        if detected:
+        detected_people, dir_projects = _auto_detect(directory, people)
+
+        # Show detected projects from git repository directories
+        if dir_projects:
+            known_project_names = {p.lower() for p in projects}
+            new_dir_projects = [
+                dp for dp in dir_projects if dp["name"].lower() not in known_project_names
+            ]
+            if new_dir_projects:
+                _hr()
+                print(f"\n  Found {len(new_dir_projects)} projects from git repositories:\n")
+                for dp in new_dir_projects:
+                    print(f"    {dp['name']}")
+                print()
+                if _yn("  Add these projects to your registry?"):
+                    for dp in new_dir_projects:
+                        projects.append(dp["name"])
+
+        if detected_people:
             _hr()
-            print(f"\n  Found {len(detected)} additional name candidates:\n")
-            for e in detected:
+            print(f"\n  Found {len(detected_people)} additional name candidates:\n")
+            for e in detected_people:
                 print(
                     f"    {e['name']:20} confidence={e['confidence']:.0%}  "
                     f"({', '.join(e['signals'][:1])})"
                 )
             print()
             if _yn("  Add any of these to your registry?"):
-                for e in detected:
+                for e in detected_people:
                     ans = input(f"    {e['name']} — (p)erson, (s)kip? ").strip().lower()
                     if ans == "p":
                         rel = input(f"    Relationship/role for {e['name']}? ").strip()

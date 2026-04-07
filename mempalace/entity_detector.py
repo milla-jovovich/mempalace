@@ -393,6 +393,67 @@ STOPWORDS = {
     "networks",
     "training",
     "inference",
+    # Common tech/programming terms that appear capitalized in READMEs
+    # but are not project or person entities (see issue #97)
+    "code",
+    "typescript",
+    "javascript",
+    "node",
+    "python",
+    "rust",
+    "ruby",
+    "java",
+    "swift",
+    "kotlin",
+    "dart",
+    "react",
+    "angular",
+    "vue",
+    "svelte",
+    "docker",
+    "linux",
+    "windows",
+    "macos",
+    "android",
+    "plugin",
+    "plugins",
+    "icon",
+    "icons",
+    "widget",
+    "widgets",
+    "module",
+    "modules",
+    "package",
+    "packages",
+    "component",
+    "components",
+    "config",
+    "configuration",
+    "readme",
+    "changelog",
+    "license",
+    "documentation",
+    "description",
+    "features",
+    "feature",
+    "overview",
+    "summary",
+    "contents",
+    "installation",
+    "setup",
+    "dependencies",
+    "requirements",
+    "contributing",
+    "contributors",
+    "modify",
+    "low",
+    "high",
+    "medium",
+    "visual",
+    "studio",
+    "figma",
+    "task",
+    "tasks",
 }
 
 # For entity detection — prose only, no code files
@@ -626,16 +687,57 @@ def classify_entity(name: str, frequency: int, scores: dict) -> dict:
     }
 
 
+# ==================== DIRECTORY-BASED PROJECT DETECTION ====================
+
+
+def detect_directory_projects(project_dir: str) -> list:
+    """
+    Detect git repositories as immediate children of the target directory.
+
+    When the init target contains git repos as children, their directory names
+    are the strongest signal for project candidates — stronger than content-based
+    detection from README files (see issue #97).
+
+    Returns a list of entity dicts with type="project" and high confidence.
+    """
+    project_path = Path(project_dir).expanduser().resolve()
+    projects = []
+
+    if not project_path.is_dir():
+        return projects
+
+    for child in sorted(project_path.iterdir()):
+        if not child.is_dir():
+            continue
+        if child.name.startswith("."):
+            continue
+        if child.name in SKIP_DIRS:
+            continue
+        if (child / ".git").is_dir() or (child / ".git").is_file():
+            projects.append(
+                {
+                    "name": child.name,
+                    "type": "project",
+                    "confidence": 0.95,
+                    "frequency": 0,
+                    "signals": ["git repository directory"],
+                }
+            )
+
+    return projects
+
+
 # ==================== MAIN DETECT ====================
 
 
-def detect_entities(file_paths: list, max_files: int = 10) -> dict:
+def detect_entities(file_paths: list, max_files: int = 10, base_dir: str = None) -> dict:
     """
     Scan files and detect entity candidates.
 
     Args:
         file_paths: List of Path objects to scan
         max_files: Max files to read (for speed)
+        base_dir: Optional directory to scan for git repo children as projects
 
     Returns:
         {
@@ -668,13 +770,13 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
     # Extract candidates
     candidates = extract_candidates(combined_text)
 
-    if not candidates:
-        return {"people": [], "projects": [], "uncertain": []}
-
     # Score and classify each candidate
     people = []
     projects = []
     uncertain = []
+
+    if not candidates and not base_dir:
+        return {"people": [], "projects": [], "uncertain": []}
 
     for name, frequency in sorted(candidates.items(), key=lambda x: x[1], reverse=True):
         scores = score_entity(name, combined_text, all_lines)
@@ -686,6 +788,17 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
             projects.append(entity)
         else:
             uncertain.append(entity)
+
+    # Merge directory-based project detection when base_dir is provided.
+    # Directory names of git repos are the strongest project signal — they take
+    # priority over content-based detection from README files (issue #97).
+    if base_dir:
+        dir_projects = detect_directory_projects(base_dir)
+        existing_project_names = {p["name"].lower() for p in projects}
+        for dp in dir_projects:
+            if dp["name"].lower() not in existing_project_names:
+                projects.append(dp)
+                existing_project_names.add(dp["name"].lower())
 
     # Sort by confidence descending
     people.sort(key=lambda x: x["confidence"], reverse=True)
@@ -848,6 +961,6 @@ if __name__ == "__main__":
     print(f"Scanning: {project_dir}")
     files = scan_for_detection(project_dir)
     print(f"Reading {len(files)} files...")
-    detected = detect_entities(files)
+    detected = detect_entities(files, base_dir=project_dir)
     confirmed = confirm_entities(detected)
     print("Confirmed entities:", confirmed)
