@@ -78,6 +78,7 @@ SKIP_FILENAMES = {
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
 
 
 # =============================================================================
@@ -395,6 +396,11 @@ def chunk_text(content: str, source_file: str) -> list:
 
 def get_collection(palace_path: str):
     os.makedirs(palace_path, exist_ok=True)
+    # Restrict palace directory to owner only
+    try:
+        os.chmod(palace_path, 0o700)
+    except (OSError, NotImplementedError):
+        pass
     client = chromadb.PersistentClient(path=palace_path)
     try:
         return client.get_collection("mempalace_drawers")
@@ -427,7 +433,7 @@ def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
 ):
     """Add one drawer to the palace."""
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk_index)).encode(), usedforsecurity=False).hexdigest()[:16]}"
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
     try:
         metadata = {
             "wing": wing,
@@ -562,6 +568,15 @@ def scan_project(
             if respect_gitignore and active_matchers and not force_include:
                 if is_gitignored(filepath, active_matchers, is_dir=False):
                     continue
+            # Skip symlinks — prevents following links to /dev/urandom, etc.
+            if filepath.is_symlink():
+                continue
+            # Skip files exceeding size limit
+            try:
+                if filepath.stat().st_size > MAX_FILE_SIZE:
+                    continue
+            except OSError:
+                continue
             files.append(filepath)
     return files
 

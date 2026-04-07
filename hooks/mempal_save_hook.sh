@@ -83,6 +83,7 @@ if [ "$STOP_HOOK_ACTIVE" = "True" ] || [ "$STOP_HOOK_ACTIVE" = "true" ]; then
 fi
 
 # Count human messages in the JSONL transcript
+# SECURITY: Pass transcript path as sys.argv to avoid shell injection via crafted paths
 if [ -f "$TRANSCRIPT_PATH" ]; then
     EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
 import json, sys
@@ -94,7 +95,6 @@ with open(sys.argv[1]) as f:
             msg = entry.get('message', {})
             if isinstance(msg, dict) and msg.get('role') == 'user':
                 content = msg.get('content', '')
-                # Skip system/command messages — only count real human input
                 if isinstance(content, str) and '<command-message>' in content:
                     continue
                 count += 1
@@ -106,6 +106,9 @@ PYEOF
 else
     EXCHANGE_COUNT=0
 fi
+
+# Sanitize session ID — strip path separators to prevent directory traversal
+SESSION_ID=$(echo "$SESSION_ID" | tr -cd 'a-zA-Z0-9_-')
 
 # Track last save point for this session
 LAST_SAVE_FILE="$STATE_DIR/${SESSION_ID}_last_save"
