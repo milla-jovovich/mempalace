@@ -336,3 +336,86 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+
+# ── Input Validation ───────────────────────────────────────────────────
+
+
+class TestInputValidation:
+    def test_missing_required_field(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 100,
+                "params": {
+                    "name": "mempalace_search",
+                    "arguments": {},  # missing required "query"
+                },
+            }
+        )
+        assert resp["error"]["code"] == -32602
+        assert "query" in resp["error"]["message"]
+
+    def test_extra_unknown_field_rejected(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 101,
+                "params": {
+                    "name": "mempalace_search",
+                    "arguments": {"query": "test", "bogus_field": "nope"},
+                },
+            }
+        )
+        assert resp["error"]["code"] == -32602
+        assert "bogus_field" in resp["error"]["message"]
+
+    def test_content_size_limit_exceeded(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        # Set a very small limit for testing
+        config._file_config["security"] = {"max_content_size": 100}
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 102,
+                "params": {
+                    "name": "mempalace_add_drawer",
+                    "arguments": {
+                        "wing": "test",
+                        "room": "test",
+                        "content": "x" * 200,
+                    },
+                },
+            }
+        )
+        assert resp["error"]["code"] == -32000
+        assert "max size" in resp["error"]["message"]
+
+    def test_content_within_size_limit(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _get_collection(palace_path, create=True)
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 103,
+                "params": {
+                    "name": "mempalace_add_drawer",
+                    "arguments": {
+                        "wing": "test",
+                        "room": "test",
+                        "content": "Small content that fits.",
+                    },
+                },
+            }
+        )
+        assert "result" in resp

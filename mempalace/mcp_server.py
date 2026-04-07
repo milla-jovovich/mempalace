@@ -726,10 +726,53 @@ def handle_request(request):
                 "id": req_id,
                 "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
             }
+
+        tool_def = TOOLS[tool_name]
+        schema = tool_def["input_schema"]
+        schema_props = schema.get("properties", {})
+        required_fields = schema.get("required", [])
+
+        # Validate required fields are present
+        missing = [f for f in required_fields if f not in tool_args]
+        if missing:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32602,
+                    "message": f"Missing required fields: {', '.join(missing)}",
+                },
+            }
+
+        # Reject unknown fields
+        unknown = [k for k in tool_args if k not in schema_props and k != "_meta"]
+        if unknown:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32602,
+                    "message": f"Unknown fields: {', '.join(unknown)}",
+                },
+            }
+
+        # Enforce content size limits on write operations
+        max_size = _config.max_content_size
+        for field in ("content", "entry"):
+            value = tool_args.get(field)
+            if isinstance(value, str) and len(value) > max_size:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {
+                        "code": -32000,
+                        "message": f"Content exceeds max size ({max_size} bytes)",
+                    },
+                }
+
         # Coerce argument types based on input_schema.
         # MCP JSON transport may deliver integers as floats or strings;
         # ChromaDB and Python slicing require native int.
-        schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
         for key, value in list(tool_args.items()):
             prop_schema = schema_props.get(key, {})
             declared_type = prop_schema.get("type")
@@ -737,8 +780,12 @@ def handle_request(request):
                 tool_args[key] = int(value)
             elif declared_type == "number" and not isinstance(value, (int, float)):
                 tool_args[key] = float(value)
+
+        # Strip _meta before dispatching (used for auth, not tool args)
+        tool_args.pop("_meta", None)
+
         try:
-            result = TOOLS[tool_name]["handler"](**tool_args)
+            result = tool_def["handler"](**tool_args)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
