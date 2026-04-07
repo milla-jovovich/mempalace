@@ -203,16 +203,33 @@ def _extract_opencode_messages(
     return messages
 
 
-def normalize_opencode_sessions(db_path: str) -> List[dict]:
+#List of known opencode db paths
+OPENCODE_DB_PATHS = [
+    "~/.local/share/opencode/opencode.db",
+    "~/.opencode/opencode.db",
+]
+
+
+def _resolve_opencode_db(db_path: str | None = None) -> str:
+    candidates = [db_path] if db_path else OPENCODE_DB_PATHS
+    for p in candidates:
+        expanded = Path(p).expanduser()
+        if expanded.is_file():
+            return str(expanded)
+    raise IOError(f"No OpenCode database found (searched {candidates})")
+
+
+def normalize_opencode_sessions(db_path: str | None = None) -> List[dict]:
     """Extract per-session transcripts from an OpenCode SQLite database."""
+    resolved = _resolve_opencode_db(db_path)
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(resolved)
         tables = {
             r[0]
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
     except Exception as e:
-        raise IOError(f"Could not read SQLite database: {db_path}: {e}")
+        raise IOError(f"Could not read SQLite database: {resolved}: {e}")
 
     if not {"session", "message", "part"}.issubset(tables):
         conn.close()
