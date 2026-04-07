@@ -76,7 +76,9 @@ def test_extract_prose_strips_code():
 
 
 def test_split_by_turns():
-    text = "> Question one\nAnswer one\n> Question two\nAnswer two\n> Question three\nAnswer three\n"
+    text = (
+        "> Question one\nAnswer one\n> Question two\nAnswer two\n> Question three\nAnswer three\n"
+    )
     segments = _split_into_segments(text)
     assert len(segments) == 3
 

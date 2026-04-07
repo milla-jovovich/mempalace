@@ -14,6 +14,7 @@ def _make_patched_server(tmp_dir):
     kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))
 
     import mempalace.mcp_server as mcp
+
     original_config = mcp._config
     original_kg = mcp._kg
     mcp._config = config
@@ -53,11 +54,13 @@ def test_handle_tools_list(tmp_dir):
 def test_handle_unknown_tool(tmp_dir):
     mcp, oc, ok = _make_patched_server(tmp_dir)
     try:
-        resp = mcp.handle_request({
-            "method": "tools/call",
-            "id": 3,
-            "params": {"name": "nonexistent_tool", "arguments": {}},
-        })
+        resp = mcp.handle_request(
+            {
+                "method": "tools/call",
+                "id": 3,
+                "params": {"name": "nonexistent_tool", "arguments": {}},
+            }
+        )
         assert "error" in resp
         assert resp["error"]["code"] == -32601
     finally:
@@ -76,26 +79,30 @@ def test_handle_unknown_method(tmp_dir):
 def test_tool_add_and_delete_drawer(tmp_dir):
     mcp, oc, ok = _make_patched_server(tmp_dir)
     try:
-        resp = mcp.handle_request({
-            "method": "tools/call",
-            "id": 5,
-            "params": {
-                "name": "mempalace_add_drawer",
-                "arguments": {"wing": "test", "room": "misc", "content": "Hello from test"},
-            },
-        })
+        resp = mcp.handle_request(
+            {
+                "method": "tools/call",
+                "id": 5,
+                "params": {
+                    "name": "mempalace_add_drawer",
+                    "arguments": {"wing": "test", "room": "misc", "content": "Hello from test"},
+                },
+            }
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["success"] is True
         drawer_id = result["drawer_id"]
 
-        resp = mcp.handle_request({
-            "method": "tools/call",
-            "id": 6,
-            "params": {
-                "name": "mempalace_delete_drawer",
-                "arguments": {"drawer_id": drawer_id},
-            },
-        })
+        resp = mcp.handle_request(
+            {
+                "method": "tools/call",
+                "id": 6,
+                "params": {
+                    "name": "mempalace_delete_drawer",
+                    "arguments": {"drawer_id": drawer_id},
+                },
+            }
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["success"] is True
     finally:
@@ -105,22 +112,26 @@ def test_tool_add_and_delete_drawer(tmp_dir):
 def test_tool_delete_nonexistent(tmp_dir):
     mcp, oc, ok = _make_patched_server(tmp_dir)
     try:
-        mcp.handle_request({
-            "method": "tools/call",
-            "id": 7,
-            "params": {
-                "name": "mempalace_add_drawer",
-                "arguments": {"wing": "x", "room": "y", "content": "seed"},
-            },
-        })
-        resp = mcp.handle_request({
-            "method": "tools/call",
-            "id": 8,
-            "params": {
-                "name": "mempalace_delete_drawer",
-                "arguments": {"drawer_id": "nonexistent_id"},
-            },
-        })
+        mcp.handle_request(
+            {
+                "method": "tools/call",
+                "id": 7,
+                "params": {
+                    "name": "mempalace_add_drawer",
+                    "arguments": {"wing": "x", "room": "y", "content": "seed"},
+                },
+            }
+        )
+        resp = mcp.handle_request(
+            {
+                "method": "tools/call",
+                "id": 8,
+                "params": {
+                    "name": "mempalace_delete_drawer",
+                    "arguments": {"drawer_id": "nonexistent_id"},
+                },
+            }
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["success"] is False
     finally:
@@ -130,23 +141,27 @@ def test_tool_delete_nonexistent(tmp_dir):
 def test_tool_kg_add_and_query(tmp_dir):
     mcp, oc, ok = _make_patched_server(tmp_dir)
     try:
-        mcp.handle_request({
-            "method": "tools/call",
-            "id": 9,
-            "params": {
-                "name": "mempalace_kg_add",
-                "arguments": {"subject": "Max", "predicate": "loves", "object": "chess"},
-            },
-        })
+        mcp.handle_request(
+            {
+                "method": "tools/call",
+                "id": 9,
+                "params": {
+                    "name": "mempalace_kg_add",
+                    "arguments": {"subject": "Max", "predicate": "loves", "object": "chess"},
+                },
+            }
+        )
 
-        resp = mcp.handle_request({
-            "method": "tools/call",
-            "id": 10,
-            "params": {
-                "name": "mempalace_kg_query",
-                "arguments": {"entity": "Max"},
-            },
-        })
+        resp = mcp.handle_request(
+            {
+                "method": "tools/call",
+                "id": 10,
+                "params": {
+                    "name": "mempalace_kg_query",
+                    "arguments": {"entity": "Max"},
+                },
+            }
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["count"] >= 1
         assert any(f["predicate"] == "loves" for f in result["facts"])
@@ -157,23 +172,31 @@ def test_tool_kg_add_and_query(tmp_dir):
 def test_tool_diary_write_and_read(tmp_dir):
     mcp, oc, ok = _make_patched_server(tmp_dir)
     try:
-        mcp.handle_request({
-            "method": "tools/call",
-            "id": 11,
-            "params": {
-                "name": "mempalace_diary_write",
-                "arguments": {"agent_name": "Atlas", "entry": "SESSION:test|built.tests", "topic": "testing"},
-            },
-        })
+        mcp.handle_request(
+            {
+                "method": "tools/call",
+                "id": 11,
+                "params": {
+                    "name": "mempalace_diary_write",
+                    "arguments": {
+                        "agent_name": "Atlas",
+                        "entry": "SESSION:test|built.tests",
+                        "topic": "testing",
+                    },
+                },
+            }
+        )
 
-        resp = mcp.handle_request({
-            "method": "tools/call",
-            "id": 12,
-            "params": {
-                "name": "mempalace_diary_read",
-                "arguments": {"agent_name": "Atlas"},
-            },
-        })
+        resp = mcp.handle_request(
+            {
+                "method": "tools/call",
+                "id": 12,
+                "params": {
+                    "name": "mempalace_diary_read",
+                    "arguments": {"agent_name": "Atlas"},
+                },
+            }
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["total"] >= 1
         assert result["entries"][0]["content"] == "SESSION:test|built.tests"

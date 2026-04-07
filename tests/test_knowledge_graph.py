@@ -1,4 +1,3 @@
-import os
 from mempalace.knowledge_graph import KnowledgeGraph
 
 

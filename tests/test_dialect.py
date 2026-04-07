@@ -1,5 +1,4 @@
-import json
-from mempalace.dialect import Dialect, EMOTION_CODES
+from mempalace.dialect import Dialect
 
 
 def test_encode_entity_known():
@@ -47,7 +46,9 @@ def test_compress_basic():
 def test_compress_with_metadata():
     d = Dialect()
     text = "We decided to switch the database."
-    compressed = d.compress(text, metadata={"wing": "code", "room": "backend", "date": "2026-03-01"})
+    compressed = d.compress(
+        text, metadata={"wing": "code", "room": "backend", "date": "2026-03-01"}
+    )
     assert "code" in compressed
     assert "backend" in compressed
 

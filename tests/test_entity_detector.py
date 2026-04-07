@@ -108,7 +108,9 @@ def test_detect_entities_end_to_end(tmp_dir):
     f = tmp_dir / "chat.txt"
     f.write_text(text)
     detected = detect_entities([f], max_files=1)
-    all_names = [e["name"] for e in detected["people"] + detected["projects"] + detected["uncertain"]]
+    all_names = [
+        e["name"] for e in detected["people"] + detected["projects"] + detected["uncertain"]
+    ]
     assert "Alice" in all_names
 
 

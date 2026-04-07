@@ -49,9 +49,7 @@ def test_detect_convo_room_general():
 
 def test_mine_convos_skips_already_filed(tmp_dir, palace_path):
     chat = tmp_dir / "chat.txt"
-    chat.write_text(
-        "> First question?\nFirst answer.\n\n> Second question?\nSecond answer.\n"
-    )
+    chat.write_text("> First question?\nFirst answer.\n\n> Second question?\nSecond answer.\n")
     mine_convos(str(tmp_dir), palace_path, wing="test")
     client = chromadb.PersistentClient(path=palace_path)
     col = client.get_collection("mempalace_drawers")

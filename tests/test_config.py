@@ -1,4 +1,3 @@
-import os
 import json
 from mempalace.config import MempalaceConfig
 

@@ -160,10 +160,34 @@ def populated_palace(palace_path):
             "Riley scored three goals in Saturday's game",
         ],
         metadatas=[
-            {"wing": "family", "room": "hobbies", "hall": "hall_facts", "source_file": "chat1.txt", "date": "2026-01-10"},
-            {"wing": "code", "room": "backend", "hall": "hall_facts", "source_file": "proj.txt", "date": "2026-02-15"},
-            {"wing": "code", "room": "decisions", "hall": "hall_discoveries", "source_file": "proj.txt", "date": "2026-03-01"},
-            {"wing": "family", "room": "sports", "hall": "hall_events", "source_file": "chat2.txt", "date": "2026-03-20"},
+            {
+                "wing": "family",
+                "room": "hobbies",
+                "hall": "hall_facts",
+                "source_file": "chat1.txt",
+                "date": "2026-01-10",
+            },
+            {
+                "wing": "code",
+                "room": "backend",
+                "hall": "hall_facts",
+                "source_file": "proj.txt",
+                "date": "2026-02-15",
+            },
+            {
+                "wing": "code",
+                "room": "decisions",
+                "hall": "hall_discoveries",
+                "source_file": "proj.txt",
+                "date": "2026-03-01",
+            },
+            {
+                "wing": "family",
+                "room": "sports",
+                "hall": "hall_events",
+                "source_file": "chat2.txt",
+                "date": "2026-03-20",
+            },
         ],
     )
     return palace_path, col
@@ -187,7 +211,9 @@ def seeded_kg(kg):
     kg.add_triple("Alice", "parent_of", "Max", valid_from="2015-04-01")
     kg.add_triple("Max", "does", "swimming", valid_from="2025-01-01")
     kg.add_triple("Max", "does", "chess", valid_from="2024-06-01")
-    kg.add_triple("Alice", "works_at", "Acme Corp", valid_from="2020-01-01", valid_to="2024-12-31")
+    kg.add_triple(
+        "Alice", "works_at", "Acme Corp", valid_from="2020-01-01", valid_to="2024-12-31"
+    )
     kg.add_triple("Alice", "works_at", "NewCo", valid_from="2025-01-01")
 
     return kg

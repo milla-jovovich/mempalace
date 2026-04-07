@@ -1,4 +1,3 @@
-import os
 from mempalace.layers import Layer0, Layer1, Layer2, Layer3, MemoryStack
 
 
