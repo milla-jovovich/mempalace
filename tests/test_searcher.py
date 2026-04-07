@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mempalace.searcher import SearchError, search, search_memories
+from mempalace.searcher import SearchError, brief, search, search_memories
 
 
 # ── search_memories (API) ──────────────────────────────────────────────
@@ -51,6 +51,12 @@ class TestSearchMemories:
         assert "source_file" in hit
         assert "similarity" in hit
         assert isinstance(hit["similarity"], float)
+
+    def test_brief(self, palace_path, seeded_collection):
+        """Brief returns a deduplicated overview."""
+        result = brief(palace_path=palace_path)
+        assert "Brief" in result
+        assert "topics" in result
 
     def test_search_memories_query_error(self):
         """search_memories returns error dict when query raises."""
