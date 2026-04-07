@@ -7,6 +7,7 @@ from mempalace.normalize import (
     _try_chatgpt_json,
     _try_claude_ai_json,
     _try_claude_code_jsonl,
+    _try_grok_json,
     _try_codex_jsonl,
     _try_normalize_json,
     _try_slack_json,
@@ -32,10 +33,40 @@ def test_claude_json(tmp_path):
     assert "Hi" in result
 
 
-def test_empty(tmp_path):
-    f = tmp_path / "empty.txt"
-    f.write_text("")
+def test_grok_json(tmp_path):
+    data = {
+        "conversations": [
+            {
+                "conversation": {"title": "Test Conversation 1"},
+                "responses": [
+                    {"response": {"sender": "human", "message": "Hello, how are you?"}},
+                    {"response": {"sender": "ASSISTANT", "message": "I'm doing great, thanks!"}},
+                ],
+            },
+            {
+                "conversation": {"title": "Test Conversation 2"},
+                "responses": [
+                    {"response": {"sender": "human", "message": "What's the weather?"}},
+                    {"response": {"sender": "ASSISTANT", "message": "It's sunny today."}},
+                ],
+            },
+        ]
+    }
+
+    f = tmp_path / "grok.json"
+    f.write_text(json.dumps(data))
     result = normalize(str(f))
+
+    assert "> Hello, how are you?" in result
+    assert "I'm doing great, thanks!" in result
+    assert "> What's the weather?" in result
+    assert "It's sunny today." in result
+
+
+def test_empty():
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+    f.close()
+    result = normalize(f.name)
     assert result.strip() == ""
 
 
@@ -459,6 +490,81 @@ def test_slack_json_username_fallback():
     ]
     result = _try_slack_json(data)
     assert result is not None
+
+
+# ── _try_grok_json ─────────────────────────────────────────────────────
+
+def test_grok_json_valid():
+    data = {
+        "conversations": [
+            {
+                "responses": [
+                    {"response": {"sender": "human", "message": "Hello"}},
+                    {"response": {"sender": "ASSISTANT", "message": "Hi"}},
+                ]
+            }
+        ]
+    }
+    result = _try_grok_json(data)
+    assert result is not None
+    assert "> Hello" in result
+    assert "Hi" in result
+
+
+def test_grok_json_case_insensitive_sender():
+    data = {
+        "conversations": [
+            {
+                "responses": [
+                    {"response": {"sender": "HUMAN", "message": "Hey"}},
+                    {"response": {"sender": "assistant", "message": "Yo"}},
+                ]
+            }
+        ]
+    }
+    result = _try_grok_json(data)
+    assert result is not None
+
+
+def test_grok_json_not_dict():
+    assert _try_grok_json([1, 2, 3]) is None
+
+
+def test_grok_json_missing_conversations():
+    assert _try_grok_json({"foo": "bar"}) is None
+
+
+def test_grok_json_too_few_messages():
+    data = {
+        "conversations": [
+            {
+                "responses": [
+                    {"response": {"sender": "human", "message": "Solo"}}
+                ]
+            }
+        ]
+    }
+    assert _try_grok_json(data) is None
+
+
+def test_grok_json_skips_malformed_nested_items():
+    data = {
+        "conversations": [
+            "not a dict",
+            {
+                "responses": [
+                    "not a dict",
+                    {"response": "not a dict"},
+                    {"response": {"sender": "human", "message": "Q"}},
+                    {"response": {"sender": "assistant", "message": "A"}},
+                ]
+            },
+        ]
+    }
+    result = _try_grok_json(data)
+    assert result is not None
+    assert "> Q" in result
+    assert "A" in result
 
 
 # ── _try_normalize_json ────────────────────────────────────────────────
