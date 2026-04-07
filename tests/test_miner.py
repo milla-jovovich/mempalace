@@ -206,3 +206,77 @@ def test_scan_project_skip_dirs_still_apply_without_override():
         assert scanned_files(project_root, respect_gitignore=False) == ["main.py"]
     finally:
         shutil.rmtree(tmpdir)
+
+
+def test_scan_project_respects_mempalaceignore():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".mempalaceignore", "secrets.yaml\nlogs/\n")
+        write_file(project_root / "src" / "app.py", "print('hello')\n" * 20)
+        write_file(project_root / "secrets.yaml", "api_key: 12345\n" * 20)
+        write_file(project_root / "logs" / "debug.txt", "debug info\n" * 20)
+
+        assert scanned_files(project_root) == ["src/app.py"]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_scan_project_mempalaceignore_works_without_gitignore():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".mempalaceignore", "*.csv\n")
+        write_file(project_root / "data.csv", "a,b,c\n" * 20)
+        write_file(project_root / "main.py", "print('main')\n" * 20)
+
+        assert scanned_files(project_root, respect_gitignore=False) == ["main.py"]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_scan_project_mempalaceignore_with_hyphen():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".mempalace-ignore", "draft/\n")
+        write_file(project_root / "src" / "app.py", "print('hello')\n" * 20)
+        write_file(project_root / "draft" / "notes.txt", "draft notes\n" * 20)
+
+        assert scanned_files(project_root) == ["src/app.py"]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_scan_project_mempalaceignore_negation():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".mempalaceignore", "data/*\n!data/important.csv\n")
+        write_file(project_root / "data" / "junk.csv", "junk\n" * 20)
+        write_file(project_root / "data" / "important.csv", "important\n" * 20)
+        write_file(project_root / "main.py", "print('main')\n" * 20)
+
+        assert scanned_files(project_root) == ["data/important.csv", "main.py"]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_scan_project_mempalaceignore_overrides_gitignore_allowance():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".mempalaceignore", "vendor/\n")
+        write_file(project_root / "src" / "app.py", "print('hello')\n" * 20)
+        write_file(project_root / "vendor" / "lib.py", "print('vendor')\n" * 20)
+
+        result = scanned_files(project_root)
+        assert "vendor/lib.py" not in result
+        assert "src/app.py" in result
+    finally:
+        shutil.rmtree(tmpdir)
