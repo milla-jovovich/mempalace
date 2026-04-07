@@ -40,18 +40,168 @@ READABLE_EXTENSIONS = {
 }
 
 SKIP_DIRS = {
+    # Version control
     ".git",
+    ".svn",
+    ".hg",
+    ".bzr",
+    # Dependencies
     "node_modules",
     "__pycache__",
     ".venv",
     "venv",
     "env",
+    ".conda",
+    ".virtualenv",
+    # Build outputs
     "dist",
     "build",
+    "target",
+    "out",
+    "bin",
+    "obj",
+    "Debug",
+    "Release",
+    "x64",
+    "x86",
+    # Frontend build outputs
     ".next",
+    ".nuxt",
+    ".svelte-kit",
+    "public",
+    "static",
+    "output",
+    "export",
+    # Java/Gradle
+    ".gradle",
+    ".metadata",
+    # Rust/Cargo
+    ".cargo",
+    # Go
+    "vendor",
+    # Python
+    ".pytest_cache",
+    ".mypy_cache",
+    ".tox",
+    # Testing
     "coverage",
+    ".nyc_output",
+    "coverage-final.json",
+    # Temporary
+    "tmp",
+    "temp",
+    ".tmp",
+    ".temp",
+    # MemPalace itself
     ".mempalace",
+    # Other common build artifacts
+    ".DS_Store",
+    "Thumbs.db",
 }
+
+# Additional file extensions and patterns to exclude
+SKIP_FILE_PATTERNS = {
+    # Minified JS/CSS
+    ".min.js",
+    ".min.css",
+    ".bundle.js",
+    ".bundle.css",
+    # Compiled/Generated files
+    ".pyc",
+    ".so",
+    ".dll",
+    ".exe",
+    ".o",
+    ".obj",
+    ".a",
+    ".lib",
+    ".dylib",
+    ".jar",
+    ".war",
+    ".ear",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".rar",
+    ".7z",
+    # Build artifacts
+    ".class",
+    ".elc",
+    ".beam",
+    # Logs
+    ".log",
+    # Lock files
+    "package-lock.json",
+    "yarn.lock",
+    "Cargo.lock",
+    "Pipfile.lock",
+    "poetry.lock",
+    "Gemfile.lock",
+    "composer.lock",
+    # IDE files
+    ".swp",
+    ".swo",
+}
+
+
+def should_skip_file(filepath: Path) -> bool:
+    """Check if a file should be skipped during mining."""
+    # Check if parent directory is in skip list
+    for parent in filepath.parents:
+        if parent.name in SKIP_DIRS:
+            return True
+
+    # Check if file extension or pattern matches skip list
+    if filepath.suffix.lower() in {
+        ".min.js",
+        ".min.css",
+        ".bundle.js",
+        ".bundle.css",
+        ".pyc",
+        ".so",
+        ".dll",
+        ".exe",
+        ".o",
+        ".obj",
+        ".a",
+        ".lib",
+        ".dylib",
+        ".jar",
+        ".war",
+        ".ear",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".rar",
+        ".7z",
+        ".class",
+        ".elc",
+        ".beam",
+        ".log",
+    }:
+        return True
+
+    # Check for specific filenames
+    if filepath.name in {
+        "package-lock.json",
+        "yarn.lock",
+        "Cargo.lock",
+        "Pipfile.lock",
+        "poetry.lock",
+        "Gemfile.lock",
+        "composer.lock",
+        ".swp",
+        ".swo",
+    }:
+        return True
+
+    # Check for other patterns
+    for pattern in SKIP_FILE_PATTERNS:
+        if str(filepath).lower().endswith(pattern.lower()):
+            return True
+
+    return False
+
 
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
@@ -293,15 +443,15 @@ def scan_project(project_dir: str) -> list:
         for filename in filenames:
             filepath = Path(root) / filename
             if filepath.suffix.lower() in READABLE_EXTENSIONS:
-                # Skip config files
                 if filename in (
                     "mempalace.yaml",
                     "mempalace.yml",
                     "mempal.yaml",
                     "mempal.yml",
                     ".gitignore",
-                    "package-lock.json",
                 ):
+                    continue
+                if should_skip_file(filepath):
                     continue
                 files.append(filepath)
     return files
