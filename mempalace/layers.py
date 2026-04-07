@@ -24,6 +24,7 @@ from collections import defaultdict
 import chromadb
 
 from .config import MempalaceConfig
+from .chromadb_utils import get_all
 
 
 # ---------------------------------------------------------------------------
@@ -97,12 +98,9 @@ class Layer1:
             return "## L1 — No palace found. Run: mempalace mine <dir>"
 
         # Fetch all drawers (with optional wing filter)
-        kwargs = {"include": ["documents", "metadatas"]}
-        if self.wing:
-            kwargs["where"] = {"wing": self.wing}
-
+        where = {"wing": self.wing} if self.wing else None
         try:
-            results = col.get(**kwargs)
+            results = get_all(col, include=["documents", "metadatas"], where=where)
         except Exception:
             return "## L1 — No drawers found."
 

@@ -32,6 +32,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .chromadb_utils import get_all
 
 
 def cmd_init(args):
@@ -256,10 +257,7 @@ def cmd_compress(args):
     # Query drawers in the wing
     where = {"wing": args.wing} if args.wing else None
     try:
-        kwargs = {"include": ["documents", "metadatas"]}
-        if where:
-            kwargs["where"] = where
-        results = col.get(**kwargs)
+        results = get_all(col, include=["documents", "metadatas"], where=where)
     except Exception as e:
         print(f"\n  Error reading drawers: {e}")
         sys.exit(1)

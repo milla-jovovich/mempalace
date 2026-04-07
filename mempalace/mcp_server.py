@@ -26,6 +26,7 @@ from datetime import datetime
 from .config import MempalaceConfig
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
+from .chromadb_utils import get_all
 import chromadb
 
 from .knowledge_graph import KnowledgeGraph
@@ -68,8 +69,8 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
-        for m in all_meta:
+        results = get_all(col, include=["metadatas"])
+        for m in results["metadatas"]:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -125,8 +126,8 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
-        for m in all_meta:
+        results = get_all(col, include=["metadatas"])
+        for m in results["metadatas"]:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
     except Exception:
@@ -140,11 +141,9 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"]}
-        if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
-        for m in all_meta:
+        where = {"wing": wing} if wing else None
+        results = get_all(col, include=["metadatas"], where=where)
+        for m in results["metadatas"]:
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
     except Exception:
@@ -158,8 +157,8 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
-        for m in all_meta:
+        results = get_all(col, include=["metadatas"])
+        for m in results["metadatas"]:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
             if w not in taxonomy:
@@ -403,9 +402,10 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         return _no_palace()
 
     try:
-        results = col.get(
-            where={"$and": [{"wing": wing}, {"room": "diary"}]},
+        results = get_all(
+            col,
             include=["documents", "metadatas"],
+            where={"$and": [{"wing": wing}, {"room": "diary"}]},
         )
 
         if not results["ids"]:

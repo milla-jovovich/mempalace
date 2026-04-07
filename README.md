@@ -607,6 +607,7 @@ Plain text. Becomes Layer 0 — loaded every session.
 
 | File | What |
 |------|------|
+| `chromadb_utils.py` | Safe batched reads from ChromaDB collections |
 | `cli.py` | CLI entry point |
 | `config.py` | Configuration loading and defaults |
 | `normalize.py` | Converts 5 chat formats to standard transcript |

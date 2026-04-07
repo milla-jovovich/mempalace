@@ -25,6 +25,25 @@ def test_env_override():
     del os.environ["MEMPALACE_PALACE_PATH"]
 
 
+def test_config_file_tilde_is_expanded():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"palace_path": "~/.mempalace/palace"}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert not cfg.palace_path.startswith("~")
+    assert cfg.palace_path == os.path.expanduser("~/.mempalace/palace")
+
+
+def test_env_var_tilde_is_expanded():
+    os.environ["MEMPALACE_PALACE_PATH"] = "~/custom/palace"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert not cfg.palace_path.startswith("~")
+        assert cfg.palace_path == os.path.expanduser("~/custom/palace")
+    finally:
+        del os.environ["MEMPALACE_PALACE_PATH"]
+
+
 def test_init():
     tmpdir = tempfile.mkdtemp()
     cfg = MempalaceConfig(config_dir=tmpdir)

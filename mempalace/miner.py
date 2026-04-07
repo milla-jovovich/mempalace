@@ -17,6 +17,8 @@ from collections import defaultdict
 
 import chromadb
 
+from .chromadb_utils import get_all
+
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
@@ -653,7 +655,7 @@ def status(palace_path: str):
         return
 
     # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
+    r = get_all(col, include=["metadatas"])
     metas = r["metadatas"]
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
