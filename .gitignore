@@ -5,3 +5,26 @@ __pycache__/
 *.pyc
 .pytest_cache/
 mempal.yaml
+
+# Security-sensitive files
+.env
+.env.*
+*.key
+auth_token
+entities.json
+
+# Database files
+*.sqlite3
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+
+# Test coverage
+htmlcov/
+.coverage
