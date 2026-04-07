@@ -38,8 +38,8 @@ logger = logging.getLogger("mempalace_mcp")
 _config = MempalaceConfig()
 
 
-def _get_collection(create=False):
-    """Return the ChromaDB collection, or None on failure."""
+def _get_collection(create=True):
+    """Return the ChromaDB collection, creating it if needed."""
     try:
         client = chromadb.PersistentClient(path=_config.palace_path)
         if create:
