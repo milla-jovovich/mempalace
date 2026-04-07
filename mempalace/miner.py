@@ -288,17 +288,21 @@ def process_file(
             "filed_at": filed_at,
         })
 
-    try:
-        collection.add(
-            documents=batch_docs,
-            ids=batch_ids,
-            metadatas=batch_metas,
-        )
-        return len(batch_docs), room
-    except Exception as e:
-        if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
-            return 0, room
-        raise
+    BATCH_SIZE = 100
+    added = 0
+    for start in range(0, len(batch_docs), BATCH_SIZE):
+        end = start + BATCH_SIZE
+        try:
+            collection.add(
+                documents=batch_docs[start:end],
+                ids=batch_ids[start:end],
+                metadatas=batch_metas[start:end],
+            )
+            added += end - start
+        except Exception as e:
+            if "already exists" not in str(e).lower() and "duplicate" not in str(e).lower():
+                raise
+    return min(added, len(batch_docs)), room
 
 
 # =============================================================================

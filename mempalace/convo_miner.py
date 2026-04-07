@@ -384,17 +384,21 @@ def mine_convos(
                 "extract_mode": extract_mode,
             })
 
-        try:
-            collection.add(
-                documents=batch_docs,
-                ids=batch_ids,
-                metadatas=batch_metas,
-            )
-            drawers_added = len(batch_docs)
-        except Exception as e:
-            if "already exists" not in str(e).lower():
-                raise
-            drawers_added = 0
+        BATCH_SIZE = 100
+        drawers_added = 0
+        for start in range(0, len(batch_docs), BATCH_SIZE):
+            end = start + BATCH_SIZE
+            try:
+                collection.add(
+                    documents=batch_docs[start:end],
+                    ids=batch_ids[start:end],
+                    metadatas=batch_metas[start:end],
+                )
+                drawers_added += end - start
+            except Exception as e:
+                if "already exists" not in str(e).lower():
+                    raise
+        drawers_added = min(drawers_added, len(batch_docs))
 
         total_drawers += drawers_added
         print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
