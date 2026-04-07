@@ -40,12 +40,12 @@ class TestCyrillicEntityDetection:
 
     def test_multi_word_cyrillic_names(self):
         text = (
-            "Проект Мемпалас работает отлично. "
-            "Проект Мемпалас использует ChromaDB. "
-            "Проект Мемпалас поддерживает юникод."
+            "Мем Палас работает отлично. "
+            "Мем Палас использует ChromaDB. "
+            "Мем Палас поддерживает юникод."
         )
         candidates = extract_candidates(text)
-        assert "Проект Мемпалас" in candidates
+        assert "Мем Палас" in candidates
 
     def test_cyrillic_stopwords_filtered(self):
         """Common Russian words should not appear as entity candidates."""
