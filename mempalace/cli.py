@@ -2,9 +2,10 @@
 """
 MemPalace — Give your AI a memory. No API key required.
 
-Two ways to ingest:
+Three ways to ingest:
   Projects:      mempalace mine ~/projects/my_app          (code, docs, notes)
   Conversations: mempalace mine ~/chats/ --mode convos     (Claude, ChatGPT, Slack)
+  Device:        mempalace mine-device                     (repos, tools, knowledge bases)
 
 Same palace. Same search. Different ingest strategies.
 
@@ -22,6 +23,8 @@ Examples:
     mempalace init ~/projects/my_app
     mempalace mine ~/projects/my_app
     mempalace mine ~/chats/claude-sessions --mode convos
+    mempalace mine-device                                 # scan your whole machine
+    mempalace mine-device --dry-run                       # preview what would be filed
     mempalace search "why did we switch to GraphQL"
     mempalace search "pricing discussion" --wing my_app --room costs
 """
@@ -138,6 +141,19 @@ def cmd_split(args):
         split_main()
     finally:
         sys.argv = old_argv
+
+
+def cmd_mine_device(args):
+    from .device_miner import mine_device
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    mine_device(
+        palace_path=palace_path,
+        wing=args.wing,
+        agent=args.agent,
+        max_depth=args.depth,
+        dry_run=args.dry_run,
+    )
 
 
 def cmd_status(args):
@@ -350,6 +366,28 @@ def main():
         help="Only split files containing at least N sessions (default: 2)",
     )
 
+    # mine-device
+    p_device = sub.add_parser(
+        "mine-device",
+        help="Scan your machine — repos, tools, knowledge bases. Cold start killer.",
+    )
+    p_device.add_argument(
+        "--wing", default=None,
+        help="Override wing name for all drawers (default: auto-detect from git remotes)",
+    )
+    p_device.add_argument(
+        "--agent", default="mempalace",
+        help="Your name — recorded on every drawer (default: mempalace)",
+    )
+    p_device.add_argument(
+        "--depth", type=int, default=8,
+        help="Max directory depth for repo discovery (default: 8)",
+    )
+    p_device.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would be filed without filing",
+    )
+
     # status
     sub.add_parser("status", help="Show what's been filed")
 
@@ -362,6 +400,7 @@ def main():
     dispatch = {
         "init": cmd_init,
         "mine": cmd_mine,
+        "mine-device": cmd_mine_device,
         "split": cmd_split,
         "search": cmd_search,
         "compress": cmd_compress,
