@@ -15,7 +15,7 @@ Usage:
     confirmed = confirm_entities(candidates)  # interactive review
 """
 
-import re
+import regex as re  # Unicode-aware regex (supports \p{Lu}, \p{Ll} for any script)
 import os
 from pathlib import Path
 from collections import defaultdict
@@ -45,6 +45,20 @@ PERSON_VERB_PATTERNS = [
     r"\bthanks?\s+{name}\b",
     r"\bhi\s+{name}\b",
     r"\bdear\s+{name}\b",
+    # Russian person verb patterns
+    r"\b{name}\s+сказал[аи]?\b",
+    r"\b{name}\s+спросил[аи]?\b",
+    r"\b{name}\s+ответил[аи]?\b",
+    r"\b{name}\s+рассмеялс[яь]\b",
+    r"\b{name}\s+почувствовал[аи]?\b",
+    r"\b{name}\s+думает\b",
+    r"\b{name}\s+хочет\b",
+    r"\b{name}\s+любит\b",
+    r"\b{name}\s+знает\b",
+    r"\b{name}\s+решил[аи]?\b",
+    r"\b{name}\s+написал[аи]?\b",
+    r"\bпривет\s+{name}\b",
+    r"\bспасибо\s+{name}\b",
 ]
 
 # Person signals — pronouns resolving nearby
@@ -58,6 +72,16 @@ PRONOUN_PATTERNS = [
     r"\bthey\b",
     r"\bthem\b",
     r"\btheir\b",
+    # Russian pronouns
+    r"\bона\b",
+    r"\bей\b",
+    r"\bеё\b",
+    r"\bон\b",
+    r"\bему\b",
+    r"\bего\b",
+    r"\bони\b",
+    r"\bим\b",
+    r"\bих\b",
 ]
 
 # Person signals — dialogue markers
@@ -86,6 +110,16 @@ PROJECT_VERB_PATTERNS = [
     r"\b{name}-local\b",
     r"\bimport\s+{name}\b",
     r"\bpip\s+install\s+{name}\b",
+    # Russian project verb patterns
+    r"\bсобираем\s+{name}\b",
+    r"\bсобрал[аи]?\s+{name}\b",
+    r"\bзапустил[аи]?\s+{name}\b",
+    r"\bвыкатил[аи]?\s+{name}\b",
+    r"\bзадеплоил[аи]?\s+{name}\b",
+    r"\bустановил[аи]?\s+{name}\b",
+    r"\bархитектура\s+{name}\b",
+    r"\bсистема\s+{name}\b",
+    r"\bрепо\s+{name}\b",
 ]
 
 # Words that are almost certainly NOT entities
@@ -393,6 +427,19 @@ STOPWORDS = {
     "networks",
     "training",
     "inference",
+    # Russian stopwords — common words that appear capitalized at sentence starts
+    "это", "как", "так", "что", "для", "все", "уже", "тоже", "может", "есть",
+    "надо", "было", "будет", "были", "если", "потом", "когда", "только", "тут",
+    "вот", "ещё", "нет", "даже", "между", "через", "после", "перед", "около",
+    "также", "однако", "поэтому", "потому", "поскольку", "впрочем", "кстати",
+    # Russian common nouns (false positive entities at sentence starts)
+    "время", "место", "человек", "жизнь", "день", "работа", "система", "мир",
+    "вопрос", "случай", "сторона", "дело", "голова", "ребёнок", "слово", "часть",
+    "пример", "проблема", "группа", "вариант", "результат", "ответ", "причина",
+    "версия", "факт", "идея", "точка", "момент", "задача", "цель", "способ",
+    # Russian abstract/topic words
+    "память", "язык", "наука", "история", "будущее", "общество", "культура",
+    "технология", "модель", "сеть", "обучение", "процесс", "ошибка", "файл",
 }
 
 # For entity detection — prose only, no code files
@@ -446,7 +493,7 @@ def extract_candidates(text: str) -> dict:
     Returns {name: frequency} for names appearing 3+ times.
     """
     # Find all capitalized words (not at sentence start — harder, so we use frequency as filter)
-    raw = re.findall(r"\b([A-Z][a-z]{1,19})\b", text)
+    raw = re.findall(r"\b(\p{Lu}\p{Ll}{1,19})\b", text)
 
     counts = defaultdict(int)
     for word in raw:
@@ -454,7 +501,7 @@ def extract_candidates(text: str) -> dict:
             counts[word] += 1
 
     # Also find multi-word proper nouns (e.g. "Memory Palace", "Claude Code")
-    multi = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", text)
+    multi = re.findall(r"\b(\p{Lu}\p{Ll}+(?:\s+\p{Lu}\p{Ll}+)+)\b", text)
     for phrase in multi:
         if not any(w.lower() in STOPWORDS for w in phrase.split()):
             counts[phrase] += 1

@@ -37,7 +37,7 @@ FLAGS:
 
 import json
 import os
-import re
+import regex as re  # Unicode-aware regex (supports \p{Lu}, \p{Ll}, \p{L} for any script)
 from typing import List, Dict, Optional
 from pathlib import Path
 
@@ -111,6 +111,28 @@ _EMOTION_SIGNALS = {
     "satisf": "satis",
     "disappoint": "grief",
     "concern": "anx",
+    # Russian emotion signals
+    "решил": "determ",
+    "предпочита": "convict",
+    "волну": "anx",
+    "радуюсь": "excite",
+    "злюсь": "frust",
+    "запутал": "confuse",
+    "люблю": "love",
+    "ненавижу": "rage",
+    "надеюсь": "hope",
+    "боюсь": "fear",
+    "доверяю": "trust",
+    "счастлив": "joy",
+    "грустно": "grief",
+    "удивлён": "surprise",
+    "благодар": "grat",
+    "интересно": "curious",
+    "тревожно": "anx",
+    "облегчение": "relief",
+    "довольн": "satis",
+    "разочаров": "grief",
+    "беспокои": "anx",
 }
 
 # Keywords that signal flags
@@ -149,6 +171,37 @@ _FLAG_SIGNALS = {
     "framework": "TECHNICAL",
     "server": "TECHNICAL",
     "config": "TECHNICAL",
+    # Russian flag signals
+    "решил": "DECISION",
+    "выбрал": "DECISION",
+    "перешёл": "DECISION",
+    "перешли": "DECISION",
+    "заменил": "DECISION",
+    "вместо": "DECISION",
+    "потому что": "DECISION",
+    "основал": "ORIGIN",
+    "создал": "ORIGIN",
+    "начал": "ORIGIN",
+    "запустил": "ORIGIN",
+    "первый раз": "ORIGIN",
+    "ключевой": "CORE",
+    "фундаментальн": "CORE",
+    "важнейш": "CORE",
+    "принцип": "CORE",
+    "убеждение": "CORE",
+    "поворотный момент": "PIVOT",
+    "всё изменил": "PIVOT",
+    "осознал": "PIVOT",
+    "прорыв": "PIVOT",
+    "озарение": "PIVOT",
+    "архитектура": "TECHNICAL",
+    "деплой": "TECHNICAL",
+    "инфраструктур": "TECHNICAL",
+    "алгоритм": "TECHNICAL",
+    "фреймворк": "TECHNICAL",
+    "сервер": "TECHNICAL",
+    "конфиг": "TECHNICAL",
+    "база данных": "TECHNICAL",
 }
 
 # Common filler/stop words to strip from topic extraction
@@ -286,6 +339,14 @@ _STOP_WORDS = {
     "really",
     "want",
     "need",
+    # Russian stop words
+    "это", "как", "так", "что", "для", "все", "уже", "тоже", "может", "есть",
+    "надо", "было", "будет", "были", "если", "потом", "когда", "только", "тут",
+    "вот", "ещё", "нет", "даже", "между", "через", "после", "перед", "около",
+    "также", "однако", "поэтому", "потому", "поскольку", "впрочем", "кстати",
+    "нужно", "можно", "очень", "просто", "более", "менее", "сейчас", "всегда",
+    "никогда", "где", "куда", "откуда", "зачем", "почему", "какой", "этот",
+    "тот", "такой", "который", "свой", "наш", "ваш", "мой", "твой",
 }
 
 
@@ -430,7 +491,7 @@ class Dialect:
     def _extract_topics(self, text: str, max_topics: int = 3) -> List[str]:
         """Extract key topic words from plain text."""
         # Tokenize: alphanumeric words, lowercase
-        words = re.findall(r"[a-zA-Z][a-zA-Z_-]{2,}", text)
+        words = re.findall(r"\p{L}[\p{L}_-]{2,}", text)
         # Count frequency, skip stop words
         freq = {}
         for w in words:
@@ -482,6 +543,23 @@ class Dialect:
             "why",
             "breakthrough",
             "insight",
+            # Russian decision/key sentence words
+            "решил",
+            "потому",
+            "вместо",
+            "предпочита",
+            "выбрал",
+            "осознал",
+            "важно",
+            "ключев",
+            "критичн",
+            "обнаружил",
+            "узнал",
+            "вывод",
+            "решение",
+            "причина",
+            "почему",
+            "прорыв",
         }
         scored = []
         for s in sentences:
@@ -521,7 +599,7 @@ class Dialect:
         # Fallback: find capitalized words that look like names (2+ chars, not sentence-start)
         words = text.split()
         for i, w in enumerate(words):
-            clean = re.sub(r"[^a-zA-Z]", "", w)
+            clean = re.sub(r"[^\p{L}]", "", w)
             if (
                 len(clean) >= 2
                 and clean[0].isupper()
