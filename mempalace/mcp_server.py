@@ -17,6 +17,7 @@ Tools (write):
   mempalace_delete_drawer   — remove a drawer by ID
 """
 
+import os
 import sys
 import json
 import logging
@@ -30,12 +31,13 @@ import chromadb
 
 from .knowledge_graph import KnowledgeGraph
 
-_kg = KnowledgeGraph()
-
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
 
 _config = MempalaceConfig()
+_kg = KnowledgeGraph(
+    db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3")
+)
 
 
 def _get_collection(create=True):
