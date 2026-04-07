@@ -466,10 +466,15 @@ def extract_candidates(text: str) -> dict:
 # ==================== SIGNAL SCORING ====================
 
 
+_pattern_cache = {}
+
+
 def _build_patterns(name: str) -> dict:
-    """Pre-compile all regex patterns for a single entity name."""
+    """Pre-compile all regex patterns for a single entity name. Cached."""
+    if name in _pattern_cache:
+        return _pattern_cache[name]
     n = re.escape(name)
-    return {
+    patterns = {
         "dialogue": [
             re.compile(p.format(name=n), re.MULTILINE | re.IGNORECASE) for p in DIALOGUE_PATTERNS
         ],
@@ -481,6 +486,8 @@ def _build_patterns(name: str) -> dict:
         "versioned": re.compile(rf"\b{n}[-v]\w+", re.IGNORECASE),
         "code_ref": re.compile(rf"\b{n}\.(py|js|ts|yaml|yml|json|sh)\b", re.IGNORECASE),
     }
+    _pattern_cache[name] = patterns
+    return patterns
 
 
 def score_entity(name: str, text: str, lines: list) -> dict:

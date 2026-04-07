@@ -25,7 +25,7 @@ from datetime import datetime
 
 from .config import MempalaceConfig
 from .searcher import search_memories
-from .palace_graph import traverse, find_tunnels, graph_stats
+from .palace_graph import traverse, find_tunnels, graph_stats, invalidate_graph_cache
 import chromadb
 
 from .knowledge_graph import KnowledgeGraph
@@ -281,6 +281,7 @@ def tool_add_drawer(
                 }
             ],
         )
+        invalidate_graph_cache()
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
     except Exception as e:
@@ -297,6 +298,7 @@ def tool_delete_drawer(drawer_id: str):
         return {"success": False, "error": f"Drawer not found: {drawer_id}"}
     try:
         col.delete(ids=[drawer_id])
+        invalidate_graph_cache()
         logger.info(f"Deleted drawer: {drawer_id}")
         return {"success": True, "drawer_id": drawer_id}
     except Exception as e:

@@ -510,9 +510,10 @@ class Dialect:
     def _detect_entities_in_text(self, text: str) -> List[str]:
         """Find known entities in text, or detect capitalized names."""
         found = []
+        text_lower = text.lower()
         # Check known entities
         for name, code in self.entity_codes.items():
-            if not name.islower() and name.lower() in text.lower():
+            if not name.islower() and name.lower() in text_lower:
                 if code not in found:
                     found.append(code)
         if found:

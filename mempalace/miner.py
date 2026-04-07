@@ -238,45 +238,67 @@ def process_file(
     rooms: list,
     agent: str,
     dry_run: bool,
-) -> int:
-    """Read, chunk, route, and file one file. Returns drawer count."""
+    known_files: set = None,
+) -> tuple:
+    """Read, chunk, route, and file one file. Returns (drawer_count, room)."""
 
     # Skip if already filed
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file):
-        return 0
+    if not dry_run:
+        if known_files is not None:
+            if source_file in known_files:
+                return 0, None
+        elif file_already_mined(collection, source_file):
+            return 0, None
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
     except Exception:
-        return 0
+        return 0, None
 
     content = content.strip()
     if len(content) < MIN_CHUNK_SIZE:
-        return 0
+        return 0, None
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
-        return len(chunks)
+        return len(chunks), room
 
-    drawers_added = 0
+    # Batch insert all chunks at once
+    if not chunks:
+        return 0, room
+
+    batch_docs = []
+    batch_ids = []
+    batch_metas = []
+    filed_at = datetime.now().isoformat()
     for chunk in chunks:
-        added = add_drawer(
-            collection=collection,
-            wing=wing,
-            room=room,
-            content=chunk["content"],
-            source_file=source_file,
-            chunk_index=chunk["chunk_index"],
-            agent=agent,
-        )
-        if added:
-            drawers_added += 1
+        drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:16]}"
+        batch_docs.append(chunk["content"])
+        batch_ids.append(drawer_id)
+        batch_metas.append({
+            "wing": wing,
+            "room": room,
+            "source_file": source_file,
+            "chunk_index": chunk["chunk_index"],
+            "added_by": agent,
+            "filed_at": filed_at,
+        })
 
-    return drawers_added
+    try:
+        collection.add(
+            documents=batch_docs,
+            ids=batch_ids,
+            metadatas=batch_metas,
+        )
+        return len(batch_docs), room
+    except Exception as e:
+        if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+            return 0, room
+        raise
 
 
 # =============================================================================
@@ -348,12 +370,27 @@ def mine(
     else:
         collection = None
 
+    # Pre-fetch all known source_files for O(1) dedup lookups
+    known_files = set()
+    if not dry_run and collection is not None:
+        total_known = collection.count()
+        offset = 0
+        while offset < total_known:
+            batch = collection.get(limit=1000, offset=offset, include=["metadatas"])
+            for meta in batch["metadatas"]:
+                sf = meta.get("source_file", "")
+                if sf:
+                    known_files.add(sf)
+            if not batch["ids"]:
+                break
+            offset += len(batch["ids"])
+
     total_drawers = 0
     files_skipped = 0
     room_counts = defaultdict(int)
 
     for i, filepath in enumerate(files, 1):
-        drawers = process_file(
+        drawers, room = process_file(
             filepath=filepath,
             project_path=project_path,
             collection=collection,
@@ -361,13 +398,14 @@ def mine(
             rooms=rooms,
             agent=agent,
             dry_run=dry_run,
+            known_files=known_files,
         )
         if drawers == 0 and not dry_run:
             files_skipped += 1
         else:
             total_drawers += drawers
-            room = detect_room(filepath, "", rooms, project_path)
-            room_counts[room] += 1
+            if room:
+                room_counts[room] += 1
             if not dry_run:
                 print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
 
@@ -398,16 +436,20 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
-    metas = r["metadatas"]
-
+    # Count by wing and room in batches (handles any palace size)
+    total = col.count()
     wing_rooms = defaultdict(lambda: defaultdict(int))
-    for m in metas:
-        wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+    offset = 0
+    while offset < total:
+        batch = col.get(limit=1000, offset=offset, include=["metadatas"])
+        for m in batch["metadatas"]:
+            wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+        if not batch["ids"]:
+            break
+        offset += len(batch["ids"])
 
     print(f"\n{'=' * 55}")
-    print(f"  MemPalace Status — {len(metas)} drawers")
+    print(f"  MemPalace Status — {total} drawers")
     print(f"{'=' * 55}\n")
     for wing, rooms in sorted(wing_rooms.items()):
         print(f"  WING: {wing}")

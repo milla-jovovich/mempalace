@@ -286,6 +286,21 @@ def mine_convos(
 
     collection = get_collection(palace_path) if not dry_run else None
 
+    # Pre-fetch all known source_files for O(1) dedup lookups
+    known_files = set()
+    if collection is not None:
+        total_known = collection.count()
+        offset = 0
+        while offset < total_known:
+            batch = collection.get(limit=1000, offset=offset, include=["metadatas"])
+            for meta in batch["metadatas"]:
+                sf = meta.get("source_file", "")
+                if sf:
+                    known_files.add(sf)
+            if not batch["ids"]:
+                break
+            offset += len(batch["ids"])
+
     total_drawers = 0
     files_skipped = 0
     room_counts = defaultdict(int)
@@ -294,7 +309,7 @@ def mine_convos(
         source_file = str(filepath)
 
         # Skip if already filed
-        if not dry_run and file_already_mined(collection, source_file):
+        if not dry_run and source_file in known_files:
             files_skipped += 1
             continue
 
@@ -346,34 +361,40 @@ def mine_convos(
         if extract_mode != "general":
             room_counts[room] += 1
 
-        # File each chunk
-        drawers_added = 0
+        # Batch insert all chunks at once
+        batch_docs = []
+        batch_ids = []
+        batch_metas = []
+        filed_at = datetime.now().isoformat()
         for chunk in chunks:
             chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
             if extract_mode == "general":
                 room_counts[chunk_room] += 1
             drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.md5((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:16]}"
-            try:
-                collection.add(
-                    documents=[chunk["content"]],
-                    ids=[drawer_id],
-                    metadatas=[
-                        {
-                            "wing": wing,
-                            "room": chunk_room,
-                            "source_file": source_file,
-                            "chunk_index": chunk["chunk_index"],
-                            "added_by": agent,
-                            "filed_at": datetime.now().isoformat(),
-                            "ingest_mode": "convos",
-                            "extract_mode": extract_mode,
-                        }
-                    ],
-                )
-                drawers_added += 1
-            except Exception as e:
-                if "already exists" not in str(e).lower():
-                    raise
+            batch_docs.append(chunk["content"])
+            batch_ids.append(drawer_id)
+            batch_metas.append({
+                "wing": wing,
+                "room": chunk_room,
+                "source_file": source_file,
+                "chunk_index": chunk["chunk_index"],
+                "added_by": agent,
+                "filed_at": filed_at,
+                "ingest_mode": "convos",
+                "extract_mode": extract_mode,
+            })
+
+        try:
+            collection.add(
+                documents=batch_docs,
+                ids=batch_ids,
+                metadatas=batch_metas,
+            )
+            drawers_added = len(batch_docs)
+        except Exception as e:
+            if "already exists" not in str(e).lower():
+                raise
+            drawers_added = 0
 
         total_drawers += drawers_added
         print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")

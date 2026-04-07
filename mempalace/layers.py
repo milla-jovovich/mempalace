@@ -20,8 +20,7 @@ import os
 import sys
 from pathlib import Path
 from collections import defaultdict
-
-import chromadb
+import heapq
 
 from .config import MempalaceConfig
 
@@ -91,13 +90,15 @@ class Layer1:
     def generate(self) -> str:
         """Pull top drawers from ChromaDB and format as compact L1 text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            cfg = MempalaceConfig()
+            col = cfg.get_collection(self.palace_path)
+            if not col:
+                raise ValueError("no collection")
         except Exception:
             return "## L1 — No palace found. Run: mempalace mine <dir>"
 
-        # Fetch all drawers (with optional wing filter)
-        kwargs = {"include": ["documents", "metadatas"]}
+        # Step 1: Fetch only metadata (no documents) for scoring
+        kwargs = {"include": ["metadatas"]}
         if self.wing:
             kwargs["where"] = {"wing": self.wing}
 
@@ -106,17 +107,16 @@ class Layer1:
         except Exception:
             return "## L1 — No drawers found."
 
-        docs = results.get("documents", [])
+        ids = results.get("ids", [])
         metas = results.get("metadatas", [])
 
-        if not docs:
+        if not ids:
             return "## L1 — No memories yet."
 
-        # Score each drawer: prefer high importance, recent filing
+        # Score each drawer on metadata only: prefer high importance
         scored = []
-        for doc, meta in zip(docs, metas):
+        for drawer_id, meta in zip(ids, metas):
             importance = 3
-            # Try multiple metadata keys that might carry weight info
             for key in ("importance", "emotional_weight", "weight"):
                 val = meta.get(key)
                 if val is not None:
@@ -125,16 +125,21 @@ class Layer1:
                     except (ValueError, TypeError):
                         pass
                     break
-            scored.append((importance, meta, doc))
+            scored.append((importance, drawer_id, meta))
 
-        # Sort by importance descending, take top N
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top = scored[: self.MAX_DRAWERS]
+        # Select top N using heapq (O(n log k) instead of full sort)
+        top = heapq.nlargest(self.MAX_DRAWERS, scored, key=lambda x: x[0])
+
+        # Step 2: Fetch only the winning documents by ID
+        top_ids = [drawer_id for _, drawer_id, _ in top]
+        top_results = col.get(ids=top_ids, include=["documents"])
+        top_docs = {did: doc for did, doc in zip(top_results["ids"], top_results["documents"])}
 
         # Group by room for readability
         by_room = defaultdict(list)
-        for imp, meta, doc in top:
+        for imp, drawer_id, meta in top:
             room = meta.get("room", "general")
+            doc = top_docs.get(drawer_id, "")
             by_room[room].append((imp, meta, doc))
 
         # Build compact text
@@ -187,8 +192,10 @@ class Layer2:
     def retrieve(self, wing: str = None, room: str = None, n_results: int = 10) -> str:
         """Retrieve drawers filtered by wing and/or room."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            cfg = MempalaceConfig()
+            col = cfg.get_collection(self.palace_path)
+            if not col:
+                raise ValueError("no collection")
         except Exception:
             return "No palace found."
 
@@ -251,8 +258,10 @@ class Layer3:
     def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
         """Semantic search, returns compact result text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            cfg = MempalaceConfig()
+            col = cfg.get_collection(self.palace_path)
+            if not col:
+                raise ValueError("no collection")
         except Exception:
             return "No palace found."
 
@@ -307,8 +316,10 @@ class Layer3:
     ) -> list:
         """Return raw dicts instead of formatted text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            cfg = MempalaceConfig()
+            col = cfg.get_collection(self.palace_path)
+            if not col:
+                raise ValueError("no collection")
         except Exception:
             return []
 
@@ -428,10 +439,9 @@ class MemoryStack:
 
         # Count drawers
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
-            count = col.count()
-            result["total_drawers"] = count
+            cfg = MempalaceConfig()
+            col = cfg.get_collection(self.palace_path)
+            result["total_drawers"] = col.count() if col else 0
         except Exception:
             result["total_drawers"] = 0
 

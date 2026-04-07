@@ -15,19 +15,31 @@ Enables queries like:
 No external graph DB needed — built from ChromaDB metadata.
 """
 
+import time
 from collections import defaultdict, Counter
 from .config import MempalaceConfig
 
-import chromadb
+# ---------------------------------------------------------------------------
+# Graph cache — avoid rebuilding on every call
+# ---------------------------------------------------------------------------
+_graph_cache = {
+    "nodes": None,
+    "edges": None,
+    "wing_to_rooms": None,
+    "built_at": 0,
+    "palace_path": None,
+}
+_CACHE_TTL = 60  # seconds
 
 
 def _get_collection(config=None):
     config = config or MempalaceConfig()
-    try:
-        client = chromadb.PersistentClient(path=config.palace_path)
-        return client.get_collection(config.collection_name)
-    except Exception:
-        return None
+    return config.get_collection()
+
+
+def invalidate_graph_cache():
+    """Call after adding/removing drawers to force a rebuild."""
+    _graph_cache["built_at"] = 0
 
 
 def build_graph(col=None, config=None):
@@ -37,11 +49,24 @@ def build_graph(col=None, config=None):
     Returns:
         nodes: dict of {room: {wings: set, halls: set, count: int}}
         edges: list of {room, wing_a, wing_b, hall} — one per tunnel crossing
+        wing_to_rooms: dict of {wing: set(rooms)} — adjacency index for fast BFS
     """
+    config = config or MempalaceConfig()
+    palace_path = config.palace_path if config else None
+
+    # Return cached graph if fresh
+    now = time.monotonic()
+    if (
+        _graph_cache["nodes"] is not None
+        and _graph_cache["palace_path"] == palace_path
+        and now - _graph_cache["built_at"] < _CACHE_TTL
+    ):
+        return _graph_cache["nodes"], _graph_cache["edges"], _graph_cache["wing_to_rooms"]
+
     if col is None:
         col = _get_collection(config)
     if not col:
-        return {}, []
+        return {}, [], {}
 
     total = col.count()
     room_data = defaultdict(lambda: {"wings": set(), "halls": set(), "count": 0, "dates": set()})
@@ -83,6 +108,12 @@ def build_graph(col=None, config=None):
                             }
                         )
 
+    # Build adjacency index: wing → set of rooms
+    wing_to_rooms = defaultdict(set)
+    for room, data in room_data.items():
+        for wing in data["wings"]:
+            wing_to_rooms[wing].add(room)
+
     # Convert sets to lists for JSON serialization
     nodes = {}
     for room, data in room_data.items():
@@ -93,7 +124,14 @@ def build_graph(col=None, config=None):
             "dates": sorted(data["dates"])[-5:] if data["dates"] else [],
         }
 
-    return nodes, edges
+    # Cache the result
+    _graph_cache["nodes"] = nodes
+    _graph_cache["edges"] = edges
+    _graph_cache["wing_to_rooms"] = wing_to_rooms
+    _graph_cache["built_at"] = now
+    _graph_cache["palace_path"] = palace_path
+
+    return nodes, edges, wing_to_rooms
 
 
 def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
@@ -103,7 +141,7 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
 
     Returns list of paths: [{room, wing, hall, hop_distance}]
     """
-    nodes, edges = build_graph(col, config)
+    nodes, edges, wing_to_rooms = build_graph(col, config)
 
     if start_room not in nodes:
         return {
@@ -123,7 +161,7 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
         }
     ]
 
-    # BFS traversal
+    # BFS traversal using adjacency index — O(V+E) instead of O(V²)
     frontier = [(start_room, 0)]
     while frontier:
         current_room, depth = frontier.pop(0)
@@ -131,14 +169,16 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
             continue
 
         current = nodes.get(current_room, {})
-        current_wings = set(current.get("wings", []))
+        current_wings = current.get("wings", [])
 
-        # Find all rooms that share a wing with current room
-        for room, data in nodes.items():
-            if room in visited:
-                continue
-            shared_wings = current_wings & set(data["wings"])
-            if shared_wings:
+        # Use adjacency index: for each wing the current room belongs to,
+        # find all other rooms in that wing — O(degree) per frontier node
+        for wing in current_wings:
+            for room in wing_to_rooms.get(wing, set()):
+                if room in visited:
+                    continue
+                data = nodes[room]
+                shared_wings = set(current_wings) & set(data["wings"])
                 visited.add(room)
                 results.append(
                     {
@@ -163,7 +203,7 @@ def find_tunnels(wing_a: str = None, wing_b: str = None, col=None, config=None):
     Find rooms that connect two wings (or all tunnel rooms if no wings specified).
     These are the "hallways" — same named idea appearing in multiple domains.
     """
-    nodes, edges = build_graph(col, config)
+    nodes, edges, wing_to_rooms = build_graph(col, config)
 
     tunnels = []
     for room, data in nodes.items():
@@ -192,7 +232,7 @@ def find_tunnels(wing_a: str = None, wing_b: str = None, col=None, config=None):
 
 def graph_stats(col=None, config=None):
     """Summary statistics about the palace graph."""
-    nodes, edges = build_graph(col, config)
+    nodes, edges, wing_to_rooms = build_graph(col, config)
 
     tunnel_rooms = sum(1 for n in nodes.values() if len(n["wings"]) >= 2)
     wing_counts = Counter()

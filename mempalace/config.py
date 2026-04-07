@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 
+import chromadb
+
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
 
@@ -67,6 +69,8 @@ class MempalaceConfig:
 
     Load order: env vars > config file > defaults.
     """
+
+    _chroma_clients = {}  # palace_path → PersistentClient (shared across instances)
 
     def __init__(self, config_dir=None):
         """Initialize config.
@@ -136,6 +140,23 @@ class MempalaceConfig:
             with open(self._config_file, "w") as f:
                 json.dump(default_config, f, indent=2)
         return self._config_file
+
+    def get_chroma_client(self, palace_path=None):
+        """Get a shared ChromaDB PersistentClient (one per palace_path)."""
+        path = palace_path or self.palace_path
+        if path not in MempalaceConfig._chroma_clients:
+            MempalaceConfig._chroma_clients[path] = chromadb.PersistentClient(path=path)
+        return MempalaceConfig._chroma_clients[path]
+
+    def get_collection(self, palace_path=None, create=False):
+        """Get the mempalace_drawers collection via the shared client."""
+        client = self.get_chroma_client(palace_path)
+        try:
+            return client.get_collection(self.collection_name)
+        except Exception:
+            if create:
+                return client.create_collection(self.collection_name)
+            return None
 
     def save_people_map(self, people_map):
         """Write people_map.json to config directory.

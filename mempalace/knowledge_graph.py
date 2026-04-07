@@ -50,11 +50,12 @@ class KnowledgeGraph:
     def __init__(self, db_path: str = None):
         self.db_path = db_path or DEFAULT_KG_PATH
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(self.db_path, timeout=10)
+        self._batch_mode = False
         self._init_db()
 
     def _init_db(self):
-        conn = self._conn()
-        conn.executescript("""
+        self._connection.executescript("""
             CREATE TABLE IF NOT EXISTS entities (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -83,11 +84,16 @@ class KnowledgeGraph:
             CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
             CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);
         """)
-        conn.commit()
-        conn.close()
+        self._connection.commit()
 
     def _conn(self):
-        return sqlite3.connect(self.db_path, timeout=10)
+        return self._connection
+
+    def close(self):
+        """Close the persistent connection."""
+        if self._connection:
+            self._connection.close()
+            self._connection = None
 
     def _entity_id(self, name: str) -> str:
         return name.lower().replace(" ", "_").replace("'", "")
@@ -103,8 +109,8 @@ class KnowledgeGraph:
             "INSERT OR REPLACE INTO entities (id, name, type, properties) VALUES (?, ?, ?, ?)",
             (eid, name, entity_type, props),
         )
-        conn.commit()
-        conn.close()
+        if not self._batch_mode:
+            conn.commit()
         return eid
 
     def add_triple(
@@ -142,7 +148,6 @@ class KnowledgeGraph:
         ).fetchone()
 
         if existing:
-            conn.close()
             return existing[0]  # Already exists and still valid
 
         triple_id = f"t_{sub_id}_{pred}_{obj_id}_{hashlib.md5(f'{valid_from}{datetime.now().isoformat()}'.encode()).hexdigest()[:8]}"
@@ -162,8 +167,8 @@ class KnowledgeGraph:
                 source_file,
             ),
         )
-        conn.commit()
-        conn.close()
+        if not self._batch_mode:
+            conn.commit()
         return triple_id
 
     def invalidate(self, subject: str, predicate: str, obj: str, ended: str = None):
@@ -179,7 +184,6 @@ class KnowledgeGraph:
             (ended, sub_id, pred, obj_id),
         )
         conn.commit()
-        conn.close()
 
     # ── Query operations ──────────────────────────────────────────────────
 
@@ -237,7 +241,6 @@ class KnowledgeGraph:
                     }
                 )
 
-        conn.close()
         return results
 
     def query_relationship(self, predicate: str, as_of: str = None):
@@ -268,7 +271,6 @@ class KnowledgeGraph:
                     "current": row[5] is None,
                 }
             )
-        conn.close()
         return results
 
     def timeline(self, entity_name: str = None):
@@ -297,7 +299,6 @@ class KnowledgeGraph:
                 LIMIT 100
             """).fetchall()
 
-        conn.close()
         return [
             {
                 "subject": r[10],
@@ -324,7 +325,6 @@ class KnowledgeGraph:
                 "SELECT DISTINCT predicate FROM triples ORDER BY predicate"
             ).fetchall()
         ]
-        conn.close()
         return {
             "entities": entities,
             "triples": triples,
@@ -339,7 +339,9 @@ class KnowledgeGraph:
         """
         Seed the knowledge graph from fact_checker.py ENTITY_FACTS.
         This bootstraps the graph with known ground truth.
+        Runs all inserts in a single transaction for speed.
         """
+        self._batch_mode = True
         for key, facts in entity_facts.items():
             name = facts.get("full_name", key.capitalize())
             etype = facts.get("type", "person")
@@ -382,3 +384,6 @@ class KnowledgeGraph:
             # Interests
             for interest in facts.get("interests", []):
                 self.add_triple(name, "loves", interest.capitalize(), valid_from="2025-01-01")
+
+        self._batch_mode = False
+        self._conn().commit()
