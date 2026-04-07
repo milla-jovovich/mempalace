@@ -27,6 +27,8 @@ classifiers = [
 dependencies = [
     "chromadb>=0.5.0,<0.7",
     "pyyaml>=6.0",
+    # Chroma telemetry uses posthog; posthog>=6 breaks capture() signature (#163)
+    "posthog>=2.4.0,<6.0.0",
 ]
 
 [project.urls]
