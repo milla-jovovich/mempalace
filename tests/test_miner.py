@@ -6,7 +6,7 @@ from pathlib import Path
 import chromadb
 import yaml
 
-from mempalace.miner import mine, scan_project
+from mempalace.miner import load_config, mine, scan_project
 
 
 def write_file(path: Path, content: str):
@@ -46,6 +46,20 @@ def test_project_mining():
         client = chromadb.PersistentClient(path=str(palace_path))
         col = client.get_collection("mempalace_drawers")
         assert col.count() > 0
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_load_config_uses_defaults_when_yaml_missing():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+        config = load_config(str(project_root))
+
+        assert isinstance(config, dict)
+        assert "wing" in config
+        assert "rooms" in config
+        assert config["wing"] == project_root.name
     finally:
         shutil.rmtree(tmpdir)
 
