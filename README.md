@@ -112,20 +112,108 @@ Three mining modes: **projects** (code and docs), **convos** (conversation expor
 
 After the one-time setup (install → init → mine), you don't run MemPalace commands manually. Your AI uses it for you. There are two ways, depending on which AI you use.
 
-### With Claude, ChatGPT, Cursor, Gemini (MCP-compatible tools)
+### With Claude, Cursor, Windsurf, Copilot, Gemini and other MCP clients
+
+**Prerequisite: `uvx`**
+
+MemPalace's MCP server runs via `uvx`, part of [`uv`](https://docs.astral.sh/uv/getting-started/installation/). If you don't have it yet:
 
 ```bash
-# Connect MemPalace once
-claude mcp add mempalace -- python -m mempalace.mcp_server
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-Now your AI has 19 tools available through MCP. Ask it anything:
+---
+
+**Claude Code (CLI)**
+
+```bash
+claude mcp add mempalace -- uvx --from mempalace python -m mempalace.mcp_server
+```
+
+---
+
+**Cursor**
+
+Open `Settings → MCP → Edit Config`, or manually edit `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project-level):
+
+```json
+{
+  "mcpServers": {
+    "mempalace": {
+      "command": "uvx",
+      "args": ["--from", "mempalace", "python", "-m", "mempalace.mcp_server"]
+    }
+  }
+}
+```
+
+---
+
+**Claude Desktop**
+
+Edit your Claude Desktop config file:
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "mempalace": {
+      "command": "uvx",
+      "args": ["--from", "mempalace", "python", "-m", "mempalace.mcp_server"]
+    }
+  }
+}
+```
+
+---
+
+**GitHub Copilot (VS Code)**
+
+Create or edit `.vscode/mcp.json` in your project:
+
+```json
+{
+  "servers": {
+    "mempalace": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "mempalace", "python", "-m", "mempalace.mcp_server"]
+    }
+  }
+}
+```
+
+---
+
+**Windsurf and other MCP-compatible clients**
+
+Most MCP clients use the same JSON structure. Add this under `"mcpServers"` in your configuration file:
+
+```json
+{
+  "mcpServers": {
+    "mempalace": {
+      "command": "uvx",
+      "args": ["--from", "mempalace", "python", "-m", "mempalace.mcp_server"]
+    }
+  }
+}
+```
+
+---
+
+MemPalace also works natively with **Gemini CLI** (which handles the server and save hooks automatically) — see the [Gemini CLI Integration Guide](examples/gemini_cli_setup.md).
+
+Once connected, your AI has 19 tools available. Ask it anything:
 
 > *"What did we decide about auth last month?"*
 
 Claude calls `mempalace_search` automatically, gets verbatim results, and answers you. You never type `mempalace search` again. The AI handles it.
-
-MemPalace also works natively with **Gemini CLI** (which handles the server and save hooks automatically) — see the [Gemini CLI Integration Guide](examples/gemini_cli_setup.md).
 
 ### With local models (Llama, Mistral, or any offline LLM)
 
