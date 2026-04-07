@@ -20,7 +20,6 @@ def test_seed_and_save(tmp_dir):
     assert "Alice" in reg.people
     assert "Max" in reg.people
     assert "MemPalace" in reg.projects
-    # max is in COMMON_ENGLISH_WORDS
     assert "max" in reg.ambiguous_flags
 
 
@@ -64,9 +63,9 @@ def test_disambiguate_person_context(tmp_dir):
 
 def test_disambiguate_concept_context(tmp_dir):
     reg = EntityRegistry.load(config_dir=tmp_dir)
-    reg.seed(mode="personal", people=[{"name": "Max", "relationship": "son"}], projects=[])
-    result = reg.lookup("Max", context="Max said something")
-    assert result["type"] == "person"
+    reg.seed(mode="personal", people=[{"name": "Ever", "relationship": "friend"}], projects=[])
+    result = reg.lookup("Ever", context="have you ever since then")
+    assert result["type"] == "concept"
 
 
 def test_extract_people_from_query(tmp_dir):

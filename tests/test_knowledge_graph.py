@@ -72,13 +72,11 @@ def test_temporal_query_as_of(tmp_dir):
     kg.invalidate("Max", "does", "swimming", ended="2025-06-01")
     kg.add_triple("Max", "does", "tennis", valid_from="2025-07-01")
 
-    # In March 2025: swimming was active
     results = kg.query_entity("Max", as_of="2025-03-15", direction="outgoing")
     objects = {r["object"] for r in results}
     assert "swimming" in objects
     assert "tennis" not in objects
 
-    # In August 2025: tennis is active, swimming ended
     results = kg.query_entity("Max", as_of="2025-08-01", direction="outgoing")
     objects = {r["object"] for r in results}
     assert "tennis" in objects
@@ -118,7 +116,7 @@ def test_stats(tmp_dir):
     kg.add_triple("Max", "does", "swimming")
     kg.invalidate("Max", "does", "swimming", ended="2026-01-01")
     stats = kg.stats()
-    assert stats["entities"] == 3  # max, chess, swimming
+    assert stats["entities"] == 3
     assert stats["triples"] == 2
     assert stats["current_facts"] == 1
     assert stats["expired_facts"] == 1

@@ -26,7 +26,6 @@ def test_layer1_generates_from_palace(populated_palace):
     l1 = Layer1(palace_path=palace_path)
     text = l1.generate()
     assert "L1" in text
-    assert len(text) > 0
 
 
 def test_layer1_no_palace(tmp_dir):
@@ -82,4 +81,4 @@ def test_memory_stack_status(populated_palace):
     stack = MemoryStack(palace_path=palace_path)
     status = stack.status()
     assert status["total_drawers"] == 4
-    assert status["L0_identity"]["exists"] is False  # no identity file in test
+    assert status["L0_identity"]["exists"] is False

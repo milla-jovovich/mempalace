@@ -26,7 +26,7 @@ def test_passthrough_with_markers(tmp_dir):
     f = tmp_dir / "marked.txt"
     f.write_text(content)
     result = normalize(str(f))
-    assert result == content  # Unchanged pass-through
+    assert result == content
 
 
 def test_claude_ai_json(tmp_dir):

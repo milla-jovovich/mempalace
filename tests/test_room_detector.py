@@ -6,8 +6,7 @@ from mempalace.room_detector_local import (
 )
 
 
-def write_file(path: Path, content: str):
-    """Helper to write a file, creating parent dirs."""
+def _write_file(path: Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
@@ -46,16 +45,16 @@ def test_detect_rooms_from_folders_nested(tmp_dir):
 
 
 def test_detect_rooms_from_files(tmp_dir):
-    write_file(tmp_dir / "test_app.py", "x" * 20)
-    write_file(tmp_dir / "test_utils.py", "x" * 20)
-    write_file(tmp_dir / "test_db.py", "x" * 20)
+    _write_file(tmp_dir / "test_app.py", "x" * 20)
+    _write_file(tmp_dir / "test_utils.py", "x" * 20)
+    _write_file(tmp_dir / "test_db.py", "x" * 20)
     rooms = detect_rooms_from_files(str(tmp_dir))
     room_names = {r["name"] for r in rooms}
     assert "testing" in room_names
 
 
 def test_detect_rooms_from_files_fallback_general(tmp_dir):
-    write_file(tmp_dir / "random.xyz", "x" * 20)
+    _write_file(tmp_dir / "random.xyz", "x" * 20)
     rooms = detect_rooms_from_files(str(tmp_dir))
     room_names = {r["name"] for r in rooms}
     assert "general" in room_names

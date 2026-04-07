@@ -9,7 +9,7 @@ from mempalace.entity_detector import (
 )
 
 
-def write_file(path: Path, content: str):
+def _write_file(path: Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
@@ -37,7 +37,7 @@ def test_extract_candidates_finds_multi_word():
 def test_extract_candidates_min_frequency():
     text = "Alice appeared once. Bob appeared once."
     candidates = extract_candidates(text)
-    assert "Alice" not in candidates  # below threshold of 3
+    assert "Alice" not in candidates
 
 
 def test_score_entity_person_verbs():
@@ -96,7 +96,7 @@ def test_classify_entity_pronoun_only_downgraded():
         "project_signals": [],
     }
     entity = classify_entity("Foo", 5, scores)
-    assert entity["type"] == "uncertain"  # pronoun-only = downgraded
+    assert entity["type"] == "uncertain"
 
 
 def test_detect_entities_end_to_end(tmp_dir):
@@ -115,8 +115,8 @@ def test_detect_entities_end_to_end(tmp_dir):
 
 
 def test_scan_for_detection_prefers_prose(tmp_dir):
-    write_file(tmp_dir / "notes.md", "# Notes\n" * 20)
-    write_file(tmp_dir / "app.py", "def main(): pass\n" * 20)
+    _write_file(tmp_dir / "notes.md", "# Notes\n" * 20)
+    _write_file(tmp_dir / "app.py", "def main(): pass\n" * 20)
     files = scan_for_detection(str(tmp_dir))
     extensions = {f.suffix for f in files}
     assert ".md" in extensions

@@ -1,4 +1,13 @@
+import chromadb
 from mempalace.palace_graph import build_graph, traverse, find_tunnels, graph_stats, _fuzzy_match
+
+
+def _make_collection(palace_path, ids, documents, metadatas):
+    """Create a ChromaDB collection with test data."""
+    client = chromadb.PersistentClient(path=palace_path)
+    col = client.get_or_create_collection("mempalace_drawers")
+    col.add(ids=ids, documents=documents, metadatas=metadatas)
+    return col
 
 
 def test_build_graph_creates_nodes(populated_palace):
@@ -11,11 +20,8 @@ def test_build_graph_creates_nodes(populated_palace):
 
 
 def test_build_graph_skips_general(palace_path):
-    import chromadb
-
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
-    col.add(
+    col = _make_collection(
+        palace_path,
         ids=["g1"],
         documents=["generic content"],
         metadatas=[{"wing": "misc", "room": "general", "hall": ""}],
@@ -25,11 +31,8 @@ def test_build_graph_skips_general(palace_path):
 
 
 def test_build_graph_detects_tunnels(palace_path):
-    import chromadb
-
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
-    col.add(
+    col = _make_collection(
+        palace_path,
         ids=["t1", "t2"],
         documents=["content a", "content b"],
         metadatas=[
@@ -50,11 +53,8 @@ def test_traverse_unknown_room(populated_palace):
 
 
 def test_traverse_hop_distance(palace_path):
-    import chromadb
-
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
-    col.add(
+    col = _make_collection(
+        palace_path,
         ids=["a1", "a2", "b1"],
         documents=["x", "y", "z"],
         metadatas=[
@@ -70,11 +70,8 @@ def test_traverse_hop_distance(palace_path):
 
 
 def test_find_tunnels_filters_by_wing(palace_path):
-    import chromadb
-
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
-    col.add(
+    col = _make_collection(
+        palace_path,
         ids=["f1", "f2", "f3"],
         documents=["a", "b", "c"],
         metadatas=[

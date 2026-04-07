@@ -95,8 +95,8 @@ def test_compression_stats():
     compressed = d.compress(original)
     stats = d.compression_stats(original, compressed)
     assert stats["original_chars"] == len(original)
-    assert stats["compressed_chars"] < len(original)
-    assert stats["ratio"] > 1.0
+    assert stats["summary_chars"] < len(original)
+    assert stats["size_ratio"] > 1.0
 
 
 def test_from_config_and_save(tmp_dir):
