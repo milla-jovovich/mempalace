@@ -461,6 +461,20 @@ The AI learns AAAK and the memory protocol automatically from the `mempalace_sta
 
 ---
 
+## Hermes Integration
+
+MemPalace plugs into [Hermes](https://github.com/NousResearch/hermes-agent) as a
+native memory provider. One command:
+
+```bash
+pip install mempalace
+mempalace hermes install
+```
+
+See [integrations/hermes/](integrations/hermes/) for details.
+
+---
+
 ## Auto-Save Hooks
 
 Two hooks for Claude Code that automatically save memories during work:
