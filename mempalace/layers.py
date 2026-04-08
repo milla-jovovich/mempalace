@@ -286,12 +286,13 @@ class Layer3:
         except Exception as e:
             return f"Search error: {e}"
 
+        # ChromaDB 1.x may return {documents: []}; guard before [0]. Issue #195.
+        if not results.get("documents") or not results["documents"][0]:
+            return "No results found."
+
         docs = results["documents"][0]
         metas = results["metadatas"][0]
         dists = results["distances"][0]
-
-        if not docs:
-            return "No results found."
 
         lines = [f'## L3 — SEARCH RESULTS for "{query}"']
         for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
@@ -340,6 +341,10 @@ class Layer3:
         try:
             results = col.query(**kwargs)
         except Exception:
+            return []
+
+        # ChromaDB 1.x may return {documents: []}; guard before [0]. Issue #195.
+        if not results.get("documents") or not results["documents"][0]:
             return []
 
         hits = []

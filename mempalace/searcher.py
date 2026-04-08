@@ -55,13 +55,14 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"\n  Search error: {e}")
         raise SearchError(f"Search error: {e}") from e
 
+    # ChromaDB 1.x may return {documents: []}; guard before [0]. Issue #195.
+    if not results.get("documents") or not results["documents"][0]:
+        print(f'\n  No results found for: "{query}"')
+        return
+
     docs = results["documents"][0]
     metas = results["metadatas"][0]
     dists = results["distances"][0]
-
-    if not docs:
-        print(f'\n  No results found for: "{query}"')
-        return
 
     print(f"\n{'=' * 60}")
     print(f'  Results for: "{query}"')
@@ -128,6 +129,14 @@ def search_memories(
         results = col.query(**kwargs)
     except Exception as e:
         return {"error": f"Search error: {e}"}
+
+    # ChromaDB 1.x may return {documents: []}; guard before [0]. Issue #195.
+    if not results.get("documents") or not results["documents"][0]:
+        return {
+            "query": query,
+            "filters": {"wing": wing, "room": room},
+            "results": [],
+        }
 
     docs = results["documents"][0]
     metas = results["metadatas"][0]

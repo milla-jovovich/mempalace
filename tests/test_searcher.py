@@ -4,6 +4,9 @@ test_searcher.py — Tests for the programmatic search_memories API.
 Tests the library-facing search interface (not the CLI print variant).
 """
 
+from unittest.mock import MagicMock
+
+from mempalace.layers import Layer3
 from mempalace.searcher import search_memories
 
 
@@ -43,3 +46,34 @@ class TestSearchMemories:
         assert "source_file" in hit
         assert "similarity" in hit
         assert isinstance(hit["similarity"], float)
+
+
+# Issue #195 — ChromaDB 1.x may return {documents: []} (no outer wrapper).
+# Pre-fix code did `results["documents"][0]` and crashed with IndexError.
+# These tests inject the buggy shape via mock to exercise the guard.
+
+_EMPTY_OUTER = {"ids": [], "documents": [], "metadatas": [], "distances": []}
+
+
+def _mock_empty_chromadb(monkeypatch, module):
+    fake_col = MagicMock()
+    fake_col.query.return_value = _EMPTY_OUTER
+    fake_client = MagicMock()
+    fake_client.get_collection.return_value = fake_col
+    monkeypatch.setattr(
+        f"{module}.chromadb.PersistentClient", lambda path: fake_client
+    )
+
+
+def test_search_memories_handles_empty_outer_list(monkeypatch, tmp_path):
+    """Issue #195: ChromaDB 1.x empty-outer shape must not crash."""
+    _mock_empty_chromadb(monkeypatch, "mempalace.searcher")
+    result = search_memories("anything", str(tmp_path))
+    assert result["results"] == []
+
+
+def test_layer3_search_raw_handles_empty_outer_list(monkeypatch, tmp_path):
+    """Issue #195: Layer3 also affected by the empty-outer shape."""
+    _mock_empty_chromadb(monkeypatch, "mempalace.layers")
+    result = Layer3(palace_path=str(tmp_path)).search_raw("anything")
+    assert result == []
