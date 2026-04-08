@@ -475,37 +475,28 @@ def cmd_sync(args):
     elif missing:
         print(f"  Skipped {len(missing)} missing files (use --clean to remove orphaned drawers)")
 
-    # Re-mine changed files
+    # Report re-mine instructions grouped by wing and mode
     if stale:
-        print(f"\n  Re-mining {len(stale)} changed files...")
-
-        # Use ingest_mode captured during scan (before deletion)
+        # Group stale files by (wing, ingest_mode, parent_dir) to suggest
+        # the fewest possible mine commands.
+        mine_groups = {}  # (wing, mode, dir) -> count
         for sf in stale:
             info = source_files[sf]
             wing = info["wing"]
-            is_convo = info.get("ingest_mode") == "convos"
+            mode = info.get("ingest_mode", "")
+            parent = str(Path(sf).parent)
+            key = (wing, mode, parent)
+            mine_groups[key] = mine_groups.get(key, 0) + 1
 
-            if is_convo:
-                from .convo_miner import mine_convos
-                mine_convos(
-                    convo_dir=str(Path(sf).parent),
-                    palace_path=palace_path,
-                    wing=wing,
-                    agent=args.agent,
-                )
-            else:
-                from .miner import mine
-                mine(
-                    project_dir=str(Path(sf).parent),
-                    palace_path=palace_path,
-                    wing_override=wing,
-                    agent=args.agent,
-                )
-            re_mined += 1
+        print(f"\n  To re-mine the {len(stale)} changed files, run:")
+        for (wing, mode, parent), count in mine_groups.items():
+            mode_flag = " --mode convos" if mode == "convos" else ""
+            print(f"    mempalace mine {parent}{mode_flag} --wing {wing} --force")
 
     print(f"\n  Sync complete.")
     print(f"  Deleted: {deleted} stale drawers")
-    print(f"  Re-mined: {re_mined} source directories")
+    if stale:
+        print(f"  Stale drawers removed: re-mine to refresh (see commands above)")
     print(f"\n{'=' * 55}\n")
 
 

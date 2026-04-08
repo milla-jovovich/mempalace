@@ -218,10 +218,11 @@ def test_force_clean_deletes_drawers():
     from mempalace.cli import _force_clean
     _force_clean(palace_path, src_dir)
 
-    # Re-check — should be cleaned
+    # Re-check — should be cleaned (resolve path for macOS /var → /private/var)
     client2 = chromadb.PersistentClient(path=palace_path)
     col2 = client2.get_collection("mempalace_drawers")
-    results = col2.get(where={"source_file": src_file})
+    resolved_file = str(Path(src_file).resolve())
+    results = col2.get(where={"source_file": resolved_file})
     assert len(results["ids"]) == 0, "Force clean should delete all drawers from source dir"
 
     os.unlink(src_file)
