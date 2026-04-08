@@ -371,28 +371,33 @@ def chunk_text(content: str, source_file: str) -> list:
 
 
 def add_drawer(
-    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
+    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str,
+    content_hash: str = "",
 ):
     """Add one drawer to the palace."""
     drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
+    meta = {
+        "wing": wing,
+        "room": room,
+        "source_file": source_file,
+        "chunk_index": chunk_index,
+        "added_by": agent,
+        "filed_at": datetime.now().isoformat(),
+    }
+    if not content_hash:
+        content_hash = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
+    if content_hash:
+        meta["content_hash"] = content_hash
+    # Store file mtime so we can detect modifications later.
     try:
-        metadata = {
-            "wing": wing,
-            "room": room,
-            "source_file": source_file,
-            "chunk_index": chunk_index,
-            "added_by": agent,
-            "filed_at": datetime.now().isoformat(),
-        }
-        # Store file mtime so we can detect modifications later.
-        try:
-            metadata["source_mtime"] = os.path.getmtime(source_file)
-        except OSError:
-            pass
+        meta["source_mtime"] = os.path.getmtime(source_file)
+    except OSError:
+        pass
+    try:
         collection.upsert(
             documents=[content],
             ids=[drawer_id],
-            metadatas=[metadata],
+            metadatas=[meta],
         )
         return True
     except Exception:
@@ -431,6 +436,7 @@ def process_file(
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)
+    file_hash = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
@@ -446,6 +452,7 @@ def process_file(
             source_file=source_file,
             chunk_index=chunk["chunk_index"],
             agent=agent,
+            content_hash=file_hash,
         )
         if added:
             drawers_added += 1

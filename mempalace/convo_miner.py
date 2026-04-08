@@ -327,28 +327,29 @@ def mine_convos(
             room_counts[room] += 1
 
         # File each chunk
+        file_hash = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
         drawers_added = 0
         for chunk in chunks:
             chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
             if extract_mode == "general":
                 room_counts[chunk_room] += 1
             drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
+            meta = {
+                "wing": wing,
+                "room": chunk_room,
+                "source_file": source_file,
+                "chunk_index": chunk["chunk_index"],
+                "added_by": agent,
+                "filed_at": datetime.now().isoformat(),
+                "ingest_mode": "convos",
+                "extract_mode": extract_mode,
+                "content_hash": file_hash,
+            }
             try:
                 collection.add(
                     documents=[chunk["content"]],
                     ids=[drawer_id],
-                    metadatas=[
-                        {
-                            "wing": wing,
-                            "room": chunk_room,
-                            "source_file": source_file,
-                            "chunk_index": chunk["chunk_index"],
-                            "added_by": agent,
-                            "filed_at": datetime.now().isoformat(),
-                            "ingest_mode": "convos",
-                            "extract_mode": extract_mode,
-                        }
-                    ],
+                    metadatas=[meta],
                 )
                 drawers_added += 1
             except Exception as e:
