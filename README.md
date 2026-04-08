@@ -94,7 +94,7 @@ mempalace init ~/projects/myapp
 
 # Mine your data
 mempalace mine ~/projects/myapp                    # projects — code, docs, notes
-mempalace mine ~/chats/ --mode convos              # convos — Claude, ChatGPT, Slack exports
+mempalace mine ~/chats/ --mode convos              # convos — Claude, ChatGPT, Slack, Cursor state.vscdb
 mempalace mine ~/chats/ --mode convos --extract general  # general — classifies into decisions, milestones, problems
 
 # Search anything you've ever discussed
@@ -564,7 +564,7 @@ mempalace init <dir>                              # guided onboarding + AAAK boo
 
 # Mining
 mempalace mine <dir>                              # mine project files
-mempalace mine <dir> --mode convos                # mine conversation exports
+mempalace mine <dir> --mode convos                # mine conversation exports (incl. Cursor state.vscdb)
 mempalace mine <dir> --mode convos --wing myapp   # tag with a wing name
 
 # Splitting

@@ -9,6 +9,7 @@ Supported:
     - Claude Code JSONL
     - OpenAI Codex CLI JSONL
     - Slack JSON export
+    - Cursor SQLite workspace DB (state.vscdb / ItemTable composer.composerData)
     - Plain text (pass through for paragraph chunking)
 
 No API key. No internet. Everything local.
@@ -16,6 +17,7 @@ No API key. No internet. Everything local.
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +27,16 @@ def normalize(filepath: str) -> str:
     Load a file and normalize to transcript format if it's a chat export.
     Plain text files pass through unchanged.
     """
+    path = Path(filepath)
+
+    # Cursor and other local chat tooling can persist sessions in SQLite.
+    # Handle DB files before text decode to avoid binary garbage ingestion.
+    if _looks_like_sqlite(path):
+        normalized = _try_cursor_sqlite(path)
+        if normalized:
+            return normalized
+        return ""
+
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
@@ -40,13 +52,132 @@ def normalize(filepath: str) -> str:
         return content
 
     # Try JSON normalization
-    ext = Path(filepath).suffix.lower()
+    ext = path.suffix.lower()
     if ext in (".json", ".jsonl") or content.strip()[:1] in ("{", "["):
         normalized = _try_normalize_json(content)
         if normalized:
             return normalized
 
     return content
+
+
+def _looks_like_sqlite(path: Path) -> bool:
+    """Detect SQLite files by signature to support Cursor workspace DB ingestion."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(16) == b"SQLite format 3\x00"
+    except OSError:
+        return False
+
+
+def _try_cursor_sqlite(path: Path) -> Optional[str]:
+    """
+    Cursor stores composer chats in state.vscdb (SQLite), typically under:
+    .../Cursor/User/workspaceStorage/<hash>/state.vscdb
+
+    We read ItemTable[key='composer.composerData'] and normalize all discovered
+    user/assistant turns into transcript format.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+
+    try:
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            "SELECT value FROM ItemTable WHERE key = ?",
+            ("composer.composerData",),
+        ).fetchall()
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+    messages = []
+    for (raw_value,) in rows:
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            continue
+        try:
+            payload = json.loads(raw_value)
+        except json.JSONDecodeError:
+            continue
+
+        messages.extend(_extract_cursor_messages(payload))
+
+    # Remove adjacent duplicates caused by overlapping nested structures.
+    deduped = []
+    for role, text in messages:
+        item = (role, text.strip())
+        if not item[1]:
+            continue
+        if not deduped or deduped[-1] != item:
+            deduped.append(item)
+
+    if len(deduped) >= 2:
+        return _messages_to_transcript(deduped)
+    return None
+
+
+def _extract_cursor_messages(payload) -> list:
+    """Extract (role, text) pairs from Cursor composer payloads."""
+
+    messages = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            role = _cursor_role(node)
+            text = _cursor_text(node)
+            if role and text:
+                messages.append((role, text))
+
+            for value in node.values():
+                walk(value)
+
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    # Prefer explicit composer sessions first when present.
+    all_composers = payload.get("allComposers") if isinstance(payload, dict) else None
+    if isinstance(all_composers, list) and all_composers:
+        for composer in all_composers:
+            walk(composer)
+    else:
+        walk(payload)
+
+    return messages
+
+
+def _cursor_role(node: dict) -> Optional[str]:
+    """Best-effort role normalization for Cursor composer message shapes."""
+    raw_role = node.get("role")
+    if isinstance(raw_role, dict):
+        raw_role = raw_role.get("type") or raw_role.get("role")
+
+    for key in (raw_role, node.get("type"), node.get("sender"), node.get("speaker")):
+        if not isinstance(key, str):
+            continue
+        role = key.lower()
+        if any(token in role for token in ("user", "human", "prompt", "request")):
+            return "user"
+        if any(token in role for token in ("assistant", "ai", "model", "agent", "bot")):
+            return "assistant"
+
+    return None
+
+
+def _cursor_text(node: dict) -> str:
+    """Extract textual content from Cursor message-like dicts."""
+    for key in ("text", "message", "markdown", "prompt", "response", "body", "content"):
+        if key not in node:
+            continue
+        value = node.get(key)
+        text = _extract_content(value)
+        if text:
+            return text
+
+    return ""
 
 
 def _try_normalize_json(content: str) -> Optional[str]:

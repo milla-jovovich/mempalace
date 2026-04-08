@@ -26,7 +26,12 @@ CONVO_EXTENSIONS = {
     ".md",
     ".json",
     ".jsonl",
+    ".vscdb",
+    ".sqlite",
+    ".db",
 }
+
+SQLITE_CONVO_EXTENSIONS = {".vscdb", ".sqlite", ".db"}
 
 SKIP_DIRS = {
     ".git",
@@ -233,6 +238,20 @@ def file_already_mined(collection, source_file: str) -> bool:
 # =============================================================================
 
 
+def _is_cursor_sqlite_candidate(filepath: Path) -> bool:
+    """Heuristic to avoid ingesting arbitrary DB files as conversations."""
+    suffix = filepath.suffix.lower()
+    if suffix not in SQLITE_CONVO_EXTENSIONS:
+        return False
+
+    name = filepath.name.lower()
+    if name.startswith("state.vscdb"):
+        return True
+
+    parts = [part.lower() for part in filepath.parts]
+    return "cursor" in parts and "workspacestorage" in parts
+
+
 def scan_convos(convo_dir: str) -> list:
     """Find all potential conversation files."""
     convo_path = Path(convo_dir).expanduser().resolve()
@@ -243,8 +262,14 @@ def scan_convos(convo_dir: str) -> list:
             if filename.endswith(".meta.json"):
                 continue
             filepath = Path(root) / filename
-            if filepath.suffix.lower() in CONVO_EXTENSIONS:
-                files.append(filepath)
+            suffix = filepath.suffix.lower()
+            if suffix not in CONVO_EXTENSIONS:
+                continue
+
+            if suffix in SQLITE_CONVO_EXTENSIONS and not _is_cursor_sqlite_candidate(filepath):
+                continue
+
+            files.append(filepath)
     return files
 
 
