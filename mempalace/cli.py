@@ -128,24 +128,14 @@ def cmd_wakeup(args):
 
 def cmd_split(args):
     """Split concatenated transcript mega-files into per-session files."""
-    from .split_mega_files import main as split_main
-    import sys
+    from .split_mega_files import run as split_run
 
-    # Rebuild argv for split_mega_files argparse
-    argv = ["--source", args.dir]
-    if args.output_dir:
-        argv += ["--output-dir", args.output_dir]
-    if args.dry_run:
-        argv.append("--dry-run")
-    if args.min_sessions != 2:
-        argv += ["--min-sessions", str(args.min_sessions)]
-
-    old_argv = sys.argv
-    sys.argv = ["mempalace split"] + argv
-    try:
-        split_main()
-    finally:
-        sys.argv = old_argv
+    split_run(
+        source=args.dir,
+        output_dir=args.output_dir,
+        dry_run=args.dry_run,
+        min_sessions=args.min_sessions,
+    )
 
 
 def cmd_status(args):
