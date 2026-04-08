@@ -682,6 +682,10 @@ export MEMPALACE_CHROMA_SSL=false
 
 > **Note:** `palace_path` is ignored in remote mode. The server manages its own storage.
 
+> **Note:** Graph traversal MCP tools (`mempalace_traverse`, `mempalace_find_tunnels`,
+> `mempalace_graph_stats`) currently operate in local mode only, even when remote
+> mode is configured. All other tools respect the remote configuration.
+
 ### Verify connectivity
 
 ```bash

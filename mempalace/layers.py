@@ -90,7 +90,7 @@ class Layer1:
     def generate(self) -> str:
         """Pull top drawers from ChromaDB and format as compact L1 text."""
         try:
-            col = palace_db.get_client(palace_path=self.palace_path).get_collection("mempalace_drawers")
+            col = palace_db.get_collection(palace_path=self.palace_path)
         except Exception:
             return "## L1 — No palace found. Run: mempalace mine <dir>"
 
@@ -194,7 +194,7 @@ class Layer2:
     def retrieve(self, wing: str = None, room: str = None, n_results: int = 10) -> str:
         """Retrieve drawers filtered by wing and/or room."""
         try:
-            col = palace_db.get_client(palace_path=self.palace_path).get_collection("mempalace_drawers")
+            col = palace_db.get_collection(palace_path=self.palace_path)
         except Exception:
             return "No palace found."
 
@@ -257,7 +257,7 @@ class Layer3:
     def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
         """Semantic search, returns compact result text."""
         try:
-            col = palace_db.get_client(palace_path=self.palace_path).get_collection("mempalace_drawers")
+            col = palace_db.get_collection(palace_path=self.palace_path)
         except Exception:
             return "No palace found."
 
@@ -312,7 +312,7 @@ class Layer3:
     ) -> list:
         """Return raw dicts instead of formatted text."""
         try:
-            col = palace_db.get_client(palace_path=self.palace_path).get_collection("mempalace_drawers")
+            col = palace_db.get_collection(palace_path=self.palace_path)
         except Exception:
             return []
 
@@ -432,7 +432,7 @@ class MemoryStack:
 
         # Count drawers
         try:
-            col = palace_db.get_client(palace_path=self.palace_path).get_collection("mempalace_drawers")
+            col = palace_db.get_collection(palace_path=self.palace_path)
             count = col.count()
             result["total_drawers"] = count
         except Exception:
