@@ -6,10 +6,16 @@ Semantic search against the palace.
 Returns verbatim text — the actual words, never summaries.
 """
 
-import sys
+import logging
 from pathlib import Path
 
 import chromadb
+
+logger = logging.getLogger("mempalace_mcp")
+
+
+class SearchError(Exception):
+    """Raised when search cannot proceed (e.g. no palace found)."""
 
 
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
@@ -23,7 +29,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
-        sys.exit(1)
+        raise SearchError(f"No palace found at {palace_path}")
 
     # Build where filter
     where = {}
@@ -47,7 +53,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
     except Exception as e:
         print(f"\n  Search error: {e}")
-        sys.exit(1)
+        raise SearchError(f"Search error: {e}") from e
 
     docs = results["documents"][0]
     metas = results["metadatas"][0]
@@ -95,7 +101,11 @@ def search_memories(
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
     except Exception as e:
-        return {"error": f"No palace found at {palace_path}: {e}"}
+        logger.error("No palace found at %s: %s", palace_path, e)
+        return {
+            "error": "No palace found",
+            "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
+        }
 
     # Build where filter
     where = {}

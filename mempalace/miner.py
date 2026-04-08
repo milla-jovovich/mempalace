@@ -403,10 +403,22 @@ def get_collection(palace_path: str):
 
 
 def file_already_mined(collection, source_file: str) -> bool:
-    """Fast check: has this file been filed before?"""
+    """Fast check: has this file been filed before and is unchanged?
+
+    Compares the stored mtime in drawer metadata against the file's current
+    mtime.  Returns False (needs re-mining) when the file has been modified
+    since it was last mined, or when no mtime was stored.
+    """
     try:
         results = collection.get(where={"source_file": source_file}, limit=1)
-        return len(results.get("ids", [])) > 0
+        if not results.get("ids"):
+            return False
+        stored_meta = results["metadatas"][0] if results.get("metadatas") else {}
+        stored_mtime = stored_meta.get("source_mtime")
+        if stored_mtime is None:
+            return False
+        current_mtime = os.path.getmtime(source_file)
+        return float(stored_mtime) == current_mtime
     except Exception:
         return False
 
@@ -417,24 +429,26 @@ def add_drawer(
     """Add one drawer to the palace."""
     drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk_index)).encode(), usedforsecurity=False).hexdigest()[:16]}"
     try:
-        collection.add(
+        metadata = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file,
+            "chunk_index": chunk_index,
+            "added_by": agent,
+            "filed_at": datetime.now().isoformat(),
+        }
+        # Store file mtime so we can detect modifications later.
+        try:
+            metadata["source_mtime"] = os.path.getmtime(source_file)
+        except OSError:
+            pass
+        collection.upsert(
             documents=[content],
             ids=[drawer_id],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file,
-                    "chunk_index": chunk_index,
-                    "added_by": agent,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
+            metadatas=[metadata],
         )
         return True
-    except Exception as e:
-        if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
-            return False
+    except Exception:
         raise
 
 

@@ -107,6 +107,23 @@ class TestTimeline:
         tl = kg.timeline()
         assert len(tl) == 100  # LIMIT 100
 
+    def test_timeline_entity_has_limit(self, kg):
+        # Add > 100 triples all connected to a single entity
+        for i in range(105):
+            kg.add_triple(
+                "hub", "connects_to", f"spoke_{i}", valid_from=f"2025-01-{(i % 28) + 1:02d}"
+            )
+        tl = kg.timeline("hub")
+        assert len(tl) == 100  # LIMIT 100 on entity-filtered branch
+
+
+class TestWALMode:
+    def test_wal_mode_enabled(self, kg):
+        conn = kg._conn()
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        conn.close()
+        assert mode == "wal"
+
 
 class TestStats:
     def test_stats_empty(self, kg):
