@@ -1,7 +1,7 @@
 ---
 name: mempalace
-description: "Local AI memory with 96.6% recall. Semantic search over past conversations, knowledge graph with temporal facts, palace architecture (wings/rooms/drawers). Free, no cloud, no API keys. Highest LongMemEval score ever published."
-version: 1.0.0
+description: "MemPalace — Local AI memory with 96.6% recall. Semantic search over past conversations, knowledge graph with temporal facts, palace architecture (wings/rooms/drawers). Free, no cloud, no API keys. Highest LongMemEval score ever published."
+version: 1.2.0
 homepage: https://github.com/milla-jovovich/mempalace
 user-invocable: true
 metadata:
@@ -120,3 +120,31 @@ For OpenClaw, add to your MCP config:
 - The knowledge graph stores typed relationships with time windows. Use it for facts about people and projects — it knows WHEN things were true.
 - Diary entries accumulate across sessions. Write one at the end of each conversation to build continuity.
 - Wings auto-detect from directory names during mining. You can also create custom wings via `mempalace_add_drawer`.
+
+## License & Attribution
+
+This skill is an integration for [MemPalace](https://github.com/milla-jovovich/mempalace), licensed under the MIT License.
+
+```
+MIT License
+
+Copyright (c) 2026 MemPalace Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
