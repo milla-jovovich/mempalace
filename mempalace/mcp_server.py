@@ -331,6 +331,47 @@ def tool_delete_drawer(drawer_id: str):
         return {"success": False, "error": str(e)}
 
 
+def tool_delete_wing(wing: str):
+    """Delete all drawers in a wing. Irreversible."""
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+
+    results = col.get(where={"wing": wing}, include=[])
+    count = len(results["ids"])
+
+    if count == 0:
+        return {"success": False, "error": f"Wing not found or empty: {wing}"}
+
+    try:
+        col.delete(where={"wing": wing})
+        logger.info(f"Deleted wing: {wing} ({count} drawers)")
+        return {"success": True, "wing": wing, "deleted_count": count}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_delete_room(wing: str, room: str):
+    """Delete all drawers in a room. Irreversible."""
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+
+    where = {"$and": [{"wing": wing}, {"room": room}]}
+    results = col.get(where=where, include=[])
+    count = len(results["ids"])
+
+    if count == 0:
+        return {"success": False, "error": f"Room not found or empty: {wing}/{room}"}
+
+    try:
+        col.delete(where=where)
+        logger.info(f"Deleted room: {wing}/{room} ({count} drawers)")
+        return {"success": True, "wing": wing, "room": room, "deleted_count": count}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # ==================== KNOWLEDGE GRAPH ====================
 
 
@@ -673,6 +714,29 @@ TOOLS = {
             "required": ["drawer_id"],
         },
         "handler": tool_delete_drawer,
+    },
+    "mempalace_delete_wing": {
+        "description": "Delete all drawers in a wing. Irreversible.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Wing to delete"},
+            },
+            "required": ["wing"],
+        },
+        "handler": tool_delete_wing,
+    },
+    "mempalace_delete_room": {
+        "description": "Delete all drawers in a room. Irreversible.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Wing containing the room"},
+                "room": {"type": "string", "description": "Room to delete"},
+            },
+            "required": ["wing", "room"],
+        },
+        "handler": tool_delete_room,
     },
     "mempalace_diary_write": {
         "description": "Write to your personal agent diary in AAAK format. Your observations, thoughts, what you worked on, what matters. Each agent has their own diary with full history. Write in AAAK for compression — e.g. 'SESSION:2026-04-04|built.palace.graph+diary.tools|ALC.req:agent.diaries.in.aaak|★★★'. Use entity codes from the AAAK spec.",

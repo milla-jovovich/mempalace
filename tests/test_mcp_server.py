@@ -58,6 +58,8 @@ class TestHandleRequest:
         assert "mempalace_search" in names
         assert "mempalace_add_drawer" in names
         assert "mempalace_kg_add" in names
+        assert "mempalace_delete_wing" in names
+        assert "mempalace_delete_room" in names
 
     def test_unknown_tool(self):
         from mempalace.mcp_server import handle_request
@@ -240,6 +242,40 @@ class TestWriteTools:
 
         result = tool_delete_drawer("nonexistent_drawer")
         assert result["success"] is False
+
+    def test_delete_wing(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_delete_wing
+
+        result = tool_delete_wing("project")
+        assert result["success"] is True
+        assert result["deleted_count"] == 3
+        assert seeded_collection.count() == 1
+
+    def test_delete_room(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_delete_room
+
+        result = tool_delete_room("project", "backend")
+        assert result["success"] is True
+        assert result["deleted_count"] == 2
+        assert seeded_collection.count() == 2
+
+    def test_delete_wing_not_found(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_delete_wing
+
+        result = tool_delete_wing("nonexistent")
+        assert result["success"] is False
+        assert "wing not found" in result["error"].lower()
+
+    def test_delete_room_not_found(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_delete_room
+
+        result = tool_delete_room("project", "nonexistent")
+        assert result["success"] is False
+        assert "room not found" in result["error"].lower()
 
     def test_check_duplicate(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
