@@ -158,7 +158,14 @@ def cmd_status(args):
 
 
 def cmd_repair(args):
-    """Rebuild palace vector index from SQLite metadata."""
+    """Rebuild palace vector index by migrating to a fresh collection.
+
+    The previous approach (delete_collection + create_collection on the same
+    path) can segfault when the HNSW index is corrupted — the delete operation
+    itself touches the broken segment. This version reads all data via get()
+    (which bypasses HNSW), writes to a brand-new palace at a temporary path,
+    then swaps directories. The original palace is preserved as a backup.
+    """
     import chromadb
     import shutil
 
@@ -173,7 +180,8 @@ def cmd_repair(args):
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
 
-    # Try to read existing drawers
+    # Read existing drawers via get() — this bypasses the HNSW index
+    # entirely, so it works even when the vector index is corrupted.
     try:
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
@@ -188,44 +196,71 @@ def cmd_repair(args):
         print("  Nothing to repair.")
         return
 
-    # Extract all drawers in batches
+    # Extract all drawers in small batches (large batches can OOM on big palaces)
     print("\n  Extracting drawers...")
-    batch_size = 5000
+    read_batch = 500
     all_ids = []
     all_docs = []
     all_metas = []
     offset = 0
     while offset < total:
-        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        batch = col.get(limit=read_batch, offset=offset, include=["documents", "metadatas"])
         all_ids.extend(batch["ids"])
         all_docs.extend(batch["documents"])
         all_metas.extend(batch["metadatas"])
-        offset += batch_size
+        offset += len(batch["ids"])
+        if offset % 5000 == 0 or offset >= total:
+            print(f"  Read {offset}/{total}")
     print(f"  Extracted {len(all_ids)} drawers")
 
-    # Backup and rebuild
+    # Release the old client before creating the new palace
+    del col
+    del client
+
+    # Build a fresh palace at a temporary path — never touch the original
     palace_path = palace_path.rstrip(os.sep)
+    rebuild_path = palace_path + "_rebuild"
+    if os.path.exists(rebuild_path):
+        shutil.rmtree(rebuild_path)
+
+    print("\n  Rebuilding into fresh palace...")
+    new_client = chromadb.PersistentClient(path=rebuild_path)
+    new_col = new_client.create_collection("mempalace_drawers")
+
+    write_batch = 100
+    filed = 0
+    for i in range(0, len(all_ids), write_batch):
+        end = min(i + write_batch, len(all_ids))
+        new_col.add(
+            documents=all_docs[i:end],
+            ids=all_ids[i:end],
+            metadatas=all_metas[i:end],
+        )
+        filed += end - i
+        if filed % 2000 == 0 or filed >= len(all_ids):
+            print(f"  Written {filed}/{len(all_ids)}")
+
+    # Verify the rebuild
+    rebuilt_count = new_col.count()
+    if rebuilt_count != len(all_ids):
+        print(f"\n  WARNING: rebuilt {rebuilt_count} but expected {len(all_ids)}")
+        print(f"  Rebuild kept at {rebuild_path} — original untouched.")
+        return
+
+    del new_col
+    del new_client
+
+    # Swap: original → backup, rebuild → palace
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
         shutil.rmtree(backup_path)
-    print(f"  Backing up to {backup_path}...")
-    shutil.copytree(palace_path, backup_path)
-
-    print("  Rebuilding collection...")
-    client.delete_collection("mempalace_drawers")
-    new_col = client.create_collection("mempalace_drawers")
-
-    filed = 0
-    for i in range(0, len(all_ids), batch_size):
-        batch_ids = all_ids[i : i + batch_size]
-        batch_docs = all_docs[i : i + batch_size]
-        batch_metas = all_metas[i : i + batch_size]
-        new_col.add(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
-        filed += len(batch_ids)
-        print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
+    print(f"\n  Backing up original to {backup_path}")
+    os.rename(palace_path, backup_path)
+    os.rename(rebuild_path, palace_path)
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print(f"  Backup saved at {backup_path}")
+    print(f"  (Delete backup with: rm -rf '{backup_path}')")
     print(f"\n{'=' * 55}\n")
 
 
