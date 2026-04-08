@@ -336,3 +336,46 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+
+class TestStdioHygiene:
+    """Regression tests for issue #225: MCP must not write non-JSON to stdout."""
+
+    def test_import_does_not_pollute_stdout(self):
+        """Importing mcp_server must redirect sys.stdout away from real stdout
+        so that native libraries (chromadb/onnxruntime) cannot corrupt the
+        JSON-RPC stream that Claude Desktop reads."""
+        import sys
+        from mempalace import mcp_server
+
+        assert hasattr(mcp_server, "_real_stdout")
+        # After import, sys.stdout must no longer be the real stdout — it
+        # should be redirected to stderr to swallow stray prints.
+        assert sys.stdout is not mcp_server._real_stdout
+        assert sys.stdout is sys.stderr or sys.stdout is mcp_server.sys.stderr
+
+    def test_main_writes_responses_to_real_stdout(self, monkeypatch, config, palace_path, kg):
+        """The main loop must write JSON-RPC responses to the captured real
+        stdout, not to the redirected sys.stdout."""
+        import io
+        import json as _json
+        from mempalace import mcp_server
+
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+
+        fake_stdout = io.StringIO()
+        fake_stderr = io.StringIO()
+        request = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+        fake_stdin = io.StringIO(_json.dumps(request) + "\n")
+
+        monkeypatch.setattr(mcp_server, "_real_stdout", fake_stdout)
+        monkeypatch.setattr(mcp_server.sys, "stdin", fake_stdin)
+        monkeypatch.setattr(mcp_server.sys, "stdout", fake_stderr)
+
+        mcp_server.main()
+
+        # Real stdout must contain valid JSON, stderr must not.
+        out = fake_stdout.getvalue().strip()
+        assert out, "main() wrote nothing to real stdout"
+        for line in out.splitlines():
+            _json.loads(line)  # must parse
