@@ -204,5 +204,27 @@ def test_scan_project_skip_dirs_still_apply_without_override():
         write_file(project_root / "main.py", "print('main')\n" * 20)
 
         assert scanned_files(project_root, respect_gitignore=False) == ["main.py"]
+
+
+def test_status_shows_actual_count_not_truncated():
+    import sys
+    from unittest.mock import Mock
+    from unittest.mock import patch
+    import mempalace.miner as miner_module
+    
+    sys.modules['chromadb'] = Mock()
+    
+    mock_collection = Mock()
+    mock_collection.count.return_value = 15000
+    mock_collection.get.return_value = {"metadatas": [{"wing": "test", "room": "general"}] * 15000}
+    
+    mock_client = Mock()
+    mock_client.get_collection.return_value = mock_collection
+    
+    with patch('mempalace.miner.chromadb.PersistentClient', return_value=mock_client):
+        miner_module.status("/fake/palace/path")
+    
+    mock_collection.count.assert_called_once()
+    mock_collection.get.assert_called_once_with(limit=15000, include=["metadatas"])
     finally:
         shutil.rmtree(tmpdir)
