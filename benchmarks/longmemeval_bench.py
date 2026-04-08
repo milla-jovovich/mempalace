@@ -2861,32 +2861,12 @@ def llm_rerank(
 
 
 def _load_api_key(key_arg):
-    """Load API key from --llm-key arg, env var, or ~/.config/lu/keys.json."""
+    """Load API key from --llm-key arg or ANTHROPIC_API_KEY env var."""
     if key_arg:
         return key_arg
     env_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if env_key:
         return env_key
-    keys_path = os.path.expanduser("~/.config/lu/keys.json")
-    if os.path.exists(keys_path):
-        try:
-            with open(keys_path) as f:
-                keys = json.load(f)
-            # Flat string keys
-            for name in ("lu_key", "anthropic_milla", "anthropic_claude_code_main"):
-                val = keys.get(name, "")
-                if isinstance(val, str) and val.startswith("sk-ant-"):
-                    return val
-            # Nested dict: keys["anthropic"]["lu_key"]
-            for section in ("anthropic", "anthropic_milla", "anthropic_claude_code_main"):
-                sec = keys.get(section, {})
-                if isinstance(sec, dict):
-                    for subkey in ("lu_key", "key", "api_key"):
-                        val = sec.get(subkey, "")
-                        if isinstance(val, str) and val.startswith("sk-ant-"):
-                            return val
-        except Exception:
-            pass
     return ""
 
 
@@ -2970,8 +2950,7 @@ def run_benchmark(
         if not api_key:
             print(
                 "ERROR: --llm-rerank / --mode diary requires an API key. "
-                "Set ANTHROPIC_API_KEY, use --llm-key, "
-                "or store in ~/.config/lu/keys.json as 'lu_key'."
+                "Set ANTHROPIC_API_KEY or use --llm-key."
             )
             sys.exit(1)
 
@@ -3290,8 +3269,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--llm-key",
         default="",
-        help="Anthropic API key for LLM re-ranking. Falls back to ANTHROPIC_API_KEY "
-        "env var or ~/.config/lu/keys.json 'lu_key' field if not provided.",
+        help="Anthropic API key for LLM re-ranking. Falls back to ANTHROPIC_API_KEY env var.",
     )
     parser.add_argument(
         "--llm-model",

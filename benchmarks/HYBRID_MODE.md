@@ -435,7 +435,6 @@ If the API call fails (timeout, rate limit, no key), the function catches the ex
 **Key loading priority:**
 1. `--llm-key` CLI flag
 2. `ANTHROPIC_API_KEY` environment variable
-3. `~/.config/lu/keys.json` (checks `anthropic.lu_key` and similar paths)
 
 ## What Changed in the Code
 
