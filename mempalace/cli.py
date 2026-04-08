@@ -370,7 +370,7 @@ def main():
 
     # mine
     p_mine = sub.add_parser("mine", help="Mine files into the palace")
-    p_mine.add_argument("dir", help="Directory to mine")
+    p_mine.add_argument("dir", help="Directory (or .db file) to mine")
     p_mine.add_argument(
         "--mode",
         choices=["projects", "convos"],

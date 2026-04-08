@@ -17,7 +17,7 @@ from collections import defaultdict
 
 import chromadb
 
-from .normalize import normalize
+from .normalize import normalize, normalize_opencode_sessions
 
 
 # File types that might contain conversations
@@ -26,7 +26,11 @@ CONVO_EXTENSIONS = {
     ".md",
     ".json",
     ".jsonl",
+    ".db",
+    ".sqlite3",
+    ".sqlite",
 }
+
 
 SKIP_DIRS = {
     ".git",
@@ -270,6 +274,35 @@ def mine_convos(
     """
 
     convo_path = Path(convo_dir).expanduser().resolve()
+    if convo_path.is_file() and convo_path.suffix in (".db", ".sqlite3", ".sqlite"):
+        import tempfile
+
+        sessions = normalize_opencode_sessions(str(convo_path))
+        with tempfile.TemporaryDirectory(prefix="mempalace_oc_") as tmpdir:
+            # Write each session as a .txt grouped by project subdirs
+            for s in sessions:
+                proj = s.get("project", "")
+                name = (
+                    Path(proj).name.lower().replace(" ", "_").replace("-", "_")
+                    if proj and proj != "/"
+                    else "opencode_general"
+                )
+                subdir = Path(tmpdir) / name
+                subdir.mkdir(exist_ok=True)
+                (subdir / f"{name}_{s['session_id']}.txt").write_text(s["transcript"])
+            for subdir in sorted(Path(tmpdir).iterdir()):
+                if subdir.is_dir():
+                    mine_convos(
+                        str(subdir),
+                        palace_path,
+                        wing=wing or subdir.name,
+                        agent=agent,
+                        limit=limit,
+                        dry_run=dry_run,
+                        extract_mode=extract_mode,
+                    )
+        return
+
     if not wing:
         wing = convo_path.name.lower().replace(" ", "_").replace("-", "_")
 
