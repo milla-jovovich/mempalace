@@ -43,3 +43,9 @@ class TestSearchMemories:
         assert "source_file" in hit
         assert "similarity" in hit
         assert isinstance(hit["similarity"], float)
+
+    def test_result_includes_drawer_id(self, palace_path, seeded_collection):
+        result = search_memories("authentication", palace_path)
+        hit = result["results"][0]
+        assert "id" in hit
+        assert hit["id"].startswith("drawer_")

@@ -129,14 +129,16 @@ def search_memories(
     except Exception as e:
         return {"error": f"Search error: {e}"}
 
+    ids = results["ids"][0]
     docs = results["documents"][0]
     metas = results["metadatas"][0]
     dists = results["distances"][0]
 
     hits = []
-    for doc, meta, dist in zip(docs, metas, dists):
+    for drawer_id, doc, meta, dist in zip(ids, docs, metas, dists):
         hits.append(
             {
+                "id": drawer_id,
                 "text": doc,
                 "wing": meta.get("wing", "unknown"),
                 "room": meta.get("room", "unknown"),
