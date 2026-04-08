@@ -26,7 +26,9 @@ Rosetta, or install ARM64 Homebrew:
 
 ### 2. Install ARM64 Python 3.12
 
-MemPalace requires Python 3.12. Install it via the native ARM64 Homebrew:
+MemPalace supports Python 3.9–3.12. Python 3.13+ is not yet supported (dependency
+compatibility issues). Python 3.12 is recommended for Apple Silicon — it has the best
+ARM64 wheel availability. Install it via the native ARM64 Homebrew:
 
 ```bash
 brew install python@3.12
@@ -88,7 +90,9 @@ file ~/.local/pipx/venvs/mempalace/bin/python
 ## MCP Server Configuration
 
 To use MemPalace as a memory backend for Claude or other MCP-compatible clients, add it
-to your MCP config (e.g. `~/.mcp.json`):
+to your MCP config. For Claude Code, this is `~/.mcp.json` (or `.mcp.json` in a project
+root for per-project config). Other MCP clients (Cursor, Windsurf, etc.) use different
+config paths — check their documentation.
 
 ```json
 {
@@ -207,6 +211,10 @@ If you previously ran MemPalace under x86_64 Python (Rosetta), the HNSW segment 
 will crash trying to open them.
 
 Fix: wipe the palace and re-mine:
+
+> **Warning**: `~/.mempalace/palace/` is the default palace used by all projects.
+> If you have existing data you want to keep, back it up first or use
+> `--palace` to mine into a separate directory instead.
 
 ```bash
 rm -rf ~/.mempalace/palace/
