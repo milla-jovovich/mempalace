@@ -11,15 +11,25 @@ These hook scripts make MemPalace save automatically. No manual "save" commands 
 
 The AI does the actual filing — it knows the conversation context, so it classifies memories into the right wings/halls/closets. The hooks just tell it WHEN to save.
 
-## Install — Claude Code
+## Install — Claude Code (Plugin)
 
-Add to `.claude/settings.local.json`:
+The easiest way to install both hooks and the MCP server:
+
+```bash
+claude plugin add mempalace@mempalace --marketplace github:milla-jovovich/mempalace
+```
+
+This installs Python versions of both hooks with no manual configuration needed.
+
+## Install — Claude Code (Manual)
+
+If you prefer manual setup, add to `.claude/settings.local.json`:
 
 ```json
 {
   "hooks": {
     "Stop": [{
-      "matcher": "*",
+      "matcher": "",
       "hooks": [{
         "type": "command",
         "command": "/absolute/path/to/hooks/mempal_save_hook.sh",

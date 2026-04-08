@@ -2,16 +2,22 @@
 
 ## Setup
 
-Run the MCP server:
+**Plugin install (recommended):** Installs the MCP server and auto-save hooks in one step:
 
 ```bash
-python -m mempalace.mcp_server
+claude plugin add mempalace@mempalace --marketplace github:milla-jovovich/mempalace
 ```
 
-Or add it to Claude Code:
+**Manual install:** Add the MCP server directly:
 
 ```bash
 claude mcp add mempalace -- python -m mempalace.mcp_server
+```
+
+**Standalone:** Run the MCP server outside Claude Code:
+
+```bash
+python -m mempalace.mcp_server
 ```
 
 ## Available Tools

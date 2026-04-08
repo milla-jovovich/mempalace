@@ -1,0 +1,17 @@
+{
+  "name": "mempalace",
+  "version": "3.0.0",
+  "description": "Auto-save hooks and MCP server for MemPalace — saves memories every 15 messages and before context compaction",
+  "author": {
+    "name": "milla-jovovich",
+    "email": "noreply@github.com"
+  },
+  "capabilities": ["shell", "mcp"],
+  "mcpServers": {
+    "mempalace": {
+      "command": "python3",
+      "args": ["-m", "mempalace.mcp_server"],
+      "type": "stdio"
+    }
+  }
+}

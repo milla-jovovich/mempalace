@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "mempalace",
+  "description": "MemPalace plugin marketplace — memory hooks and MCP tools for Claude Code",
+  "owner": {
+    "name": "milla-jovovich",
+    "email": "noreply@github.com"
+  },
+  "plugins": [
+    {
+      "name": "mempalace",
+      "description": "Auto-save hooks and MCP server for MemPalace — the AI memory system",
+      "source": "./plugins/mempalace",
+      "category": "productivity"
+    }
+  ]
+}

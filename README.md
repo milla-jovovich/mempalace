@@ -112,10 +112,19 @@ Three mining modes: **projects** (code and docs), **convos** (conversation expor
 
 After the one-time setup (install → init → mine), you don't run MemPalace commands manually. Your AI uses it for you. There are two ways, depending on which AI you use.
 
-### With Claude, ChatGPT, Cursor, Gemini (MCP-compatible tools)
+### With Claude Code (plugin — recommended)
 
 ```bash
-# Connect MemPalace once
+# Install the MemPalace plugin (hooks + MCP server in one step)
+claude plugin add mempalace@mempalace --marketplace github:milla-jovovich/mempalace
+```
+
+This installs the MCP server (19 tools) and auto-save hooks (save every 15 messages + emergency save before compaction). No manual configuration needed.
+
+### With Claude, ChatGPT, Cursor, Gemini (MCP — manual)
+
+```bash
+# Or connect the MCP server directly
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
@@ -438,6 +447,12 @@ Letta charges $20–200/mo for agent-managed memory. MemPalace does it with a wi
 
 ## MCP Server
 
+**Plugin install (recommended):**
+```bash
+claude plugin add mempalace@mempalace --marketplace github:milla-jovovich/mempalace
+```
+
+**Manual install:**
 ```bash
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
@@ -500,14 +515,13 @@ Two hooks for Claude Code that automatically save memories during work:
 
 **PreCompact Hook** — fires before context compression. Emergency save before the window shrinks.
 
-```json
-{
-  "hooks": {
-    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "/path/to/mempalace/hooks/mempal_save_hook.sh"}]}],
-    "PreCompact": [{"matcher": "", "hooks": [{"type": "command", "command": "/path/to/mempalace/hooks/mempal_precompact_hook.sh"}]}]
-  }
-}
+**Plugin install (recommended):** Both hooks are included in the plugin — no manual configuration needed:
+
+```bash
+claude plugin add mempalace@mempalace --marketplace github:milla-jovovich/mempalace
 ```
+
+**Manual install:** See [hooks/README.md](hooks/README.md) for copy-paste configuration.
 
 ---
 
