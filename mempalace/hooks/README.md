@@ -2,6 +2,18 @@
 
 These hook scripts make MemPalace save automatically. No manual "save" commands needed.
 
+## Quick Setup (pip or uv users)
+
+The hooks are already bundled. Run:
+
+```bash
+mempalace hooks install          # prints config for Claude Code
+mempalace hooks install --format codex  # prints config for Codex CLI
+mempalace hooks path             # prints the installed hooks directory
+```
+
+Paste the output into your settings file and you're done.
+
 ## What They Do
 
 | Hook | When It Fires | What Happens |
