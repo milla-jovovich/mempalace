@@ -1,8 +1,16 @@
+import sys as _sys
+_real_stdout = _sys.stdout
+_sys.stdout = _sys.stderr
+import os as _os
+_os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
+_os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+import warnings as _warnings
+_warnings.filterwarnings("ignore")
 #!/usr/bin/env python3
 """
 MemPalace MCP Server — read/write palace access for Claude Code
 ================================================================
-Install: claude mcp add mempalace -- python -m mempalace.mcp_server
+Install: claude mcp add mempalace -- python /path/to/mcp_server.py
 
 Tools (read):
   mempalace_status          — total drawers, wing/room breakdown
@@ -24,14 +32,13 @@ import hashlib
 from datetime import datetime
 
 from .config import MempalaceConfig
-from .version import __version__
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
-import chromadb
-
 from .knowledge_graph import KnowledgeGraph
 
 _kg = KnowledgeGraph()
+
+import chromadb
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
@@ -53,6 +60,7 @@ def _get_collection(create=False):
 def _no_palace():
     return {
         "error": "No palace found",
+        "palace_path": _config.palace_path,
         "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
     }
 
@@ -68,7 +76,7 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = col.get(include=["metadatas"])["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -125,7 +133,7 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = col.get(include=["metadatas"])["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -140,7 +148,7 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
+        kwargs = {"include": ["metadatas"]}
         if wing:
             kwargs["where"] = {"wing": wing}
         all_meta = col.get(**kwargs)["metadatas"]
@@ -158,7 +166,7 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = col.get(include=["metadatas"])["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -312,24 +320,19 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
 
 
-def tool_kg_add(
-    subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
-):
+def tool_kg_add(subject: str, predicate: str, object: str,
+                valid_from: str = None, source_closet: str = None):
     """Add a relationship to the knowledge graph."""
-    triple_id = _kg.add_triple(
-        subject, predicate, object, valid_from=valid_from, source_closet=source_closet
-    )
-    return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {object}"}
+    triple_id = _kg.add_triple(subject, predicate, object,
+                                valid_from=valid_from, source_closet=source_closet)
+    return {"success": True, "triple_id": triple_id,
+            "fact": f"{subject} → {predicate} → {object}"}
 
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
     """Mark a fact as no longer true (set end date)."""
     _kg.invalidate(subject, predicate, object, ended=ended)
-    return {
-        "success": True,
-        "fact": f"{subject} → {predicate} → {object}",
-        "ended": ended or "today",
-    }
+    return {"success": True, "fact": f"{subject} → {predicate} → {object}", "ended": ended or "today"}
 
 
 def tool_kg_timeline(entity: str = None):
@@ -367,18 +370,16 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         col.add(
             ids=[entry_id],
             documents=[entry],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "hall": "hall_diary",
-                    "topic": topic,
-                    "type": "diary_entry",
-                    "agent": agent_name,
-                    "filed_at": now.isoformat(),
-                    "date": now.strftime("%Y-%m-%d"),
-                }
-            ],
+            metadatas=[{
+                "wing": wing,
+                "room": room,
+                "hall": "hall_diary",
+                "topic": topic,
+                "type": "diary_entry",
+                "agent": agent_name,
+                "filed_at": now.isoformat(),
+                "date": now.strftime("%Y-%m-%d"),
+            }],
         )
         logger.info(f"Diary entry: {entry_id} → {wing}/diary/{topic}")
         return {
@@ -406,7 +407,6 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         results = col.get(
             where={"$and": [{"wing": wing}, {"room": "diary"}]},
             include=["documents", "metadatas"],
-            limit=10000,
         )
 
         if not results["ids"]:
@@ -415,14 +415,12 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         # Combine and sort by timestamp
         entries = []
         for doc, meta in zip(results["documents"], results["metadatas"]):
-            entries.append(
-                {
-                    "date": meta.get("date", ""),
-                    "timestamp": meta.get("filed_at", ""),
-                    "topic": meta.get("topic", ""),
-                    "content": doc,
-                }
-            )
+            entries.append({
+                "date": meta.get("date", ""),
+                "timestamp": meta.get("filed_at", ""),
+                "topic": meta.get("topic", ""),
+                "content": doc,
+            })
 
         entries.sort(key=lambda x: x["timestamp"], reverse=True)
         entries = entries[:last_n]
@@ -475,18 +473,9 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "entity": {
-                    "type": "string",
-                    "description": "Entity to query (e.g. 'Max', 'MyProject', 'Alice')",
-                },
-                "as_of": {
-                    "type": "string",
-                    "description": "Date filter — only facts valid at this date (YYYY-MM-DD, optional)",
-                },
-                "direction": {
-                    "type": "string",
-                    "description": "outgoing (entity→?), incoming (?→entity), or both (default: both)",
-                },
+                "entity": {"type": "string", "description": "Entity to query (e.g. 'Max', 'MyProject', 'Alice')"},
+                "as_of": {"type": "string", "description": "Date filter — only facts valid at this date (YYYY-MM-DD, optional)"},
+                "direction": {"type": "string", "description": "outgoing (entity→?), incoming (?→entity), or both (default: both)"},
             },
             "required": ["entity"],
         },
@@ -498,19 +487,10 @@ TOOLS = {
             "type": "object",
             "properties": {
                 "subject": {"type": "string", "description": "The entity doing/being something"},
-                "predicate": {
-                    "type": "string",
-                    "description": "The relationship type (e.g. 'loves', 'works_on', 'daughter_of')",
-                },
+                "predicate": {"type": "string", "description": "The relationship type (e.g. 'loves', 'works_on', 'daughter_of')"},
                 "object": {"type": "string", "description": "The entity being connected to"},
-                "valid_from": {
-                    "type": "string",
-                    "description": "When this became true (YYYY-MM-DD, optional)",
-                },
-                "source_closet": {
-                    "type": "string",
-                    "description": "Closet ID where this fact appears (optional)",
-                },
+                "valid_from": {"type": "string", "description": "When this became true (YYYY-MM-DD, optional)"},
+                "source_closet": {"type": "string", "description": "Closet ID where this fact appears (optional)"},
             },
             "required": ["subject", "predicate", "object"],
         },
@@ -524,10 +504,7 @@ TOOLS = {
                 "subject": {"type": "string", "description": "Entity"},
                 "predicate": {"type": "string", "description": "Relationship"},
                 "object": {"type": "string", "description": "Connected entity"},
-                "ended": {
-                    "type": "string",
-                    "description": "When it stopped being true (YYYY-MM-DD, default: today)",
-                },
+                "ended": {"type": "string", "description": "When it stopped being true (YYYY-MM-DD, default: today)"},
             },
             "required": ["subject", "predicate", "object"],
         },
@@ -538,10 +515,7 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "entity": {
-                    "type": "string",
-                    "description": "Entity to get timeline for (optional — omit for full timeline)",
-                },
+                "entity": {"type": "string", "description": "Entity to get timeline for (optional — omit for full timeline)"},
             },
         },
         "handler": tool_kg_timeline,
@@ -556,14 +530,8 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "start_room": {
-                    "type": "string",
-                    "description": "Room to start from (e.g. 'chromadb-setup', 'riley-school')",
-                },
-                "max_hops": {
-                    "type": "integer",
-                    "description": "How many connections to follow (default: 2)",
-                },
+                "start_room": {"type": "string", "description": "Room to start from (e.g. 'chromadb-setup', 'riley-school')"},
+                "max_hops": {"type": "integer", "description": "How many connections to follow (default: 2)"},
             },
             "required": ["start_room"],
         },
@@ -651,18 +619,9 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "agent_name": {
-                    "type": "string",
-                    "description": "Your name — each agent gets their own diary wing",
-                },
-                "entry": {
-                    "type": "string",
-                    "description": "Your diary entry in AAAK format — compressed, entity-coded, emotion-marked",
-                },
-                "topic": {
-                    "type": "string",
-                    "description": "Topic tag (optional, default: general)",
-                },
+                "agent_name": {"type": "string", "description": "Your name — each agent gets their own diary wing"},
+                "entry": {"type": "string", "description": "Your diary entry in AAAK format — compressed, entity-coded, emotion-marked"},
+                "topic": {"type": "string", "description": "Topic tag (optional, default: general)"},
             },
             "required": ["agent_name", "entry"],
         },
@@ -673,14 +632,8 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "agent_name": {
-                    "type": "string",
-                    "description": "Your name — each agent gets their own diary wing",
-                },
-                "last_n": {
-                    "type": "integer",
-                    "description": "Number of recent entries to read (default: 10)",
-                },
+                "agent_name": {"type": "string", "description": "Your name — each agent gets their own diary wing"},
+                "last_n": {"type": "integer", "description": "Number of recent entries to read (default: 10)"},
             },
             "required": ["agent_name"],
         },
@@ -701,7 +654,7 @@ def handle_request(request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "mempalace", "version": __version__},
+                "serverInfo": {"name": "mempalace", "version": "2.0.0"},
             },
         }
     elif method == "notifications/initialized":
@@ -726,17 +679,6 @@ def handle_request(request):
                 "id": req_id,
                 "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
             }
-        # Coerce argument types based on input_schema.
-        # MCP JSON transport may deliver integers as floats or strings;
-        # ChromaDB and Python slicing require native int.
-        schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
-        for key, value in list(tool_args.items()):
-            prop_schema = schema_props.get(key, {})
-            declared_type = prop_schema.get("type")
-            if declared_type == "integer" and not isinstance(value, int):
-                tool_args[key] = int(value)
-            elif declared_type == "number" and not isinstance(value, (int, float)):
-                tool_args[key] = float(value)
         try:
             result = TOOLS[tool_name]["handler"](**tool_args)
             return {
@@ -744,13 +686,9 @@ def handle_request(request):
                 "id": req_id,
                 "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
             }
-        except Exception:
-            logger.exception(f"Tool error in {tool_name}")
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32000, "message": "Internal tool error"},
-            }
+        except Exception as e:
+            logger.error(f"Tool error in {tool_name}: {e}")
+            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": str(e)}}
 
     return {
         "jsonrpc": "2.0",
@@ -772,8 +710,8 @@ def main():
             request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
+                _real_stdout.write(json.dumps(response) + "\n")
+                _real_stdout.flush()
         except KeyboardInterrupt:
             break
         except Exception as e:
