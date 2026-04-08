@@ -37,6 +37,18 @@ logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
 
 _config = MempalaceConfig()
+_read_only = False
+
+# Tools that modify palace state. Blocked in read-only mode.
+WRITE_TOOLS = frozenset(
+    {
+        "mempalace_add_drawer",
+        "mempalace_delete_drawer",
+        "mempalace_kg_add",
+        "mempalace_kg_invalidate",
+        "mempalace_diary_write",
+    }
+)
 
 
 _client_cache = None
@@ -219,8 +231,9 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
             "is_duplicate": len(duplicates) > 0,
             "matches": duplicates,
         }
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Error in check_duplicate")
+        return {"error": "Duplicate check failed"}
 
 
 def tool_get_aaak_spec():
@@ -291,8 +304,9 @@ def tool_add_drawer(
         )
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Error adding drawer")
+        return {"success": False, "error": "Failed to add drawer"}
 
 
 def tool_delete_drawer(drawer_id: str):
@@ -307,8 +321,9 @@ def tool_delete_drawer(drawer_id: str):
         col.delete(ids=[drawer_id])
         logger.info(f"Deleted drawer: {drawer_id}")
         return {"success": True, "drawer_id": drawer_id}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Error deleting drawer")
+        return {"success": False, "error": "Failed to delete drawer"}
 
 
 # ==================== KNOWLEDGE GRAPH ====================
@@ -396,8 +411,9 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
             "topic": topic,
             "timestamp": now.isoformat(),
         }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Error writing diary entry")
+        return {"success": False, "error": "Failed to write diary entry"}
 
 
 def tool_diary_read(agent_name: str, last_n: int = 10):
@@ -441,8 +457,9 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
             "total": len(results["ids"]),
             "showing": len(entries),
         }
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Error reading diary entries")
+        return {"error": "Failed to read diary entries"}
 
 
 # ==================== MCP PROTOCOL ====================
@@ -715,19 +732,29 @@ def handle_request(request):
     elif method == "notifications/initialized":
         return None
     elif method == "tools/list":
+        available = {n: t for n, t in TOOLS.items() if not (_read_only and n in WRITE_TOOLS)}
         return {
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
                 "tools": [
                     {"name": n, "description": t["description"], "inputSchema": t["input_schema"]}
-                    for n, t in TOOLS.items()
+                    for n, t in available.items()
                 ]
             },
         }
     elif method == "tools/call":
         tool_name = params.get("name")
         tool_args = params.get("arguments", {})
+        if _read_only and tool_name in WRITE_TOOLS:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32600,
+                    "message": f"Server is in read-only mode. Tool '{tool_name}' is not available.",
+                },
+            }
         if tool_name not in TOOLS:
             return {
                 "jsonrpc": "2.0",
@@ -768,7 +795,12 @@ def handle_request(request):
 
 
 def main():
-    logger.info("MemPalace MCP Server starting...")
+    global _read_only
+    if "--read-only" in sys.argv:
+        _read_only = True
+        logger.info("MemPalace MCP Server starting (READ-ONLY mode)...")
+    else:
+        logger.info("MemPalace MCP Server starting...")
     while True:
         try:
             line = sys.stdin.readline()
