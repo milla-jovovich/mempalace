@@ -8,6 +8,7 @@ Supported:
     - ChatGPT conversations.json
     - Claude Code JSONL
     - OpenAI Codex CLI JSONL
+    - Cursor agent transcript JSONL
     - Slack JSON export
     - Plain text (pass through for paragraph chunking)
 
@@ -57,6 +58,10 @@ def _try_normalize_json(content: str) -> Optional[str]:
         return normalized
 
     normalized = _try_codex_jsonl(content)
+    if normalized:
+        return normalized
+
+    normalized = _try_cursor_jsonl(content)
     if normalized:
         return normalized
 
@@ -143,6 +148,46 @@ def _try_codex_jsonl(content: str) -> Optional[str]:
             messages.append(("assistant", text))
 
     if len(messages) >= 2 and has_session_meta:
+        return _messages_to_transcript(messages)
+    return None
+
+
+def _try_cursor_jsonl(content: str) -> Optional[str]:
+    """Cursor agent transcript JSONL (~/.cursor/projects/<proj>/agent-transcripts/<uuid>.jsonl).
+
+    Each line is {"role": "user"|"assistant", "message": {"content": [...]}} where
+    content blocks follow the standard {"type": "text", "text": "..."} shape.
+    Discriminated from Claude Code JSONL (which uses top-level "type" instead of "role")
+    and from Codex JSONL (which uses "event_msg" / "session_meta" wrapper).
+    """
+    lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
+    messages = []
+    has_cursor_structure = False
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+
+        role = entry.get("role", "")
+        if role not in ("user", "assistant"):
+            continue
+
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            continue
+        raw_content = message.get("content")
+        if isinstance(raw_content, list):
+            has_cursor_structure = True
+
+        text = _extract_content(raw_content)
+        if not text:
+            continue
+        messages.append((role, text))
+
+    if len(messages) >= 2 and has_cursor_structure:
         return _messages_to_transcript(messages)
     return None
 
