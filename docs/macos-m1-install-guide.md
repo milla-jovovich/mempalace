@@ -107,6 +107,36 @@ Replace `YOUR_USERNAME` with your macOS username. Using the venv Python directly
 than the `mempalace` wrapper script) ensures the MCP server inherits the correct ARM64
 environment.
 
+### Pointing an MCP server at a specific palace
+
+The MCP server reads the `MEMPALACE_PALACE_PATH` environment variable at startup. Use
+this to direct each Claude instance to a different palace without touching
+`~/.mempalace/config.json`.
+
+For a **global default** (`~/.mcp.json`), leave `env` empty — the server falls back to
+the path in `config.json`.
+
+For a **project-specific palace**, add a `.mcp.json` in the project root:
+
+```json
+{
+  "mcpServers": {
+    "mempalace": {
+      "type": "stdio",
+      "command": "/Users/YOUR_USERNAME/.local/pipx/venvs/mempalace/bin/python",
+      "args": ["-m", "mempalace.mcp_server"],
+      "env": {
+        "MEMPALACE_PALACE_PATH": "/Users/YOUR_USERNAME/.mempalace/my-project"
+      }
+    }
+  }
+}
+```
+
+This means each Claude session opened in that project directory automatically queries the
+correct palace — no manual switching required. You can run as many project-specific
+palaces as you like; each MCP server process is independent.
+
 ---
 
 ## Initialising and Mining
