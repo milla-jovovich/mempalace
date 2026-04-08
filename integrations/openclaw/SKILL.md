@@ -1,7 +1,7 @@
 ---
 name: mempalace
 description: "MemPalace — Local AI memory with 96.6% recall. Semantic search over past conversations, knowledge graph with temporal facts, palace architecture (wings/rooms/drawers). Free, no cloud, no API keys. Highest LongMemEval score ever published."
-version: 1.3.0
+version: 1.4.0
 homepage: https://github.com/milla-jovovich/mempalace
 user-invocable: true
 metadata:
@@ -123,7 +123,7 @@ For OpenClaw, add to your MCP config:
 
 ## License & Attribution
 
-This skill is an integration for [MemPalace](https://github.com/milla-jovovich/mempalace), created by **Milla & Ben** ([@igorls](https://github.com/igorls)), licensed under the MIT License.
+This skill is an integration for [MemPalace](https://github.com/milla-jovovich/mempalace), created by **Ben Sigman** ([@bensig](https://github.com/bensig)), **Igor Lins e Silva** ([@igorls](https://github.com/igorls)), **Milla Jovovich** ([@milla-jovovich](https://github.com/milla-jovovich)), and **adv3nt3** ([@adv3nt3](https://github.com/adv3nt3)), licensed under the MIT License.
 
 ```
 MIT License
