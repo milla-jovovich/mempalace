@@ -134,6 +134,47 @@ def _no_palace():
     }
 
 
+# Batch size for paginated metadata scans.
+# A single col.get(limit=N) call on large palaces (>10k drawers) can return
+# None metadatas or raise in some ChromaDB builds.  Fetching in small pages
+# is both safer and friendlier on memory.
+_TAXONOMY_BATCH = 500
+
+
+def _iter_metadatas(col, where=None):
+    """
+    Yield every metadata dict in *col*, fetched in pages of *_TAXONOMY_BATCH*.
+
+    This replaces the previous pattern of ``col.get(limit=10000)`` which
+    silently returned empty results on palaces with more than ~10k drawers
+    (issue #171).  The generator is also safe against ChromaDB returning
+    ``None`` for the ``metadatas`` key.
+    """
+    offset = 0
+    while True:
+        kwargs: dict = {
+            "include": ["metadatas"],
+            "limit": _TAXONOMY_BATCH,
+            "offset": offset,
+        }
+        if where:
+            kwargs["where"] = where
+        try:
+            batch = col.get(**kwargs)
+        except Exception as exc:
+            logger.warning(
+                "_iter_metadatas: ChromaDB error at offset %d: %s", offset, exc
+            )
+            return
+        metas = batch.get("metadatas") or []
+        if not metas:
+            return
+        yield from metas
+        offset += len(metas)
+        if len(metas) < _TAXONOMY_BATCH:
+            return
+
+
 # ==================== READ TOOLS ====================
 
 
@@ -144,24 +185,13 @@ def tool_status():
     count = col.count()
     wings = {}
     rooms = {}
-    batch_size = 5000
-    offset = 0
-    error_info = None
-    while True:
-        try:
-            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
-            rows = batch["metadatas"]
-            for m in rows:
-                w = m.get("wing", "unknown")
-                r = m.get("room", "unknown")
-                wings[w] = wings.get(w, 0) + 1
-                rooms[r] = rooms.get(r, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            error_info = f"Partial result, failed at offset {offset}: {str(e)}"
-            break
+    total_from_meta = 0
+    for m in _iter_metadatas(col):
+        w = m.get("wing", "unknown")
+        r = m.get("room", "unknown")
+        wings[w] = wings.get(w, 0) + 1
+        rooms[r] = rooms.get(r, 0) + 1
+        total_from_meta += 1
     result = {
         "total_drawers": count,
         "wings": wings,
@@ -170,8 +200,7 @@ def tool_status():
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
     }
-    if error_info:
-        result["error"] = error_info
+    if total_from_meta < count:
         result["partial"] = True
     return result
 
@@ -214,28 +243,9 @@ def tool_list_wings():
     if not col:
         return _no_palace()
     wings = {}
-    batch_size = 5000
-    offset = 0
-    try:
-        col.count()  # verify collection is accessible
-    except Exception as e:
-        return {"wings": {}, "error": str(e)}
-    while True:
-        try:
-            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
-            rows = batch["metadatas"]
-            for m in rows:
-                w = m.get("wing", "unknown")
-                wings[w] = wings.get(w, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            return {
-                "wings": wings,
-                "error": f"Partial result, failed at offset {offset}: {str(e)}",
-                "partial": True,
-            }
+    for m in _iter_metadatas(col):
+        w = m.get("wing", "unknown")
+        wings[w] = wings.get(w, 0) + 1
     return {"wings": wings}
 
 
@@ -244,33 +254,10 @@ def tool_list_rooms(wing: str = None):
     if not col:
         return _no_palace()
     rooms = {}
-    batch_size = 5000
-    offset = 0
     where = {"wing": wing} if wing else None
-    try:
-        col.count()  # verify collection is accessible
-    except Exception as e:
-        return {"wing": wing or "all", "rooms": {}, "error": str(e)}
-    while True:
-        try:
-            kwargs = {"include": ["metadatas"], "limit": batch_size, "offset": offset}
-            if where:
-                kwargs["where"] = where
-            batch = col.get(**kwargs)
-            rows = batch["metadatas"]
-            for m in rows:
-                r = m.get("room", "unknown")
-                rooms[r] = rooms.get(r, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            return {
-                "wing": wing or "all",
-                "rooms": rooms,
-                "error": f"Partial result, failed at offset {offset}: {str(e)}",
-                "partial": True,
-            }
+    for m in _iter_metadatas(col, where=where):
+        r = m.get("room", "unknown")
+        rooms[r] = rooms.get(r, 0) + 1
     return {"wing": wing or "all", "rooms": rooms}
 
 
@@ -279,31 +266,12 @@ def tool_get_taxonomy():
     if not col:
         return _no_palace()
     taxonomy = {}
-    batch_size = 5000
-    offset = 0
-    try:
-        col.count()  # verify collection is accessible
-    except Exception as e:
-        return {"taxonomy": {}, "error": str(e)}
-    while True:
-        try:
-            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
-            rows = batch["metadatas"]
-            for m in rows:
-                w = m.get("wing", "unknown")
-                r = m.get("room", "unknown")
-                if w not in taxonomy:
-                    taxonomy[w] = {}
-                taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            return {
-                "taxonomy": taxonomy,
-                "error": f"Partial result, failed at offset {offset}: {str(e)}",
-                "partial": True,
-            }
+    for m in _iter_metadatas(col):
+        w = m.get("wing", "unknown")
+        r = m.get("room", "unknown")
+        if w not in taxonomy:
+            taxonomy[w] = {}
+        taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
     return {"taxonomy": taxonomy}
 
 
