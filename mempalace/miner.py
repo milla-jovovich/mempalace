@@ -11,13 +11,15 @@ import os
 import sys
 import hashlib
 import fnmatch
+from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
 import chromadb
 
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS
+from .drawer_store import DrawerNamespace, DrawerStore, PROJECT_INGEST_MODE, REFRESH_OWNER_KEY
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -55,6 +57,9 @@ CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+PROJECT_PIPELINE_FINGERPRINT = (
+    f"projects:v2:chunk={CHUNK_SIZE}:overlap={CHUNK_OVERLAP}:min={MIN_CHUNK_SIZE}:single-room"
+)
 
 
 # =============================================================================
@@ -366,37 +371,85 @@ def chunk_text(content: str, source_file: str) -> list:
 
 
 # =============================================================================
-# PALACE — ChromaDB operations
+# PALACE — source refresh operations
 # =============================================================================
 
 
-def add_drawer(
-    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
-):
-    """Add one drawer to the palace."""
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
-    try:
-        metadata = {
-            "wing": wing,
-            "room": room,
-            "source_file": source_file,
-            "chunk_index": chunk_index,
-            "added_by": agent,
-            "filed_at": datetime.now().isoformat(),
-        }
-        # Store file mtime so we can detect modifications later.
-        try:
-            metadata["source_mtime"] = os.path.getmtime(source_file)
-        except OSError:
-            pass
-        collection.upsert(
-            documents=[content],
-            ids=[drawer_id],
-            metadatas=[metadata],
+@dataclass
+class ProcessResult:
+    status: str
+    drawers: int = 0
+    cleared: int = 0
+    room_counts: dict = field(default_factory=dict)
+    error: str = ""
+
+
+def build_source_signature(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def build_drawer_id(wing: str, room: str, source_file: str, chunk_index: int) -> str:
+    digest = hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]
+    return f"drawer_{wing}_{room}_{digest}"
+
+
+def prepare_drawer_rows(
+    namespace: DrawerNamespace,
+    source_root: str,
+    source_signature: str,
+    room: str,
+    chunks: list,
+    agent: str,
+) -> list:
+    rows = []
+    filed_at = datetime.now().isoformat()
+    for chunk in chunks:
+        rows.append(
+            {
+                "id": build_drawer_id(
+                    wing=namespace.wing,
+                    room=room,
+                    source_file=namespace.source_file,
+                    chunk_index=chunk["chunk_index"],
+                ),
+                "document": chunk["content"],
+                "metadata": {
+                    "wing": namespace.wing,
+                    "room": room,
+                    "source_file": namespace.source_file,
+                    "source_root": source_root,
+                    "source_signature": source_signature,
+                    "pipeline_fingerprint": PROJECT_PIPELINE_FINGERPRINT,
+                    "chunk_index": chunk["chunk_index"],
+                    "added_by": agent,
+                    "filed_at": filed_at,
+                    "ingest_mode": namespace.ingest_mode,
+                    REFRESH_OWNER_KEY: namespace.refresh_owner,
+                },
+            }
         )
-        return True
-    except Exception:
-        raise
+    return rows
+
+
+def namespace_is_current(existing_rows: list, new_rows: list, source_signature: str) -> bool:
+    if not existing_rows or not new_rows:
+        return False
+
+    existing_ids = [row["id"] for row in existing_rows]
+    new_ids = [row["id"] for row in new_rows]
+    if len(existing_ids) != len(new_ids):
+        return False
+    if set(existing_ids) != set(new_ids):
+        return False
+
+    for row in existing_rows:
+        metadata = row["metadata"]
+        if metadata.get("source_signature") != source_signature:
+            return False
+        if metadata.get("pipeline_fingerprint") != PROJECT_PIPELINE_FINGERPRINT:
+            return False
+
+    return True
 
 
 # =============================================================================
@@ -407,50 +460,84 @@ def add_drawer(
 def process_file(
     filepath: Path,
     project_path: Path,
-    collection,
+    store: DrawerStore,
     wing: str,
     rooms: list,
     agent: str,
     dry_run: bool,
-) -> tuple:
-    """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
-
-    # Skip if already filed
+) -> ProcessResult:
+    """Read, chunk, route, and refresh one source-backed namespace."""
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
-        return 0, None
+    namespace = DrawerNamespace(
+        wing=wing,
+        source_file=source_file,
+        ingest_mode=PROJECT_INGEST_MODE,
+    )
+    existing_rows = []
+
+    try:
+        existing_rows = store.get_namespace_rows(namespace)
+    except Exception:
+        existing_rows = []
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return 0, None
+    except OSError as exc:
+        return ProcessResult(status="error", error=str(exc))
 
     content = content.strip()
     if len(content) < MIN_CHUNK_SIZE:
-        return 0, None
+        if not existing_rows:
+            return ProcessResult(status="ignored")
+        if dry_run:
+            return ProcessResult(status="cleared", cleared=len(existing_rows))
+        try:
+            store.delete_ids([row["id"] for row in existing_rows])
+        except Exception as exc:
+            return ProcessResult(status="error", error=str(exc))
+        return ProcessResult(status="cleared", cleared=len(existing_rows))
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)
+    if not chunks:
+        if not existing_rows:
+            return ProcessResult(status="ignored")
+        if dry_run:
+            return ProcessResult(status="cleared", cleared=len(existing_rows))
+        try:
+            store.delete_ids([row["id"] for row in existing_rows])
+        except Exception as exc:
+            return ProcessResult(status="error", error=str(exc))
+        return ProcessResult(status="cleared", cleared=len(existing_rows))
+
+    source_signature = build_source_signature(content)
+    new_rows = prepare_drawer_rows(
+        namespace=namespace,
+        source_root=str(project_path),
+        source_signature=source_signature,
+        room=room,
+        chunks=chunks,
+        agent=agent,
+    )
+
+    if namespace_is_current(existing_rows, new_rows, source_signature):
+        return ProcessResult(status="unchanged")
 
     if dry_run:
-        print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
-        return len(chunks), room
+        status = "new" if not existing_rows else "updated"
+        return ProcessResult(status=status, drawers=len(new_rows), room_counts={room: len(new_rows)})
 
-    drawers_added = 0
-    for chunk in chunks:
-        added = add_drawer(
-            collection=collection,
-            wing=wing,
-            room=room,
-            content=chunk["content"],
-            source_file=source_file,
-            chunk_index=chunk["chunk_index"],
-            agent=agent,
-        )
-        if added:
-            drawers_added += 1
+    try:
+        store.upsert_rows(new_rows)
+        new_ids = {row["id"] for row in new_rows}
+        stale_ids = [row["id"] for row in existing_rows if row["id"] not in new_ids]
+        if stale_ids:
+            store.delete_ids(stale_ids)
+    except Exception as exc:
+        return ProcessResult(status="error", error=str(exc))
 
-    return drawers_added, room
+    status = "new" if not existing_rows else "updated"
+    return ProcessResult(status=status, drawers=len(new_rows), room_counts={room: len(new_rows)})
 
 
 # =============================================================================
@@ -559,7 +646,8 @@ def mine(
     print(f"  Wing:    {wing}")
     print(f"  Rooms:   {', '.join(r['name'] for r in rooms)}")
     print(f"  Files:   {len(files)}")
-    print(f"  Palace:  {palace_path}")
+    store = DrawerStore(palace_path=palace_path)
+    print(f"  Palace:  {store.palace_path}")
     if dry_run:
         print("  DRY RUN — nothing will be filed")
     if not respect_gitignore:
@@ -568,41 +656,63 @@ def mine(
         print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
     print(f"{'─' * 55}\n")
 
-    if not dry_run:
-        collection = get_collection(palace_path)
-    else:
-        collection = None
-
     total_drawers = 0
-    files_skipped = 0
+    total_cleared = 0
+    status_counts = defaultdict(int)
     room_counts = defaultdict(int)
 
     for i, filepath in enumerate(files, 1):
-        drawers, room = process_file(
+        result = process_file(
             filepath=filepath,
             project_path=project_path,
-            collection=collection,
+            store=store,
             wing=wing,
             rooms=rooms,
             agent=agent,
             dry_run=dry_run,
         )
-        if drawers == 0 and not dry_run:
-            files_skipped += 1
-        else:
-            total_drawers += drawers
-            room_counts[room] += 1
-            if not dry_run:
-                print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+        status_counts[result.status] += 1
+        total_drawers += result.drawers
+        total_cleared += result.cleared
+        for room, count in result.room_counts.items():
+            room_counts[room] += count
+
+        if dry_run:
+            detail = []
+            if result.drawers:
+                detail.append(f"{result.drawers} drawers")
+            if result.cleared:
+                detail.append(f"clear {result.cleared}")
+            suffix = f" ({', '.join(detail)})" if detail else ""
+            print(f"    [DRY RUN] {filepath.name} → {result.status}{suffix}")
+            continue
+
+        if result.status in ("new", "updated"):
+            print(
+                f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} "
+                f"{result.status:7} +{result.drawers}"
+            )
+        elif result.status == "cleared":
+            print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} cleared  -{result.cleared}")
+        elif result.status == "error":
+            print(f"  ! [{i:4}/{len(files)}] {filepath.name[:50]:50} error    {result.error}")
 
     print(f"\n{'=' * 55}")
     print("  Done.")
-    print(f"  Files processed: {len(files) - files_skipped}")
-    print(f"  Files skipped (already filed): {files_skipped}")
+    print(f"  Files scanned: {len(files)}")
+    print(f"  Files new: {status_counts['new']}")
+    print(f"  Files updated: {status_counts['updated']}")
+    print(f"  Files unchanged: {status_counts['unchanged']}")
+    print(f"  Files cleared: {status_counts['cleared']}")
+    print(f"  Files errored: {status_counts['error']}")
+    if status_counts["ignored"]:
+        print(f"  Files ignored (no usable content): {status_counts['ignored']}")
     print(f"  Drawers filed: {total_drawers}")
-    print("\n  By room:")
-    for room, count in sorted(room_counts.items(), key=lambda x: x[1], reverse=True):
-        print(f"    {room:20} {count} files")
+    print(f"  Drawers cleared: {total_cleared}")
+    if room_counts:
+        print("\n  Drawers filed by room:")
+        for room, count in sorted(room_counts.items(), key=lambda x: x[1], reverse=True):
+            print(f"    {room:20} {count} drawers")
     print('\n  Next: mempalace search "what you\'re looking for"')
     print(f"{'=' * 55}\n")
 
