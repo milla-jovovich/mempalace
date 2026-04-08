@@ -33,3 +33,10 @@ venv/
 
 # ChromaDB local data
 *.sqlite3-journal
+
+# Sensitive local data
+entities.json
+known_names.json
+identity.txt
+*.sqlite3
+*.db
