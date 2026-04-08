@@ -510,19 +510,163 @@ def ingest_conversation(conv, collection):
     return len(docs)
 
 
-def retrieve(collection, question, top_k=10):
-    """Retrieve top-K chunks from the collection."""
+def retrieve(collection, question, top_k=10, mode="raw", llm_rerank_key=None, llm_rerank_model="claude-haiku-4-5-20251001"):
+    """Retrieve top-K chunks from the collection.
+
+    Modes:
+        raw    - vanilla ChromaDB semantic search (baseline)
+        hybrid - semantic search + keyword overlap re-ranking (MemPalace hybrid mode)
+
+    If llm_rerank_key is set, an additional LLM reranking pass runs after
+    the initial retrieval (same as longmemeval_bench.py --llm-rerank).
+    """
     try:
         count = collection.count()
+        # Hybrid and rerank retrieve a larger pool then re-rank
+        need_pool = mode == "hybrid" or llm_rerank_key
+        n_retrieve = min(top_k * 5, count) if need_pool else min(top_k, count)
+
         results = collection.query(
             query_texts=[question],
-            n_results=min(top_k, count),
+            n_results=n_retrieve,
             include=["documents", "distances", "metadatas"],
         )
-        return results["documents"][0], results["distances"][0]
+
+        docs = results["documents"][0]
+        dists = results["distances"][0]
+
+        if not docs:
+            return [], []
+
+        if mode == "hybrid":
+            docs, dists = _hybrid_rerank(question, docs, dists, results["metadatas"][0], top_k)
+        else:
+            docs = docs[:top_k]
+            dists = dists[:top_k]
+
+        # Optional LLM rerank pass (Anthropic Claude, same as longmemeval_bench.py)
+        if llm_rerank_key and docs:
+            docs, dists = _llm_rerank_chunks(question, docs, dists, llm_rerank_key, llm_rerank_model)
+
+        return docs, dists
+
     except Exception as e:
         print(f"    Retrieve error: {e}")
         return [], []
+
+
+# Stop words for keyword extraction (matches longmemeval_bench.py)
+_HYBRID_STOP_WORDS = {
+    "what", "when", "where", "who", "how", "which", "did", "do", "was", "were",
+    "have", "has", "had", "is", "are", "the", "a", "an", "my", "me", "i", "you",
+    "your", "their", "it", "its", "in", "on", "at", "to", "for", "of", "with",
+    "by", "from", "ago", "last", "that", "this", "there", "about", "get", "got",
+    "give", "gave", "buy", "bought", "made", "make", "can", "could", "would",
+    "should", "will", "tell", "told", "know", "many", "much", "been",
+}
+
+
+def _extract_keywords(text):
+    """Extract meaningful keywords from text, stripping stop words."""
+    words = re.findall(r"\b[a-z]{3,}\b", text.lower())
+    return [w for w in words if w not in _HYBRID_STOP_WORDS]
+
+
+def _hybrid_rerank(question, docs, dists, metadatas, top_k, hybrid_weight=0.30):
+    """Re-rank retrieved docs by fusing semantic distance with keyword overlap.
+
+    This is the core of MemPalace's hybrid retrieval mode, ported from
+    longmemeval_bench.py build_palace_and_retrieve_hybrid().
+    """
+    query_keywords = _extract_keywords(question)
+
+    scored = []
+    for doc, dist, meta in zip(docs, dists, metadatas):
+        # Keyword overlap score
+        if query_keywords:
+            doc_lower = doc.lower()
+            hits = sum(1 for kw in query_keywords if kw in doc_lower)
+            overlap = hits / len(query_keywords)
+        else:
+            overlap = 0.0
+
+        # Fused distance: lower = better. Reduce distance for keyword overlap.
+        fused_dist = dist * (1.0 - hybrid_weight * overlap)
+        scored.append((doc, fused_dist))
+
+    # Sort by fused distance (ascending = most relevant first)
+    scored.sort(key=lambda x: x[1])
+
+    top_docs = [doc for doc, _ in scored[:top_k]]
+    top_dists = [dist for _, dist in scored[:top_k]]
+    return top_docs, top_dists
+
+
+def _llm_rerank_chunks(question, docs, dists, api_key, model="claude-haiku-4-5-20251001"):
+    """Use Claude to rerank retrieved chunks by relevance.
+
+    Ported from longmemeval_bench.py llm_rerank(). Sends top chunks to Claude,
+    asks which is most relevant, promotes the winner to position 0.
+    """
+    if len(docs) <= 1:
+        return docs, dists
+
+    # Format chunks for the prompt (first 500 chars each)
+    chunk_blocks = []
+    for i, doc in enumerate(docs):
+        text = doc[:500].replace("\n", " ").strip()
+        chunk_blocks.append(f"Chunk {i + 1}:\n{text}")
+
+    chunks_text = "\n\n".join(chunk_blocks)
+
+    prompt = (
+        f"Question: {question}\n\n"
+        f"Below are {len(docs)} text chunks from a conversation history. "
+        f"Which single chunk is most likely to contain the answer to the question above? "
+        f"Reply with ONLY a number between 1 and {len(docs)}. Nothing else.\n\n"
+        f"{chunks_text}\n\n"
+        f"Most relevant chunk number:"
+    )
+
+    payload = json.dumps({
+        "model": model,
+        "max_tokens": 8,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+
+    for _attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                result = json.loads(resp.read())
+            raw = result["content"][0]["text"].strip()
+            m = re.search(r"\b(\d+)\b", raw)
+            if m:
+                pick = int(m.group(1)) - 1  # 1-indexed to 0-indexed
+                if 0 <= pick < len(docs):
+                    # Promote the picked chunk to position 0
+                    reranked_docs = [docs[pick]] + [d for i, d in enumerate(docs) if i != pick]
+                    reranked_dists = [dists[pick]] + [d for i, d in enumerate(dists) if i != pick]
+                    return reranked_docs, reranked_dists
+            return docs, dists
+        except Exception as e:
+            if _attempt < 2:
+                time.sleep(2 ** (_attempt + 1))
+            else:
+                print(f"    LLM rerank failed: {e}")
+                return docs, dists
+
+    return docs, dists
 
 
 # =============================================================================
@@ -530,7 +674,7 @@ def retrieve(collection, question, top_k=10):
 # =============================================================================
 
 
-def eval_conversation(conv, client, model, top_k=10, debug_file=None):
+def eval_conversation(conv, client, model, top_k=10, mode="raw", llm_rerank_key=None, llm_rerank_model="claude-haiku-4-5-20251001", debug_file=None):
     """Evaluate a single conversation. Returns (checks_passed, checks_total, ability_scores)."""
     conv_id = conv["id"]
     category = conv["category"]
@@ -564,7 +708,7 @@ def eval_conversation(conv, client, model, top_k=10, debug_file=None):
 
         # Retrieve
         q_start = time.time()
-        chunks, distances = retrieve(collection, question, top_k=top_k)
+        chunks, distances = retrieve(collection, question, top_k=top_k, mode=mode, llm_rerank_key=llm_rerank_key, llm_rerank_model=llm_rerank_model)
 
         # Synthesize
         answer = synthesize_answer(client, model, question, chunks)
@@ -653,6 +797,14 @@ def main():
     parser.add_argument("--full", action="store_true", help="Run all 20 conversations")
     parser.add_argument("--conv", type=int, default=0, help="Conversation index for single run")
     parser.add_argument("--top-k", type=int, default=10, help="Number of chunks to retrieve")
+    parser.add_argument("--mode", type=str, default="raw", choices=["raw", "hybrid"],
+                        help="Retrieval mode: raw (vanilla ChromaDB) or hybrid (keyword re-ranking)")
+    parser.add_argument("--llm-rerank", action="store_true",
+                        help="Enable LLM reranking of retrieved chunks (requires Anthropic API key)")
+    parser.add_argument("--llm-model", type=str, default="claude-haiku-4-5-20251001",
+                        help="Claude model for LLM reranking (default: haiku)")
+    parser.add_argument("--api-key", type=str, default=None,
+                        help="Anthropic API key for --llm-rerank (or set ANTHROPIC_KEY env var)")
     parser.add_argument("--embed-model", type=str, default="default", help="Embedding model")
     parser.add_argument("--debug-dir", type=str, default=None, help="JSONL debug output directory")
     args = parser.parse_args()
@@ -668,7 +820,19 @@ def main():
     global _bench_embed_fn
     _bench_embed_fn = _make_embed_fn(args.embed_model)
     print(f"  Embedding: {args.embed_model}")
+    print(f"  Mode: {args.mode}")
     print(f"  Top-K: {args.top_k}")
+
+    # LLM rerank setup
+    rerank_key = None
+    rerank_model = args.llm_model
+    if args.llm_rerank:
+        rerank_key = args.api_key or os.environ.get("ANTHROPIC_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+        if not rerank_key:
+            print("ERROR: --llm-rerank requires an Anthropic API key.")
+            print("  Set ANTHROPIC_KEY env var or pass --api-key")
+            sys.exit(1)
+        print(f"  LLM rerank: {rerank_model}")
 
     # Setup LLM
     client, model = _create_llm_client()
@@ -696,7 +860,9 @@ def main():
 
     for conv in conversations:
         passed, checks, abilities = eval_conversation(
-            conv, client, model, top_k=args.top_k, debug_file=debug_file
+            conv, client, model, top_k=args.top_k, mode=args.mode,
+            llm_rerank_key=rerank_key, llm_rerank_model=rerank_model,
+            debug_file=debug_file
         )
         grand_passed += passed
         grand_checks += checks
@@ -716,7 +882,9 @@ def main():
     header = (
         f"BEAM 100K  - MemPalace {mode}\n"
         f"  Methodology: BEAM official rubric judge (3-tier: 1.0/0.5/0.0)\n"
-        f"  Retrieval: ChromaDB top-{args.top_k}, Embedding: {args.embed_model}\n"
+        f"  Retrieval: ChromaDB top-{args.top_k}, Mode: {args.mode}"
+        f"{f', LLM rerank: {rerank_model}' if rerank_key else ''}"
+        f", Embedding: {args.embed_model}\n"
         f"  Synthesis: {model}\n"
         f"  Time: {total_secs/60:.0f}m {total_secs%60:.0f}s"
     )
