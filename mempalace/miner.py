@@ -20,6 +20,7 @@ import chromadb
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
+    ".rst",
     ".py",
     ".js",
     ".ts",
