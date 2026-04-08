@@ -17,6 +17,8 @@ from collections import defaultdict
 
 import chromadb
 
+from .compat import ensure_palace_safe, write_palace_metadata
+
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
@@ -395,11 +397,14 @@ def chunk_text(content: str, source_file: str) -> list:
 
 def get_collection(palace_path: str):
     os.makedirs(palace_path, exist_ok=True)
+    ensure_palace_safe(palace_path)
     client = chromadb.PersistentClient(path=palace_path)
     try:
-        return client.get_collection("mempalace_drawers")
+        collection = client.get_collection("mempalace_drawers")
     except Exception:
-        return client.create_collection("mempalace_drawers")
+        collection = client.create_collection("mempalace_drawers")
+    write_palace_metadata(palace_path)
+    return collection
 
 
 def file_already_mined(collection, source_file: str) -> bool:
@@ -645,6 +650,7 @@ def mine(
 
 def status(palace_path: str):
     """Show what's been filed in the palace."""
+    ensure_palace_safe(palace_path)
     try:
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")

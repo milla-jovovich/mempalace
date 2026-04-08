@@ -11,6 +11,8 @@ from pathlib import Path
 
 import chromadb
 
+from .compat import ensure_palace_safe
+
 logger = logging.getLogger("mempalace_mcp")
 
 
@@ -23,6 +25,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     Search the palace. Returns verbatim drawer content.
     Optionally filter by wing (project) or room (aspect).
     """
+    ensure_palace_safe(palace_path)
     try:
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
@@ -97,6 +100,7 @@ def search_memories(
     Programmatic search — returns a dict instead of printing.
     Used by the MCP server and other callers that need data.
     """
+    ensure_palace_safe(palace_path)
     try:
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")

@@ -32,6 +32,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .compat import ensure_palace_safe
 
 
 def cmd_init(args):
@@ -101,6 +102,7 @@ def cmd_search(args):
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     try:
+        ensure_palace_safe(palace_path)
         search(
             query=args.query,
             palace_path=palace_path,
@@ -117,6 +119,7 @@ def cmd_wakeup(args):
     from .layers import MemoryStack
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    ensure_palace_safe(palace_path)
     stack = MemoryStack(palace_path=palace_path)
 
     text = stack.wake_up(wing=args.wing)
@@ -152,6 +155,7 @@ def cmd_status(args):
     from .miner import status
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    ensure_palace_safe(palace_path)
     status(palace_path=palace_path)
 
 
@@ -161,6 +165,7 @@ def cmd_repair(args):
     import shutil
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    ensure_palace_safe(palace_path)
 
     if not os.path.isdir(palace_path):
         print(f"\n  No palace found at {palace_path}")
@@ -232,6 +237,7 @@ def cmd_compress(args):
     from .dialect import Dialect
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    ensure_palace_safe(palace_path)
 
     # Load dialect (with optional entity config)
     config_path = args.config
@@ -476,7 +482,11 @@ def main():
         "repair": cmd_repair,
         "status": cmd_status,
     }
-    dispatch[args.command](args)
+    try:
+        dispatch[args.command](args)
+    except RuntimeError as e:
+        print(f"\n  Error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

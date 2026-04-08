@@ -24,6 +24,7 @@ from collections import defaultdict
 import chromadb
 
 from .config import MempalaceConfig
+from .compat import ensure_palace_safe
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +91,7 @@ class Layer1:
 
     def generate(self) -> str:
         """Pull top drawers from ChromaDB and format as compact L1 text."""
+        ensure_palace_safe(self.palace_path)
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
             col = client.get_collection("mempalace_drawers")
@@ -195,6 +197,7 @@ class Layer2:
 
     def retrieve(self, wing: str = None, room: str = None, n_results: int = 10) -> str:
         """Retrieve drawers filtered by wing and/or room."""
+        ensure_palace_safe(self.palace_path)
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
             col = client.get_collection("mempalace_drawers")
@@ -259,6 +262,7 @@ class Layer3:
 
     def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
         """Semantic search, returns compact result text."""
+        ensure_palace_safe(self.palace_path)
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
             col = client.get_collection("mempalace_drawers")
@@ -315,6 +319,7 @@ class Layer3:
         self, query: str, wing: str = None, room: str = None, n_results: int = 5
     ) -> list:
         """Return raw dicts instead of formatted text."""
+        ensure_palace_safe(self.palace_path)
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
             col = client.get_collection("mempalace_drawers")
@@ -436,6 +441,7 @@ class MemoryStack:
         }
 
         # Count drawers
+        ensure_palace_safe(self.palace_path)
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
             col = client.get_collection("mempalace_drawers")
