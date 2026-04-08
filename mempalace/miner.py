@@ -399,7 +399,13 @@ def get_collection(palace_path: str):
     try:
         return client.get_collection("mempalace_drawers")
     except Exception:
-        return client.create_collection("mempalace_drawers")
+        # hnsw:space=cosine is required because searcher.py computes
+        # similarity = 1 - distance, which only yields a meaningful score
+        # in the [0, 1] range when the underlying distance is cosine.
+        # See issue #218.
+        return client.create_collection(
+            "mempalace_drawers", metadata={"hnsw:space": "cosine"}
+        )
 
 
 def file_already_mined(collection, source_file: str) -> bool:

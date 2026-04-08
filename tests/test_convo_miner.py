@@ -2,7 +2,7 @@ import os
 import tempfile
 import shutil
 import chromadb
-from mempalace.convo_miner import mine_convos
+from mempalace.convo_miner import get_collection, mine_convos
 
 
 def test_convo_mining():
@@ -24,3 +24,11 @@ def test_convo_mining():
     assert len(results["documents"][0]) > 0
 
     shutil.rmtree(tmpdir)
+
+
+def test_get_collection_uses_cosine_distance(tmp_path):
+    """Newly-created drawer collections must declare hnsw:space=cosine so that
+    searcher.py's `similarity = 1 - distance` formula yields scores in [0, 1]
+    instead of negative L2 distances. Regression test for issue #218."""
+    col = get_collection(str(tmp_path / "palace"))
+    assert col.metadata.get("hnsw:space") == "cosine"

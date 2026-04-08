@@ -6,7 +6,7 @@ from pathlib import Path
 import chromadb
 import yaml
 
-from mempalace.miner import mine, scan_project
+from mempalace.miner import get_collection, mine, scan_project
 
 
 def write_file(path: Path, content: str):
@@ -206,3 +206,11 @@ def test_scan_project_skip_dirs_still_apply_without_override():
         assert scanned_files(project_root, respect_gitignore=False) == ["main.py"]
     finally:
         shutil.rmtree(tmpdir)
+
+
+def test_get_collection_uses_cosine_distance(tmp_path):
+    """Newly-created drawer collections must declare hnsw:space=cosine so that
+    searcher.py's `similarity = 1 - distance` formula yields scores in [0, 1]
+    instead of negative L2 distances. Regression test for issue #218."""
+    col = get_collection(str(tmp_path / "palace"))
+    assert col.metadata.get("hnsw:space") == "cosine"
