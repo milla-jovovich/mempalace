@@ -30,21 +30,29 @@ def _verify_with_tardygrada(hits: list) -> dict:
     if not hits:
         return {"contradictions": []}
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".md", delete=False, prefix="mempalace_verify_"
-    ) as f:
-        for i, hit in enumerate(hits, 1):
-            f.write(f"## [{i}] {hit['wing']} / {hit['room']} (similarity: {hit['similarity']})\n")
-            f.write(hit["text"].strip() + "\n\n")
-        tmp_path = f.name
-
+    tmp_path = None
     try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, prefix="mempalace_verify_"
+        ) as f:
+            for i, hit in enumerate(hits, 1):
+                f.write(
+                    f"## [{i}] {hit['wing']} / {hit['room']} (similarity: {hit['similarity']})\n"
+                )
+                f.write(hit["text"].strip() + "\n\n")
+            tmp_path = f.name
+
         result = subprocess.run(
             ["tardygrada", "verify-doc", tmp_path],
             capture_output=True,
             text=True,
             timeout=10,
         )
+        if result.returncode != 0:
+            return {
+                "contradictions": None,
+                "verify_warning": f"tardygrada exited with code {result.returncode}: {result.stderr[:200]}",
+            }
         return {"contradictions": _parse_conflicts(result.stdout)}
     except FileNotFoundError:
         return {
@@ -57,7 +65,8 @@ def _verify_with_tardygrada(hits: list) -> dict:
             "verify_warning": "tardygrada verify-doc timeout after 10s",
         }
     finally:
-        os.unlink(tmp_path)
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def _parse_conflicts(stdout: str) -> list:
