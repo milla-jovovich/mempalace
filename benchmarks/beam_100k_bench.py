@@ -416,8 +416,25 @@ Answer the user's question based ONLY on the retrieved memory notes below.
 If the notes don't contain enough information to answer, say so clearly.
 Be concise and direct. Include specific details, names, dates, and numbers from the notes."""
 
+# AAAK spec from mempalace/mcp_server.py AAAK_SPEC (verbatim)
+AAAK_SYNTHESIS_SYSTEM = """You are a helpful AI assistant with access to a conversational memory system.
+The retrieved memory notes below are in AAAK format, a compressed memory dialect.
 
-def synthesize_answer(client, model, question, retrieved_chunks):
+AAAK FORMAT GUIDE:
+  ENTITIES: 3-letter uppercase codes. e.g. ALC=Alice, JOR=Jordan.
+  EMOTIONS: *action markers* before/during text. *warm*=joy, *fierce*=determined, *raw*=vulnerable.
+  STRUCTURE: Pipe-separated fields. FAM: family | PROJ: projects.
+  DATES: ISO format (2026-03-31). COUNTS: Nx = N mentions.
+  IMPORTANCE: one to five star marks (1-5 scale).
+
+Read AAAK naturally. Expand entity codes mentally, treat *markers* as emotional context.
+
+Answer the user's question based ONLY on the retrieved memory notes below.
+If the notes don't contain enough information to answer, say so clearly.
+Be concise and direct. Include specific details, names, dates, and numbers from the notes."""
+
+
+def synthesize_answer(client, model, question, retrieved_chunks, aaak=False):
     """Use LLM to synthesize an answer from retrieved chunks."""
     if not retrieved_chunks:
         return "I don't have any relevant information to answer this question."
@@ -427,8 +444,10 @@ def synthesize_answer(client, model, question, retrieved_chunks):
         for i, chunk in enumerate(retrieved_chunks)
     )
 
+    system = AAAK_SYNTHESIS_SYSTEM if aaak else SYNTHESIS_SYSTEM
+
     messages = [
-        {"role": "system", "content": SYNTHESIS_SYSTEM},
+        {"role": "system", "content": system},
         {
             "role": "user",
             "content": f"Retrieved memory notes:\n{notes_text}\n\nQuestion: {question}",
@@ -468,8 +487,16 @@ def judge_rubric(client, model, question, answer, rubric_item):
 # =============================================================================
 
 
-def ingest_conversation(conv, collection):
+def ingest_conversation(conv, collection, aaak=False):
     """Ingest all user messages from a BEAM conversation into ChromaDB."""
+    dialect = None
+    if aaak:
+        try:
+            from mempalace.dialect import Dialect
+            dialect = Dialect()
+        except ImportError:
+            print("    WARN: mempalace.dialect not available, falling back to raw")
+
     docs = []
     ids = []
     metadatas = []
@@ -486,6 +513,10 @@ def ingest_conversation(conv, collection):
             doc = f"[{time_anchor}] {content}"
         else:
             doc = content
+
+        # AAAK compression before indexing (same as longmemeval_bench.py aaak mode)
+        if dialect:
+            doc = dialect.compress(doc)
 
         docs.append(doc)
         ids.append(f"msg_{i}")
@@ -674,7 +705,7 @@ def _llm_rerank_chunks(question, docs, dists, api_key, model="claude-haiku-4-5-2
 # =============================================================================
 
 
-def eval_conversation(conv, client, model, top_k=10, mode="raw", llm_rerank_key=None, llm_rerank_model="claude-haiku-4-5-20251001", debug_file=None):
+def eval_conversation(conv, client, model, top_k=10, mode="raw", aaak=False, aaak_spec=False, llm_rerank_key=None, llm_rerank_model="claude-haiku-4-5-20251001", debug_file=None):
     """Evaluate a single conversation. Returns (checks_passed, checks_total, ability_scores)."""
     conv_id = conv["id"]
     category = conv["category"]
@@ -688,7 +719,7 @@ def eval_conversation(conv, client, model, top_k=10, mode="raw", llm_rerank_key=
     # --- Ingest ---
     ingest_start = time.time()
     collection = _fresh_collection()
-    ingested = ingest_conversation(conv, collection)
+    ingested = ingest_conversation(conv, collection, aaak=aaak)
     ingest_secs = time.time() - ingest_start
     print(f"  Ingested {ingested} messages in {ingest_secs:.1f}s")
 
@@ -711,7 +742,7 @@ def eval_conversation(conv, client, model, top_k=10, mode="raw", llm_rerank_key=
         chunks, distances = retrieve(collection, question, top_k=top_k, mode=mode, llm_rerank_key=llm_rerank_key, llm_rerank_model=llm_rerank_model)
 
         # Synthesize
-        answer = synthesize_answer(client, model, question, chunks)
+        answer = synthesize_answer(client, model, question, chunks, aaak=(aaak and aaak_spec))
         q_secs = time.time() - q_start
 
         print(f"\n  [{ability}] Q{qi+1}: {question[:80]}")
@@ -797,8 +828,10 @@ def main():
     parser.add_argument("--full", action="store_true", help="Run all 20 conversations")
     parser.add_argument("--conv", type=int, default=0, help="Conversation index for single run")
     parser.add_argument("--top-k", type=int, default=10, help="Number of chunks to retrieve")
-    parser.add_argument("--mode", type=str, default="raw", choices=["raw", "hybrid"],
-                        help="Retrieval mode: raw (vanilla ChromaDB) or hybrid (keyword re-ranking)")
+    parser.add_argument("--mode", type=str, default="raw", choices=["raw", "hybrid", "aaak"],
+                        help="Retrieval mode: raw (vanilla ChromaDB), hybrid (keyword re-ranking), or aaak (AAAK compression before indexing)")
+    parser.add_argument("--aaak-spec", action="store_true",
+                        help="Include AAAK dialect spec in synthesis prompt (only relevant with --mode aaak)")
     parser.add_argument("--llm-rerank", action="store_true",
                         help="Enable LLM reranking of retrieved chunks (requires Anthropic API key)")
     parser.add_argument("--llm-model", type=str, default="claude-haiku-4-5-20251001",
@@ -861,6 +894,7 @@ def main():
     for conv in conversations:
         passed, checks, abilities = eval_conversation(
             conv, client, model, top_k=args.top_k, mode=args.mode,
+            aaak=(args.mode == "aaak"), aaak_spec=args.aaak_spec,
             llm_rerank_key=rerank_key, llm_rerank_model=rerank_model,
             debug_file=debug_file
         )
