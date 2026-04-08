@@ -635,6 +635,25 @@ or multi-user setups where you want a single, always-on palace.
 - Multiple users share one palace (e.g. a team AI assistant).
 - You want to offload embeddings to a dedicated server.
 
+### Multi-user support and known limitations
+
+All clients share a single `mempalace_drawers` collection — there is no
+per-user namespacing or authentication. The practical implications:
+
+| Scenario | Works? | Notes |
+|---|---|---|
+| 1 dev, multiple workstations | ✅ Perfect fit | Same person's memories sync across machines |
+| Multiple devs, shared team palace | ✅ Works | All memories pooled together — intentional for a shared assistant |
+| Multiple devs, each wanting isolated memory | ❌ Not supported | Would need separate servers or per-user collection names |
+
+**ID collision risks when sharing a server between multiple users:**
+
+- **`mine` / `convo-mine`** — drawer IDs are hashed from `source_file + chunk_index`. Two users with the same file path (e.g. both have `/home/user/notes.md`) will overwrite each other's entries silently.
+- **Diary entries** — IDs include a second-resolution timestamp. Two users writing a diary entry within the same second produce the same ID; the second write silently overwrites the first.
+- **Manual `add_drawer`** — content-addressed, so identical content from two users deduplicates cleanly. Different content in the same wing/room coexists fine.
+
+For single-dev multi-workstation use these collisions are harmless (re-mining the same file is idempotent). For true multi-user isolation, run a separate ChromaDB instance per user.
+
 ### Running ChromaDB with Docker
 
 ```yaml
