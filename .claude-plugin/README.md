@@ -50,7 +50,7 @@ Set the `MEMPAL_DIR` environment variable to a directory path to automatically r
 
 ## MCP Server
 
-The plugin automatically configures a local MCP server with 19 tools for storing, searching, and managing memories. No manual MCP setup is required -- `/mempalace:init` handles everything.
+The plugin automatically configures a local MCP server with 21 tools for storing, searching, and managing memories. No manual MCP setup is required -- `/mempalace:init` handles everything.
 
 ## Full Documentation
 

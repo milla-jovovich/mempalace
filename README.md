@@ -130,7 +130,7 @@ Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-Now your AI has 19 tools available through MCP. Ask it anything:
+Now your AI has 21 tools available through MCP. Ask it anything:
 
 > *"What did we decide about auth last month?"*
 
@@ -458,7 +458,7 @@ claude plugin install --scope user mempalace
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-### 19 Tools
+### 21 Tools
 
 **Palace (read)**
 
@@ -472,12 +472,16 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 | `mempalace_check_duplicate` | Check before filing |
 | `mempalace_get_aaak_spec` | AAAK dialect reference |
 
+Search results now include an `id` field for each hit (the drawer ID).
+
 **Palace (write)**
 
 | Tool | What |
 |------|------|
 | `mempalace_add_drawer` | File verbatim content |
 | `mempalace_delete_drawer` | Remove by ID |
+| `mempalace_delete_wing` | Delete all drawers in a wing |
+| `mempalace_delete_room` | Delete all drawers in a room |
 
 **Knowledge Graph**
 
@@ -576,6 +580,10 @@ mempalace search "query"                          # search everything
 mempalace search "query" --wing myapp             # within a wing
 mempalace search "query" --room auth-migration    # within a room
 
+# Delete
+mempalace delete-wing <wing>                       # delete entire wing
+mempalace delete-room <wing> <room>                # delete specific room
+
 # Memory stack
 mempalace wake-up                                 # load L0 + L1 context
 mempalace wake-up --wing driftwood                # project-specific
@@ -630,7 +638,7 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `cli.py` | CLI entry point |
 | `config.py` | Configuration loading and defaults |
 | `normalize.py` | Converts 5 chat formats to standard transcript |
-| `mcp_server.py` | MCP server — 19 tools, AAAK auto-teach, memory protocol |
+| `mcp_server.py` | MCP server — 21 tools, AAAK auto-teach, memory protocol |
 | `miner.py` | Project file ingest |
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |
 | `searcher.py` | Semantic search via ChromaDB |
@@ -654,7 +662,7 @@ mempalace/
 ├── README.md                  ← you are here
 ├── mempalace/                 ← core package (README)
 │   ├── cli.py                 ← CLI entry point
-│   ├── mcp_server.py          ← MCP server (19 tools)
+│   ├── mcp_server.py          ← MCP server (21 tools)
 │   ├── knowledge_graph.py     ← temporal entity graph
 │   ├── palace_graph.py        ← room navigation graph
 │   ├── dialect.py             ← AAAK compression
