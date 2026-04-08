@@ -17,21 +17,27 @@ Tools (write):
   mempalace_delete_drawer   — remove a drawer by ID
 """
 
-import argparse
-import os
+# Issue #225: save real stdout BEFORE any other import so chatter from
+# chromadb/posthog/etc cannot corrupt the JSON-RPC wire on stdout. Use
+# _real_stdout for protocol responses below.
 import sys
-import json
-import logging
-import hashlib
-from datetime import datetime
+_real_stdout = sys.stdout
+sys.stdout = sys.stderr
 
-from .config import MempalaceConfig
-from .version import __version__
-from .searcher import search_memories
-from .palace_graph import traverse, find_tunnels, graph_stats
-import chromadb
+import argparse  # noqa: E402
+import os  # noqa: E402
+import json  # noqa: E402
+import logging  # noqa: E402
+import hashlib  # noqa: E402
+from datetime import datetime  # noqa: E402
 
-from .knowledge_graph import KnowledgeGraph
+from .config import MempalaceConfig  # noqa: E402
+from .version import __version__  # noqa: E402
+from .searcher import search_memories  # noqa: E402
+from .palace_graph import traverse, find_tunnels, graph_stats  # noqa: E402
+import chromadb  # noqa: E402
+
+from .knowledge_graph import KnowledgeGraph  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
@@ -800,8 +806,8 @@ def main():
             request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
+                _real_stdout.write(json.dumps(response) + "\n")
+                _real_stdout.flush()
         except KeyboardInterrupt:
             break
         except Exception as e:

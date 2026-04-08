@@ -342,3 +342,48 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+
+# Issue #225 — MCP stdio protocol must not be polluted by import-time chatter.
+
+
+def test_mcp_server_redirects_stdout_at_import():
+    """Issue #225: importing mempalace.mcp_server must redirect sys.stdout
+    to sys.stderr so that any subsequent print() (from chromadb, posthog, our
+    own modules, or anywhere else) lands on stderr instead of corrupting the
+    MCP JSON-RPC wire on stdout."""
+    import subprocess
+    import sys as _sys
+
+    # Print a marker AFTER importing mcp_server. With the fix, sys.stdout is
+    # sys.stderr, so the marker lands on stderr; without the fix it would
+    # land on stdout (and be visible to MCP clients).
+    code = (
+        "import mempalace.mcp_server as _; "
+        "print('POLLUTION_MARKER_42')"
+    )
+    proc = subprocess.run(
+        [_sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert "POLLUTION_MARKER_42" not in proc.stdout
+    assert "POLLUTION_MARKER_42" in proc.stderr
+
+
+def test_mcp_server_stdout_emits_only_json():
+    """Issue #225: e2e check — every non-empty stdout line is valid JSON."""
+    import subprocess
+    import sys as _sys
+
+    proc = subprocess.run(
+        [_sys.executable, "-m", "mempalace.mcp_server"],
+        input='{"method":"initialize","id":1,"params":{}}\n',
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    for line in proc.stdout.splitlines():
+        if line.strip():
+            json.loads(line)  # raises if any line is non-JSON
