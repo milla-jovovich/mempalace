@@ -4,7 +4,7 @@ test_searcher.py — Tests for the programmatic search_memories API.
 Tests the library-facing search interface (not the CLI print variant).
 """
 
-from mempalace.searcher import search_memories
+from mempalace.searcher import search, search_memories
 
 
 class TestSearchMemories:
@@ -43,3 +43,44 @@ class TestSearchMemories:
         assert "source_file" in hit
         assert "similarity" in hit
         assert isinstance(hit["similarity"], float)
+
+    def test_handles_empty_query_payload(self, monkeypatch):
+        class _FakeCollection:
+            def query(self, **_kwargs):
+                return {"documents": [], "metadatas": [], "distances": []}
+
+        class _FakeClient:
+            def __init__(self, path):
+                self.path = path
+
+            def get_collection(self, _name):
+                return _FakeCollection()
+
+        monkeypatch.setattr(
+            "mempalace.searcher.chromadb.PersistentClient",
+            _FakeClient,
+        )
+
+        result = search_memories("anything", "/tmp/fake-palace")
+        assert result["results"] == []
+
+    def test_cli_search_handles_empty_query_payload(self, monkeypatch, capsys):
+        class _FakeCollection:
+            def query(self, **_kwargs):
+                return {"documents": [], "metadatas": [], "distances": []}
+
+        class _FakeClient:
+            def __init__(self, path):
+                self.path = path
+
+            def get_collection(self, _name):
+                return _FakeCollection()
+
+        monkeypatch.setattr(
+            "mempalace.searcher.chromadb.PersistentClient",
+            _FakeClient,
+        )
+
+        search("anything", "/tmp/fake-palace")
+        out = capsys.readouterr().out
+        assert 'No results found for: "anything"' in out
