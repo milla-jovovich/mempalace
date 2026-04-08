@@ -82,6 +82,21 @@ if [ "$STOP_HOOK_ACTIVE" = "True" ] || [ "$STOP_HOOK_ACTIVE" = "true" ]; then
     exit 0
 fi
 
+# Skip if project has no initialized mempalace wing (no mempalace.yaml found)
+WORKING_DIR=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cwd', ''))" 2>/dev/null)
+[ -z "$WORKING_DIR" ] && WORKING_DIR="$(pwd)"
+
+check_dir="$WORKING_DIR"
+while [ "$check_dir" != "/" ]; do
+    [ -f "$check_dir/mempalace.yaml" ] && break
+    check_dir="$(dirname "$check_dir")"
+done
+
+if [ ! -f "$check_dir/mempalace.yaml" ]; then
+    echo "{}"
+    exit 0
+fi
+
 # Count human messages in the JSONL transcript
 if [ -f "$TRANSCRIPT_PATH" ]; then
     EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
