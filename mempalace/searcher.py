@@ -12,6 +12,10 @@ from pathlib import Path
 import chromadb
 
 logger = logging.getLogger("mempalace_mcp")
+CHAT_SOURCE_MARKER = "/agent-transcripts/"
+SUBAGENT_SOURCE_MARKER = "/subagents/"
+MIN_SIMILARITY = 0.15
+FETCH_MULTIPLIER = 12
 
 
 class SearchError(Exception):
@@ -43,7 +47,8 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     try:
         kwargs = {
             "query_texts": [query],
-            "n_results": n_results,
+            # Fetch more candidates so we can post-filter low quality hits.
+            "n_results": max(n_results * FETCH_MULTIPLIER, n_results),
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
@@ -91,7 +96,12 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    cursor_source_filter: bool = False,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
@@ -117,9 +127,10 @@ def search_memories(
         where = {"room": room}
 
     try:
+        fetch_n = max(n_results * FETCH_MULTIPLIER, n_results) if cursor_source_filter else n_results
         kwargs = {
             "query_texts": [query],
-            "n_results": n_results,
+            "n_results": fetch_n,
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
@@ -134,16 +145,37 @@ def search_memories(
     dists = results["distances"][0]
 
     hits = []
+    seen_texts = set()
     for doc, meta, dist in zip(docs, metas, dists):
+        source_file = meta.get("source_file", "") or ""
+        similarity = round(1 - dist, 3)
+
+        if cursor_source_filter:
+            # Keep primary chat transcript chunks, drop known noisy sources.
+            if CHAT_SOURCE_MARKER not in source_file or SUBAGENT_SOURCE_MARKER in source_file:
+                continue
+
+            # Avoid weak matches that often produce irrelevant suggestions.
+            if similarity < MIN_SIMILARITY:
+                continue
+
+            # Deduplicate repeated text chunks.
+            doc_key = doc.strip()
+            if doc_key in seen_texts:
+                continue
+            seen_texts.add(doc_key)
+
         hits.append(
             {
                 "text": doc,
                 "wing": meta.get("wing", "unknown"),
                 "room": meta.get("room", "unknown"),
-                "source_file": Path(meta.get("source_file", "?")).name,
-                "similarity": round(1 - dist, 3),
+                "source_file": Path(source_file or "?").name,
+                "similarity": similarity,
             }
         )
+        if len(hits) >= n_results:
+            break
 
     return {
         "query": query,

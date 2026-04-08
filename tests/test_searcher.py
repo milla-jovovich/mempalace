@@ -4,7 +4,7 @@ test_searcher.py — Tests for the programmatic search_memories API.
 Tests the library-facing search interface (not the CLI print variant).
 """
 
-from mempalace.searcher import search_memories
+from mempalace.searcher import CHAT_SOURCE_MARKER, FETCH_MULTIPLIER, search_memories
 
 
 class TestSearchMemories:
@@ -36,6 +36,128 @@ class TestSearchMemories:
 
     def test_result_fields(self, palace_path, seeded_collection):
         result = search_memories("authentication", palace_path)
+        hit = result["results"][0]
+        assert "text" in hit
+        assert "wing" in hit
+        assert "room" in hit
+        assert "source_file" in hit
+        assert "similarity" in hit
+        assert isinstance(hit["similarity"], float)
+
+    def test_filters_non_transcript_sources(self, monkeypatch):
+        class FakeCollection:
+            def query(self, **kwargs):
+                return {
+                    "documents": [["good hit", "bad hit"]],
+                    "metadatas": [
+                        [
+                            {
+                                "wing": "cursor",
+                                "room": "technical",
+                                "source_file": "/tmp/agent-transcripts/abc.jsonl",
+                            },
+                            {
+                                "wing": "cursor",
+                                "room": "technical",
+                                "source_file": "/tmp/notes/manual.md",
+                            },
+                        ]
+                    ],
+                    "distances": [[0.2, 0.05]],
+                }
+
+        class FakeClient:
+            def get_collection(self, _name):
+                return FakeCollection()
+
+        monkeypatch.setattr("mempalace.searcher.chromadb.PersistentClient", lambda path: FakeClient())
+
+        result = search_memories("query", "/tmp/palace", cursor_source_filter=True)
+        assert len(result["results"]) == 1
+        assert result["results"][0]["text"] == "good hit"
+
+    def test_filters_subagent_and_low_similarity_and_duplicates(self, monkeypatch):
+        repeated = "same chunk"
+
+        class FakeCollection:
+            def query(self, **kwargs):
+                return {
+                    "documents": [[repeated, repeated, "subagent", "too weak", "valid"]],
+                    "metadatas": [
+                        [
+                            {
+                                "wing": "cursor",
+                                "room": "technical",
+                                "source_file": "/tmp/agent-transcripts/a.jsonl",
+                            },
+                            {
+                                "wing": "cursor",
+                                "room": "technical",
+                                "source_file": "/tmp/agent-transcripts/b.jsonl",
+                            },
+                            {
+                                "wing": "cursor",
+                                "room": "technical",
+                                "source_file": "/tmp/agent-transcripts/subagents/c.jsonl",
+                            },
+                            {
+                                "wing": "cursor",
+                                "room": "technical",
+                                "source_file": "/tmp/agent-transcripts/d.jsonl",
+                            },
+                            {
+                                "wing": "cursor",
+                                "room": "technical",
+                                "source_file": "/tmp/agent-transcripts/e.jsonl",
+                            },
+                        ]
+                    ],
+                    "distances": [[0.1, 0.1, 0.1, 0.95, 0.2]],
+                }
+
+        class FakeClient:
+            def get_collection(self, _name):
+                return FakeCollection()
+
+        monkeypatch.setattr("mempalace.searcher.chromadb.PersistentClient", lambda path: FakeClient())
+
+        result = search_memories("query", "/tmp/palace", n_results=5, cursor_source_filter=True)
+        texts = [hit["text"] for hit in result["results"]]
+        assert texts == [repeated, "valid"]
+
+    def test_expands_query_candidates_for_post_filtering(self, monkeypatch):
+        captured = {}
+
+        class FakeCollection:
+            def query(self, **kwargs):
+                captured.update(kwargs)
+                return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+        class FakeClient:
+            def get_collection(self, _name):
+                return FakeCollection()
+
+        monkeypatch.setattr("mempalace.searcher.chromadb.PersistentClient", lambda path: FakeClient())
+
+        search_memories("query", "/tmp/palace", n_results=3, cursor_source_filter=True)
+        assert captured["n_results"] == 3 * FETCH_MULTIPLIER
+
+    def test_cursor_source_filter_returns_result_fields(self, monkeypatch):
+        class FakeCollection:
+            def query(self, **kwargs):
+                return {
+                    "documents": [["hello"]],
+                    "metadatas": [[{"wing": "cursor", "room": "general", "source_file": f"/tmp{CHAT_SOURCE_MARKER}a.jsonl"}]],
+                    "distances": [[0.1]],
+                }
+
+        class FakeClient:
+            def get_collection(self, _name):
+                return FakeCollection()
+
+        monkeypatch.setattr("mempalace.searcher.chromadb.PersistentClient", lambda path: FakeClient())
+
+        result = search_memories("authentication", "/tmp/palace", cursor_source_filter=True)
         hit = result["results"][0]
         assert "text" in hit
         assert "wing" in hit

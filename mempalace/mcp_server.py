@@ -170,13 +170,20 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+def tool_search(
+    query: str,
+    limit: int = 5,
+    wing: str = None,
+    room: str = None,
+    cursor_source_filter: bool = False,
+):
     return search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
+        cursor_source_filter=cursor_source_filter,
     )
 
 
@@ -594,6 +601,10 @@ TOOLS = {
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "cursor_source_filter": {
+                    "type": "boolean",
+                    "description": "Enable Cursor transcript quality filtering (optional, default false)",
+                },
             },
             "required": ["query"],
         },
