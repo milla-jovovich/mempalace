@@ -137,3 +137,114 @@ class TestStats:
         assert stats["triples"] == 5
         assert stats["current_facts"] == 4  # 1 expired (Acme Corp)
         assert stats["expired_facts"] == 1
+
+
+class TestConflictResolution:
+    """Tests for auto-resolving conflicting triples on single-valued predicates."""
+
+    def test_single_valued_auto_invalidates_old(self, kg):
+        """Adding a new works_at should invalidate the old one."""
+        kg.add_triple("Alice", "works_at", "Acme", valid_from="2020-01-01")
+        kg.add_triple("Alice", "works_at", "NewCo", valid_from="2025-01-01")
+
+        results = kg.query_entity("Alice", direction="outgoing")
+        active = [r for r in results if r["current"]]
+        expired = [r for r in results if not r["current"]]
+
+        assert len(active) == 1
+        assert active[0]["object"] == "NewCo"
+        assert len(expired) == 1
+        assert expired[0]["object"] == "Acme"
+        assert expired[0]["valid_to"] == "2025-01-01"
+
+    def test_multi_valued_allows_coexistence(self, kg):
+        """Multi-valued predicates like 'loves' should not auto-invalidate."""
+        kg.add_triple("Max", "loves", "chess")
+        kg.add_triple("Max", "loves", "swimming")
+
+        results = kg.query_entity("Max", direction="outgoing")
+        active = [r for r in results if r["current"]]
+        assert len(active) == 2
+
+    def test_confidence_guard_prevents_downgrade(self, kg):
+        """Lower-confidence fact should not invalidate higher-confidence one."""
+        kg.add_triple("Alice", "works_at", "Acme", confidence=0.9)
+        kg.add_triple("Alice", "works_at", "NewCo", confidence=0.5)
+
+        results = kg.query_entity("Alice", direction="outgoing")
+        active = [r for r in results if r["current"]]
+        # Both should be active since new confidence < old confidence
+        assert len(active) == 2
+
+    def test_equal_confidence_allows_replacement(self, kg):
+        """Equal confidence (default 1.0) should allow replacement."""
+        kg.add_triple("Alice", "lives_in", "NYC")
+        kg.add_triple("Alice", "lives_in", "LA")
+
+        results = kg.query_entity("Alice", direction="outgoing")
+        active = [r for r in results if r["current"]]
+        assert len(active) == 1
+        assert active[0]["object"] == "LA"
+
+    def test_conflict_resolution_preserves_timeline(self, kg):
+        """Old triple's valid_to should equal new triple's valid_from (no gap)."""
+        kg.add_triple("Alice", "title_is", "Engineer", valid_from="2020-01-01")
+        kg.add_triple("Alice", "title_is", "Senior Engineer", valid_from="2024-06-15")
+
+        results = kg.query_entity("Alice", direction="outgoing")
+        old = [r for r in results if r["object"] == "Engineer"][0]
+        new = [r for r in results if r["object"] == "Senior Engineer"][0]
+
+        assert old["valid_to"] == "2024-06-15"
+        assert new["valid_from"] == "2024-06-15"
+        assert old["current"] is False
+        assert new["current"] is True
+
+    def test_conflict_no_valid_from_uses_today(self, kg):
+        """When new triple has no valid_from, old triple's valid_to defaults to today."""
+        from datetime import date
+
+        kg.add_triple("Bob", "works_at", "OldCorp")
+        kg.add_triple("Bob", "works_at", "NewCorp")
+
+        results = kg.query_entity("Bob", direction="outgoing")
+        old = [r for r in results if r["object"] == "OldCorp"][0]
+        assert old["valid_to"] == date.today().isoformat()
+
+    def test_custom_single_valued_predicates(self, tmp_dir):
+        """Constructor should accept custom single-valued predicate set."""
+        import os
+        from mempalace.knowledge_graph import KnowledgeGraph
+
+        db_path = os.path.join(tmp_dir, "custom_kg.sqlite3")
+        custom_kg = KnowledgeGraph(
+            db_path=db_path,
+            single_valued_predicates={"favorite_color"},
+        )
+
+        custom_kg.add_triple("Alice", "favorite_color", "blue")
+        custom_kg.add_triple("Alice", "favorite_color", "green")
+
+        results = custom_kg.query_entity("Alice", direction="outgoing")
+        active = [r for r in results if r["current"]]
+        assert len(active) == 1
+        assert active[0]["object"] == "green"
+
+    def test_identical_triple_still_returns_existing(self, kg):
+        """Adding the exact same triple (same object) should return existing ID, not conflict."""
+        tid1 = kg.add_triple("Alice", "works_at", "Acme")
+        tid2 = kg.add_triple("Alice", "works_at", "Acme")
+        assert tid1 == tid2
+
+
+class TestUUIDIds:
+    """Verify triple IDs use uuid4 instead of md5."""
+
+    def test_triple_id_format(self, kg):
+        tid = kg.add_triple("Alice", "knows", "Bob")
+        # Should be t_{sub}_{pred}_{obj}_{8-char-hex}
+        assert tid.startswith("t_alice_knows_bob_")
+        suffix = tid.split("_")[-1]
+        assert len(suffix) == 8
+        # uuid4 hex chars only
+        int(suffix, 16)

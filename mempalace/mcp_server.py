@@ -20,7 +20,7 @@ Tools (write):
 import sys
 import json
 import logging
-import hashlib
+import uuid
 from datetime import datetime
 
 from .config import MempalaceConfig
@@ -264,7 +264,7 @@ def tool_add_drawer(
             "matches": dup["matches"],
         }
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((content[:100] + datetime.now().isoformat()).encode()).hexdigest()[:16]}"
+    drawer_id = f"drawer_{wing}_{room}_{uuid.uuid4().hex[:16]}"
 
     try:
         col.add(
@@ -361,7 +361,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return _no_palace()
 
     now = datetime.now()
-    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(entry[:50].encode()).hexdigest()[:8]}"
+    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
 
     try:
         col.add(

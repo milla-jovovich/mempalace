@@ -35,20 +35,46 @@ Usage:
     kg.invalidate("Max", "has_issue", "sports_injury", ended="2026-02-15")
 """
 
-import hashlib
 import json
 import os
 import sqlite3
-from datetime import date, datetime
+import uuid
+from datetime import date
 from pathlib import Path
 
 
 DEFAULT_KG_PATH = os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
 
+# Predicates where only one active value makes sense at a time.
+# When a new triple conflicts with an existing active triple on a
+# single-valued predicate, the old triple is auto-invalidated.
+# Multi-valued predicates (loves, knows, does) are left untouched.
+SINGLE_VALUED_PREDICATES = frozenset(
+    {
+        "works_at",
+        "lives_in",
+        "reports_to",
+        "title_is",
+        "married_to",
+        "is_partner_of",
+        "email_is",
+        "phone_is",
+        "role_is",
+        "team_is",
+        "manager_is",
+        "status_is",
+    }
+)
+
 
 class KnowledgeGraph:
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str = None, single_valued_predicates: set = None):
         self.db_path = db_path or DEFAULT_KG_PATH
+        self.single_valued_predicates = (
+            set(single_valued_predicates)
+            if single_valued_predicates is not None
+            else set(SINGLE_VALUED_PREDICATES)
+        )
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -147,7 +173,25 @@ class KnowledgeGraph:
             conn.close()
             return existing[0]  # Already exists and still valid
 
-        triple_id = f"t_{sub_id}_{pred}_{obj_id}_{hashlib.md5(f'{valid_from}{datetime.now().isoformat()}'.encode()).hexdigest()[:8]}"
+        # Auto-resolve conflicts on single-valued predicates.
+        # If a new fact contradicts an active fact (same subject + predicate,
+        # different object) and the new fact has >= confidence, invalidate
+        # the old fact with valid_to set to the new fact's valid_from.
+        if pred in self.single_valued_predicates:
+            conflicting = conn.execute(
+                "SELECT id, object, confidence FROM triples "
+                "WHERE subject=? AND predicate=? AND valid_to IS NULL",
+                (sub_id, pred),
+            ).fetchall()
+            for old_id, old_obj, old_conf in conflicting:
+                if old_obj != obj_id and (old_conf or 1.0) <= confidence:
+                    ended = valid_from or date.today().isoformat()
+                    conn.execute(
+                        "UPDATE triples SET valid_to=? WHERE id=?",
+                        (ended, old_id),
+                    )
+
+        triple_id = f"t_{sub_id}_{pred}_{obj_id}_{uuid.uuid4().hex[:8]}"
 
         conn.execute(
             """INSERT INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, source_closet, source_file)
