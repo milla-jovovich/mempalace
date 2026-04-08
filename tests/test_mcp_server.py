@@ -223,6 +223,66 @@ class TestReadTools:
         assert "error" in result
 
 
+# ── Taxonomy Pagination ─────────────────────────────────────────────────
+
+
+class TestTaxonomyPagination:
+    """Verify _iter_metadatas pagination under a tiny batch size."""
+
+    def test_list_wings_paginated(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        import mempalace.mcp_server as srv
+
+        monkeypatch.setattr(srv, "_TAXONOMY_BATCH", 2)
+        result = srv.tool_list_wings()
+        assert result["wings"]["project"] == 3
+        assert result["wings"]["notes"] == 1
+
+    def test_list_rooms_filtered_paginated(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        import mempalace.mcp_server as srv
+
+        monkeypatch.setattr(srv, "_TAXONOMY_BATCH", 2)
+        result = srv.tool_list_rooms(wing="project")
+        assert "backend" in result["rooms"]
+        assert "planning" not in result["rooms"]
+
+    def test_get_taxonomy_paginated(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        import mempalace.mcp_server as srv
+
+        monkeypatch.setattr(srv, "_TAXONOMY_BATCH", 2)
+        result = srv.tool_get_taxonomy()
+        assert result["taxonomy"]["project"]["backend"] == 2
+        assert result["taxonomy"]["notes"]["planning"] == 1
+
+    def test_status_partial_flag_false_on_success(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        import mempalace.mcp_server as srv
+
+        monkeypatch.setattr(srv, "_TAXONOMY_BATCH", 2)
+        result = srv.tool_status()
+        assert result["partial"] is False
+
+    def test_status_partial_flag_true_on_mid_failure(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        import mempalace.mcp_server as srv
+
+        call_count = {"n": 0}
+        original_iter = srv._iter_metadatas
+
+        def patched_iter(col, where=None):
+            for item in original_iter(col, where=where):
+                call_count["n"] += 1
+                if call_count["n"] >= 2:
+                    return  # simulate mid-pagination failure
+                yield item
+
+        monkeypatch.setattr(srv, "_iter_metadatas", patched_iter)
+        result = srv.tool_status()
+        assert result["partial"] is True
+
+
 # ── Search Tool ─────────────────────────────────────────────────────────
 
 
