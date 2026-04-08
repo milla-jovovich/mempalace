@@ -116,20 +116,6 @@ After the one-time setup (install → init → mine), you don't run MemPalace co
 
 **Prerequisite: `uvx`**
 
-MemPalace's MCP server runs via `uvx`, part of [`uv`](https://docs.astral.sh/uv/getting-started/installation/). If you don't have it yet:
-
-```bash
-# macOS / Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
----
-
-**Prerequisite: `uvx`**
-
 MemPalace's MCP server runs via `uvx`, part of [`uv`](https://docs.astral.sh/uv/getting-started/installation/). If you don't have it yet.
 
 **Claude Code (CLI)**
