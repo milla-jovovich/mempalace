@@ -100,3 +100,20 @@ def test_get_collection_returns_existing(tmp_path):
     col1.add(ids=["x"], documents=["hello"], metadatas=[{"wing": "a", "room": "b"}])
     col2 = palace_db.get_collection(palace_path=str(tmp_path))
     assert col2.count() == 1
+
+
+import subprocess
+import sys
+
+
+def test_remote_status_local_mode(monkeypatch):
+    """'mempalace remote status' prints local mode when no host configured."""
+    monkeypatch.delenv("MEMPALACE_CHROMA_HOST", raising=False)
+    result = subprocess.run(
+        [sys.executable, "-m", "mempalace", "remote", "status"],
+        capture_output=True,
+        text=True,
+        cwd="/Users/cypromis/Projects/claude-code/mempalace",
+    )
+    assert result.returncode == 0
+    assert "local" in result.stdout.lower()

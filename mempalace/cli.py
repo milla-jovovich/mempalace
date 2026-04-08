@@ -360,6 +360,31 @@ def cmd_compress(args):
         print("  (dry run -- nothing stored)")
 
 
+def cmd_remote(args):
+    """Show remote/local ChromaDB mode and test connectivity if remote."""
+    cfg = MempalaceConfig()
+
+    if not cfg.chroma_host:
+        print("\n  Mode: LOCAL (PersistentClient)")
+        print(f"  Palace path: {cfg.palace_path}")
+        print()
+        return
+
+    proto = "https" if cfg.chroma_ssl else "http"
+    url = f"{proto}://{cfg.chroma_host}:{cfg.chroma_port}"
+    print(f"\n  Mode: REMOTE (HttpClient)")
+    print(f"  Server: {url}")
+
+    try:
+        client = palace_db.get_client()
+        hb = client.heartbeat()
+        print(f"  Status: OK (heartbeat={hb})")
+    except Exception as e:
+        print(f"  Status: UNREACHABLE — {e}")
+        sys.exit(1)
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
@@ -502,6 +527,12 @@ def main():
     # status
     sub.add_parser("status", help="Show what's been filed")
 
+    # remote
+    p_remote = sub.add_parser("remote", help="Show ChromaDB mode (local or remote)")
+    p_remote_sub = p_remote.add_subparsers(dest="remote_cmd")
+    p_remote_sub.add_parser("status", help="Show remote/local mode and connectivity")
+    p_remote.set_defaults(func=cmd_remote)
+
     args = parser.parse_args()
 
     if not args.command:
@@ -534,6 +565,7 @@ def main():
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
         "status": cmd_status,
+        "remote": cmd_remote,
     }
     dispatch[args.command](args)
 
