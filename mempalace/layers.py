@@ -131,9 +131,9 @@ class Layer1:
                 if val is not None:
                     try:
                         importance = float(val)
+                        break
                     except (ValueError, TypeError):
-                        pass
-                    break
+                        continue
             scored.append((importance, meta, doc))
 
         # Sort by importance descending, take top N
