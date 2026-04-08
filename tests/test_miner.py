@@ -206,3 +206,30 @@ def test_scan_project_skip_dirs_still_apply_without_override():
         assert scanned_files(project_root, respect_gitignore=False) == ["main.py"]
     finally:
         shutil.rmtree(tmpdir)
+
+
+def test_get_collection_uses_cosine_space():
+    """Regression for #218: collection must be created with hnsw:space=cosine
+    so that searcher's `1 - dist` similarity scoring stays in [-1, 1] (not L2)."""
+    from mempalace.miner import get_collection
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        col = get_collection(tmpdir)
+        assert col.metadata is not None
+        assert col.metadata.get("hnsw:space") == "cosine"
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_convo_get_collection_uses_cosine_space():
+    """Regression for #218: convos mine path must also use cosine."""
+    from mempalace.convo_miner import get_collection
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        col = get_collection(tmpdir)
+        assert col.metadata is not None
+        assert col.metadata.get("hnsw:space") == "cosine"
+    finally:
+        shutil.rmtree(tmpdir)

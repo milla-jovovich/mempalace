@@ -210,7 +210,9 @@ def cmd_repair(args):
 
     print("  Rebuilding collection...")
     client.delete_collection("mempalace_drawers")
-    new_col = client.create_collection("mempalace_drawers")
+    new_col = client.create_collection(
+        "mempalace_drawers", metadata={"hnsw:space": "cosine"}
+    )
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
