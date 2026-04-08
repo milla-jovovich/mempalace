@@ -63,7 +63,7 @@ class KnowledgeGraph:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
-            CREATE TABLE IF NOT EXISTS triples (
+                        CREATE TABLE IF NOT EXISTS triples (
                 id TEXT PRIMARY KEY,
                 subject TEXT NOT NULL,
                 predicate TEXT NOT NULL,
@@ -71,6 +71,7 @@ class KnowledgeGraph:
                 valid_from TEXT,
                 valid_to TEXT,
                 confidence REAL DEFAULT 1.0,
+                pheromone_level REAL DEFAULT 1.0,
                 source_closet TEXT,
                 source_file TEXT,
                 extracted_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -312,6 +313,136 @@ class KnowledgeGraph:
             }
             for r in rows
         ]
+
+
+    # ── Singularity Equation: A* + Stigmergy Traversal ────────────────────
+
+    def update_pheromone(self, subject: str, predicate: str, obj: str, delta: float = 0.1):
+        """Deposit pheromone on a successful causal link / knowledge path."""
+        sub_id = self._entity_id(subject)
+        obj_id = self._entity_id(obj)
+        pred = predicate.lower().replace(" ", "_")
+        
+        conn = self._conn()
+        conn.execute(
+            """UPDATE triples 
+               SET pheromone_level = pheromone_level + ? 
+               WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL""",
+            (delta, sub_id, pred, obj_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_neighbors(self, entity_id: str):
+        """Get all connected nodes for graph traversal."""
+        conn = self._conn()
+        neighbors = []
+        
+        # Outgoing
+        for row in conn.execute(
+            """SELECT object, predicate, pheromone_level, id 
+               FROM triples WHERE subject = ? AND valid_to IS NULL""", 
+            (entity_id,)
+        ).fetchall():
+            neighbors.append({
+                "node": row[0], 
+                "predicate": row[1], 
+                "pheromone": row[2] or 1.0,
+                "edge_id": row[3],
+                "direction": "outgoing"
+            })
+            
+        # Incoming
+        for row in conn.execute(
+            """SELECT subject, predicate, pheromone_level, id 
+               FROM triples WHERE object = ? AND valid_to IS NULL""", 
+            (entity_id,)
+        ).fetchall():
+            neighbors.append({
+                "node": row[0], 
+                "predicate": row[1], 
+                "pheromone": row[2] or 1.0,
+                "edge_id": row[3],
+                "direction": "incoming"
+            })
+            
+        conn.close()
+        return neighbors
+
+    def astar_stigmergy_path(self, start_entity: str, target_entity: str, heuristic_weight: float = 1.0, beta: float = 0.5):
+        """
+        Find the optimal path between concepts using the Singularity Equation.
+        P* = argmin [ \sum w_ij (1 - \beta(1 - \tau_ij^-1)) + \lambda h(n_end) ]
+        
+        Note: The heuristic h(n_end) should ideally be populated by a ChromaDB 
+        embedding distance fetch. In this core DB implementation, we rely heavily 
+        on the stigmergy (pheromone_level) to guide the search, assuming h=0 
+        when the goal is reached, or using graph-distance if embeddings aren't injected.
+        """
+        import heapq
+        
+        start_id = self._entity_id(start_entity)
+        target_id = self._entity_id(target_entity)
+        
+        # Priority queue stores: (f_score, current_id, path_so_far)
+        # f_score = g_score (cost so far) + h_score (heuristic to target)
+        queue = [(0.0, start_id, [])]
+        
+        # Track the best g_score for each node
+        g_scores = {start_id: 0.0}
+        
+        # Track visited nodes to prevent cycles
+        visited = set()
+        
+        # Mock heuristic function (Ideally replaced with ChromaDB distance)
+        def h(node_id):
+            if node_id == target_id:
+                return 0.0
+            return 1.0 # Base distance
+            
+        while queue:
+            f_score, current, path = heapq.heappop(queue)
+            
+            if current == target_id:
+                return path
+                
+            if current in visited:
+                continue
+                
+            visited.add(current)
+            
+            for neighbor in self.get_neighbors(current):
+                next_node = neighbor["node"]
+                
+                if next_node in visited:
+                    continue
+                    
+                # Calculate edge cost modulated by pheromone
+                # Cost is lowered by high pheromone: w_ij (1 - beta(1 - 1/tau))
+                # Base weight w_ij = 1.0
+                tau = neighbor["pheromone"]
+                adjusted_edge_cost = 1.0 * (1.0 - beta * (1.0 - (1.0 / max(0.01, tau))))
+                
+                # Prevent negative costs in Dijkstra/A*
+                adjusted_edge_cost = max(0.1, adjusted_edge_cost)
+                
+                tentative_g = g_scores.get(current, float('inf')) + adjusted_edge_cost
+                
+                if tentative_g < g_scores.get(next_node, float('inf')):
+                    g_scores[next_node] = tentative_g
+                    f = tentative_g + (heuristic_weight * h(next_node))
+                    
+                    new_path = path + [{
+                        "from": current,
+                        "to": next_node,
+                        "predicate": neighbor["predicate"],
+                        "direction": neighbor["direction"],
+                        "pheromone": tau
+                    }]
+                    
+                    heapq.heappush(queue, (f, next_node, new_path))
+                    
+        return None # No path found
 
     # ── Stats ─────────────────────────────────────────────────────────────
 
