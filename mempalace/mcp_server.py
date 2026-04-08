@@ -18,12 +18,13 @@ Tools (write):
 """
 
 import argparse
+import heapq
 import os
 import sys
 import json
 import logging
 import hashlib
-import os
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -63,8 +64,8 @@ else:
     _kg = KnowledgeGraph()
 
 
-_client_cache = None
 _collection_cache = None
+_cache_lock = threading.Lock()
 
 
 # ==================== WRITE-AHEAD LOG ====================
@@ -73,12 +74,16 @@ _collection_cache = None
 # enables review/rollback of writes from external or untrusted sources.
 
 _WAL_DIR = Path(os.path.expanduser("~/.mempalace/wal"))
-_WAL_DIR.mkdir(parents=True, exist_ok=True)
 _WAL_FILE = _WAL_DIR / "write_log.jsonl"
+_wal_initialized = False
 
 
 def _wal_log(operation: str, params: dict, result: dict = None):
     """Append a write operation to the write-ahead log."""
+    global _wal_initialized
+    if not _wal_initialized:
+        _WAL_DIR.mkdir(parents=True, exist_ok=True)
+        _wal_initialized = True
     entry = {
         "timestamp": datetime.now().isoformat(),
         "operation": operation,
@@ -88,6 +93,11 @@ def _wal_log(operation: str, params: dict, result: dict = None):
     try:
         with open(_WAL_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, default=str) + "\n")
+        # Set restrictive permissions on WAL file
+        try:
+            os.chmod(_WAL_FILE, 0o600)
+        except (OSError, NotImplementedError):
+            pass
     except Exception as e:
         logger.error(f"WAL write failed: {e}")
 
@@ -103,7 +113,7 @@ def _get_client():
     return _client
 
 
-_meta_cache = {"data": None, "timestamp": 0, "ttl": 30}  # 30 second TTL
+_meta_cache = {"data": None, "timestamp": 0, "ttl": 300}  # 5 minute TTL (writes invalidate)
 
 
 def _get_cached_metadata():
@@ -122,15 +132,16 @@ def _get_cached_metadata():
 
 def _get_collection(create=False):
     """Return the ChromaDB collection, caching the client between calls."""
-    global _client_cache, _collection_cache
+    global _collection_cache
     try:
         client = _get_client()
         if create:
-            _collection_cache = _client_cache.get_or_create_collection(_config.collection_name)
+            _collection_cache = client.get_or_create_collection(_config.collection_name)
         elif _collection_cache is None:
-            _collection_cache = _client_cache.get_collection(_config.collection_name)
+            _collection_cache = client.get_collection(_config.collection_name)
         return _collection_cache
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to get collection: %s", e)
         return None
 
 
@@ -260,12 +271,14 @@ def tool_get_taxonomy():
 
 
 def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+    col = _get_collection()
     return search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
+        collection=col,
     )
 
 
@@ -351,11 +364,20 @@ def tool_add_drawer(
     if not col:
         return _no_palace()
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5(content.encode()).hexdigest()[:16]}"
+    # Deterministic ID based on content for true idempotency
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256(content.encode()).hexdigest()[:24]}"
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((content[:100] + datetime.now().isoformat()).encode()).hexdigest()[:24]}"
-
-    _wal_log("add_drawer", {"drawer_id": drawer_id, "wing": wing, "room": room, "added_by": added_by, "content_length": len(content), "content_preview": content[:200]})
+    _wal_log(
+        "add_drawer",
+        {
+            "drawer_id": drawer_id,
+            "wing": wing,
+            "room": room,
+            "added_by": added_by,
+            "content_length": len(content),
+            "content_preview": content[:200],
+        },
+    )
 
     # Idempotency: if the deterministic ID already exists, return success as a no-op.
     try:
@@ -399,7 +421,14 @@ def tool_delete_drawer(drawer_id: str):
     # Log the deletion with the content being removed for audit trail
     deleted_content = existing.get("documents", [""])[0] if existing.get("documents") else ""
     deleted_meta = existing.get("metadatas", [{}])[0] if existing.get("metadatas") else {}
-    _wal_log("delete_drawer", {"drawer_id": drawer_id, "deleted_meta": deleted_meta, "content_preview": deleted_content[:200]})
+    _wal_log(
+        "delete_drawer",
+        {
+            "drawer_id": drawer_id,
+            "deleted_meta": deleted_meta,
+            "content_preview": deleted_content[:200],
+        },
+    )
 
     try:
         col.delete(ids=[drawer_id])
@@ -415,6 +444,10 @@ def tool_delete_drawer(drawer_id: str):
 
 def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
     """Query the knowledge graph for an entity's relationships."""
+    try:
+        entity = sanitize_name(entity, "entity")
+    except ValueError as e:
+        return {"error": str(e)}
     results = _kg.query_entity(entity, as_of=as_of, direction=direction)
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
 
@@ -430,7 +463,16 @@ def tool_kg_add(
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
-    _wal_log("kg_add", {"subject": subject, "predicate": predicate, "object": object, "valid_from": valid_from, "source_closet": source_closet})
+    _wal_log(
+        "kg_add",
+        {
+            "subject": subject,
+            "predicate": predicate,
+            "object": object,
+            "valid_from": valid_from,
+            "source_closet": source_closet,
+        },
+    )
     triple_id = _kg.add_triple(
         subject, predicate, object, valid_from=valid_from, source_closet=source_closet
     )
@@ -439,7 +481,16 @@ def tool_kg_add(
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
     """Mark a fact as no longer true (set end date)."""
-    _wal_log("kg_invalidate", {"subject": subject, "predicate": predicate, "object": object, "ended": ended})
+    try:
+        subject = sanitize_name(subject, "subject")
+        predicate = sanitize_name(predicate, "predicate")
+        object = sanitize_name(object, "object")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    _wal_log(
+        "kg_invalidate",
+        {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
+    )
     _kg.invalidate(subject, predicate, object, ended=ended)
     return {
         "success": True,
@@ -450,6 +501,11 @@ def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = N
 
 def tool_kg_timeline(entity: str = None):
     """Get chronological timeline of facts, optionally for one entity."""
+    if entity:
+        try:
+            entity = sanitize_name(entity, "entity")
+        except ValueError as e:
+            return {"error": str(e)}
     results = _kg.timeline(entity)
     return {"entity": entity or "all", "timeline": results, "count": len(results)}
 
@@ -485,7 +541,15 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     now = datetime.now()
     entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.sha256(entry[:50].encode()).hexdigest()[:12]}"
 
-    _wal_log("diary_write", {"agent_name": agent_name, "topic": topic, "entry_id": entry_id, "entry_preview": entry[:200]})
+    _wal_log(
+        "diary_write",
+        {
+            "agent_name": agent_name,
+            "topic": topic,
+            "entry_id": entry_id,
+            "entry_preview": entry[:200],
+        },
+    )
 
     try:
         # TODO: Future versions should expand AAAK before embedding to improve
@@ -536,7 +600,7 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         results = col.get(
             where={"$and": [{"wing": wing}, {"room": "diary"}]},
             include=["documents", "metadatas"],
-            limit=10000,
+            limit=500,
         )
 
         if not results["ids"]:
@@ -554,8 +618,7 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
                 }
             )
 
-        entries.sort(key=lambda x: x["timestamp"], reverse=True)
-        entries = entries[:last_n]
+        entries = heapq.nlargest(last_n, entries, key=lambda x: x["timestamp"])
 
         return {
             "agent": agent_name,
@@ -872,7 +935,7 @@ def handle_request(request):
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                "result": {"content": [{"type": "text", "text": json.dumps(result)}]},
             }
         except Exception:
             logger.exception(f"Tool error in {tool_name}")
@@ -891,23 +954,27 @@ def handle_request(request):
 
 def main():
     logger.info("MemPalace MCP Server starting...")
-    while True:
-        try:
-            line = sys.stdin.readline()
-            if not line:
+    try:
+        while True:
+            try:
+                line = sys.stdin.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                request = json.loads(line)
+                response = handle_request(request)
+                if response is not None:
+                    sys.stdout.write(json.dumps(response) + "\n")
+                    sys.stdout.flush()
+            except KeyboardInterrupt:
                 break
-            line = line.strip()
-            if not line:
-                continue
-            request = json.loads(line)
-            response = handle_request(request)
-            if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            logger.error(f"Server error: {e}")
+            except Exception as e:
+                logger.error(f"Server error: {e}")
+    finally:
+        _kg.close()
+        logger.info("MemPalace MCP Server stopped.")
 
 
 if __name__ == "__main__":

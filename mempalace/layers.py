@@ -21,9 +21,8 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
-import chromadb
-
 from .config import MempalaceConfig
+from .palace import get_client
 
 
 # ---------------------------------------------------------------------------
@@ -91,58 +90,66 @@ class Layer1:
     def generate(self) -> str:
         """Pull top drawers from ChromaDB and format as compact L1 text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
+            client = get_client(self.palace_path)
             col = client.get_collection("mempalace_drawers")
         except Exception:
             return "## L1 — No palace found. Run: mempalace mine <dir>"
 
-        # Fetch all drawers in batches to avoid SQLite variable limit (~999)
+        # Pass 1: Fetch only metadatas to score and find top N IDs
         _BATCH = 500
-        docs, metas = [], []
+        scored = []  # (importance, id, meta)
         offset = 0
         while True:
-            kwargs = {"include": ["documents", "metadatas"], "limit": _BATCH, "offset": offset}
+            kwargs = {"include": ["metadatas"], "limit": _BATCH, "offset": offset}
             if self.wing:
                 kwargs["where"] = {"wing": self.wing}
             try:
                 batch = col.get(**kwargs)
             except Exception:
                 break
-            batch_docs = batch.get("documents", [])
+            batch_ids = batch.get("ids", [])
             batch_metas = batch.get("metadatas", [])
-            if not batch_docs:
+            if not batch_ids:
                 break
-            docs.extend(batch_docs)
-            metas.extend(batch_metas)
-            offset += len(batch_docs)
-            if len(batch_docs) < _BATCH:
+            for i, (did, meta) in enumerate(zip(batch_ids, batch_metas)):
+                importance = 3
+                for key in ("importance", "emotional_weight", "weight"):
+                    val = meta.get(key)
+                    if val is not None:
+                        try:
+                            importance = float(val)
+                        except (ValueError, TypeError):
+                            pass
+                        break
+                scored.append((importance, did, meta))
+            offset += len(batch_ids)
+            if len(batch_ids) < _BATCH:
                 break
 
-        if not docs:
+        if not scored:
             return "## L1 — No memories yet."
-
-        # Score each drawer: prefer high importance, recent filing
-        scored = []
-        for doc, meta in zip(docs, metas):
-            importance = 3
-            # Try multiple metadata keys that might carry weight info
-            for key in ("importance", "emotional_weight", "weight"):
-                val = meta.get(key)
-                if val is not None:
-                    try:
-                        importance = float(val)
-                    except (ValueError, TypeError):
-                        pass
-                    break
-            scored.append((importance, meta, doc))
 
         # Sort by importance descending, take top N
         scored.sort(key=lambda x: x[0], reverse=True)
         top = scored[: self.MAX_DRAWERS]
 
+        # Pass 2: Fetch only the top N documents by ID
+        top_ids = [did for _, did, _ in top]
+        try:
+            top_results = col.get(ids=top_ids, include=["documents"])
+            id_to_doc = dict(zip(top_results["ids"], top_results["documents"]))
+        except Exception:
+            id_to_doc = {}
+
+        # Rebuild top with documents
+        top_with_docs = []
+        for importance, did, meta in top:
+            doc = id_to_doc.get(did, "")
+            top_with_docs.append((importance, meta, doc))
+
         # Group by room for readability
         by_room = defaultdict(list)
-        for imp, meta, doc in top:
+        for imp, meta, doc in top_with_docs:
             room = meta.get("room", "general")
             by_room[room].append((imp, meta, doc))
 
@@ -196,7 +203,7 @@ class Layer2:
     def retrieve(self, wing: str = None, room: str = None, n_results: int = 10) -> str:
         """Retrieve drawers filtered by wing and/or room."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
+            client = get_client(self.palace_path)
             col = client.get_collection("mempalace_drawers")
         except Exception:
             return "No palace found."
@@ -260,7 +267,7 @@ class Layer3:
     def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
         """Semantic search, returns compact result text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
+            client = get_client(self.palace_path)
             col = client.get_collection("mempalace_drawers")
         except Exception:
             return "No palace found."
@@ -316,7 +323,7 @@ class Layer3:
     ) -> list:
         """Return raw dicts instead of formatted text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
+            client = get_client(self.palace_path)
             col = client.get_collection("mempalace_drawers")
         except Exception:
             return []
@@ -437,7 +444,7 @@ class MemoryStack:
 
         # Count drawers
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
+            client = get_client(self.palace_path)
             col = client.get_collection("mempalace_drawers")
             count = col.count()
             result["total_drawers"] = count

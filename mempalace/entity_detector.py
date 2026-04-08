@@ -47,17 +47,17 @@ PERSON_VERB_PATTERNS = [
     r"\bdear\s+{name}\b",
 ]
 
-# Person signals — pronouns resolving nearby
+# Person signals — pronouns resolving nearby (pre-compiled for performance)
 PRONOUN_PATTERNS = [
-    r"\bshe\b",
-    r"\bher\b",
-    r"\bhers\b",
-    r"\bhe\b",
-    r"\bhim\b",
-    r"\bhis\b",
-    r"\bthey\b",
-    r"\bthem\b",
-    r"\btheir\b",
+    re.compile(r"\bshe\b"),
+    re.compile(r"\bher\b"),
+    re.compile(r"\bhers\b"),
+    re.compile(r"\bhe\b"),
+    re.compile(r"\bhim\b"),
+    re.compile(r"\bhis\b"),
+    re.compile(r"\bthey\b"),
+    re.compile(r"\bthem\b"),
+    re.compile(r"\btheir\b"),
 ]
 
 # Person signals — dialogue markers
@@ -517,7 +517,7 @@ def score_entity(name: str, text: str, lines: list) -> dict:
     for idx in name_line_indices:
         window_text = " ".join(lines[max(0, idx - 2) : idx + 3]).lower()
         for pronoun_pattern in PRONOUN_PATTERNS:
-            if re.search(pronoun_pattern, window_text):
+            if pronoun_pattern.search(window_text):
                 pronoun_hits += 1
                 break
     if pronoun_hits > 0:

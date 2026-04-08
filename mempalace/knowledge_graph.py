@@ -86,13 +86,14 @@ class KnowledgeGraph:
             CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
             CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
             CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);
+            CREATE INDEX IF NOT EXISTS idx_triples_spo_active ON triples(subject, predicate, object, valid_to);
         """)
         conn.commit()
 
     def _conn(self):
         if self._connection is None:
             self._connection = sqlite3.connect(self.db_path, timeout=10)
-            self._connection.execute("PRAGMA journal_mode=WAL")
+            self._connection.execute("PRAGMA foreign_keys=ON")
             self._connection.row_factory = sqlite3.Row
         return self._connection
 
@@ -117,7 +118,11 @@ class KnowledgeGraph:
         conn = self._conn()
         with conn:
             conn.execute(
-                "INSERT OR REPLACE INTO entities (id, name, type, properties) VALUES (?, ?, ?, ?)",
+                """INSERT INTO entities (id, name, type, properties) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                       name = excluded.name,
+                       type = excluded.type,
+                       properties = excluded.properties""",
                 (eid, name, entity_type, props),
             )
         return eid
@@ -148,7 +153,9 @@ class KnowledgeGraph:
         # Auto-create entities if they don't exist
         conn = self._conn()
         with conn:
-            conn.execute("INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (sub_id, subject))
+            conn.execute(
+                "INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (sub_id, subject)
+            )
             conn.execute("INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (obj_id, obj))
 
             # Check for existing identical triple
@@ -205,15 +212,47 @@ class KnowledgeGraph:
         eid = self._entity_id(name)
         conn = self._conn()
 
+        as_of_clause = ""
+        as_of_params = []
+        if as_of:
+            as_of_clause = " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+            as_of_params = [as_of, as_of]
+
         results = []
 
-        if direction in ("outgoing", "both"):
-            query = "SELECT t.*, e.name as obj_name FROM triples t JOIN entities e ON t.object = e.id WHERE t.subject = ?"
-            params = [eid]
-            if as_of:
-                query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
-                params.extend([as_of, as_of])
+        if direction == "both":
+            # Single UNION ALL query instead of two separate queries
+            query = (
+                "SELECT t.*, e.name as related_name, 'outgoing' as direction"
+                " FROM triples t JOIN entities e ON t.object = e.id"
+                f" WHERE t.subject = ?{as_of_clause}"
+                " UNION ALL"
+                " SELECT t.*, e.name as related_name, 'incoming' as direction"
+                " FROM triples t JOIN entities e ON t.subject = e.id"
+                f" WHERE t.object = ?{as_of_clause}"
+            )
+            params = [eid] + as_of_params + [eid] + as_of_params
             for row in conn.execute(query, params).fetchall():
+                d = row["direction"]
+                results.append(
+                    {
+                        "direction": d,
+                        "subject": name if d == "outgoing" else row["related_name"],
+                        "predicate": row["predicate"],
+                        "object": row["related_name"] if d == "outgoing" else name,
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
+                    }
+                )
+        elif direction == "outgoing":
+            query = (
+                "SELECT t.*, e.name as obj_name FROM triples t JOIN entities e ON t.object = e.id WHERE t.subject = ?"
+                + as_of_clause
+            )
+            for row in conn.execute(query, [eid] + as_of_params).fetchall():
                 results.append(
                     {
                         "direction": "outgoing",
@@ -227,14 +266,12 @@ class KnowledgeGraph:
                         "current": row["valid_to"] is None,
                     }
                 )
-
-        if direction in ("incoming", "both"):
-            query = "SELECT t.*, e.name as sub_name FROM triples t JOIN entities e ON t.subject = e.id WHERE t.object = ?"
-            params = [eid]
-            if as_of:
-                query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
-                params.extend([as_of, as_of])
-            for row in conn.execute(query, params).fetchall():
+        elif direction == "incoming":
+            query = (
+                "SELECT t.*, e.name as sub_name FROM triples t JOIN entities e ON t.subject = e.id WHERE t.object = ?"
+                + as_of_clause
+            )
+            for row in conn.execute(query, [eid] + as_of_params).fetchall():
                 results.append(
                     {
                         "direction": "incoming",
@@ -293,7 +330,7 @@ class KnowledgeGraph:
                 JOIN entities s ON t.subject = s.id
                 JOIN entities o ON t.object = o.id
                 WHERE (t.subject = ? OR t.object = ?)
-                ORDER BY t.valid_from ASC NULLS LAST
+                ORDER BY CASE WHEN t.valid_from IS NULL THEN 1 ELSE 0 END, t.valid_from ASC
                 LIMIT 100
             """,
                 (eid, eid),
@@ -304,7 +341,7 @@ class KnowledgeGraph:
                 FROM triples t
                 JOIN entities s ON t.subject = s.id
                 JOIN entities o ON t.object = o.id
-                ORDER BY t.valid_from ASC NULLS LAST
+                ORDER BY CASE WHEN t.valid_from IS NULL THEN 1 ELSE 0 END, t.valid_from ASC
                 LIMIT 100
             """).fetchall()
 
@@ -324,10 +361,15 @@ class KnowledgeGraph:
 
     def stats(self):
         conn = self._conn()
-        entities = conn.execute("SELECT COUNT(*) as cnt FROM entities").fetchone()["cnt"]
-        triples = conn.execute("SELECT COUNT(*) as cnt FROM triples").fetchone()["cnt"]
-        current = conn.execute("SELECT COUNT(*) as cnt FROM triples WHERE valid_to IS NULL").fetchone()["cnt"]
-        expired = triples - current
+        row = conn.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM entities) as entity_count,
+                (SELECT COUNT(*) FROM triples) as triple_count,
+                (SELECT COUNT(*) FROM triples WHERE valid_to IS NULL) as current_count
+        """).fetchone()
+        entities = row["entity_count"]
+        triples = row["triple_count"]
+        current = row["current_count"]
         predicates = [
             r["predicate"]
             for r in conn.execute(
@@ -338,7 +380,7 @@ class KnowledgeGraph:
             "entities": entities,
             "triples": triples,
             "current_facts": current,
-            "expired_facts": expired,
+            "expired_facts": triples - current,
             "relationship_types": predicates,
         }
 

@@ -15,10 +15,8 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
-
 from .normalize import normalize
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS, get_collection, get_mined_files, file_already_mined
 
 
 # File types that might contain conversations
@@ -266,7 +264,12 @@ def mine_convos(
         print("  DRY RUN — nothing will be filed")
     print(f"{'-' * 55}\n")
 
-    collection = get_collection(palace_path) if not dry_run else None
+    if not dry_run:
+        collection = get_collection(palace_path)
+        mined_cache = get_mined_files(collection)
+    else:
+        collection = None
+        mined_cache = None
 
     total_drawers = 0
     files_skipped = 0
@@ -276,7 +279,7 @@ def mine_convos(
         source_file = str(filepath)
 
         # Skip if already filed
-        if not dry_run and file_already_mined(collection, source_file):
+        if not dry_run and file_already_mined(collection, source_file, mined_cache):
             files_skipped += 1
             continue
 
@@ -328,34 +331,30 @@ def mine_convos(
         if extract_mode != "general":
             room_counts[room] += 1
 
-        # File each chunk
-        drawers_added = 0
+        # Batch upsert all chunks for this file
+        ids, docs, metas = [], [], []
         for chunk in chunks:
             chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
             if extract_mode == "general":
                 room_counts[chunk_room] += 1
             drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
-            try:
-                collection.add(
-                    documents=[chunk["content"]],
-                    ids=[drawer_id],
-                    metadatas=[
-                        {
-                            "wing": wing,
-                            "room": chunk_room,
-                            "source_file": source_file,
-                            "chunk_index": chunk["chunk_index"],
-                            "added_by": agent,
-                            "filed_at": datetime.now().isoformat(),
-                            "ingest_mode": "convos",
-                            "extract_mode": extract_mode,
-                        }
-                    ],
-                )
-                drawers_added += 1
-            except Exception as e:
-                if "already exists" not in str(e).lower():
-                    raise
+            ids.append(drawer_id)
+            docs.append(chunk["content"])
+            metas.append(
+                {
+                    "wing": wing,
+                    "room": chunk_room,
+                    "source_file": source_file,
+                    "chunk_index": chunk["chunk_index"],
+                    "added_by": agent,
+                    "filed_at": datetime.now().isoformat(),
+                    "ingest_mode": "convos",
+                    "extract_mode": extract_mode,
+                }
+            )
+
+        collection.upsert(documents=docs, ids=ids, metadatas=metas)
+        drawers_added = len(ids)
 
         total_drawers += drawers_added
         print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")

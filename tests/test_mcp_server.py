@@ -15,6 +15,10 @@ def _patch_mcp_server(monkeypatch, config, kg):
 
     monkeypatch.setattr(mcp_server, "_config", config)
     monkeypatch.setattr(mcp_server, "_kg", kg)
+    # Reset singleton caches so they pick up the new config
+    monkeypatch.setattr(mcp_server, "_client", None)
+    monkeypatch.setattr(mcp_server, "_collection_cache", None)
+    monkeypatch.setattr(mcp_server, "_meta_cache", {"data": None, "timestamp": 0, "ttl": 300})
 
 
 def _get_collection(palace_path, create=False):

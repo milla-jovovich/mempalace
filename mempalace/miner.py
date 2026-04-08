@@ -8,16 +8,16 @@ Stores verbatim chunks as drawers. No summaries. Ever.
 """
 
 import os
+import re
 import sys
 import hashlib
 import fnmatch
+import functools
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
-
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS, get_collection, get_mined_files, file_already_mined
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -40,6 +40,20 @@ READABLE_EXTENSIONS = {
     ".csv",
     ".sql",
     ".toml",
+}
+
+SKIP_FILENAMES = {
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    ".DS_Store",
+    "Thumbs.db",
+    ".gitkeep",
+    "mempalace.yaml",
+    "mempalace.yml",
+    "mempal.yaml",
+    "mempal.yml",
+    ".gitignore",
 }
 
 CHUNK_SIZE = 800  # chars per drawer
@@ -131,6 +145,11 @@ class GitignoreMatcher:
 
     def _rule_matches(self, rule: dict, relative: str, is_dir: bool) -> bool:
         pattern = rule["pattern"]
+        compiled = rule.get("_compiled")
+        if compiled is None:
+            compiled = re.compile(fnmatch.translate(pattern))
+            rule["_compiled"] = compiled
+
         parts = relative.split("/")
         pattern_parts = pattern.split("/")
 
@@ -139,15 +158,23 @@ class GitignoreMatcher:
             if not target_parts:
                 return False
             if rule["anchored"] or len(pattern_parts) > 1:
-                return self._match_from_root(target_parts, pattern_parts)
-            return any(fnmatch.fnmatch(part, pattern) for part in target_parts)
+                return self._match_from_root(tuple(target_parts), tuple(pattern_parts))
+            return any(compiled.match(part) for part in target_parts)
 
         if rule["anchored"] or len(pattern_parts) > 1:
-            return self._match_from_root(parts, pattern_parts)
+            return self._match_from_root(tuple(parts), tuple(pattern_parts))
 
-        return any(fnmatch.fnmatch(part, pattern) for part in parts)
+        return any(compiled.match(part) for part in parts)
 
-    def _match_from_root(self, target_parts: list, pattern_parts: list) -> bool:
+    @staticmethod
+    @functools.lru_cache(maxsize=4096)
+    def _match_from_root(target_parts: tuple, pattern_parts: tuple) -> bool:
+        """Match path parts against pattern parts with ** glob support.
+
+        Uses tuples for hashability (lru_cache memoization).
+        """
+
+        @functools.lru_cache(maxsize=None)
         def matches(path_index: int, pattern_index: int) -> bool:
             if pattern_index == len(pattern_parts):
                 return True
@@ -297,8 +324,7 @@ def detect_room(filepath: Path, content: str, rooms: list, project_path: Path) -
     for room in rooms:
         keywords = room.get("keywords", []) + [room["name"]]
         for kw in keywords:
-            count = content_lower.count(kw.lower())
-            scores[room["name"]] += count
+            scores[room["name"]] += content_lower.count(kw.lower())
 
     if scores:
         best = max(scores, key=scores.get)
@@ -403,45 +429,59 @@ def process_file(
     rooms: list,
     agent: str,
     dry_run: bool,
-) -> int:
-    """Read, chunk, route, and file one file. Returns drawer count."""
+    mined_cache: dict = None,
+) -> tuple:
+    """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
 
     # Skip if already filed
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file):
-        return 0
+    if not dry_run and file_already_mined(collection, source_file, mined_cache):
+        return 0, None
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return 0
+        return 0, None
 
     content = content.strip()
     if len(content) < MIN_CHUNK_SIZE:
-        return 0
+        return 0, None
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
-        return len(chunks)
+        return len(chunks), room
 
-    drawers_added = 0
+    if not chunks:
+        return 0, room
+
+    # Batch upsert all chunks for this file
+    ids, docs, metas = [], [], []
     for chunk in chunks:
-        added = add_drawer(
-            collection=collection,
-            wing=wing,
-            room=room,
-            content=chunk["content"],
-            source_file=source_file,
-            chunk_index=chunk["chunk_index"],
-            agent=agent,
-        )
-        if added:
-            drawers_added += 1
+        drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
+        metadata = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file,
+            "chunk_index": chunk["chunk_index"],
+            "added_by": agent,
+            "filed_at": datetime.now().isoformat(),
+        }
+        try:
+            metadata["source_mtime"] = os.path.getmtime(source_file)
+        except OSError:
+            pass
+        ids.append(drawer_id)
+        docs.append(chunk["content"])
+        metas.append(metadata)
 
-    return drawers_added
+    try:
+        collection.upsert(documents=docs, ids=ids, metadatas=metas)
+        return len(ids), room
+    except Exception:
+        raise
 
 
 # =============================================================================
@@ -561,15 +601,18 @@ def mine(
 
     if not dry_run:
         collection = get_collection(palace_path)
+        # Pre-fetch all mined files for O(1) skip checks
+        mined_cache = get_mined_files(collection)
     else:
         collection = None
+        mined_cache = None
 
     total_drawers = 0
     files_skipped = 0
     room_counts = defaultdict(int)
 
     for i, filepath in enumerate(files, 1):
-        drawers = process_file(
+        drawers, room = process_file(
             filepath=filepath,
             project_path=project_path,
             collection=collection,
@@ -577,13 +620,14 @@ def mine(
             rooms=rooms,
             agent=agent,
             dry_run=dry_run,
+            mined_cache=mined_cache,
         )
         if drawers == 0 and not dry_run:
             files_skipped += 1
         else:
             total_drawers += drawers
-            room = detect_room(filepath, "", rooms, project_path)
-            room_counts[room] += 1
+            if room:
+                room_counts[room] += 1
             if not dry_run:
                 print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
 
@@ -607,7 +651,9 @@ def mine(
 def status(palace_path: str):
     """Show what's been filed in the palace."""
     try:
-        client = chromadb.PersistentClient(path=palace_path)
+        from .palace import get_client
+
+        client = get_client(palace_path)
         col = client.get_collection("mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")

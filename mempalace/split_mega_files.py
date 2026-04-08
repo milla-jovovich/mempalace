@@ -176,13 +176,16 @@ def extract_subject(lines):
     return "session"
 
 
-def split_file(filepath, output_dir, dry_run=False):
+def split_file(filepath, output_dir, dry_run=False, lines=None):
     """
     Split a single mega-file into per-session files.
     Returns list of output paths written (or would be written if dry_run).
+
+    If lines is provided, reuses them instead of re-reading the file.
     """
     path = Path(filepath)
-    lines = path.read_text(errors="replace").splitlines(keepends=True)
+    if lines is None:
+        lines = path.read_text(errors="replace").splitlines(keepends=True)
 
     boundaries = find_session_boundaries(lines)
     if len(boundaries) < 2:
@@ -267,10 +270,10 @@ def main():
 
     mega_files = []
     for f in files:
-        lines = f.read_text(errors="replace").splitlines(keepends=True)
-        boundaries = find_session_boundaries(lines)
+        file_lines = f.read_text(errors="replace").splitlines(keepends=True)
+        boundaries = find_session_boundaries(file_lines)
         if len(boundaries) >= args.min_sessions:
-            mega_files.append((f, len(boundaries)))
+            mega_files.append((f, len(boundaries), file_lines))
 
     if not mega_files:
         print(f"No mega-files found in {src_dir} (min {args.min_sessions} sessions).")
@@ -285,9 +288,9 @@ def main():
     print(f"{'─' * 60}\n")
 
     total_written = 0
-    for f, n_sessions in mega_files:
+    for f, n_sessions, cached_lines in mega_files:
         print(f"  {f.name}  ({n_sessions} sessions, {f.stat().st_size // 1024}KB)")
-        written = split_file(f, output_dir, dry_run=args.dry_run)
+        written = split_file(f, output_dir, dry_run=args.dry_run, lines=cached_lines)
         total_written += len(written)
 
         if not args.dry_run and written:

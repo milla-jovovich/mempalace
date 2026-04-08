@@ -15,10 +15,15 @@ Enables queries like:
 No external graph DB needed — built from ChromaDB metadata.
 """
 
-from collections import defaultdict, Counter
+import time
+from collections import defaultdict, Counter, deque
 from .config import MempalaceConfig
 
 import chromadb
+
+
+# Graph cache with TTL to avoid rebuilding on every call
+_graph_cache = {"nodes": None, "edges": None, "wing_to_rooms": None, "timestamp": 0, "ttl": 60}
 
 
 def _get_collection(config=None):
@@ -30,14 +35,23 @@ def _get_collection(config=None):
         return None
 
 
-def build_graph(col=None, config=None):
+def build_graph(col=None, config=None, force=False):
     """
     Build the palace graph from ChromaDB metadata.
+    Uses a TTL cache to avoid repeated full scans.
 
     Returns:
-        nodes: dict of {room: {wings: set, halls: set, count: int}}
+        nodes: dict of {room: {wings: list, halls: list, count: int, dates: list}}
         edges: list of {room, wing_a, wing_b, hall} — one per tunnel crossing
     """
+    now = time.time()
+    if (
+        not force
+        and _graph_cache["nodes"] is not None
+        and (now - _graph_cache["timestamp"]) < _graph_cache["ttl"]
+    ):
+        return _graph_cache["nodes"], _graph_cache["edges"]
+
     if col is None:
         col = _get_collection(config)
     if not col:
@@ -93,6 +107,22 @@ def build_graph(col=None, config=None):
             "dates": sorted(data["dates"])[-5:] if data["dates"] else [],
         }
 
+    # Build wing-to-rooms adjacency index for O(1) BFS lookups
+    wing_to_rooms = defaultdict(set)
+    for room, data in nodes.items():
+        for w in data["wings"]:
+            wing_to_rooms[w].add(room)
+
+    # Update cache
+    _graph_cache.update(
+        {
+            "nodes": nodes,
+            "edges": edges,
+            "wing_to_rooms": wing_to_rooms,
+            "timestamp": time.time(),
+        }
+    )
+
     return nodes, edges
 
 
@@ -123,22 +153,26 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
         }
     ]
 
-    # BFS traversal
-    frontier = [(start_room, 0)]
+    # Use adjacency index for O(1) neighbor lookups instead of scanning all nodes
+    wing_to_rooms = _graph_cache.get("wing_to_rooms", defaultdict(set))
+
+    # BFS with deque for O(1) popleft
+    frontier = deque([(start_room, 0)])
     while frontier:
-        current_room, depth = frontier.pop(0)
+        current_room, depth = frontier.popleft()
         if depth >= max_hops:
             continue
 
         current = nodes.get(current_room, {})
-        current_wings = set(current.get("wings", []))
+        current_wings = current.get("wings", [])
 
-        # Find all rooms that share a wing with current room
-        for room, data in nodes.items():
-            if room in visited:
-                continue
-            shared_wings = current_wings & set(data["wings"])
-            if shared_wings:
+        # Find all rooms that share a wing via adjacency index
+        for wing in current_wings:
+            for room in wing_to_rooms.get(wing, set()):
+                if room in visited:
+                    continue
+                data = nodes[room]
+                shared_wings = sorted(set(current_wings) & set(data["wings"]))
                 visited.add(room)
                 results.append(
                     {
@@ -147,7 +181,7 @@ def traverse(start_room: str, col=None, config=None, max_hops: int = 2):
                         "halls": data["halls"],
                         "count": data["count"],
                         "hop": depth + 1,
-                        "connected_via": sorted(shared_wings),
+                        "connected_via": shared_wings,
                     }
                 )
                 if depth + 1 < max_hops:

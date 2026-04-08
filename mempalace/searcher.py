@@ -91,21 +91,30 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str,
+    palace_path: str = None,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    collection=None,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
     Used by the MCP server and other callers that need data.
     """
-    try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
-    except Exception as e:
-        logger.error("No palace found at %s: %s", palace_path, e)
-        return {
-            "error": "No palace found",
-            "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
-        }
+    col = collection
+    if col is None:
+        try:
+            from .palace import get_client
+
+            client = get_client(palace_path)
+            col = client.get_collection("mempalace_drawers")
+        except Exception as e:
+            logger.error("No palace found at %s: %s", palace_path, e)
+            return {
+                "error": "No palace found",
+                "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
+            }
 
     # Build where filter
     where = {}

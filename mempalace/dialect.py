@@ -435,27 +435,19 @@ class Dialect:
 
     def _extract_topics(self, text: str, max_topics: int = 3) -> List[str]:
         """Extract key topic words from plain text."""
-        # Tokenize: alphanumeric words, lowercase
+        # Tokenize: alphanumeric words — single pass for frequency + boosting
         words = re.findall(r"[a-zA-Z][a-zA-Z_-]{2,}", text)
-        # Count frequency, skip stop words
         freq = {}
         for w in words:
             w_lower = w.lower()
             if w_lower in _STOP_WORDS or len(w_lower) < 3:
                 continue
             freq[w_lower] = freq.get(w_lower, 0) + 1
-
-        # Also boost words that look like proper nouns or technical terms
-        for w in words:
-            w_lower = w.lower()
-            if w_lower in _STOP_WORDS:
-                continue
-            if w[0].isupper() and w_lower in freq:
+            # Boost proper nouns and technical terms in same pass
+            if w[0].isupper():
                 freq[w_lower] += 2
-            # CamelCase or has underscore/hyphen
-            if "_" in w or "-" in w or (any(c.isupper() for c in w[1:])):
-                if w_lower in freq:
-                    freq[w_lower] += 2
+            if "_" in w or "-" in w or any(c.isupper() for c in w[1:]):
+                freq[w_lower] += 2
 
         ranked = sorted(freq.items(), key=lambda x: -x[1])
         return [w for w, _ in ranked[:max_topics]]
@@ -516,9 +508,10 @@ class Dialect:
     def _detect_entities_in_text(self, text: str) -> List[str]:
         """Find known entities in text, or detect capitalized names."""
         found = []
+        text_lower = text.lower()
         # Check known entities
         for name, code in self.entity_codes.items():
-            if not name.islower() and name.lower() in text.lower():
+            if not name.islower() and name.lower() in text_lower:
                 if code not in found:
                     found.append(code)
         if found:
@@ -803,7 +796,9 @@ class Dialect:
         from datetime import date as date_cls
 
         essential = []
+        all_tunnels = []
 
+        # Single pass: read each file once, extract both essentials and tunnels
         for fname in sorted(os.listdir(zettel_dir)):
             if not fname.endswith(".json"):
                 continue
@@ -825,13 +820,6 @@ class Dialect:
                 if weight >= weight_threshold or is_origin or has_key_flag:
                     essential.append((z, file_num, source_date))
 
-        all_tunnels = []
-        for fname in sorted(os.listdir(zettel_dir)):
-            if not fname.endswith(".json"):
-                continue
-            fpath = os.path.join(zettel_dir, fname)
-            with open(fpath, "r") as f:
-                data = json.load(f)
             for t in data.get("tunnels", []):
                 all_tunnels.append(t)
 

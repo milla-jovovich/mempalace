@@ -40,6 +40,12 @@ def sanitize_name(value: str, field_name: str = "name") -> str:
     if "\x00" in value:
         raise ValueError(f"{field_name} contains null bytes")
 
+    # Enforce safe character set
+    if not _SAFE_NAME_RE.match(value):
+        raise ValueError(
+            f"{field_name} contains invalid characters (allowed: letters, digits, spaces, hyphens, underscores, dots, apostrophes)"
+        )
+
     return value
 
 
@@ -52,6 +58,7 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
     if "\x00" in value:
         raise ValueError("content contains null bytes")
     return value
+
 
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
@@ -201,4 +208,9 @@ class MempalaceConfig:
         self._config_dir.mkdir(parents=True, exist_ok=True)
         with open(self._people_map_file, "w") as f:
             json.dump(people_map, f, indent=2)
+        # Restrict to owner read/write only
+        try:
+            self._people_map_file.chmod(0o600)
+        except (OSError, NotImplementedError):
+            pass
         return self._people_map_file
