@@ -5,6 +5,7 @@ Uses the real ChromaDB fixtures from conftest.py for integration tests,
 plus mock-based tests for error paths.
 """
 
+import io
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +14,7 @@ from mempalace.searcher import SearchError, search, search_memories
 
 
 # ── search_memories (API) ──────────────────────────────────────────────
+
 
 
 class TestSearchMemories:
@@ -119,3 +121,31 @@ class TestSearchCLI:
         captured = capsys.readouterr()
         # Should have output with at least one result block
         assert "[1]" in captured.out
+
+    def test_cli_search_uses_ascii_separator_on_cp1252_stdout(self, monkeypatch):
+        class _FakeCollection:
+            def query(self, **_kwargs):
+                return {
+                    "documents": [["JWT auth details"]],
+                    "metadatas": [[{"wing": "project", "room": "backend", "source_file": "auth.py"}]],
+                    "distances": [[0.1]],
+                }
+
+        class _FakeClient:
+            def __init__(self, path):
+                self.path = path
+
+            def get_collection(self, _name):
+                return _FakeCollection()
+
+        monkeypatch.setattr("mempalace.searcher.chromadb.PersistentClient", _FakeClient)
+
+        buf = io.BytesIO()
+        fake_stdout = io.TextIOWrapper(buf, encoding="cp1252", errors="strict")
+        monkeypatch.setattr("sys.stdout", fake_stdout)
+
+        search("anything", "/tmp/fake-palace")
+        fake_stdout.flush()
+        output = buf.getvalue().decode("cp1252")
+
+        assert "  " + ("-" * 56) in output
