@@ -6,7 +6,6 @@ Reads mempalace.yaml from the project directory to know the wing + rooms.
 Routes each file to the right room based on content.
 Stores verbatim chunks as drawers. No summaries. Ever.
 """
-
 import os
 import sys
 import hashlib
@@ -14,6 +13,7 @@ import fnmatch
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import chromadb
 
@@ -451,6 +451,35 @@ def add_drawer(
     except Exception:
         raise
 
+def add_drawers_batch(
+    collection, wing: str, room: str, chunks: list, source_file: str, agent: str
+):
+    """Add multiple drawers to the palace in a single batch upsert."""
+    if not chunks:
+        return 0
+    ids, documents, metadatas = [], [], []
+    mtime = None
+    try:
+        mtime = os.path.getmtime(source_file)
+    except OSError:
+        pass
+    for chunk in chunks:
+        drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk['chunk_index'])).encode(), usedforsecurity=False).hexdigest()[:16]}"
+        metadata = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file,
+            "chunk_index": chunk["chunk_index"],
+            "added_by": agent,
+            "filed_at": datetime.now().isoformat(),
+        }
+        if mtime is not None:
+            metadata["source_mtime"] = mtime
+        ids.append(drawer_id)
+        documents.append(chunk["content"])
+        metadatas.append(metadata)
+    collection.upsert(documents=documents, ids=ids, metadatas=metadatas)
+    return len(ids)
 
 # =============================================================================
 # PROCESS ONE FILE
@@ -503,7 +532,7 @@ def process_file(
         if added:
             drawers_added += 1
 
-    return drawers_added, room
+    return drawers_added
 
 
 # =============================================================================
@@ -622,7 +651,7 @@ def mine(
     room_counts = defaultdict(int)
 
     for i, filepath in enumerate(files, 1):
-        drawers, room = process_file(
+        drawers = process_file(
             filepath=filepath,
             project_path=project_path,
             collection=collection,
@@ -635,6 +664,7 @@ def mine(
             files_skipped += 1
         else:
             total_drawers += drawers
+            room = detect_room(filepath, "", rooms, project_path)
             room_counts[room] += 1
             if not dry_run:
                 print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
