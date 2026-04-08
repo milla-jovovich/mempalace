@@ -24,4 +24,6 @@ vendor/
 
 **Affected versions:** Confirmed on mempalace 3.0.0 with ChromaDB 1.5.6.
 
-**Tracking:** This issue was discovered during real-world use on repositories with Terraform infrastructure code. A fix would be to skip files matching `.gitignore` patterns (and optionally `.mempalaceignore`) before attempting to embed them.
+**Tracking:** This issue was discovered during real-world use on repositories with Terraform infrastructure code. The fix was to skip files larger than 10 MB during scanning and add `.mempalaceignore` support so MemPalace can explicitly exclude problematic paths before attempting to embed them.
+
+**Status:** Fixed on branch `docs/gitignore-binary-mining-bug` by adding the large-file scan guard and `.mempalaceignore` overrides in the miner.
