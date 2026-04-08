@@ -26,6 +26,7 @@ import sys
 import json
 import logging
 import hashlib
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -215,6 +216,102 @@ def _no_palace():
     }
 
 
+# ==================== AUTO-DISCOVER WINGS ====================
+
+IGNORE_DIRS = {
+    "node_modules", ".git", ".cursor", "__pycache__",
+    ".venv", "venv", ".env", "dist", "build",
+    "target", ".next", ".nuxt", ".mempalace",
+    ".idea", ".vs", ".vscode",
+}
+
+_discovered_wings_cache = None
+
+
+def _folder_to_wing(folder_name: str) -> str:
+    """Normalize a folder name into a valid wing name.
+
+    Preserves Unicode characters (CJK, etc.), hyphens, and underscores.
+    Leading/trailing hyphens and underscores are stripped.
+    'My-Project' -> 'wing_my-project'
+    'my_project' -> 'wing_my_project'
+    'プロジェクトA' -> 'wing_プロジェクトa'
+    """
+    slug = folder_name.lower()
+    slug = re.sub(r'[^\w\-]+', '_', slug)
+    slug = slug.strip('_-')
+    if not slug:
+        slug = "unnamed"
+    return f"wing_{slug}"
+
+
+def _sync_wings_from_root(force=False):
+    """Scan subdirectories under root_dir and register new ones as wings.
+
+    Called once on server startup. Results are cached so subsequent
+    calls (e.g. from tool_status) are free unless force=True.
+    """
+    global _discovered_wings_cache
+
+    if _discovered_wings_cache is not None and not force:
+        return _discovered_wings_cache
+
+    root_dir = _config.root_dir
+    if not root_dir:
+        _discovered_wings_cache = []
+        return []
+
+    root_path = Path(root_dir).expanduser().resolve()
+    if not root_path.is_dir():
+        logger.warning(f"root_dir not found: {root_dir}")
+        _discovered_wings_cache = []
+        return []
+
+    # Known wings from wing_config.json (single source of truth)
+    wing_config = _config.load_wing_config()
+    known_wings = set(wing_config.get("wings", {}).keys())
+
+    # Scan subdirectories
+    new_wings = []
+    for child in sorted(root_path.iterdir()):
+        if not child.is_dir():
+            continue
+        if child.name.startswith("."):
+            continue
+        if child.name.lower() in IGNORE_DIRS:
+            continue
+
+        wing_name = _folder_to_wing(child.name)
+        if wing_name not in known_wings:
+            new_wings.append({
+                "name": wing_name,
+                "path": str(child),
+                "folder": child.name,
+            })
+
+    # Register new wings in wing_config.json
+    if new_wings:
+        wings = wing_config.get("wings", {})
+        for w in new_wings:
+            wings[w["name"]] = {
+                "type": "project",
+                "path": w["path"],
+                "keywords": [w["folder"].lower()],
+                "auto_discovered": True,
+            }
+        wing_config["wings"] = wings
+        if "default_wing" not in wing_config:
+            wing_config["default_wing"] = "wing_general"
+
+        _config.save_wing_config(wing_config)
+
+        names = ", ".join(w["folder"] for w in new_wings)
+        logger.info(f"Auto-discovered {len(new_wings)} new wing(s): {names}")
+
+    _discovered_wings_cache = new_wings
+    return new_wings
+
+
 # ==================== HELPERS ====================
 
 
@@ -268,9 +365,12 @@ def _sanitize_optional_name(value: str = None, field_name: str = "name") -> str:
 # ==================== READ TOOLS ====================
 
 
+
 def tool_status():
+    _sync_wings_from_root(force=False)
     col = _get_collection()
     if not col:
+
         return _no_palace()
     count = col.count()
     wings = {}
@@ -1643,7 +1743,9 @@ def handle_request(request):
 
 def main():
     logger.info("MemPalace MCP Server starting...")
+    _sync_wings_from_root()
     while True:
+
         try:
             line = sys.stdin.readline()
             if not line:

@@ -148,6 +148,15 @@ class MempalaceConfig:
         return self._file_config.get("palace_path", DEFAULT_PALACE_PATH)
 
     @property
+    def root_dir(self):
+        """Root directory specified during init.
+        Subdirectories become wings automatically."""
+        env_val = os.environ.get("MEMPALACE_ROOT_DIR")
+        if env_val:
+            return env_val
+        return self._file_config.get("root_dir", None)
+
+    @property
     def collection_name(self):
         """ChromaDB collection name."""
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
@@ -194,7 +203,36 @@ class MempalaceConfig:
         except OSError:
             pass
 
-    def init(self):
+    def _save(self):
+        """Persist current config to disk."""
+        self._config_dir.mkdir(parents=True, exist_ok=True)
+        with open(self._config_file, "w", encoding="utf-8") as f:
+            json.dump(self._file_config, f, indent=2, ensure_ascii=False)
+
+    @property
+    def config_dir(self):
+        """Public access to the config directory path."""
+        return self._config_dir
+
+    def load_wing_config(self):
+        """Load wing_config.json and return as dict."""
+        wing_config_path = self._config_dir / "wing_config.json"
+        if wing_config_path.exists():
+            try:
+                with open(wing_config_path, encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {}
+
+    def save_wing_config(self, wing_config):
+        """Save wing_config.json."""
+        self._config_dir.mkdir(parents=True, exist_ok=True)
+        wing_config_path = self._config_dir / "wing_config.json"
+        with open(wing_config_path, "w", encoding="utf-8") as f:
+            json.dump(wing_config, f, indent=2, ensure_ascii=False)
+
+    def init(self, root_dir=None):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
         # Restrict directory permissions to owner only (Unix)
@@ -209,13 +247,18 @@ class MempalaceConfig:
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,
             }
-            with open(self._config_file, "w") as f:
-                json.dump(default_config, f, indent=2)
+            if root_dir:
+                default_config["root_dir"] = str(root_dir)
+            with open(self._config_file, "w", encoding="utf-8") as f:
+                json.dump(default_config, f, indent=2, ensure_ascii=False)
             # Restrict config file to owner read/write only
             try:
                 self._config_file.chmod(0o600)
             except (OSError, NotImplementedError):
                 pass
+        elif root_dir:
+            self._file_config["root_dir"] = str(root_dir)
+            self._save()
         return self._config_file
 
     def save_people_map(self, people_map):
