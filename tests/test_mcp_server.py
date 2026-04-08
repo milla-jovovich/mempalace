@@ -342,3 +342,43 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+
+# Issue #171 — palaces with >10k drawers had list_wings/list_rooms/get_taxonomy
+# silently truncating at 10k AND swallowing exceptions, returning empty {}.
+
+
+def test_tool_list_wings_paginates_beyond_10k(monkeypatch):
+    """Issue #171: tool_list_wings must count drawers across multiple pages,
+    not silently truncate at the first 10k."""
+    from unittest.mock import MagicMock
+
+    from mempalace import mcp_server
+
+    fake_col = MagicMock()
+    fake_col.get.side_effect = [
+        {"metadatas": [{"wing": "alpha"}] * 10000},
+        {"metadatas": [{"wing": "beta"}] * 5000},
+    ]
+    monkeypatch.setattr(mcp_server, "_get_collection", lambda create=False: fake_col)
+
+    result = mcp_server.tool_list_wings()
+    assert result["wings"]["alpha"] == 10000
+    assert result["wings"]["beta"] == 5000
+
+
+def test_tool_list_wings_logs_chromadb_error_instead_of_swallowing(monkeypatch, caplog):
+    """Issue #171: errors must surface in logs, not vanish into bare except."""
+    import logging
+    from unittest.mock import MagicMock
+
+    from mempalace import mcp_server
+
+    fake_col = MagicMock()
+    fake_col.get.side_effect = RuntimeError("simulated chromadb failure")
+    monkeypatch.setattr(mcp_server, "_get_collection", lambda create=False: fake_col)
+
+    with caplog.at_level(logging.ERROR, logger="mempalace_mcp"):
+        result = mcp_server.tool_list_wings()
+    assert result == {"wings": {}}
+    assert any("simulated chromadb failure" in r.message for r in caplog.records)
