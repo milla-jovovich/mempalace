@@ -128,6 +128,10 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 ---
 
+**Prerequisite: `uvx`**
+
+MemPalace's MCP server runs via `uvx`, part of [`uv`](https://docs.astral.sh/uv/getting-started/installation/). If you don't have it yet.
+
 **Claude Code (CLI)**
 
 ```bash
@@ -527,7 +531,7 @@ Letta charges $20–200/mo for agent-managed memory. MemPalace does it with a wi
 ## MCP Server
 
 ```bash
-claude mcp add mempalace -- python -m mempalace.mcp_server
+claude mcp add mempalace -- uvx --from mempalace python -m mempalace.mcp_server
 ```
 
 ### 19 Tools
