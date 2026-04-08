@@ -51,6 +51,17 @@ class KnowledgeGraph:
         self.db_path = db_path or DEFAULT_KG_PATH
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._apply_migrations()
+
+    def _apply_migrations(self):
+        conn = self._conn()
+        try:
+            conn.execute("ALTER TABLE triples ADD COLUMN pheromone_level REAL DEFAULT 0.0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        finally:
+            conn.commit()
+            conn.close()
 
     def _init_db(self):
         conn = self._conn()
@@ -204,16 +215,18 @@ class KnowledgeGraph:
                 query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
                 params.extend([as_of, as_of])
             for row in conn.execute(query, params).fetchall():
+                # To protect against schema version variance:
+                # 0: id, 1: sub, 2: pred, 3: obj, 4: from, 5: to, 6: conf, 7: src_closet or pheromone
+                # Last column is always the JOINed name.
                 results.append(
                     {
                         "direction": "outgoing",
                         "subject": name,
                         "predicate": row[2],
-                        "object": row[10],  # obj_name
+                        "object": row[-1],  # obj_name is the last column
                         "valid_from": row[4],
                         "valid_to": row[5],
                         "confidence": row[6],
-                        "source_closet": row[7],
                         "current": row[5] is None,
                     }
                 )
@@ -228,13 +241,12 @@ class KnowledgeGraph:
                 results.append(
                     {
                         "direction": "incoming",
-                        "subject": row[10],  # sub_name
+                        "subject": row[-1],  # sub_name is the last column
                         "predicate": row[2],
                         "object": name,
                         "valid_from": row[4],
                         "valid_to": row[5],
                         "confidence": row[6],
-                        "source_closet": row[7],
                         "current": row[5] is None,
                     }
                 )
@@ -262,9 +274,9 @@ class KnowledgeGraph:
         for row in conn.execute(query, params).fetchall():
             results.append(
                 {
-                    "subject": row[10],
+                    "subject": row[-2], # sub_name
                     "predicate": pred,
-                    "object": row[11],
+                    "object": row[-1], # obj_name
                     "valid_from": row[4],
                     "valid_to": row[5],
                     "current": row[5] is None,
@@ -303,15 +315,137 @@ class KnowledgeGraph:
         conn.close()
         return [
             {
-                "subject": r[10],
+                "subject": r[-2],
                 "predicate": r[2],
-                "object": r[11],
+                "object": r[-1],
                 "valid_from": r[4],
                 "valid_to": r[5],
                 "current": r[5] is None,
             }
             for r in rows
         ]
+
+    # ── Pheromone Traversal (STAN) ────────────────────────────────────────
+
+    def evaporate_pheromones(self, decay_rate: float = 0.1):
+        """Apply evaporation decay to all active pheromone trails."""
+        conn = self._conn()
+        conn.execute(
+            "UPDATE triples SET pheromone_level = ROUND(pheromone_level * (1.0 - ?), 2) WHERE pheromone_level > 0",
+            (decay_rate,)
+        )
+        conn.commit()
+        conn.close()
+
+    def deposit_pheromone(self, subject: str, predicate: str, obj: str, amount: float = 1.0, max_pheromone: float = 100.0):
+        """Deposit pheromone on a specific edge to reinforce a successful path."""
+        sub_id = self._entity_id(subject)
+        obj_id = self._entity_id(obj)
+        pred = predicate.lower().replace(" ", "_")
+        
+        conn = self._conn()
+        conn.execute(
+            """UPDATE triples 
+               SET pheromone_level = MIN(COALESCE(pheromone_level, 0.0) + ?, ?) 
+               WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL""",
+            (amount, max_pheromone, sub_id, pred, obj_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_neighbors_with_pheromones(self, entity_id: str):
+        """Get all connected nodes for graph traversal with their pheromone levels."""
+        conn = self._conn()
+        neighbors = []
+        
+        # Outgoing
+        for row in conn.execute(
+            "SELECT object, predicate, COALESCE(pheromone_level, 0.0) FROM triples WHERE subject = ? AND valid_to IS NULL", 
+            (entity_id,)
+        ).fetchall():
+            neighbors.append({
+                "node": row[0], 
+                "predicate": row[1], 
+                "pheromone": row[2],
+                "direction": "outgoing"
+            })
+            
+        # Incoming
+        for row in conn.execute(
+            "SELECT subject, predicate, COALESCE(pheromone_level, 0.0) FROM triples WHERE object = ? AND valid_to IS NULL", 
+            (entity_id,)
+        ).fetchall():
+            neighbors.append({
+                "node": row[0], 
+                "predicate": row[1], 
+                "pheromone": row[2],
+                "direction": "incoming"
+            })
+            
+        conn.close()
+        return neighbors
+
+    def stigmergic_astar(self, start_entity: str, target_entity: str, influence: float = 0.7, max_depth: int = 5):
+        """
+        Find optimal path leveraging stigmergic edge weights from STAN.
+        cost_eff = 1.0 / (1 + pheromone * influence)
+        """
+        import heapq
+        
+        start_id = self._entity_id(start_entity)
+        target_id = self._entity_id(target_entity)
+        
+        # Queue: (cost_so_far, current_node, path_history, depth)
+        # Using simple Dijkstra approach mapped with STAN's edge weights, 
+        # since pure semantic distance heuristics (ChromaDB) require injection.
+        queue = [(0.0, start_id, [], 0)]
+        g_scores = {start_id: 0.0}
+        visited = set()
+        
+        while queue:
+            current_cost, current_node, path, depth = heapq.heappop(queue)
+            
+            if current_node == target_id:
+                return path
+                
+            if depth >= max_depth:
+                continue
+                
+            if current_node in visited:
+                continue
+                
+            visited.add(current_node)
+            
+            for neighbor in self.get_neighbors_with_pheromones(current_node):
+                next_node = neighbor["node"]
+                
+                if next_node in visited:
+                    continue
+                
+                # STAN Core Formula: cost_effective = w / (1 + tau * alpha)
+                # w = 1.0 base weight. tau = pheromone. alpha = influence parameter (0.7 default)
+                tau = neighbor["pheromone"]
+                edge_cost = 1.0 / (1.0 + (tau * influence))
+                
+                tentative_g = current_cost + edge_cost
+                
+                if tentative_g < g_scores.get(next_node, float('inf')):
+                    g_scores[next_node] = tentative_g
+                    
+                    # Store path as lightweight tuples to avoid O(n^2) scaling 
+                    # and correctly map back into memory.
+                    step = {
+                        "from": current_node,
+                        "to": next_node,
+                        "predicate": neighbor["predicate"],
+                        "direction": neighbor["direction"],
+                        "pheromone": tau,
+                        "cost": edge_cost
+                    }
+                    
+                    heapq.heappush(queue, (tentative_g, next_node, path + [step], depth + 1))
+                    
+        return None
 
     # ── Stats ─────────────────────────────────────────────────────────────
 
