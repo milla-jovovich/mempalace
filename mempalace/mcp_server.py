@@ -57,6 +57,47 @@ def _no_palace():
     }
 
 
+# Batch size for paginated metadata scans.
+# A single col.get(limit=N) call on large palaces (>10k drawers) can return
+# None metadatas or raise in some ChromaDB builds.  Fetching in small pages
+# is both safer and friendlier on memory.
+_TAXONOMY_BATCH = 500
+
+
+def _iter_metadatas(col, where=None):
+    """
+    Yield every metadata dict in *col*, fetched in pages of *_TAXONOMY_BATCH*.
+
+    This replaces the previous pattern of ``col.get(limit=10000)`` which
+    silently returned empty results on palaces with more than ~10k drawers
+    (issue #171).  The generator is also safe against ChromaDB returning
+    ``None`` for the ``metadatas`` key.
+    """
+    offset = 0
+    while True:
+        kwargs: dict = {
+            "include": ["metadatas"],
+            "limit": _TAXONOMY_BATCH,
+            "offset": offset,
+        }
+        if where:
+            kwargs["where"] = where
+        try:
+            batch = col.get(**kwargs)
+        except Exception as exc:
+            logger.warning(
+                "_iter_metadatas: ChromaDB error at offset %d: %s", offset, exc
+            )
+            return
+        metas = batch.get("metadatas") or []
+        if not metas:
+            return
+        yield from metas
+        offset += len(metas)
+        if len(metas) < _TAXONOMY_BATCH:
+            return
+
+
 # ==================== READ TOOLS ====================
 
 
@@ -67,15 +108,11 @@ def tool_status():
     count = col.count()
     wings = {}
     rooms = {}
-    try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-            rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
+    for m in _iter_metadatas(col):
+        w = m.get("wing", "unknown")
+        r = m.get("room", "unknown")
+        wings[w] = wings.get(w, 0) + 1
+        rooms[r] = rooms.get(r, 0) + 1
     return {
         "total_drawers": count,
         "wings": wings,
@@ -124,13 +161,9 @@ def tool_list_wings():
     if not col:
         return _no_palace()
     wings = {}
-    try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-    except Exception:
-        pass
+    for m in _iter_metadatas(col):
+        w = m.get("wing", "unknown")
+        wings[w] = wings.get(w, 0) + 1
     return {"wings": wings}
 
 
@@ -139,16 +172,10 @@ def tool_list_rooms(wing: str = None):
     if not col:
         return _no_palace()
     rooms = {}
-    try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
-        if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
-        for m in all_meta:
-            r = m.get("room", "unknown")
-            rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
+    where = {"wing": wing} if wing else None
+    for m in _iter_metadatas(col, where=where):
+        r = m.get("room", "unknown")
+        rooms[r] = rooms.get(r, 0) + 1
     return {"wing": wing or "all", "rooms": rooms}
 
 
@@ -157,16 +184,12 @@ def tool_get_taxonomy():
     if not col:
         return _no_palace()
     taxonomy = {}
-    try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            if w not in taxonomy:
-                taxonomy[w] = {}
-            taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
-    except Exception:
-        pass
+    for m in _iter_metadatas(col):
+        w = m.get("wing", "unknown")
+        r = m.get("room", "unknown")
+        if w not in taxonomy:
+            taxonomy[w] = {}
+        taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
     return {"taxonomy": taxonomy}
 
 
