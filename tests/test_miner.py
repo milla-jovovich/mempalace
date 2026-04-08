@@ -7,6 +7,7 @@ import chromadb
 import yaml
 
 from mempalace.miner import mine, scan_project
+from tests.conftest import close_chroma_client
 
 
 def write_file(path: Path, content: str):
@@ -21,6 +22,7 @@ def scanned_files(project_root: Path, **kwargs):
 
 def test_project_mining():
     tmpdir = tempfile.mkdtemp()
+    client = None
     try:
         project_root = Path(tmpdir).resolve()
         os.makedirs(project_root / "backend")
@@ -47,6 +49,8 @@ def test_project_mining():
         col = client.get_collection("mempalace_drawers")
         assert col.count() > 0
     finally:
+        if client is not None:
+            close_chroma_client(client)
         shutil.rmtree(tmpdir)
 
 

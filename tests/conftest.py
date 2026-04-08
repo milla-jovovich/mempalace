@@ -34,6 +34,21 @@ from mempalace.config import MempalaceConfig  # noqa: E402
 from mempalace.knowledge_graph import KnowledgeGraph  # noqa: E402
 
 
+def close_chroma_client(client):
+    """Best-effort cleanup for Chroma clients, especially on Windows."""
+    try:
+        client.close()
+    except Exception:
+        pass
+
+    try:
+        server = getattr(client, "_server", None)
+        if server is not None and hasattr(server, "stop"):
+            server.stop()
+    except Exception:
+        pass
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_home():
     """Ensure HOME points to a temp dir for the entire test session.
@@ -84,7 +99,8 @@ def collection(palace_path):
     """A ChromaDB collection pre-seeded in the temp palace."""
     client = chromadb.PersistentClient(path=palace_path)
     col = client.get_or_create_collection("mempalace_drawers")
-    return col
+    yield col
+    close_chroma_client(client)
 
 
 @pytest.fixture
