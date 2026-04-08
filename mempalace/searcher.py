@@ -142,12 +142,18 @@ def search_memories(
 
     hits = []
     for doc, meta, dist in zip(docs, metas, dists):
-        text = doc
-        if fernet and meta.get("encrypted_content"):
-            try:
-                text = decrypt(fernet, meta["encrypted_content"])
-            except Exception:
-                pass  # Fall back to raw document
+        encrypted = meta.get("encrypted_content")
+        if encrypted:
+            if fernet:
+                try:
+                    text = decrypt(fernet, encrypted)
+                except Exception:
+                    logger.error("Failed to decrypt search result — wrong key or corrupted data")
+                    text = "[encrypted — decryption failed]"
+            else:
+                text = "[encrypted — key not available]"
+        else:
+            text = doc
         hits.append(
             {
                 "text": text,

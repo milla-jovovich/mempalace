@@ -106,13 +106,24 @@ class KnowledgeGraph:
         return props_json
 
     def _decrypt_props(self, props_str: str) -> str:
-        """Decrypt properties string if encryption is enabled."""
-        if self._fernet and props_str and not props_str.startswith("{"):
+        """Decrypt properties string if it looks like Fernet ciphertext.
+
+        Fernet tokens always start with 'gAAAAA'. If the string starts with '{'
+        it's unencrypted JSON from before encryption was enabled.
+        """
+        if not props_str or props_str.startswith("{"):
+            return props_str  # Already plaintext JSON
+        if self._fernet:
             try:
                 return sec_decrypt(self._fernet, props_str)
             except Exception:
-                pass  # Fall back to raw string (unencrypted data)
-        return props_str
+                import logging
+
+                logging.getLogger("mempalace_security").error(
+                    "Failed to decrypt entity properties — wrong key or corrupted data"
+                )
+                return "{}"  # Return empty properties rather than ciphertext
+        return props_str  # No fernet available, return as-is
 
     def add_entity(self, name: str, entity_type: str = "unknown", properties: dict = None):
         """Add or update an entity node."""

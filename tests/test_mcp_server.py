@@ -567,11 +567,15 @@ class TestEncryption:
         )
         assert result["success"] is True
 
-        # Verify encrypted_content is in metadata
-        stored = col.get(ids=[result["drawer_id"]], include=["metadatas"])
+        # Verify encrypted_content is in metadata and plaintext is NOT in documents
+        stored = col.get(ids=[result["drawer_id"]], include=["metadatas", "documents"])
         meta = stored["metadatas"][0]
+        doc = stored["documents"][0]
         assert "encrypted_content" in meta
         assert meta["encrypted_content"] != "Top secret family information."
+        # Documents field should contain a placeholder, not plaintext
+        assert "Top secret family information." not in doc
+        assert doc.startswith("[encrypted:")
 
         # Verify it decrypts correctly
         from mempalace.security import decrypt

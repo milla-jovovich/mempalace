@@ -54,13 +54,24 @@ _fernet = None
 
 
 def _decrypt_doc(doc, meta):
-    """Return decrypted content if encryption is active and encrypted_content exists."""
-    if _fernet and meta.get("encrypted_content"):
-        try:
-            return decrypt(_fernet, meta["encrypted_content"])
-        except Exception:
-            logger.warning("Failed to decrypt content, returning raw document")
-    return doc
+    """Return decrypted content if encrypted_content exists in metadata.
+
+    When encryption is enabled, the documents field contains only a placeholder
+    (content hash), and the real content lives in encrypted_content metadata.
+    """
+    encrypted = meta.get("encrypted_content")
+    if not encrypted:
+        return doc  # Unencrypted drawer — return as-is
+
+    if not _fernet:
+        logger.error("Encrypted content found but no encryption key loaded")
+        return "[encrypted — key not available]"
+
+    try:
+        return decrypt(_fernet, encrypted)
+    except Exception:
+        logger.error("Failed to decrypt content — wrong key or corrupted data")
+        return "[encrypted — decryption failed]"
 
 
 def _get_collection(create=False):
@@ -300,13 +311,18 @@ def tool_add_drawer(
         "filed_at": datetime.now().isoformat(),
     }
 
+    # When encryption is enabled, store only a placeholder in the documents
+    # field (used by ChromaDB for embeddings) and the real content encrypted
+    # in metadata. This ensures plaintext is not persisted on disk.
+    doc_content = content
     if _fernet:
         metadata["encrypted_content"] = encrypt(_fernet, content)
+        doc_content = f"[encrypted:{content_hash(content, length=32)}]"
 
     try:
         col.add(
             ids=[drawer_id],
-            documents=[content],
+            documents=[doc_content],
             metadatas=[metadata],
         )
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
@@ -402,13 +418,15 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         "date": now.strftime("%Y-%m-%d"),
     }
 
+    doc_content = entry
     if _fernet:
         metadata["encrypted_content"] = encrypt(_fernet, entry)
+        doc_content = f"[encrypted:{content_hash(entry, length=32)}]"
 
     try:
         col.add(
             ids=[entry_id],
-            documents=[entry],
+            documents=[doc_content],
             metadatas=[metadata],
         )
         logger.info(f"Diary entry: {entry_id} → {wing}/diary/{topic}")
@@ -725,7 +743,7 @@ def _check_auth(params, req_id):
     if _auth_token is None:
         return None  # Auth not enabled
     token = params.get("_meta", {}).get("auth_token", "")
-    if not token or not verify_token(token, _auth_token):
+    if not verify_token(token, _auth_token):
         return {
             "jsonrpc": "2.0",
             "id": req_id,

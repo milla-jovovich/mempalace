@@ -91,7 +91,11 @@ def _try_keyring_get(account):
         import keyring
 
         return keyring.get_password(_KEYRING_SERVICE, account)
-    except Exception:
+    except ImportError:
+        logger.debug("keyring package not installed")
+        return None
+    except Exception as e:
+        logger.warning("Failed to read from OS keychain: %s", e)
         return None
 
 
@@ -102,7 +106,11 @@ def _try_keyring_set(account, value):
 
         keyring.set_password(_KEYRING_SERVICE, account, value)
         return True
-    except Exception:
+    except ImportError:
+        logger.debug("keyring package not installed")
+        return False
+    except Exception as e:
+        logger.warning("Failed to write to OS keychain: %s", e)
         return False
 
 
@@ -139,11 +147,12 @@ def load_or_create_token(config_dir):
     else:
         # Fall back to file
         logger.warning(
-            "OS keychain unavailable. Storing auth token in %s. "
+            "OS keychain unavailable. Storing auth token in file. "
             "Install 'keyring' for secure storage: pip install mempalace[security]",
-            token_path,
         )
-        Path(config_dir).mkdir(parents=True, exist_ok=True)
+        config_path = Path(config_dir)
+        config_path.mkdir(parents=True, exist_ok=True)
+        secure_dir(config_path)
         token_path.write_text(token)
         secure_file(token_path)
 
@@ -211,11 +220,12 @@ def load_or_create_key(config_dir):
     else:
         # Fall back to file
         logger.warning(
-            "OS keychain unavailable. Storing encryption key in %s. "
+            "OS keychain unavailable. Storing encryption key in file. "
             "Install 'keyring' for secure storage: pip install mempalace[security]",
-            key_path,
         )
-        Path(config_dir).mkdir(parents=True, exist_ok=True)
+        config_path = Path(config_dir)
+        config_path.mkdir(parents=True, exist_ok=True)
+        secure_dir(config_path)
         key_path.write_text(key_bytes.decode())
         secure_file(key_path)
 
