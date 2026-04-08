@@ -336,3 +336,90 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+
+# ── Read-Only Mode ─────────────────────────────────────────────────────
+
+
+class TestReadOnlyMode:
+    def test_read_only_blocks_write_tools(self, monkeypatch):
+        from mempalace import mcp_server
+        from mempalace.mcp_server import handle_request
+
+        monkeypatch.setattr(mcp_server, "_read_only", True)
+
+        for tool_name in mcp_server.WRITE_TOOLS:
+            resp = handle_request(
+                {
+                    "method": "tools/call",
+                    "id": 99,
+                    "params": {"name": tool_name, "arguments": {}},
+                }
+            )
+            assert "error" in resp, f"{tool_name} should be blocked in read-only mode"
+            assert resp["error"]["code"] == -32600
+
+        monkeypatch.setattr(mcp_server, "_read_only", False)
+
+    def test_read_only_allows_read_tools(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, seeded_kg)
+        from mempalace import mcp_server
+        from mempalace.mcp_server import handle_request
+
+        _get_collection(palace_path, create=True)
+        monkeypatch.setattr(mcp_server, "_read_only", True)
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 100,
+                "params": {"name": "mempalace_status", "arguments": {}},
+            }
+        )
+        assert "result" in resp
+        assert "error" not in resp
+
+        monkeypatch.setattr(mcp_server, "_read_only", False)
+
+    def test_read_only_hides_write_tools_from_list(self, monkeypatch):
+        from mempalace import mcp_server
+        from mempalace.mcp_server import handle_request
+
+        monkeypatch.setattr(mcp_server, "_read_only", True)
+
+        resp = handle_request({"method": "tools/list", "id": 101, "params": {}})
+        tool_names = {t["name"] for t in resp["result"]["tools"]}
+
+        for write_tool in mcp_server.WRITE_TOOLS:
+            assert write_tool not in tool_names, f"{write_tool} should be hidden in read-only mode"
+        assert "mempalace_status" in tool_names
+        assert "mempalace_search" in tool_names
+
+        monkeypatch.setattr(mcp_server, "_read_only", False)
+
+
+# ── Error Hardening ────────────────────────────────────────────────────
+
+
+class TestErrorHardening:
+    def test_error_responses_do_not_leak_exceptions(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _get_collection(palace_path, create=True)
+        from mempalace.mcp_server import handle_request
+
+        # Call delete with a nonexistent drawer to get a controlled error path
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 200,
+                "params": {"name": "mempalace_delete_drawer", "arguments": {"drawer_id": "nope"}},
+            }
+        )
+        content = json.loads(resp["result"]["content"][0]["text"])
+        # Should get a clean error, not a Python traceback
+        assert "success" in content
+        assert content["success"] is False
+        # The error message should not contain Python exception class names
+        error_msg = content.get("error", "")
+        assert "Traceback" not in error_msg
+        assert "Exception" not in error_msg
