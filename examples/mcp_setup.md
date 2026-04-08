@@ -14,6 +14,25 @@ Or add it to Claude Code:
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
+Or add it to Antigravity MCP Config:
+
+```bash
+{
+  "mcpServers": {
+    "mempalace": {
+      "command": "C:\\your\\python\\path\\python.exe",
+      "args": [
+        "-m",
+        "mempalace.mcp_server"
+      ],
+      "disabled": false
+    }
+  }
+}
+```
+
+file location `C:\Users\yourusername\.gemini\antigravity\mcp_config.json`
+
 ## Available Tools
 
 The server exposes the full MemPalace MCP toolset. Common entry points include:
