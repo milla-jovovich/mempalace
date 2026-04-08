@@ -53,7 +53,6 @@ def _get_collection(create=False):
 def _no_palace():
     return {
         "error": "No palace found",
-        "palace_path": _config.palace_path,
         "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
     }
 
@@ -69,7 +68,7 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -126,7 +125,7 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -141,7 +140,7 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"]}
+        kwargs = {"include": ["metadatas"], "limit": 10000}
         if wing:
             kwargs["where"] = {"wing": wing}
         all_meta = col.get(**kwargs)["metadatas"]
@@ -159,7 +158,7 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -407,6 +406,7 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         results = col.get(
             where={"$and": [{"wing": wing}, {"room": "diary"}]},
             include=["documents", "metadatas"],
+            limit=10000,
         )
 
         if not results["ids"]:
@@ -744,9 +744,13 @@ def handle_request(request):
                 "id": req_id,
                 "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
             }
-        except Exception as e:
-            logger.error(f"Tool error in {tool_name}: {e}")
-            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": str(e)}}
+        except Exception:
+            logger.exception(f"Tool error in {tool_name}")
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32000, "message": "Internal tool error"},
+            }
 
     return {
         "jsonrpc": "2.0",

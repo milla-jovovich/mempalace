@@ -13,6 +13,9 @@ def _patch_mcp_server(monkeypatch, config, palace_path, kg):
     """Patch the mcp_server module globals to use test fixtures."""
     from mempalace import mcp_server
 
+    assert getattr(config, "palace_path", None) == palace_path, (
+        f"config.palace_path ({getattr(config, 'palace_path', None)!r}) does not match palace_path fixture ({palace_path!r})"
+    )
     monkeypatch.setattr(mcp_server, "_config", config)
     monkeypatch.setattr(mcp_server, "_kg", kg)
 
@@ -149,6 +152,7 @@ class TestReadTools:
         assert result["taxonomy"]["notes"]["planning"] == 1
 
     def test_no_palace_returns_error(self, monkeypatch, config, kg):
+        config._file_config["palace_path"] = "/nonexistent/path"
         _patch_mcp_server(monkeypatch, config, "/nonexistent/path", kg)
         from mempalace.mcp_server import tool_status
 

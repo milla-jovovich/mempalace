@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "chromadb>=0.4.0,<1",
+    "chromadb>=0.5.0,<0.7",
     "pyyaml>=6.0",
 ]
 
@@ -39,6 +39,7 @@ mempalace = "mempalace:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.4.0"]
+spellcheck = ["autocorrect>=2.0"]
 
 [dependency-groups]
 dev = ["pytest>=7.0", "ruff>=0.4.0"]

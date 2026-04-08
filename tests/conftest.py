@@ -35,7 +35,7 @@ from mempalace.knowledge_graph import KnowledgeGraph  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _isolate_home(tmp_path_factory):
+def _isolate_home():
     """Ensure HOME points to a temp dir for the entire test session.
 
     The env vars were already set at module level (above) so that

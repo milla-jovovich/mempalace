@@ -87,7 +87,9 @@ class KnowledgeGraph:
         conn.close()
 
     def _conn(self):
-        return sqlite3.connect(self.db_path, timeout=10)
+        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
 
     def _entity_id(self, name: str) -> str:
         return name.lower().replace(" ", "_").replace("'", "")
@@ -284,6 +286,7 @@ class KnowledgeGraph:
                 JOIN entities o ON t.object = o.id
                 WHERE (t.subject = ? OR t.object = ?)
                 ORDER BY t.valid_from ASC NULLS LAST
+                LIMIT 100
             """,
                 (eid, eid),
             ).fetchall()
