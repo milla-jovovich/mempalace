@@ -11,28 +11,13 @@ from pathlib import Path
 
 import chromadb
 
+from mempalace.utils import extract_query_lists
+
 logger = logging.getLogger("mempalace_mcp")
 
 
 class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
-
-
-def _extract_query_lists(results: dict):
-    """
-    Return (docs, metas, dists) from a Chroma query payload safely.
-
-    Chroma can return {"documents": []} when no matches are found.
-    In that case, indexing [0] raises IndexError unless guarded.
-    """
-    documents = results.get("documents") or []
-    metadatas = results.get("metadatas") or []
-    distances = results.get("distances") or []
-
-    docs = documents[0] if documents else []
-    metas = metadatas[0] if metadatas else []
-    dists = distances[0] if distances else []
-    return docs, metas, dists
 
 
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
@@ -72,7 +57,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"\n  Search error: {e}")
         raise SearchError(f"Search error: {e}") from e
 
-    docs, metas, dists = _extract_query_lists(results)
+    docs, metas, dists = extract_query_lists(results)
 
     if not docs:
         print(f'\n  No results found for: "{query}"')
@@ -144,7 +129,7 @@ def search_memories(
     except Exception as e:
         return {"error": f"Search error: {e}"}
 
-    docs, metas, dists = _extract_query_lists(results)
+    docs, metas, dists = extract_query_lists(results)
 
     hits = []
     for doc, meta, dist in zip(docs, metas, dists):

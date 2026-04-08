@@ -24,18 +24,7 @@ from collections import defaultdict
 import chromadb
 
 from .config import MempalaceConfig
-
-
-def _extract_query_lists(results: dict):
-    """Return (docs, metas, dists) from a Chroma query payload safely."""
-    documents = results.get("documents") or []
-    metadatas = results.get("metadatas") or []
-    distances = results.get("distances") or []
-
-    docs = documents[0] if documents else []
-    metas = metadatas[0] if metadatas else []
-    dists = distances[0] if distances else []
-    return docs, metas, dists
+from .utils import extract_query_lists
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +287,7 @@ class Layer3:
         except Exception as e:
             return f"Search error: {e}"
 
-        docs, metas, dists = _extract_query_lists(results)
+        docs, metas, dists = extract_query_lists(results)
 
         if not docs:
             return "No results found."
@@ -353,7 +342,7 @@ class Layer3:
             return []
 
         hits = []
-        docs, metas, dists = _extract_query_lists(results)
+        docs, metas, dists = extract_query_lists(results)
         for doc, meta, dist in zip(docs, metas, dists):
             hits.append(
                 {
