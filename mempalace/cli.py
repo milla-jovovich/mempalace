@@ -361,6 +361,71 @@ def cmd_compress(args):
         print("  (dry run -- nothing stored)")
 
 
+def cmd_delete_wing(args):
+    """Delete an entire wing."""
+    import chromadb
+
+    config = MempalaceConfig()
+    palace_path = os.path.expanduser(args.palace) if args.palace else config.palace_path
+
+    try:
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection(config.collection_name)
+
+        results = col.get(where={"wing": args.wing}, include=[])
+        count = len(results["ids"])
+
+        if count == 0:
+            print(f"Wing not found: {args.wing}")
+            return 1
+
+        if not args.force:
+            confirm = input(f"Delete wing '{args.wing}' with {count} drawers? [y/N] ")
+            if confirm.lower() != "y":
+                print("Aborted")
+                return 0
+
+        col.delete(where={"wing": args.wing})
+        print(f"Deleted wing '{args.wing}' ({count} drawers)")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
+def cmd_delete_room(args):
+    """Delete a room in a wing."""
+    import chromadb
+
+    config = MempalaceConfig()
+    palace_path = os.path.expanduser(args.palace) if args.palace else config.palace_path
+
+    try:
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection(config.collection_name)
+
+        where = {"$and": [{"wing": args.wing}, {"room": args.room}]}
+        results = col.get(where=where, include=[])
+        count = len(results["ids"])
+
+        if count == 0:
+            print(f"Room not found: {args.wing}/{args.room}")
+            return 1
+
+        if not args.force:
+            confirm = input(f"Delete room '{args.wing}/{args.room}' with {count} drawers? [y/N] ")
+            if confirm.lower() != "y":
+                print("Aborted")
+                return 0
+
+        col.delete(where=where)
+        print(f"Deleted room '{args.wing}/{args.room}' ({count} drawers)")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
@@ -503,6 +568,19 @@ def main():
     # status
     sub.add_parser("status", help="Show what's been filed")
 
+    # delete-wing
+    p_delete_wing = sub.add_parser("delete-wing", help="Delete an entire wing")
+    p_delete_wing.add_argument("wing", help="Wing name to delete")
+    p_delete_wing.add_argument("--force", action="store_true", help="Skip confirmation")
+    p_delete_wing.set_defaults(func=cmd_delete_wing)
+
+    # delete-room
+    p_delete_room = sub.add_parser("delete-room", help="Delete a room in a wing")
+    p_delete_room.add_argument("wing", help="Wing name")
+    p_delete_room.add_argument("room", help="Room name to delete")
+    p_delete_room.add_argument("--force", action="store_true", help="Skip confirmation")
+    p_delete_room.set_defaults(func=cmd_delete_room)
+
     args = parser.parse_args()
 
     if not args.command:
@@ -535,6 +613,8 @@ def main():
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
         "status": cmd_status,
+        "delete-wing": cmd_delete_wing,
+        "delete-room": cmd_delete_room,
     }
     dispatch[args.command](args)
 
