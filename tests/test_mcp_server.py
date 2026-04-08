@@ -403,3 +403,75 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+
+# ── Pagination tests (issue #171) ───────────────────────────────────────
+
+
+class TestTaxonomyPagination:
+    """
+    Verify that tool_list_wings / tool_list_rooms / tool_get_taxonomy
+    iterate through *all* pages instead of capping at the old limit=10000
+    single-shot fetch.
+
+    We force _TAXONOMY_BATCH=2 so the seeded 4-item collection exercises
+    the pagination loop with real ChromaDB calls (2 pages of 2 items each).
+    """
+
+    def test_list_wings_counts_all_pages(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        """Correct wing counts when items span multiple fetch batches."""
+        import mempalace.mcp_server as mcp_module
+
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        monkeypatch.setattr(mcp_module, "_TAXONOMY_BATCH", 2)
+
+        from mempalace.mcp_server import tool_list_wings
+
+        result = tool_list_wings()
+        # seeded_collection: 3x project, 1x notes (4 items over 2 pages)
+        assert result["wings"]["project"] == 3
+        assert result["wings"]["notes"] == 1
+
+    def test_get_taxonomy_counts_all_pages(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        """Correct taxonomy tree when items span multiple fetch batches."""
+        import mempalace.mcp_server as mcp_module
+
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        monkeypatch.setattr(mcp_module, "_TAXONOMY_BATCH", 2)
+
+        from mempalace.mcp_server import tool_get_taxonomy
+
+        result = tool_get_taxonomy()
+        assert result["taxonomy"]["project"]["backend"] == 2
+        assert result["taxonomy"]["project"]["frontend"] == 1
+        assert result["taxonomy"]["notes"]["planning"] == 1
+
+    def test_list_wings_graceful_on_none_metadatas(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        """
+        list_wings returns empty wings dict (not TypeError) when ChromaDB
+        returns None for the metadatas key -- observed with some ChromaDB
+        builds on palaces that have not yet been indexed.
+        """
+        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        import mempalace.mcp_server as mcp_module
+
+        class _FakeCol:
+            """Minimal collection stub whose .get() returns None metadatas."""
+
+            def get(self, **_kwargs):
+                return {"ids": [], "metadatas": None}
+
+        monkeypatch.setattr(mcp_module, "_get_collection", lambda create=False: _FakeCol())
+
+        from mempalace.mcp_server import tool_list_wings
+
+        result = tool_list_wings()
+        assert result == {"wings": {}}, (
+            "Expected empty wings dict, not a crash, when ChromaDB returns None metadatas"
+        )
