@@ -112,6 +112,186 @@ def cmd_search(args):
         sys.exit(1)
 
 
+def cmd_vocab(args):
+    """Manage the vocabulary map for query expansion."""
+    from .searcher import load_vocab_map, expand_query
+    from .config import MempalaceConfig
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    vocab_file = Path(palace_path) / "vocabulary_map.yaml"
+
+    if args.vocab_action == "show":
+        if not vocab_file.exists():
+            print("\n  No vocabulary map found.")
+            print(f"  Create one at: {vocab_file}")
+            print("  Or run: mempalace vocab build  (auto-generates a starter map)")
+            return
+        print(f"\n  Vocabulary map: {vocab_file}\n")
+        print(vocab_file.read_text(encoding="utf-8"))
+
+    elif args.vocab_action == "build":
+        _cmd_vocab_build(palace_path, vocab_file, args)
+
+    elif args.vocab_action == "test":
+        if not vocab_file.exists():
+            print("\n  No vocabulary map found. Run: mempalace vocab build")
+            sys.exit(1)
+        vocab_map = load_vocab_map(palace_path)
+        expanded = expand_query(args.query, vocab_map)
+        print(f"\n  Original:  {args.query}")
+        if expanded != args.query:
+            print(f"  Expanded:  {expanded}")
+        else:
+            print("  Expanded:  (no expansion — no matching concepts in vocabulary map)")
+
+
+def _cmd_vocab_build(palace_path: str, vocab_file: Path, args):
+    """
+    Auto-generate a starter vocabulary_map.yaml by identifying high-TF-IDF
+    terms — words that are distinctive to specific wings/rooms but rare across
+    the full corpus. These are the terms most likely to be missed by natural-
+    language queries.
+    """
+    import math
+    import re
+    import chromadb
+    from collections import Counter, defaultdict
+
+    try:
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection("mempalace_drawers")
+    except Exception:
+        print(f"\n  No palace found at {palace_path}")
+        print("  Run: mempalace init <dir> && mempalace mine <dir>")
+        sys.exit(1)
+
+    print("\n  Scanning palace for distinctive terms...")
+    all_data = col.get(include=["documents", "metadatas"], limit=50000)
+    docs = all_data["documents"]
+    metas = all_data["metadatas"]
+
+    if not docs:
+        print("  Palace is empty — nothing to build a vocabulary map from.")
+        sys.exit(1)
+
+    # Tokenise: keep runs of alphanumeric + hyphen, 3+ chars, not pure digits
+    _tok = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
+
+    def tokenise(text: str) -> list[str]:
+        return [
+            t
+            for t in _tok.findall(text)
+            if len(t) >= 3 and not t.isdigit() and not re.fullmatch(r"\d+[\d.]*", t)
+        ]
+
+    # Stopwords — common English words that are weak signals
+    STOPWORDS = {
+        "the", "and", "for", "with", "that", "this", "are", "was", "from",
+        "not", "but", "have", "has", "had", "been", "they", "their", "you",
+        "your", "our", "use", "used", "using", "will", "can", "all", "one",
+        "more", "when", "also", "into", "its", "any", "each", "some", "such",
+        "than", "then", "there", "these", "those", "which", "who", "what",
+        "how", "her", "him", "his", "she", "the", "via", "per", "etc",
+        "out", "new", "set", "get", "run", "add", "see", "may", "would",
+        "should", "could", "must", "about", "after", "before", "between",
+        "where", "both", "other", "over", "only", "same", "just",
+    }
+
+    # wing → Counter of term frequencies across wing documents
+    wing_tf: dict[str, Counter] = defaultdict(Counter)
+    doc_freq: Counter = Counter()  # how many documents contain term
+
+    for doc, meta in zip(docs, metas):
+        wing = meta.get("wing", "unknown")
+        tokens = tokenise(doc.lower())
+        unique = set(tokens)
+        wing_tf[wing].update(tokens)
+        doc_freq.update(unique)
+
+    total_docs = len(docs)
+    n_wings = len(wing_tf)
+
+    # Collect per-wing high-TF-IDF terms
+    # We want terms that: appear often in one wing, rarely across others
+    min_tf = getattr(args, "min_tf", 3)
+    top_n = getattr(args, "top_n", 8)
+
+    concepts_yaml_lines: list[str] = []
+    seen_terms: set[str] = set()
+
+    for wing, tf in sorted(wing_tf.items()):
+        candidates = []
+        for term, freq in tf.items():
+            if term in STOPWORDS:
+                continue
+            if freq < min_tf:
+                continue
+            if len(term) < 3:
+                continue
+            # IDF across documents
+            df = doc_freq.get(term, 1)
+            idf = math.log((total_docs + 1) / (df + 1))
+            score = freq * idf
+            candidates.append((score, term))
+
+        candidates.sort(reverse=True)
+        top_terms = []
+        for _score, term in candidates[:top_n * 3]:
+            if term not in seen_terms:
+                top_terms.append(term)
+                seen_terms.add(term)
+            if len(top_terms) >= top_n:
+                break
+
+        if not top_terms:
+            continue
+
+        concepts_yaml_lines.append(f"  - natural_language:")
+        concepts_yaml_lines.append(f'      - "{wing}"')
+        concepts_yaml_lines.append(f'      - "about {wing}"')
+        concepts_yaml_lines.append(f"    corpus_terms:")
+        for term in top_terms:
+            concepts_yaml_lines.append(f'      - "{term}"')
+
+    if not concepts_yaml_lines:
+        print("  Not enough data to build a vocabulary map (corpus too small or too uniform).")
+        sys.exit(1)
+
+    header = (
+        "# MemPalace vocabulary map — query expansion\n"
+        "#\n"
+        "# Maps natural language phrases to the exact terms that appear in your corpus.\n"
+        "# Edit freely: add concepts, rename phrases, add/remove corpus_terms.\n"
+        "# Run 'mempalace vocab build' again to regenerate (overwrites this file).\n"
+        "# Run 'mempalace vocab test \"your question\"' to preview expansion.\n"
+        "#\n"
+        "# Format:\n"
+        "#   concepts:\n"
+        "#     - natural_language:\n"
+        '#         - "phrase I might say"\n'
+        "#       corpus_terms:\n"
+        '#         - "ExactTermInCorpus"\n'
+        "#\n"
+        "concepts:\n"
+    )
+    content = header + "\n".join(concepts_yaml_lines) + "\n"
+
+    if vocab_file.exists() and not getattr(args, "force", False):
+        print(f"\n  Vocabulary map already exists: {vocab_file}")
+        print("  Use --force to overwrite.")
+        sys.exit(1)
+
+    vocab_file.write_text(content, encoding="utf-8")
+
+    n_concepts = len([l for l in concepts_yaml_lines if "natural_language:" in l])
+    print(f"\n  Built vocabulary map with {n_concepts} wing-level concepts.")
+    print(f"  Saved to: {vocab_file}")
+    print("\n  Next steps:")
+    print("    1. Edit the map to add your own natural-language phrases")
+    print('    2. Test: mempalace vocab test "your question here"')
+    print("    3. Searches now auto-expand against this map — no other setup needed")
+
+
 def cmd_wakeup(args):
     """Show L0 (identity) + L1 (essential story) — the wake-up context."""
     from .layers import MemoryStack
@@ -426,6 +606,38 @@ def main():
     p_search.add_argument("--room", default=None, help="Limit to one room")
     p_search.add_argument("--results", type=int, default=5, help="Number of results")
 
+    # vocab
+    p_vocab = sub.add_parser(
+        "vocab",
+        help="Manage vocabulary map for query expansion (improves search recall for proper nouns and jargon)",
+    )
+    vocab_sub = p_vocab.add_subparsers(dest="vocab_action")
+    vocab_sub.add_parser("show", help="Print the current vocabulary map")
+    p_vocab_build = vocab_sub.add_parser(
+        "build", help="Auto-generate a starter vocabulary map from the corpus (TF-IDF)"
+    )
+    p_vocab_build.add_argument(
+        "--force", action="store_true", help="Overwrite existing vocabulary_map.yaml"
+    )
+    p_vocab_build.add_argument(
+        "--min-tf",
+        type=int,
+        default=3,
+        dest="min_tf",
+        help="Minimum term frequency to include a term (default: 3)",
+    )
+    p_vocab_build.add_argument(
+        "--top-n",
+        type=int,
+        default=8,
+        dest="top_n",
+        help="Top N terms per wing to include (default: 8)",
+    )
+    p_vocab_test = vocab_sub.add_parser(
+        "test", help="Preview how a query would be expanded by the vocabulary map"
+    )
+    p_vocab_test.add_argument("query", help="Query to preview")
+
     # compress
     p_compress = sub.add_parser(
         "compress", help="Compress drawers using AAAK Dialect (~30x reduction)"
@@ -524,6 +736,13 @@ def main():
             return
         args.name = name
         cmd_instructions(args)
+        return
+
+    if args.command == "vocab":
+        if not getattr(args, "vocab_action", None):
+            p_vocab.print_help()
+            return
+        cmd_vocab(args)
         return
 
     dispatch = {

@@ -249,6 +249,73 @@ def tool_get_aaak_spec():
     return {"aaak_spec": AAAK_SPEC}
 
 
+def tool_vocab_map_read():
+    """
+    Read the vocabulary map (vocabulary_map.yaml) from the palace directory.
+    Returns the raw YAML text so you can review and edit concepts.
+    """
+    from .searcher import load_vocab_map
+
+    vocab_map = load_vocab_map(_config.palace_path)
+    if not vocab_map:
+        return {
+            "exists": False,
+            "hint": (
+                "No vocabulary map found. "
+                "Run: mempalace vocab build  — or ask me to create one."
+            ),
+        }
+    vocab_file = Path(_config.palace_path) / "vocabulary_map.yaml"
+    return {
+        "exists": True,
+        "path": str(vocab_file),
+        "concepts": vocab_map.get("concepts", []),
+        "raw_yaml": vocab_file.read_text(encoding="utf-8") if vocab_file.exists() else "",
+    }
+
+
+def tool_vocab_map_add_concept(natural_language: list, corpus_terms: list):
+    """
+    Add a new concept to the vocabulary map. Creates vocabulary_map.yaml if it
+    does not exist. Appends to existing concepts without touching the rest of the file.
+
+    natural_language: list of phrases the user might say (e.g. ["what camera", "camera choice"])
+    corpus_terms: list of exact corpus terms to expand the query with (e.g. ["Sony A7R V", "mirrorless"])
+    """
+    vocab_file = Path(_config.palace_path) / "vocabulary_map.yaml"
+    vocab_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if not vocab_file.exists():
+        header = (
+            "# MemPalace vocabulary map — query expansion\n"
+            "#\n"
+            "# Each concept maps natural language phrases to exact corpus terms.\n"
+            "# Run 'mempalace vocab test \"your question\"' to preview expansion.\n"
+            "#\n"
+            "concepts:\n"
+        )
+        vocab_file.write_text(header, encoding="utf-8")
+
+    lines = [
+        "  - natural_language:",
+    ]
+    for phrase in natural_language:
+        lines.append(f'      - "{phrase}"')
+    lines.append("    corpus_terms:")
+    for term in corpus_terms:
+        lines.append(f'      - "{term}"')
+    lines.append("")
+
+    with vocab_file.open("a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+    return {
+        "ok": True,
+        "path": str(vocab_file),
+        "added": {"natural_language": natural_language, "corpus_terms": corpus_terms},
+    }
+
+
 def tool_traverse_graph(start_room: str, max_hops: int = 2):
     """Walk the palace graph from a room. Find connected ideas across wings."""
     col = _get_collection()
@@ -612,6 +679,31 @@ TOOLS = {
         "description": "Palace graph overview: total rooms, tunnel connections, edges between wings.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_graph_stats,
+    },
+    "mempalace_vocab_map_read": {
+        "description": "Read the vocabulary map used for query expansion. Shows all concept mappings and the raw YAML so you can review or plan additions.",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_vocab_map_read,
+    },
+    "mempalace_vocab_map_add": {
+        "description": "Add a concept to the vocabulary map. Maps natural-language phrases to exact corpus terms, improving recall for proper nouns, product names, and jargon. Call this when a user mentions a term that is likely in the palace but not in natural queries.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "natural_language": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Phrases the user might say, e.g. [\"what camera\", \"camera recommendation\"]",
+                },
+                "corpus_terms": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Exact terms that appear in the corpus, e.g. [\"Sony A7R V\", \"mirrorless\", \"61MP\"]",
+                },
+            },
+            "required": ["natural_language", "corpus_terms"],
+        },
+        "handler": tool_vocab_map_add_concept,
     },
     "mempalace_search": {
         "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
