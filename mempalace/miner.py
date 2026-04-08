@@ -15,7 +15,8 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import fcntl
+if sys.platform != "win32":
+    import fcntl
 import signal
 
 import chromadb
@@ -614,7 +615,7 @@ def mine(
         print("\n\n  Interrupted — finishing current file then stopping cleanly...")
         interrupted = True
 
-    signal.signal(signal.SIGINT, _handle_interrupt)
+    old_handler = signal.signal(signal.SIGINT, _handle_interrupt)
 
     project_path = Path(project_dir).expanduser().resolve()
     config = load_config(project_dir)
@@ -692,6 +693,7 @@ def mine(
         print('\n  Next: mempalace search "what you\'re looking for"')
         print(f"{'=' * 55}\n")
     finally:
+        signal.signal(signal.SIGINT, old_handler)
         if lock is not None:
             _release_palace_lock(lock)
 
