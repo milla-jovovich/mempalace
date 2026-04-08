@@ -171,21 +171,7 @@ install_with_pip() {
 }
 
 run_mempalace() {
-    case "$RUNNER_KIND" in
-        uv)
-            "$RESOLVED_PYTHON" -m mempalace "$@"
-            ;;
-        pipx)
-            "$RESOLVED_PYTHON" -m mempalace "$@"
-            ;;
-        pip)
-            "$RESOLVED_PYTHON" -m mempalace "$@"
-            ;;
-        *)
-            error "Unknown runner kind: $RUNNER_KIND"
-            exit 1
-            ;;
-    esac
+    "$RESOLVED_PYTHON" -m mempalace "$@"
 }
 
 update_opencode_config() {
@@ -198,7 +184,7 @@ update_opencode_config() {
     success "Created backup: $BACKUP_FILE"
 
     # Merge only the mempalace MCP entry so existing keys stay intact.
-    python3 - <<'PY' "$CONFIG_FILE" "$RESOLVED_PYTHON"
+    "$DETECTED_PYTHON" - <<'PY' "$CONFIG_FILE" "$RESOLVED_PYTHON"
 import json
 import sys
 from pathlib import Path

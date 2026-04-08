@@ -56,7 +56,7 @@ Edit `~/.config/opencode/opencode.json`:
   "mcp": {
     "mempalace": {
       "type": "local",
-      "command": ["$(uv tool dir)/mempalace/bin/python", "-m", "mempalace.mcp_server"],
+      "command": ["<UV_TOOL_DIR>/mempalace/bin/python", "-m", "mempalace.mcp_server"],
       "environment": { "PYTHONUNBUFFERED": "1" },
       "enabled": true,
       "timeout": 10000
@@ -95,8 +95,8 @@ Add a memory section to your project's `AGENTS.md` so agents know when and how t
 ## Memory (MemPalace)
 
 - Search before starting: `mempalace_search` for related past work, decisions, patterns
-- Save after significant work: `mempalace_save_memory` with context and key findings
-- Tag memories with project name and date for retrieval
+- Save after significant work: `mempalace_add_drawer` with wing, room, and verbatim content
+- Query entity relationships: `mempalace_kg_query` for linked concepts and decisions
 ```
 
 ## 6. Verify
@@ -119,7 +119,7 @@ ls $(uv tool dir)/mempalace/bin/python
 Once connected, OpenCode agents automatically have access to 19 MemPalace tools. Example queries that trigger memory lookups:
 
 - *"What decisions did we make about the auth module?"* → `mempalace_search`
-- *"Save what we decided about the API structure"* → `mempalace_save_memory`
+- *"Save what we decided about the API structure"* → `mempalace_add_drawer`
 - *"What patterns have we used for error handling?"* → `mempalace_search`
 
 Agents using oh-my-openagent will call these tools proactively based on skill instructions — no explicit prompting required.
