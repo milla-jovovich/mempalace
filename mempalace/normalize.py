@@ -8,6 +8,7 @@ Supported:
     - ChatGPT conversations.json
     - Claude Code JSONL
     - OpenAI Codex CLI JSONL
+    - Gemini CLI JSON sessions
     - Slack JSON export
     - Plain text (pass through for paragraph chunking)
 
@@ -65,7 +66,7 @@ def _try_normalize_json(content: str) -> Optional[str]:
     except json.JSONDecodeError:
         return None
 
-    for parser in (_try_claude_ai_json, _try_chatgpt_json, _try_slack_json):
+    for parser in (_try_claude_ai_json, _try_chatgpt_json, _try_gemini_json, _try_slack_json):
         normalized = parser(data)
         if normalized:
             return normalized
@@ -227,6 +228,72 @@ def _try_chatgpt_json(data) -> Optional[str]:
             children = node.get("children", [])
             current_id = children[0] if children else None
     if len(messages) >= 2:
+        return _messages_to_transcript(messages)
+    return None
+
+
+def _try_gemini_json(data) -> Optional[str]:
+    """Gemini CLI / Google AI Studio JSON sessions.
+
+    Handles two layouts:
+
+    1. **Gemini API contents format** — used by Gemini CLI session files
+       (``~/.gemini/sessions/*.json``):
+       ``{"contents": [{"role": "user", "parts": [{"text": "..."}]}, ...]}``
+
+    2. **Flat messages list** — simplified export:
+       ``[{"role": "user", "content": "..."}, {"role": "model", "content": "..."}]``
+       or wrapped in ``{"messages": [...]}``.
+
+    Gemini uses "model" as the assistant role (not "assistant").
+    """
+    contents = None
+
+    # Layout 1: {"contents": [...]}
+    if isinstance(data, dict) and "contents" in data:
+        contents = data["contents"]
+    # Layout 2a: {"messages": [...]}
+    elif isinstance(data, dict) and "messages" in data:
+        contents = data["messages"]
+    # Layout 2b: top-level list
+    elif isinstance(data, list):
+        contents = data
+
+    if not isinstance(contents, list) or len(contents) < 2:
+        return None
+
+    messages = []
+    has_model_role = False
+    for item in contents:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role", "")
+
+        # Extract text — try "parts" first (Gemini API), then "content" (flat)
+        text = ""
+        parts = item.get("parts")
+        if isinstance(parts, list):
+            text_parts = []
+            for p in parts:
+                if isinstance(p, str):
+                    text_parts.append(p)
+                elif isinstance(p, dict) and "text" in p:
+                    text_parts.append(p["text"])
+            text = " ".join(text_parts).strip()
+        elif not text:
+            text = _extract_content(item.get("content", ""))
+
+        if not text:
+            continue
+
+        if role == "user":
+            messages.append(("user", text))
+        elif role == "model":
+            has_model_role = True
+            messages.append(("assistant", text))
+
+    # Require at least one "model" role to distinguish from other formats
+    if len(messages) >= 2 and has_model_role:
         return _messages_to_transcript(messages)
     return None
 
