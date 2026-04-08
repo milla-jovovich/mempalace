@@ -7,6 +7,10 @@ Returns verbatim text — the actual words, never summaries.
 """
 
 import logging
+import os
+import re
+import subprocess
+import tempfile
 from pathlib import Path
 
 import chromadb
@@ -16,6 +20,66 @@ logger = logging.getLogger("mempalace_mcp")
 
 class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
+
+
+def _verify_with_tardygrada(hits: list) -> dict:
+    """
+    Run tardygrada verify-doc on search results to detect contradictions.
+    Returns {"contradictions": [...]} or {"contradictions": None, "verify_warning": "..."}.
+    """
+    if not hits:
+        return {"contradictions": []}
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", delete=False, prefix="mempalace_verify_"
+    ) as f:
+        for i, hit in enumerate(hits, 1):
+            f.write(f"## [{i}] {hit['wing']} / {hit['room']} (similarity: {hit['similarity']})\n")
+            f.write(hit["text"].strip() + "\n\n")
+        tmp_path = f.name
+
+    try:
+        result = subprocess.run(
+            ["tardygrada", "verify-doc", tmp_path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return {"contradictions": _parse_conflicts(result.stdout)}
+    except FileNotFoundError:
+        return {
+            "contradictions": None,
+            "verify_warning": "tardygrada binary not found on PATH — install from https://github.com/fabio-rovai/tardygrada",
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "contradictions": None,
+            "verify_warning": "tardygrada verify-doc timeout after 10s",
+        }
+    finally:
+        os.unlink(tmp_path)
+
+
+def _parse_conflicts(stdout: str) -> list:
+    """Parse tardygrada verify-doc output into structured conflict objects."""
+    conflicts = []
+    pattern = re.compile(
+        r'\[CONFLICT\] Lines? (\d+) vs (\d+):\s*\n'
+        r'\s*"([^"]+)"\s*\n'
+        r'\s*"([^"]+)"\s*\n'
+        r'\s*-> [^\n]+\n'
+        r'\s*Confidence: ([\d.]+)',
+        re.MULTILINE,
+    )
+    for match in pattern.finditer(stdout):
+        conflicts.append({
+            "line_a": int(match.group(1)),
+            "line_b": int(match.group(2)),
+            "claim_a": match.group(3),
+            "claim_b": match.group(4),
+            "confidence": float(match.group(5)),
+        })
+    return conflicts
 
 
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
@@ -91,7 +155,8 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5,
+    verify: bool = False,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
@@ -145,8 +210,13 @@ def search_memories(
             }
         )
 
-    return {
+    response = {
         "query": query,
         "filters": {"wing": wing, "room": room},
         "results": hits,
     }
+
+    if verify:
+        response.update(_verify_with_tardygrada(hits))
+
+    return response
