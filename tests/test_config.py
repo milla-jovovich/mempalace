@@ -30,3 +30,20 @@ def test_init():
     cfg = MempalaceConfig(config_dir=tmpdir)
     cfg.init()
     assert os.path.exists(os.path.join(tmpdir, "config.json"))
+
+
+def test_config_path_expands_user_home():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"palace_path": "~/.mempalace/custom"}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    expected = os.path.expanduser("~/.mempalace/custom")
+    assert cfg.palace_path == expected
+
+
+def test_env_path_expands_user_home():
+    os.environ["MEMPALACE_PALACE_PATH"] = "~/.mempalace/env_custom"
+    cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+    expected = os.path.expanduser("~/.mempalace/env_custom")
+    assert cfg.palace_path == expected
+    del os.environ["MEMPALACE_PALACE_PATH"]
