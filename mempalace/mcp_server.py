@@ -170,13 +170,14 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None, verify: bool = False):
     return search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
+        verify=verify,
     )
 
 
@@ -586,7 +587,7 @@ TOOLS = {
         "handler": tool_graph_stats,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
+        "description": "Semantic search. Returns verbatim drawer content with similarity scores. Set verify=true to check results for contradictions using Tardygrada (requires tardygrada binary on PATH).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -594,6 +595,10 @@ TOOLS = {
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "verify": {
+                    "type": "boolean",
+                    "description": "Run tardygrada verify-doc on results to detect contradictions (default: false, requires tardygrada binary)",
+                },
             },
             "required": ["query"],
         },
