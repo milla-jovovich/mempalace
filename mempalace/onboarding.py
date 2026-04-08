@@ -13,7 +13,7 @@ from minute one — before a single session is indexed.
 
 Usage:
     python3 -m mempalace.onboarding
-    or: mempalace init
+    or: mempalace init [dir]
 """
 
 from pathlib import Path

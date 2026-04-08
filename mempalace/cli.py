@@ -9,7 +9,7 @@ Two ways to ingest:
 Same palace. Same search. Different ingest strategies.
 
 Commands:
-    mempalace init <dir>                  Detect rooms from folder structure
+    mempalace init [dir]                  Detect rooms from folder structure
     mempalace split <dir>                 Split concatenated mega-files into per-session files
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
@@ -347,7 +347,7 @@ def cmd_compress(args):
         print("  (dry run -- nothing stored)")
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -363,7 +363,12 @@ def main():
 
     # init
     p_init = sub.add_parser("init", help="Detect rooms from your folder structure")
-    p_init.add_argument("dir", help="Project directory to set up")
+    p_init.add_argument(
+        "dir",
+        nargs="?",
+        default=".",
+        help="Project directory to set up (default: current directory)",
+    )
     p_init.add_argument(
         "--yes", action="store_true", help="Auto-accept all detected entities (non-interactive)"
     )
@@ -460,7 +465,12 @@ def main():
     # status
     sub.add_parser("status", help="Show what's been filed")
 
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
     if not args.command:
         parser.print_help()
