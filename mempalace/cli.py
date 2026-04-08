@@ -32,6 +32,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from . import palace_db
 
 
 def cmd_init(args):
@@ -158,7 +159,6 @@ def cmd_status(args):
 def cmd_repair(args):
     """Rebuild palace vector index from SQLite metadata."""
     import shutil
-    from . import palace_db
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
@@ -242,7 +242,6 @@ def cmd_instructions(args):
 
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
-    from . import palace_db
     from .dialect import Dialect
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
