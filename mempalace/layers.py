@@ -286,12 +286,12 @@ class Layer3:
         except Exception as e:
             return f"Search error: {e}"
 
+        if not results["documents"] or not results["documents"][0]:
+            return "No results found."
+
         docs = results["documents"][0]
         metas = results["metadatas"][0]
         dists = results["distances"][0]
-
-        if not docs:
-            return "No results found."
 
         lines = [f'## L3 — SEARCH RESULTS for "{query}"']
         for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
