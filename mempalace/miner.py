@@ -399,7 +399,9 @@ def get_collection(palace_path: str):
     try:
         return client.get_collection("mempalace_drawers")
     except Exception:
-        return client.create_collection("mempalace_drawers")
+        # metadata key is deprecated in chromadb >=0.6; migrate to
+        # configuration={"hnsw": {"space": "cosine"}} once min version is bumped.
+        return client.create_collection("mempalace_drawers", metadata={"hnsw:space": "cosine"})
 
 
 def file_already_mined(collection, source_file: str) -> bool:

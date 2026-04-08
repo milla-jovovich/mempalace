@@ -44,7 +44,7 @@ def _get_collection(create=False):
     try:
         client = chromadb.PersistentClient(path=_config.palace_path)
         if create:
-            return client.get_or_create_collection(_config.collection_name)
+            return client.get_or_create_collection(_config.collection_name, metadata={"hnsw:space": "cosine"})
         return client.get_collection(_config.collection_name)
     except Exception:
         return None

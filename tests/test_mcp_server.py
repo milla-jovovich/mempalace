@@ -26,7 +26,7 @@ def _get_collection(palace_path, create=False):
 
     client = chromadb.PersistentClient(path=palace_path)
     if create:
-        return client.get_or_create_collection("mempalace_drawers")
+        return client.get_or_create_collection("mempalace_drawers", metadata={"hnsw:space": "cosine"})
     return client.get_collection("mempalace_drawers")
 
 
