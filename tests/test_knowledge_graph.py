@@ -63,6 +63,13 @@ class TestQueries:
         assert "outgoing" in directions
         assert "incoming" in directions
 
+    def test_query_default_direction_returns_both(self, seeded_kg):
+        """Default direction should be 'both', matching the MCP wrapper."""
+        results = seeded_kg.query_entity("Max")
+        directions = {r["direction"] for r in results}
+        assert "outgoing" in directions, "Default should include outgoing results"
+        assert "incoming" in directions, "Default should include incoming results"
+
     def test_query_as_of_filters_expired(self, seeded_kg):
         results = seeded_kg.query_entity("Alice", as_of="2023-06-01", direction="outgoing")
         employers = [r["object"] for r in results if r["predicate"] == "works_at"]

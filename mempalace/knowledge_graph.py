@@ -185,7 +185,7 @@ class KnowledgeGraph:
 
     # ── Query operations ──────────────────────────────────────────────────
 
-    def query_entity(self, name: str, as_of: str = None, direction: str = "outgoing"):
+    def query_entity(self, name: str, as_of: str = None, direction: str = "both"):
         """
         Get all relationships for an entity.
 
