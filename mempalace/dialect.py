@@ -549,7 +549,8 @@ class Dialect:
                 for ent in entities:
                     name = ent.get("text", "")
                     if name and len(name) >= 2:
-                        code = name[:3].upper()
+                        # Use known entity code if available, else auto-generate
+                        code = self.entity_codes.get(name, name[:3].upper())
                         if code not in found:
                             found.append(code)
                     if len(found) >= 3:

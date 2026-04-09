@@ -10,26 +10,46 @@ from mempalace.nlp_config import (
     installed_providers,
 )
 
+_NLP_ENV_VARS = [
+    "MEMPALACE_NLP_BACKEND",
+    "MEMPALACE_NLP_SENTENCES",
+    "MEMPALACE_NLP_NEGATION",
+    "MEMPALACE_NLP_NER",
+    "MEMPALACE_NLP_COREF",
+    "MEMPALACE_NLP_TRIPLES",
+    "MEMPALACE_NLP_CLASSIFY",
+    "MEMPALACE_NLP_SLM",
+]
+
+
+def _clear_nlp_env(monkeypatch):
+    """Remove all MEMPALACE_NLP_* env vars so tests see default behaviour."""
+    for var in _NLP_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
 
 # -- Default behavior --
 
 
-def test_default_is_legacy():
+def test_default_is_legacy(monkeypatch):
     """Default config should be legacy with all capabilities OFF."""
+    _clear_nlp_env(monkeypatch)
     config = NLPConfig.resolve()
     assert config.backend == "legacy"
     assert config.source == "default"
 
 
-def test_default_all_capabilities_off():
+def test_default_all_capabilities_off(monkeypatch):
     """All capabilities should be OFF by default."""
+    _clear_nlp_env(monkeypatch)
     config = NLPConfig.resolve()
     for cap in ALL_CAPABILITIES:
         assert config.has(cap) is False
 
 
-def test_default_any_active_false():
+def test_default_any_active_false(monkeypatch):
     """any_active() should be False when everything is off."""
+    _clear_nlp_env(monkeypatch)
     config = NLPConfig.resolve()
     assert config.any_active() is False
 
@@ -86,15 +106,17 @@ def test_per_feature_env_overrides_backend(monkeypatch):
 # -- YAML config --
 
 
-def test_yaml_config_backend():
+def test_yaml_config_backend(monkeypatch):
     """yaml config should set backend when no env/CLI override."""
+    _clear_nlp_env(monkeypatch)
     config = NLPConfig.resolve(yaml_config={"nlp_backend": "pysbd"})
     assert config.backend == "pysbd"
     assert config.source == "yaml"
 
 
-def test_yaml_fine_grained_override():
+def test_yaml_fine_grained_override(monkeypatch):
     """yaml nlp section can override individual capabilities."""
+    _clear_nlp_env(monkeypatch)
     config = NLPConfig.resolve(
         yaml_config={
             "nlp_backend": "pysbd",
@@ -109,8 +131,9 @@ def test_yaml_fine_grained_override():
 # -- CLI backend flag --
 
 
-def test_cli_backend_flag():
+def test_cli_backend_flag(monkeypatch):
     """CLI backend should take priority over yaml."""
+    _clear_nlp_env(monkeypatch)
     config = NLPConfig.resolve(
         cli_backend="legacy",
         yaml_config={"nlp_backend": "spacy"},
@@ -122,8 +145,9 @@ def test_cli_backend_flag():
 # -- Invalid backend --
 
 
-def test_invalid_backend_falls_to_legacy():
+def test_invalid_backend_falls_to_legacy(monkeypatch):
     """Invalid backend names should fall back to legacy."""
+    _clear_nlp_env(monkeypatch)
     config = NLPConfig.resolve(cli_backend="nonexistent")
     assert config.backend == "legacy"
     assert config.source == "default"
