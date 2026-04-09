@@ -13,6 +13,8 @@ from .backends import chroma as _chroma_backend
 from .palace import get_collection
 
 logger = logging.getLogger("mempalace_mcp")
+# Keep this module-level alias so existing tests can still patch
+# `mempalace.searcher.chromadb.PersistentClient` unchanged.
 chromadb = _chroma_backend.chromadb
 
 
