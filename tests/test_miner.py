@@ -227,6 +227,47 @@ def test_scan_project_skip_dirs_still_apply_without_override():
         shutil.rmtree(tmpdir)
 
 
+def test_scan_project_respects_mpignore():
+    """`.mpignore` works like `.gitignore` but is always active."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".mpignore", "data/results/\n*.csv\n")
+        write_file(project_root / "src" / "app.py", "print('hello')\n" * 20)
+        write_file(project_root / "data" / "results" / "big.json", '{"a": 1}\n' * 20)
+        write_file(project_root / "data" / "summary.csv", "a,b\n1,2\n" * 20)
+        write_file(project_root / "data" / "readme.md", "# Data\n" * 20)
+
+        result = scanned_files(project_root)
+        assert "src/app.py" in result
+        assert "data/readme.md" in result
+        assert "data/results/big.json" not in result
+        assert "data/summary.csv" not in result
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_mpignore_active_even_with_no_gitignore():
+    """`.mpignore` is respected even when `respect_gitignore=False`."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".gitignore", "ignored.py\n")
+        write_file(project_root / ".mpignore", "heavy_data.json\n")
+        write_file(project_root / "app.py", "print('ok')\n" * 20)
+        write_file(project_root / "ignored.py", "print('git-ignored')\n" * 20)
+        write_file(project_root / "heavy_data.json", '{"x": 1}\n' * 20)
+
+        result = scanned_files(project_root, respect_gitignore=False)
+        assert "app.py" in result
+        assert "ignored.py" in result, ".gitignore should be bypassed"
+        assert "heavy_data.json" not in result, ".mpignore should still apply"
+    finally:
+        shutil.rmtree(tmpdir)
+
+
 def test_detect_room_exact_match_no_substring():
     """Short folder names must not match room names via substring.
 
