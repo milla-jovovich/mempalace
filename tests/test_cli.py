@@ -401,6 +401,18 @@ def test_main_mcp_serve_palace_after_subcommand():
         assert args.palace == "/custom/palace"
 
 
+def test_main_mcp_serve_palace_before_subcommand():
+    """mempalace --palace /path mcp-serve must also forward --palace."""
+    with (
+        patch("sys.argv", ["mempalace", "--palace", "/global/palace", "mcp-serve"]),
+        patch("mempalace.cli.cmd_mcp_serve") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+        args = mock_cmd.call_args[0][0]
+        assert args.palace == "/global/palace"
+
+
 # ── cmd_repair ─────────────────────────────────────────────────────────
 
 

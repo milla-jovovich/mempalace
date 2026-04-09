@@ -510,7 +510,7 @@ def main():
     )
     p_mcp_serve.add_argument(
         "--palace",
-        default=None,
+        default=argparse.SUPPRESS,
         dest="palace",
         help="Where the palace lives (overrides config file and env var)",
     )
