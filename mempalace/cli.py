@@ -166,6 +166,7 @@ def cmd_repair(args):
     (which bypasses HNSW), writes to a brand-new palace at a temporary path,
     then swaps directories. The original palace is preserved as a backup.
     """
+    import gc
     import chromadb
     import shutil
 
@@ -173,7 +174,7 @@ def cmd_repair(args):
 
     if not os.path.isdir(palace_path):
         print(f"\n  No palace found at {palace_path}")
-        return
+        sys.exit(1)
 
     print(f"\n{'=' * 55}")
     print("  MemPalace Repair")
@@ -187,10 +188,14 @@ def cmd_repair(args):
         col = client.get_collection("mempalace_drawers")
         total = col.count()
         print(f"  Drawers found: {total}")
+    except PermissionError as e:
+        print(f"  Permission denied: {e}")
+        print(f"  Try: chmod -R u+rw '{palace_path}'")
+        sys.exit(1)
     except Exception as e:
         print(f"  Error reading palace: {e}")
         print("  Cannot recover — palace may need to be re-mined from source files.")
-        return
+        sys.exit(1)
 
     if total == 0:
         print("  Nothing to repair.")
@@ -209,17 +214,34 @@ def cmd_repair(args):
         if got == 0:
             print(f"  WARNING: empty batch at offset {offset}, stopping early")
             break
+
+        batch_docs = batch.get("documents")
+        batch_metas = batch.get("metadatas")
+        if batch_docs is None or batch_metas is None:
+            print(f"  ERROR: get() returned None for documents or metadatas at offset {offset}")
+            print("  Stopping extraction — some drawers may have corrupted metadata.")
+            break
+
         all_ids.extend(batch["ids"])
-        all_docs.extend(batch["documents"])
-        all_metas.extend(batch["metadatas"])
+        all_docs.extend(batch_docs)
+        all_metas.extend(batch_metas)
         offset += got
         if offset % 5000 == 0 or offset >= total:
             print(f"  Read {offset}/{total}")
     print(f"  Extracted {len(all_ids)} drawers")
 
+    if len(all_ids) < total:
+        print(f"\n  WARNING: extracted {len(all_ids)} of {total} reported drawers")
+        print("  Some drawers could not be read (possible corruption).")
+        if len(all_ids) == 0:
+            print("  Cannot rebuild an empty palace. Original is untouched.")
+            sys.exit(1)
+        print(f"  Proceeding with partial rebuild ({len(all_ids)} drawers)...")
+
     # Release the old client before creating the new palace
     del col
     del client
+    gc.collect()
 
     # Build a fresh palace at a temporary path — never touch the original
     palace_path = palace_path.rstrip(os.sep)
@@ -233,23 +255,29 @@ def cmd_repair(args):
 
     write_batch = 100
     filed = 0
-    for i in range(0, len(all_ids), write_batch):
-        end = min(i + write_batch, len(all_ids))
-        new_col.add(
-            documents=all_docs[i:end],
-            ids=all_ids[i:end],
-            metadatas=all_metas[i:end],
-        )
-        filed += end - i
-        if filed % 2000 == 0 or filed >= len(all_ids):
-            print(f"  Written {filed}/{len(all_ids)}")
+    try:
+        for i in range(0, len(all_ids), write_batch):
+            end = min(i + write_batch, len(all_ids))
+            new_col.add(
+                documents=all_docs[i:end],
+                ids=all_ids[i:end],
+                metadatas=all_metas[i:end],
+            )
+            filed += end - i
+            if filed % 2000 == 0 or filed >= len(all_ids):
+                print(f"  Written {filed}/{len(all_ids)}")
+    except Exception as e:
+        print(f"\n  ERROR writing to rebuilt palace: {e}")
+        print(f"  Original palace is untouched at {palace_path}")
+        print(f"  Partial rebuild at {rebuild_path} can be deleted.")
+        sys.exit(1)
 
     # Verify the rebuild
     rebuilt_count = new_col.count()
     if rebuilt_count != len(all_ids):
         print(f"\n  WARNING: rebuilt {rebuilt_count} but expected {len(all_ids)}")
         print(f"  Rebuild kept at {rebuild_path} — original untouched.")
-        return
+        sys.exit(1)
 
     del new_col
     del new_client
