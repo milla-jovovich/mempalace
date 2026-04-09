@@ -81,6 +81,17 @@ def cmd_mine(args):
             dry_run=args.dry_run,
             extract_mode=args.extract,
         )
+    elif args.mode == "cursor":
+        from .cursor_miner import mine_cursor
+
+        mine_cursor(
+            cursor_dir=args.dir,
+            palace_path=palace_path,
+            wing=args.wing or "cursor_chats",
+            agent=args.agent,
+            limit=args.limit,
+            dry_run=args.dry_run,
+        )
     else:
         from .miner import mine
 
@@ -443,9 +454,9 @@ def main():
     p_mine.add_argument("dir", help="Directory to mine")
     p_mine.add_argument(
         "--mode",
-        choices=["projects", "convos"],
+        choices=["projects", "convos", "cursor"],
         default="projects",
-        help="Ingest mode: 'projects' for code/docs (default), 'convos' for chat exports",
+        help="Ingest mode: 'projects' for code/docs (default), 'convos' for chat exports, 'cursor' for Cursor AI chats (~/.cursor/chats)",
     )
     p_mine.add_argument("--wing", default=None, help="Wing name (default: directory name)")
     p_mine.add_argument(
