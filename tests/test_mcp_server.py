@@ -103,6 +103,23 @@ class TestHandleRequest:
         assert "mempalace_add_drawer" in names
         assert "mempalace_kg_add" in names
 
+    def test_null_arguments_does_not_hang(self, monkeypatch, config, palace_path, seeded_kg):
+        """Sending arguments: null should return a result, not hang (#394)."""
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import handle_request
+
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 10,
+                "params": {"name": "mempalace_status", "arguments": None},
+            }
+        )
+        assert "error" not in resp
+        assert resp["result"] is not None
+
     def test_unknown_tool(self):
         from mempalace.mcp_server import handle_request
 

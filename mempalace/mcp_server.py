@@ -881,7 +881,7 @@ def handle_request(request):
         }
     elif method == "tools/call":
         tool_name = params.get("name")
-        tool_args = params.get("arguments", {})
+        tool_args = params.get("arguments") or {}
         if tool_name not in TOOLS:
             return {
                 "jsonrpc": "2.0",

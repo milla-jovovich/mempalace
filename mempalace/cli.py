@@ -202,6 +202,7 @@ def cmd_repair(args):
     print(f"  Extracted {len(all_ids)} drawers")
 
     # Backup and rebuild
+    palace_path = palace_path.rstrip(os.sep)
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
         shutil.rmtree(backup_path)
