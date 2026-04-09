@@ -367,7 +367,7 @@ def tool_add_drawer(
         pass
 
     try:
-        _add_drawer(
+        actual_id = _add_drawer(
             collection=col,
             wing=wing,
             room=room,
@@ -376,8 +376,8 @@ def tool_add_drawer(
             chunk_index=0,
             agent=added_by,
         )
-        logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
-        return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
+        logger.info(f"Filed drawer: {actual_id} → {wing}/{room}")
+        return {"success": True, "drawer_id": actual_id, "wing": wing, "room": room}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

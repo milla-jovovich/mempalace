@@ -404,7 +404,7 @@ def add_drawer(
             ids=[drawer_id],
             metadatas=[meta],
         )
-        return True
+        return drawer_id
     except Exception:
         raise
 

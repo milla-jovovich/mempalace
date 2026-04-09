@@ -460,35 +460,41 @@ def cmd_sync(args):
             wing = info["wing"]
             is_convo = info.get("ingest_mode") == "convos"
 
-            # 1. Delete old drawers for this file
-            for i in range(0, len(ids), 100):
-                col.delete(ids=ids[i:i + 100])
-            deleted += len(ids)
+            try:
 
-            # 2. Re-mine the file immediately
-            filepath = Path(sf)
-            if is_convo:
-                mine_convos(
-                    convo_dir=str(filepath.parent),
-                    palace_path=palace_path,
-                    wing=wing,
-                    agent=args.agent,
-                    filepath_filter=filepath,
-                )
-            else:
-                config = load_config(str(filepath.parent))
-                rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
-                process_file(
-                    filepath=filepath,
-                    project_path=filepath.parent,
-                    collection=col,
-                    wing=wing,
-                    rooms=rooms,
-                    agent=args.agent,
-                    dry_run=False,
-                )
-            re_mined += 1
-            print(f"    {filepath.name} — re-mined ({len(ids)} old drawers replaced)")
+                # 1. Delete old drawers for this file
+                for i in range(0, len(ids), 100):
+                    col.delete(ids=ids[i:i + 100])
+                deleted += len(ids)
+
+                # 2. Re-mine the file immediately
+                filepath = Path(sf)
+                if is_convo:
+                    mine_convos(
+                        convo_dir=str(filepath.parent),
+                        palace_path=palace_path,
+                        wing=wing,
+                        agent=args.agent,
+                        filepath_filter=filepath,
+                    )
+                else:
+                    config = load_config(str(filepath.parent))
+                    rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
+                    process_file(
+                        filepath=filepath,
+                        project_path=filepath.parent,
+                        collection=col,
+                        wing=wing,
+                        rooms=rooms,
+                        agent=args.agent,
+                        dry_run=False,
+                    )
+                re_mined += 1
+                print(f"    {filepath.name} — re-mined ({len(ids)} old drawers replaced)")
+            except SystemExit:
+                print(f"    WARNING: {Path(sf).name} — config not found, drawers deleted but re-mine skipped")
+            except Exception as exc:
+                print(f"    ERROR: {Path(sf).name} — {exc} (drawers may be missing for this file)")
 
     # Delete drawers for missing files (if --clean flag)
     if missing and args.clean:
