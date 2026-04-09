@@ -471,6 +471,30 @@ def tool_kg_stats():
     return _kg.stats()
 
 
+def tool_export(output_file: str):
+    """Export palace data to a portable JSON file."""
+    from mempalace.exporter import export_palace
+
+    result = export_palace(
+        palace_path=_config.palace_path,
+        output_file=output_file,
+        kg=_kg,
+    )
+    return result.to_dict()
+
+
+def tool_import(input_file: str):
+    """Import palace data from a JSON export file."""
+    from mempalace.exporter import import_palace
+
+    result = import_palace(
+        input_file=input_file,
+        palace_path=_config.palace_path,
+        kg=_kg,
+    )
+    return result.to_dict()
+
+
 # ==================== AGENT DIARY ====================
 
 
@@ -698,6 +722,34 @@ TOOLS = {
         "description": "Knowledge graph overview: entities, triples, current vs expired facts, relationship types.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_kg_stats,
+    },
+    "mempalace_export": {
+        "description": "Export all palace data (drawers + knowledge graph) to a portable JSON file for backup or migration.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "output_file": {
+                    "type": "string",
+                    "description": "Path for the output JSON file (e.g. 'palace_backup.json')",
+                },
+            },
+            "required": ["output_file"],
+        },
+        "handler": tool_export,
+    },
+    "mempalace_import": {
+        "description": "Import palace data from a JSON export file. Skips existing drawers to avoid duplicates.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "input_file": {
+                    "type": "string",
+                    "description": "Path to the JSON export file to import",
+                },
+            },
+            "required": ["input_file"],
+        },
+        "handler": tool_import,
     },
     "mempalace_traverse": {
         "description": "Walk the palace graph from a room. Shows connected ideas across wings — the tunnels. Like following a thread through the palace: start at 'chromadb-setup' in wing_code, discover it connects to wing_myproject (planning) and wing_user (feelings about it).",

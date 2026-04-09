@@ -264,6 +264,68 @@ def cmd_mcp(args):
         print(f"  {base_server_cmd} --palace /path/to/palace")
 
 
+def cmd_export(args):
+    """Export palace data to a portable JSON file."""
+    from .exporter import export_palace
+    from .knowledge_graph import KnowledgeGraph
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    output_file = args.output
+
+    kg_path = os.path.join(palace_path, "knowledge_graph.sqlite3")
+    kg = KnowledgeGraph(db_path=kg_path) if os.path.exists(kg_path) else None
+
+    print(f"\n{'=' * 55}")
+    print("  Palace Export")
+    print(f"  Palace: {palace_path}")
+    print(f"  Output: {output_file}")
+    print(f"{'=' * 55}\n")
+
+    result = export_palace(palace_path=palace_path, output_file=output_file, kg=kg)
+
+    print(f"  Drawers exported:     {result.drawers_exported}")
+    print(f"  KG entities exported: {result.kg_entities_exported}")
+    print(f"  KG triples exported:  {result.kg_triples_exported}")
+
+    if result.errors:
+        print(f"\n  Errors ({len(result.errors)}):")
+        for err in result.errors[:5]:
+            print(f"    - {err}")
+    else:
+        size = os.path.getsize(output_file)
+        print(f"\n  Saved: {output_file} ({size:,} bytes)")
+
+    print(f"\n{'=' * 55}\n")
+
+
+def cmd_import(args):
+    """Import palace data from a JSON export file."""
+    from .exporter import import_palace
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    input_file = args.input_file
+
+    print(f"\n{'=' * 55}")
+    print("  Palace Import")
+    print(f"  From:   {input_file}")
+    print(f"  Palace: {palace_path}")
+    print(f"{'=' * 55}\n")
+
+    result = import_palace(input_file=input_file, palace_path=palace_path)
+
+    print(f"  Drawers imported:     {result.drawers_imported}")
+    print(f"  Drawers skipped:      {result.drawers_skipped} (already existed)")
+    print(f"  KG entities imported: {result.kg_entities_imported}")
+    print(f"  KG triples imported:  {result.kg_triples_imported}")
+
+    if result.errors:
+        print(f"\n  Errors ({len(result.errors)}):")
+        for err in result.errors[:5]:
+            print(f"    - {err}")
+
+    print(f"\n{'=' * 55}\n")
+
+
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
     import chromadb
@@ -530,6 +592,14 @@ def main():
         help="Show MCP setup command for connecting MemPalace to your AI client",
     )
 
+    # export
+    p_export = sub.add_parser("export", help="Export palace to a portable JSON file")
+    p_export.add_argument("output", help="Output JSON file path")
+
+    # import
+    p_import = sub.add_parser("import", help="Import palace from a JSON export file")
+    p_import.add_argument("input_file", help="Input JSON file path")
+
     # status
     sub.add_parser("status", help="Show what's been filed")
 
@@ -563,6 +633,8 @@ def main():
         "search": cmd_search,
         "mcp": cmd_mcp,
         "compress": cmd_compress,
+        "export": cmd_export,
+        "import": cmd_import,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
         "status": cmd_status,
