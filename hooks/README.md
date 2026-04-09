@@ -84,36 +84,30 @@ The hooks resolve the repo root automatically from their own path, so they work 
 
 ### Save Hook (Stop event)
 
-```
-User sends message → AI responds → Claude Code fires Stop hook
-                                            ↓
-                                    Hook counts human messages in JSONL transcript
-                                            ↓
-                              ┌─── < 15 since last save ──→ echo "{}" (let AI stop)
-                              │
-                              └─── ≥ 15 since last save ──→ {"decision": "block", "reason": "save..."}
-                                                                    ↓
-                                                            AI saves to palace
-                                                                    ↓
-                                                            AI tries to stop again
-                                                                    ↓
-                                                            stop_hook_active = true
-                                                                    ↓
-                                                            Hook sees flag → echo "{}" (let it through)
+```mermaid
+flowchart TB
+  A[User sends message] --> B[AI responds]
+  B --> C[Claude Code fires Stop hook]
+  C --> D[Hook counts human messages in JSONL transcript]
+  D --> E{Messages since last save?}
+  E -->|less than 15| F["echo '{}' — let AI stop"]
+  E -->|15 or more| G["Block with reason: save to palace"]
+  G --> H[AI saves to palace]
+  H --> I[AI tries to stop again]
+  I --> J["stop_hook_active = true"]
+  J --> K["Hook sees flag — echo '{}' — let it through"]
 ```
 
 The `stop_hook_active` flag prevents infinite loops: block once → AI saves → tries to stop → flag is true → we let it through.
 
 ### PreCompact Hook
 
-```
-Context window getting full → Claude Code fires PreCompact
-                                        ↓
-                                Hook ALWAYS blocks
-                                        ↓
-                                AI saves everything
-                                        ↓
-                                Compaction proceeds
+```mermaid
+flowchart TB
+  A[Context window getting full] --> B[Claude Code fires PreCompact]
+  B --> C[Hook ALWAYS blocks]
+  C --> D[AI saves everything]
+  D --> E[Compaction proceeds]
 ```
 
 No counting needed — compaction always warrants a save.

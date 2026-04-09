@@ -205,34 +205,19 @@ There are also **halls**, which connect rooms within a wing, and **tunnels**, wh
 
 You say what you're looking for and boom, it already knows which wing to go to. Just *that* in itself would have made a big difference. But this is beautiful, elegant, organic, and most importantly, efficient.
 
-```
-  ┌─────────────────────────────────────────────────────────────┐
-  │  WING: Person                                              │
-  │                                                            │
-  │    ┌──────────┐  ──hall──  ┌──────────┐                    │
-  │    │  Room A  │            │  Room B  │                    │
-  │    └────┬─────┘            └──────────┘                    │
-  │         │                                                  │
-  │         ▼                                                  │
-  │    ┌──────────┐      ┌──────────┐                          │
-  │    │  Closet  │ ───▶ │  Drawer  │                          │
-  │    └──────────┘      └──────────┘                          │
-  └─────────┼──────────────────────────────────────────────────┘
-            │
-          tunnel
-            │
-  ┌─────────┼──────────────────────────────────────────────────┐
-  │  WING: Project                                             │
-  │         │                                                  │
-  │    ┌────┴─────┐  ──hall──  ┌──────────┐                    │
-  │    │  Room A  │            │  Room C  │                    │
-  │    └────┬─────┘            └──────────┘                    │
-  │         │                                                  │
-  │         ▼                                                  │
-  │    ┌──────────┐      ┌──────────┐                          │
-  │    │  Closet  │ ───▶ │  Drawer  │                          │
-  │    └──────────┘      └──────────┘                          │
-  └─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph WP["WING: Person"]
+    PA[Room A] ---|hall| PB[Room B]
+    PA --> PCloset[Closet] --> PDrawer[Drawer]
+  end
+
+  subgraph WR["WING: Project"]
+    PrA[Room A] ---|hall| PrC[Room C]
+    PrA --> PrCloset[Closet] --> PrDrawer[Drawer]
+  end
+
+  PA -.->|tunnel| PrA
 ```
 
 **Wings** — a person or project. As many as you need.
