@@ -59,13 +59,17 @@ def _setup_provider_with_mock(monkeypatch, mock_gliner):
 
     mock_mm = MagicMock()
     mock_mm.ensure_model.return_value = None  # triggers fallback load
+    mock_mm_cls = MagicMock()
+    mock_mm_cls.get.return_value = mock_mm
+    mock_mm_module = types.ModuleType("mempalace.nlp_providers.model_manager")
+    mock_mm_module.ModelManager = mock_mm_cls
 
-    with (
-        patch.dict(sys.modules, {"gliner": mock_gliner}),
-        patch(
-            "mempalace.nlp_providers.model_manager.ModelManager.get",
-            return_value=mock_mm,
-        ),
+    with patch.dict(
+        sys.modules,
+        {
+            "gliner": mock_gliner,
+            "mempalace.nlp_providers.model_manager": mock_mm_module,
+        },
     ):
         p._loaded = False
         p._available = None
@@ -278,11 +282,19 @@ class TestGLiNERErrorHandling:
         p = _fresh_provider()
         mock_mm = MagicMock()
         mock_mm.ensure_model.return_value = "/fake/model/path"
+        mock_mm_cls = MagicMock(return_value=mock_mm)
+        mock_mm_cls.get.return_value = mock_mm
+        # Create a mock model_manager module so 'from .model_manager import ModelManager'
+        # returns our mock class
+        mock_mm_module = types.ModuleType("mempalace.nlp_providers.model_manager")
+        mock_mm_module.ModelManager = mock_mm_cls
         with (
-            patch.dict(sys.modules, {"gliner": mock_gliner}),
-            patch(
-                "mempalace.nlp_providers.model_manager.ModelManager.get",
-                return_value=mock_mm,
+            patch.dict(
+                sys.modules,
+                {
+                    "gliner": mock_gliner,
+                    "mempalace.nlp_providers.model_manager": mock_mm_module,
+                },
             ),
         ):
             p._ensure_loaded()
@@ -301,12 +313,16 @@ class TestGLiNERErrorHandling:
         p = _fresh_provider()
         mock_mm = MagicMock()
         mock_mm.ensure_model.return_value = None
-        with (
-            patch.dict(sys.modules, {"gliner": mock_gliner}),
-            patch(
-                "mempalace.nlp_providers.model_manager.ModelManager.get",
-                return_value=mock_mm,
-            ),
+        mock_mm_cls = MagicMock()
+        mock_mm_cls.get.return_value = mock_mm
+        mock_mm_module = types.ModuleType("mempalace.nlp_providers.model_manager")
+        mock_mm_module.ModelManager = mock_mm_cls
+        with patch.dict(
+            sys.modules,
+            {
+                "gliner": mock_gliner,
+                "mempalace.nlp_providers.model_manager": mock_mm_module,
+            },
         ):
             p._ensure_loaded()
         assert p._available is False
@@ -317,12 +333,16 @@ class TestGLiNERErrorHandling:
         mock_gliner = types.ModuleType("gliner")
         mock_gliner.GLiNER = MagicMock()
         p = _fresh_provider()
-        with (
-            patch.dict(sys.modules, {"gliner": mock_gliner}),
-            patch(
-                "mempalace.nlp_providers.model_manager.ModelManager.get",
-                side_effect=RuntimeError("boom"),
-            ),
+        mock_mm_cls = MagicMock()
+        mock_mm_cls.get.side_effect = RuntimeError("boom")
+        mock_mm_module = types.ModuleType("mempalace.nlp_providers.model_manager")
+        mock_mm_module.ModelManager = mock_mm_cls
+        with patch.dict(
+            sys.modules,
+            {
+                "gliner": mock_gliner,
+                "mempalace.nlp_providers.model_manager": mock_mm_module,
+            },
         ):
             p._loaded = False
             p._ensure_loaded()

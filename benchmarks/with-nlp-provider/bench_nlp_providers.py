@@ -3,28 +3,23 @@
 NLP Provider Benchmark
 ======================
 
-Benchmarks NLP providers against the legacy regex baseline.
-Measures accuracy, throughput, and memory usage for each capability:
-  - Sentence splitting (pySBD, spaCy, wtpsplit vs regex)
-  - NER (spaCy, GLiNER vs regex pattern matching)
-  - Classification (GLiNER vs keyword markers)
-  - Triple extraction (GLiNER vs none)
+Benchmarks NLP-enhanced mempalace operations against the legacy regex baseline.
+Uses actual mempalace APIs (dialect, entity_detector, general_extractor, miner)
+rather than reimplementing anything.
 
 Usage:
-    # Run all benchmarks (skips unavailable providers):
-    python benchmarks/with-nlp-provider/bench_nlp_providers.py
+    # Baseline (no NLP packages):
+    python benchmarks/with-nlp-provider/bench_nlp_providers.py --iterations 20
 
-    # Run specific capability:
-    python benchmarks/with-nlp-provider/bench_nlp_providers.py --capability sentences
-
-    # Run with custom iterations:
-    python benchmarks/with-nlp-provider/bench_nlp_providers.py --iterations 100
+    # With NLP (set env vars + install packages first):
+    MEMPALACE_NLP_SENTENCES=1 MEMPALACE_NLP_NER=1 MEMPALACE_NLP_CLASSIFY=1 \
+      python benchmarks/with-nlp-provider/bench_nlp_providers.py --iterations 20
 """
 
 import argparse
+import os
 import sys
 import time
-import os
 from pathlib import Path
 
 # Add project root to path
@@ -35,9 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # Test data
 # ---------------------------------------------------------------------------
 
-SENTENCE_TEXTS = [
-    "Dr. Smith went to Washington. He met with officials. The meeting lasted 2 hours.",
-    "I don't like the new API. However, it's faster than the old one. Let's keep it for now.",
+TEXTS = [
     "We decided to use PostgreSQL because it handles JSON natively. "
     "The migration from MySQL took three weeks but it was worth it. "
     "Python's SQLAlchemy ORM made the transition much smoother.",
@@ -46,22 +39,15 @@ SENTENCE_TEXTS = [
     "The fix was to configure max_pool_size=20 in the database settings.",
     "Alice works at Anthropic in San Francisco. She builds AI systems. "
     "Her colleague Bob moved from Google last year. They collaborate on safety research.",
-]
-
-NER_TEXTS = [
-    "Barack Obama was born in Hawaii and served as the 44th President.",
-    "Alice works at Anthropic in San Francisco.",
-    "Python and JavaScript are popular programming languages.",
-    "The meeting with Dr. Smith is scheduled for March 15, 2025.",
-    "Microsoft acquired GitHub for $7.5 billion in 2018.",
-]
-
-CLASSIFY_TEXTS = [
-    ("We decided to use PostgreSQL because it handles JSON well.", "decision"),
-    ("I always use black for formatting Python code.", "preference"),
-    ("Finally got the tests passing after three days of debugging!", "milestone"),
-    ("Bug: the API returns 500 when the payload exceeds 10MB.", "problem"),
-    ("I'm so proud of what we've built together.", "emotional"),
+    "I don't like the new API. However, it's faster than the old one. Let's keep it for now.",
+    "Finally got the tests passing after three days of debugging! "
+    "The key insight was that the mock wasn't resetting between test runs.",
+    "Dr. Smith went to Washington. He met with officials. The meeting lasted 2 hours.",
+    "I'm so proud of what we've built together. This has been an amazing journey.",
+    "I always use black for formatting Python code. Never mix tabs and spaces.",
+    "Microsoft acquired GitHub for $7.5 billion in 2018. "
+    "Satya Nadella called it a strategic investment in developer tools.",
+    "Barack Obama was born in Hawaii and served as the 44th President of the United States.",
 ]
 
 
@@ -73,204 +59,139 @@ def _has_package(name):
         return False
 
 
+def _nlp_status():
+    """Report which NLP features are active."""
+    flags = {}
+    for key in ["SENTENCES", "NEGATION", "NER", "CLASSIFY", "TRIPLES"]:
+        flags[key] = os.environ.get(f"MEMPALACE_NLP_{key}", "0") == "1"
+    return flags
+
+
 # ---------------------------------------------------------------------------
-# Benchmark: Sentence Splitting
+# Benchmark: Sentence splitting via dialect._split_sentences()
 # ---------------------------------------------------------------------------
 
 
-def bench_sentences(iterations):
-    """Benchmark sentence splitting across providers."""
-    import re
+def bench_sentence_splitting(iterations):
+    """Benchmark dialect's sentence splitting (uses NLP when available)."""
+    from mempalace.dialect import Dialect
 
-    results = {}
+    d = Dialect()
 
-    # Legacy (regex)
-    def legacy_split(text):
-        return [s.strip() for s in re.split(r"[.!?\n]+", text) if s.strip()]
+    # Warmup
+    d._split_sentences(TEXTS[0])
 
     start = time.perf_counter()
+    total_sentences = 0
     for _ in range(iterations):
-        for text in SENTENCE_TEXTS:
-            legacy_split(text)
+        for text in TEXTS:
+            sents = d._split_sentences(text)
+            total_sentences += len(sents)
     elapsed = time.perf_counter() - start
-    sample = legacy_split(SENTENCE_TEXTS[0])
-    results["legacy (regex)"] = {
+
+    sample = d._split_sentences(TEXTS[0])
+    return {
         "time_s": elapsed,
-        "ops_per_s": (iterations * len(SENTENCE_TEXTS)) / elapsed,
+        "ops_per_s": (iterations * len(TEXTS)) / elapsed,
+        "total_sentences": total_sentences,
         "sample_count": len(sample),
-        "sample": sample[:3],
+        "sample": [s[:60] for s in sample[:3]],
     }
 
-    # pySBD
-    if _has_package("pysbd"):
-        os.environ["MEMPALACE_NLP_SENTENCES"] = "1"
-        from mempalace.nlp_providers.pysbd_provider import PySBDProvider
-
-        p = PySBDProvider()
-        if p.is_available():
-            # Warmup
-            p.split_sentences(SENTENCE_TEXTS[0])
-
-            start = time.perf_counter()
-            for _ in range(iterations):
-                for text in SENTENCE_TEXTS:
-                    p.split_sentences(text)
-            elapsed = time.perf_counter() - start
-            sample = p.split_sentences(SENTENCE_TEXTS[0])
-            results["pySBD"] = {
-                "time_s": elapsed,
-                "ops_per_s": (iterations * len(SENTENCE_TEXTS)) / elapsed,
-                "sample_count": len(sample),
-                "sample": sample[:3],
-            }
-
-    # spaCy
-    if _has_package("spacy"):
-        os.environ["MEMPALACE_NLP_NER"] = "1"
-        from mempalace.nlp_providers.spacy_provider import SpaCyProvider
-
-        p = SpaCyProvider()
-        if p.is_available():
-            p.split_sentences(SENTENCE_TEXTS[0])  # warmup
-
-            start = time.perf_counter()
-            for _ in range(iterations):
-                for text in SENTENCE_TEXTS:
-                    p.split_sentences(text)
-            elapsed = time.perf_counter() - start
-            sample = p.split_sentences(SENTENCE_TEXTS[0])
-            results["spaCy"] = {
-                "time_s": elapsed,
-                "ops_per_s": (iterations * len(SENTENCE_TEXTS)) / elapsed,
-                "sample_count": len(sample),
-                "sample": sample[:3],
-            }
-
-    # wtpsplit
-    if _has_package("wtpsplit"):
-        os.environ["MEMPALACE_NLP_SENTENCES"] = "1"
-        from mempalace.nlp_providers.wtpsplit_provider import WtpsplitProvider
-
-        p = WtpsplitProvider()
-        if p.is_available():
-            p.split_sentences(SENTENCE_TEXTS[0])  # warmup
-
-            start = time.perf_counter()
-            for _ in range(iterations):
-                for text in SENTENCE_TEXTS:
-                    p.split_sentences(text)
-            elapsed = time.perf_counter() - start
-            sample = p.split_sentences(SENTENCE_TEXTS[0])
-            results["wtpsplit"] = {
-                "time_s": elapsed,
-                "ops_per_s": (iterations * len(SENTENCE_TEXTS)) / elapsed,
-                "sample_count": len(sample),
-                "sample": sample[:3],
-            }
-
-    return results
-
 
 # ---------------------------------------------------------------------------
-# Benchmark: NER
+# Benchmark: Entity extraction via entity_detector.extract_candidates()
 # ---------------------------------------------------------------------------
 
 
-def bench_ner(iterations):
-    """Benchmark NER across providers."""
-    results = {}
-
-    # Legacy (regex pattern matching via entity_detector)
+def bench_entity_extraction(iterations):
+    """Benchmark entity detection (uses NLP NER when available)."""
     from mempalace.entity_detector import extract_candidates
 
+    # Warmup
+    extract_candidates(TEXTS[0])
+
     start = time.perf_counter()
+    total_entities = 0
     for _ in range(iterations):
-        for text in NER_TEXTS:
-            extract_candidates(text)
+        for text in TEXTS:
+            candidates = extract_candidates(text)
+            total_entities += len(candidates)
     elapsed = time.perf_counter() - start
-    sample = extract_candidates(NER_TEXTS[0])
-    results["legacy (regex)"] = {
+
+    sample = extract_candidates(TEXTS[0])
+    return {
         "time_s": elapsed,
-        "ops_per_s": (iterations * len(NER_TEXTS)) / elapsed,
-        "entities_found": len(sample),
+        "ops_per_s": (iterations * len(TEXTS)) / elapsed,
+        "total_entities": total_entities,
+        "sample_entities": list(sample.keys())[:5],
     }
 
-    # spaCy
-    if _has_package("spacy"):
-        os.environ["MEMPALACE_NLP_NER"] = "1"
-        from mempalace.nlp_providers.spacy_provider import SpaCyProvider
-
-        p = SpaCyProvider()
-        if p.is_available():
-            p.extract_entities(NER_TEXTS[0])  # warmup
-
-            start = time.perf_counter()
-            for _ in range(iterations):
-                for text in NER_TEXTS:
-                    p.extract_entities(text)
-            elapsed = time.perf_counter() - start
-            sample = p.extract_entities(NER_TEXTS[0])
-            results["spaCy"] = {
-                "time_s": elapsed,
-                "ops_per_s": (iterations * len(NER_TEXTS)) / elapsed,
-                "entities_found": len(sample),
-                "sample": [e["text"] for e in sample[:5]],
-            }
-
-    # GLiNER
-    if _has_package("gliner"):
-        os.environ["MEMPALACE_NLP_NER"] = "1"
-        from mempalace.nlp_providers.gliner_provider import GLiNERProvider
-
-        p = GLiNERProvider()
-        if p.is_available():
-            p.extract_entities(NER_TEXTS[0])  # warmup
-
-            start = time.perf_counter()
-            for _ in range(iterations):
-                for text in NER_TEXTS:
-                    p.extract_entities(text)
-            elapsed = time.perf_counter() - start
-            sample = p.extract_entities(NER_TEXTS[0])
-            results["GLiNER"] = {
-                "time_s": elapsed,
-                "ops_per_s": (iterations * len(NER_TEXTS)) / elapsed,
-                "entities_found": len(sample),
-                "sample": [e["text"] for e in sample[:5]],
-            }
-
-    return results
-
 
 # ---------------------------------------------------------------------------
-# Benchmark: Classification
+# Benchmark: Memory classification via general_extractor.extract_memories()
 # ---------------------------------------------------------------------------
 
 
-def bench_classify(iterations):
-    """Benchmark text classification."""
+def bench_classification(iterations):
+    """Benchmark memory type classification (uses NLP when available)."""
     from mempalace.general_extractor import extract_memories
 
-    results = {}
+    # Warmup
+    extract_memories(TEXTS[0])
 
-    # Legacy (regex markers)
     start = time.perf_counter()
-    correct = 0
-    total = 0
+    total_memories = 0
+    type_counts = {}
     for _ in range(iterations):
-        for text, expected_type in CLASSIFY_TEXTS:
+        for text in TEXTS:
             memories = extract_memories(text, min_confidence=0.1)
-            if memories and memories[0]["memory_type"] == expected_type:
-                correct += 1
-            total += 1
+            total_memories += len(memories)
+            for m in memories:
+                mt = m["memory_type"]
+                type_counts[mt] = type_counts.get(mt, 0) + 1
     elapsed = time.perf_counter() - start
-    results["legacy (regex)"] = {
+
+    return {
         "time_s": elapsed,
-        "ops_per_s": total / elapsed,
-        "accuracy": correct / total if total > 0 else 0,
+        "ops_per_s": (iterations * len(TEXTS)) / elapsed,
+        "total_memories": total_memories,
+        "type_distribution": type_counts,
     }
 
-    return results
+
+# ---------------------------------------------------------------------------
+# Benchmark: Dialect compress/decompress (end-to-end)
+# ---------------------------------------------------------------------------
+
+
+def bench_dialect_roundtrip(iterations):
+    """Benchmark dialect compression + decode (uses NLP internally)."""
+    from mempalace.dialect import Dialect
+
+    d = Dialect()
+
+    # Warmup
+    compressed = d.compress(TEXTS[0])
+    d.decode(compressed)
+
+    start = time.perf_counter()
+    total_ratio = 0.0
+    count = 0
+    for _ in range(iterations):
+        for text in TEXTS:
+            compressed = d.compress(text)
+            d.decode(compressed)
+            if compressed and text:
+                total_ratio += len(compressed) / len(text)
+                count += 1
+    elapsed = time.perf_counter() - start
+
+    return {
+        "time_s": elapsed,
+        "ops_per_s": (iterations * len(TEXTS)) / elapsed,
+        "avg_compression_ratio": total_ratio / count if count else 0,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -280,17 +201,19 @@ def bench_classify(iterations):
 
 def print_results(capability, results):
     print(f"\n{'=' * 60}")
-    print(f"  {capability.upper()}")
+    print(f"  {capability}")
     print(f"{'=' * 60}")
-    for provider, metrics in results.items():
-        print(f"\n  {provider}:")
-        for key, val in metrics.items():
-            if key == "sample":
-                print(f"    {key}: {val[:3]}")
-            elif isinstance(val, float):
-                print(f"    {key}: {val:.4f}")
-            else:
-                print(f"    {key}: {val}")
+    for key, val in results.items():
+        if isinstance(val, list):
+            print(f"    {key}: {val}")
+        elif isinstance(val, float):
+            print(f"    {key}: {val:.4f}")
+        elif isinstance(val, dict):
+            print(f"    {key}:")
+            for k, v in val.items():
+                print(f"      {k}: {v}")
+        else:
+            print(f"    {key}: {val}")
     print()
 
 
@@ -300,41 +223,46 @@ def print_results(capability, results):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark NLP providers vs legacy")
-    parser.add_argument(
-        "--capability",
-        choices=["sentences", "ner", "classify", "all"],
-        default="all",
-        help="Which capability to benchmark",
-    )
+    parser = argparse.ArgumentParser(description="Benchmark mempalace with/without NLP providers")
     parser.add_argument(
         "--iterations",
         type=int,
         default=50,
-        help="Number of iterations per benchmark",
+        help="Number of iterations per benchmark (default: 50)",
     )
     args = parser.parse_args()
 
-    print(f"NLP Provider Benchmark — {args.iterations} iterations")
-    print("Available packages: ", end="")
-    for pkg in ["pysbd", "spacy", "gliner", "wtpsplit", "onnxruntime_genai"]:
-        status = "yes" if _has_package(pkg) else "no"
-        print(f"{pkg}={status} ", end="")
+    print(f"MemPalace NLP Benchmark — {args.iterations} iterations")
     print()
 
-    if args.capability in ("sentences", "all"):
-        results = bench_sentences(args.iterations)
-        print_results("Sentence Splitting", results)
+    # Report NLP status
+    flags = _nlp_status()
+    print("NLP feature flags:")
+    for flag, enabled in flags.items():
+        print(f"  MEMPALACE_NLP_{flag}: {'ON' if enabled else 'off'}")
 
-    if args.capability in ("ner", "all"):
-        results = bench_ner(args.iterations)
-        print_results("Named Entity Recognition", results)
+    print()
+    print("Available NLP packages:")
+    for pkg in ["pysbd", "spacy", "gliner", "wtpsplit", "onnxruntime_genai"]:
+        status = "installed" if _has_package(pkg) else "not installed"
+        print(f"  {pkg}: {status}")
 
-    if args.capability in ("classify", "all"):
-        results = bench_classify(args.iterations)
-        print_results("Classification", results)
+    print()
+    print("-" * 60)
 
-    print("\nDone.")
+    results = bench_sentence_splitting(args.iterations)
+    print_results("Sentence Splitting (dialect._split_sentences)", results)
+
+    results = bench_entity_extraction(args.iterations)
+    print_results("Entity Extraction (entity_detector.extract_candidates)", results)
+
+    results = bench_classification(args.iterations)
+    print_results("Memory Classification (general_extractor.extract_memories)", results)
+
+    results = bench_dialect_roundtrip(args.iterations)
+    print_results("Dialect Compress/Decompress Roundtrip", results)
+
+    print("Done.")
 
 
 if __name__ == "__main__":
