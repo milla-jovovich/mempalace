@@ -223,9 +223,33 @@ def get_collection(palace_path: str):
 def file_already_mined(collection, source_file: str) -> bool:
     try:
         results = collection.get(where={"source_file": source_file}, limit=1)
-        return len(results.get("ids", [])) > 0
+        if not results.get("ids"):
+            return False
+        stored_meta = results["metadatas"][0] if results.get("metadatas") else {}
+        # Conversation exports are often overwritten in place as a session grows.
+        # We only skip re-ingest when the on-disk file has the same mtime as the
+        # version we previously mined.
+        stored_mtime = stored_meta.get("source_mtime")
+        if stored_mtime is None:
+            return False
+        current_mtime = os.path.getmtime(source_file)
+        return float(stored_mtime) == current_mtime
     except Exception:
         return False
+
+
+def delete_drawers_for_source(collection, source_file: str):
+    """Delete all drawers that came from one source file before re-ingesting it."""
+    try:
+        results = collection.get(where={"source_file": source_file})
+        ids = results.get("ids", [])
+        if ids:
+            # Re-ingest replaces the source file as a whole. Deleting old drawers
+            # first avoids leaving stale chunks behind when the file shrinks or
+            # when chunk boundaries change after re-export.
+            collection.delete(ids=ids)
+    except Exception:
+        return
 
 
 # =============================================================================
@@ -302,6 +326,11 @@ def mine_convos(
             files_skipped += 1
             continue
 
+        # Conversation files are treated as replaceable sources, not append-only
+        # records. If the export changed, rebuild that file's drawers from scratch.
+        if not dry_run:
+            delete_drawers_for_source(collection, source_file)
+
         # Normalize format
         try:
             content = normalize(str(filepath))
@@ -371,6 +400,10 @@ def mine_convos(
                             "filed_at": datetime.now().isoformat(),
                             "ingest_mode": "convos",
                             "extract_mode": extract_mode,
+                            # Stored for incremental re-ingest checks. We use the
+                            # source file's mtime as a lightweight "did this export
+                            # change?" signal on the next mining run.
+                            "source_mtime": os.path.getmtime(source_file),
                         }
                     ],
                 )
