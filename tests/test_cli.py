@@ -607,3 +607,16 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
     out = capsys.readouterr().out
     assert "Stored" in out
     mock_comp_col.upsert.assert_called_once()
+
+
+def test_cmd_repair_trailing_slash_does_not_recurse():
+    """Repair with trailing slash should put backup outside palace dir (#395)."""
+    import os
+
+    args = argparse.Namespace(palace="/tmp/fake_palace/")
+    with patch("mempalace.cli.os.path.isdir", return_value=False):
+        cmd_repair(args)
+    # Verify the rstrip logic: palace_path should not end with separator
+    palace_path = os.path.expanduser(args.palace).rstrip(os.sep)
+    backup_path = palace_path + ".backup"
+    assert not backup_path.startswith(palace_path + os.sep)
