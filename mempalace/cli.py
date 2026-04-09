@@ -240,6 +240,96 @@ def cmd_instructions(args):
     run_instructions(name=args.name)
 
 
+def cmd_nlp(args):
+    """Dispatch NLP subcommands: status, install, remove, verify."""
+    action = getattr(args, "nlp_action", None)
+    if not action:
+        print("Usage: mempalace nlp {status|install|remove|verify}")
+        return
+
+    if action == "status":
+        _nlp_status()
+    elif action == "install":
+        _nlp_install(args)
+    elif action == "remove":
+        _nlp_remove(args)
+    elif action == "verify":
+        _nlp_verify()
+
+
+def _nlp_status():
+    """Show NLP backend status: what's installed, what's active."""
+    from .nlp_config import NLPConfig, installed_providers, FEATURE_ENV_VARS
+
+    config = NLPConfig.resolve()
+    providers = installed_providers()
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace NLP Status")
+    print(f"{'=' * 55}\n")
+
+    print(f"  Active backend:  {config.backend}")
+    print(f"  Config source:   {config.source}")
+    print(f"  All features:    {'SOME ACTIVE' if config.any_active() else 'ALL OFF (default)'}")
+    print()
+
+    print("  Capabilities:")
+    for cap, enabled in sorted(config.capabilities.items()):
+        env_var = FEATURE_ENV_VARS.get(cap, f"MEMPALACE_NLP_{cap.upper()}")
+        env_val = os.environ.get(env_var)
+        override = f" (env: {env_var}={env_val})" if env_val else ""
+        status = "ON" if enabled else "off"
+        symbol = "+" if enabled else "-"
+        print(f"    [{symbol}] {cap:12} {status}{override}")
+
+    print()
+    print("  Installed providers:")
+    for name, info in providers.items():
+        if info["installed"]:
+            print(f"    [+] {name:20} v{info['version']}")
+        else:
+            print(f"    [ ] {name:20} (not installed)")
+    print()
+
+
+def _nlp_install(args):
+    """Install models for a given backend level."""
+    from .nlp_providers.model_manager import ModelManager
+
+    backend = getattr(args, "backend", None) or "spacy"
+    mm = ModelManager.get()
+    results = mm.install_for_backend(backend, prompt_user=True)
+    for model_id, success in results.items():
+        status = "OK" if success else "FAILED"
+        print(f"  {model_id}: {status}")
+
+
+def _nlp_remove(args):
+    """Remove a downloaded model."""
+    from .nlp_providers.model_manager import ModelManager
+
+    model_id = getattr(args, "model_id", None)
+    mm = ModelManager.get()
+    if model_id:
+        if mm.remove_model(model_id):
+            print(f"  Removed: {model_id}")
+        else:
+            print(f"  Not found: {model_id}")
+    else:
+        print("  Usage: mempalace nlp remove <model-id>")
+
+
+def _nlp_verify():
+    """Verify all downloaded models."""
+    from .nlp_providers.model_manager import ModelManager
+
+    mm = ModelManager.get()
+    all_status = mm.get_all_status()
+    for model_id, info in all_status.items():
+        status = info["status"].value
+        print(f"  {model_id}: {status}")
+
+
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
     import chromadb
@@ -372,6 +462,12 @@ def main():
         default=None,
         help="Where the palace lives (default: from ~/.mempalace/config.json or ~/.mempalace/palace)",
     )
+    parser.add_argument(
+        "--nlp-backend",
+        default=None,
+        choices=["legacy", "pysbd", "spacy", "gliner", "full"],
+        help="NLP backend level (default: legacy — all NLP features disabled)",
+    )
 
     sub = parser.add_subparsers(dest="command")
 
@@ -494,6 +590,21 @@ def main():
     for instr_name in ["init", "search", "mine", "help", "status"]:
         instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
 
+    # nlp
+    p_nlp = sub.add_parser("nlp", help="Manage NLP backends and models")
+    nlp_sub = p_nlp.add_subparsers(dest="nlp_action")
+    nlp_sub.add_parser("status", help="Show NLP backend status")
+    p_nlp_install = nlp_sub.add_parser("install", help="Download models for a backend level")
+    p_nlp_install.add_argument(
+        "backend",
+        nargs="?",
+        default="spacy",
+        help="Backend level to install models for (default: spacy)",
+    )
+    p_nlp_remove = nlp_sub.add_parser("remove", help="Remove a downloaded model")
+    p_nlp_remove.add_argument("model_id", nargs="?", help="Model ID to remove")
+    nlp_sub.add_parser("verify", help="Verify all downloaded models")
+
     # repair
     sub.add_parser(
         "repair",
@@ -524,6 +635,13 @@ def main():
             return
         args.name = name
         cmd_instructions(args)
+        return
+
+    if args.command == "nlp":
+        if not getattr(args, "nlp_action", None):
+            p_nlp.print_help()
+            return
+        cmd_nlp(args)
         return
 
     dispatch = {

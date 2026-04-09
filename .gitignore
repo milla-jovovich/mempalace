@@ -6,3 +6,4 @@ __pycache__/
 .pytest_cache/
 mempal.yaml
 .a5c/
+.coverage
