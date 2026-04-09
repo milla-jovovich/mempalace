@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 split_mega_files.py — Split concatenated transcript files into per-session files
-=================================================================================
 
 Scans a directory for .txt files that contain multiple Claude Code sessions
 (identified by "Claude Code v" headers). Splits each into individual files
@@ -184,6 +183,10 @@ def split_file(filepath, output_dir, dry_run=False):
     Returns list of output paths written (or would be written if dry_run).
     """
     path = Path(filepath)
+    max_size = 500 * 1024 * 1024  # 500 MB safety limit
+    if path.stat().st_size > max_size:
+        print(f"  SKIP: {path.name} exceeds {max_size // (1024*1024)} MB limit")
+        return []
     lines = path.read_text(errors="replace").splitlines(keepends=True)
 
     boundaries = find_session_boundaries(lines)
@@ -221,7 +224,7 @@ def split_file(filepath, output_dir, dry_run=False):
         if dry_run:
             print(f"  [{i + 1}/{len(boundaries) - 1}] {name}  ({len(chunk)} lines)")
         else:
-            out_path.write_text("".join(chunk))
+            out_path.write_text("".join(chunk), encoding="utf-8")
             print(f"  {_CHECKMARK} {name}  ({len(chunk)} lines)")
 
         written.append(out_path)
@@ -265,10 +268,16 @@ def main():
     if args.file:
         files = [Path(args.file)]
     else:
+            out_path.write_text("".join(chunk), encoding="utf-8")
+            print(f"  {_CHECKMARK} {name}  ({len(chunk)} lines)")
         files = sorted(src_dir.glob("*.txt"))
 
     mega_files = []
+    max_scan_size = 500 * 1024 * 1024  # 500 MB
     for f in files:
+        if f.stat().st_size > max_scan_size:
+            print(f"  SKIP: {f.name} exceeds {max_scan_size // (1024*1024)} MB limit")
+            continue
         lines = f.read_text(errors="replace").splitlines(keepends=True)
         boundaries = find_session_boundaries(lines)
         if len(boundaries) >= args.min_sessions:
@@ -297,12 +306,16 @@ def main():
             f.rename(backup)
             print(f"  → Original renamed to {backup.name}\n")
         else:
+            out_path.write_text("".join(chunk), encoding="utf-8")
+            print(f"  {_CHECKMARK} {name}  ({len(chunk)} lines)")
             print()
 
     print(f"{'─' * 60}")
     if args.dry_run:
         print(f"  DRY RUN — would create {total_written} files from {len(mega_files)} mega-files")
     else:
+            out_path.write_text("".join(chunk), encoding="utf-8")
+            print(f"  {_CHECKMARK} {name}  ({len(chunk)} lines)")
         print(f"  Done — created {total_written} files from {len(mega_files)} mega-files")
     print()
 
