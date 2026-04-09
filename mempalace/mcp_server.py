@@ -766,6 +766,7 @@ def handle_request(request):
             elif declared_type == "number" and not isinstance(value, (int, float)):
                 tool_args[key] = float(value)
         try:
+            tool_args.pop("wait_for_previous", None)
             result = TOOLS[tool_name]["handler"](**tool_args)
             return {
                 "jsonrpc": "2.0",
