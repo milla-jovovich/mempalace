@@ -5,8 +5,10 @@ Uses the real ChromaDB fixtures from conftest.py for integration tests,
 plus mock-based tests for error paths.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import chromadb
 import pytest
 
 from mempalace.searcher import SearchError, search, search_memories
@@ -38,6 +40,32 @@ class TestSearchMemories:
         result = search_memories("code", palace_path, n_results=2)
         assert len(result["results"]) <= 2
 
+    def test_search_memories_uses_explicit_path_and_configured_collection(self, tmp_path):
+        palace_path = tmp_path / "custom-palace"
+        client = chromadb.PersistentClient(path=str(palace_path))
+        col = client.get_or_create_collection("custom_drawers")
+        col.add(
+            ids=["drawer_1"],
+            documents=["JWT authentication now lives in the custom collection."],
+            metadatas=[
+                {
+                    "wing": "project",
+                    "room": "backend",
+                    "source_file": "auth.py",
+                    "chunk_index": 0,
+                }
+            ],
+        )
+        cfg = SimpleNamespace(
+            palace_path="/wrong/path",
+            collection_name="custom_drawers",
+        )
+
+        result = search_memories("JWT authentication", str(palace_path), config=cfg)
+
+        assert result["results"]
+        assert result["results"][0]["room"] == "backend"
+
     def test_no_palace_returns_error(self, tmp_path):
         result = search_memories("anything", str(tmp_path / "missing"))
         assert "error" in result
@@ -56,10 +84,8 @@ class TestSearchMemories:
         """search_memories returns error dict when query raises."""
         mock_col = MagicMock()
         mock_col.query.side_effect = RuntimeError("query failed")
-        mock_client = MagicMock()
-        mock_client.get_collection.return_value = mock_col
 
-        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+        with patch("mempalace.searcher.get_drawer_collection", return_value=mock_col):
             result = search_memories("test", "/fake/path")
         assert "error" in result
         assert "query failed" in result["error"]
@@ -111,10 +137,8 @@ class TestSearchCLI:
         """search raises SearchError when query fails."""
         mock_col = MagicMock()
         mock_col.query.side_effect = RuntimeError("boom")
-        mock_client = MagicMock()
-        mock_client.get_collection.return_value = mock_col
 
-        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+        with patch("mempalace.searcher.get_drawer_collection", return_value=mock_col):
             with pytest.raises(SearchError, match="Search error"):
                 search("test", "/fake/path")
 

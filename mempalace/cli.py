@@ -34,6 +34,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .palace import get_drawer_collection, resolve_drawer_context
 
 
 def cmd_init(args):
@@ -101,7 +102,8 @@ def cmd_mine(args):
 def cmd_search(args):
     from .searcher import search, SearchError
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    cfg = MempalaceConfig()
+    palace_path = os.path.expanduser(args.palace) if args.palace else cfg.palace_path
     try:
         search(
             query=args.query,
@@ -109,6 +111,7 @@ def cmd_search(args):
             wing=args.wing,
             room=args.room,
             n_results=args.results,
+            config=cfg,
         )
     except SearchError:
         sys.exit(1)
@@ -161,8 +164,9 @@ def cmd_migrate(args):
 def cmd_status(args):
     from .miner import status
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-    status(palace_path=palace_path)
+    cfg = MempalaceConfig()
+    palace_path = os.path.expanduser(args.palace) if args.palace else cfg.palace_path
+    status(palace_path=palace_path, config=cfg)
 
 
 def cmd_repair(args):
@@ -170,7 +174,9 @@ def cmd_repair(args):
     import chromadb
     import shutil
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    cfg = MempalaceConfig()
+    palace_arg = os.path.expanduser(args.palace) if args.palace else cfg.palace_path
+    palace_path, collection_name = resolve_drawer_context(palace_path=palace_arg, config=cfg)
 
     if not os.path.isdir(palace_path):
         print(f"\n  No palace found at {palace_path}")
@@ -183,9 +189,13 @@ def cmd_repair(args):
 
     # Try to read existing drawers
     try:
+        col = get_drawer_collection(palace_path=palace_path, create=False, config=cfg)
+        if col is None:
+            print(f"\n  No palace found at {palace_path}")
+            return
         client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
         total = col.count()
+        print(f"  Collection: {collection_name}")
         print(f"  Drawers found: {total}")
     except Exception as e:
         print(f"  Error reading palace: {e}")
@@ -220,8 +230,8 @@ def cmd_repair(args):
     shutil.copytree(palace_path, backup_path)
 
     print("  Rebuilding collection...")
-    client.delete_collection("mempalace_drawers")
-    new_col = client.create_collection("mempalace_drawers")
+    client.delete_collection(collection_name)
+    new_col = client.create_collection(collection_name)
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
@@ -277,7 +287,9 @@ def cmd_compress(args):
     import chromadb
     from .dialect import Dialect
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    cfg = MempalaceConfig()
+    palace_arg = os.path.expanduser(args.palace) if args.palace else cfg.palace_path
+    palace_path, _ = resolve_drawer_context(palace_path=palace_arg, config=cfg)
 
     # Load dialect (with optional entity config)
     config_path = args.config
@@ -295,8 +307,10 @@ def cmd_compress(args):
 
     # Connect to palace
     try:
+        col = get_drawer_collection(palace_path=palace_path, create=False, config=cfg)
+        if col is None:
+            raise FileNotFoundError(palace_path)
         client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")

@@ -15,9 +15,13 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
-
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import (
+    SKIP_DIRS,
+    file_already_mined,
+    get_collection,
+    get_drawer_collection,
+    iter_collection_metadatas,
+)
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -622,26 +626,27 @@ def mine(
 # =============================================================================
 
 
-def status(palace_path: str):
+def status(palace_path: str, config=None):
     """Show what's been filed in the palace."""
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_drawer_collection(palace_path=palace_path, create=False, config=config)
     except Exception:
+        print(f"\n  No palace found at {palace_path}")
+        print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        return
+    if col is None:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
     # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
-    metas = r["metadatas"]
-
     wing_rooms = defaultdict(lambda: defaultdict(int))
-    for m in metas:
+    for m in iter_collection_metadatas(col):
         wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+    total_drawers = col.count()
 
     print(f"\n{'=' * 55}")
-    print(f"  MemPalace Status — {len(metas)} drawers")
+    print(f"  MemPalace Status — {total_drawers} drawers")
     print(f"{'=' * 55}\n")
     for wing, rooms in sorted(wing_rooms.items()):
         print(f"  WING: {wing}")

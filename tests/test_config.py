@@ -18,11 +18,28 @@ def test_config_from_file():
     assert cfg.palace_path == "/custom/palace"
 
 
+def test_config_from_file_expands_tilde():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"palace_path": "~/custom/palace"}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.palace_path == os.path.expanduser("~/custom/palace")
+
+
 def test_env_override():
     os.environ["MEMPALACE_PALACE_PATH"] = "/env/palace"
     cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
     assert cfg.palace_path == "/env/palace"
     del os.environ["MEMPALACE_PALACE_PATH"]
+
+
+def test_env_override_expands_tilde():
+    os.environ["MEMPALACE_PALACE_PATH"] = "~/env/palace"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.palace_path == os.path.expanduser("~/env/palace")
+    finally:
+        del os.environ["MEMPALACE_PALACE_PATH"]
 
 
 def test_init():

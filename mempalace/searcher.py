@@ -9,7 +9,8 @@ Returns verbatim text — the actual words, never summaries.
 import logging
 from pathlib import Path
 
-import chromadb
+from .config import MempalaceConfig
+from .palace import get_drawer_collection, resolve_drawer_context
 
 logger = logging.getLogger("mempalace_mcp")
 
@@ -18,18 +19,29 @@ class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
 
 
-def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
+def search(
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    config: MempalaceConfig = None,
+):
     """
     Search the palace. Returns verbatim drawer content.
     Optionally filter by wing (project) or room (aspect).
     """
+    cfg = config or MempalaceConfig()
+    resolved_path, _ = resolve_drawer_context(palace_path=palace_path, config=cfg)
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
-    except Exception:
-        print(f"\n  No palace found at {palace_path}")
+        col = get_drawer_collection(palace_path=palace_path, create=False, config=cfg)
+    except Exception as e:
+        print(f"\n  Search error: {e}")
+        raise SearchError(f"Search error: {e}") from e
+    if col is None:
+        print(f"\n  No palace found at {resolved_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
-        raise SearchError(f"No palace found at {palace_path}")
+        raise SearchError(f"No palace found at {resolved_path}")
 
     # Build where filter
     where = {}
@@ -91,17 +103,26 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    config: MempalaceConfig = None,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
     Used by the MCP server and other callers that need data.
     """
+    cfg = config or MempalaceConfig()
+    resolved_path, _ = resolve_drawer_context(palace_path=palace_path, config=cfg)
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_drawer_collection(palace_path=palace_path, create=False, config=cfg)
     except Exception as e:
-        logger.error("No palace found at %s: %s", palace_path, e)
+        logger.error("Search setup failed at %s: %s", resolved_path, e)
+        return {"error": f"Search error: {e}"}
+    if col is None:
+        logger.error("No palace found at %s", resolved_path)
         return {
             "error": "No palace found",
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",

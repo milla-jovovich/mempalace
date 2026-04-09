@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import MempalaceConfig, sanitize_name, sanitize_content
+from .palace import open_collection_on_client, iter_collection_metadatas, resolve_drawer_context
 from .version import __version__
 from .query_sanitizer import sanitize_query
 from .searcher import search_memories
@@ -55,7 +56,7 @@ def _parse_args():
 _args = _parse_args()
 
 if _args.palace:
-    os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
+    os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(os.path.expanduser(_args.palace))
 
 _config = MempalaceConfig()
 if _args.palace:
@@ -65,7 +66,9 @@ else:
 
 
 _client_cache = None
+_client_cache_path = None
 _collection_cache = None
+_collection_cache_key = None
 
 
 # ==================== WRITE-AHEAD LOG ====================
@@ -101,30 +104,37 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
-_client_cache = None
-_collection_cache = None
-
-
 def _get_client():
     """Return a singleton ChromaDB PersistentClient."""
-    global _client_cache
-    if _client_cache is None:
-        _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+    global _client_cache, _client_cache_path, _collection_cache, _collection_cache_key
+    palace_path, _ = resolve_drawer_context(config=_config)
+    if _client_cache is None or _client_cache_path != palace_path:
+        _client_cache = chromadb.PersistentClient(path=palace_path)
+        _client_cache_path = palace_path
+        _collection_cache = None
+        _collection_cache_key = None
     return _client_cache
 
 
 def _get_collection(create=False):
     """Return the ChromaDB collection, caching the client between calls."""
-    global _collection_cache
+    global _collection_cache, _collection_cache_key
+    palace_path, collection_name = resolve_drawer_context(config=_config)
+    cache_key = (palace_path, collection_name)
+    if _collection_cache is not None and _collection_cache_key == cache_key:
+        return _collection_cache
+    if not create and not os.path.isdir(palace_path):
+        return None
     try:
         client = _get_client()
-        if create:
-            _collection_cache = client.get_or_create_collection(_config.collection_name)
-        elif _collection_cache is None:
-            _collection_cache = client.get_collection(_config.collection_name)
-        return _collection_cache
-    except Exception:
+        collection = open_collection_on_client(client, collection_name, create=create)
+    except chromadb.errors.NotFoundError:
         return None
+    if collection is None:
+        return None
+    _collection_cache = collection
+    _collection_cache_key = cache_key
+    return collection
 
 
 def _no_palace():
@@ -141,32 +151,24 @@ def tool_status():
     col = _get_collection()
     if not col:
         return _no_palace()
+    palace_path, _ = resolve_drawer_context(config=_config)
     count = col.count()
     wings = {}
     rooms = {}
-    batch_size = 5000
-    offset = 0
     error_info = None
-    while True:
-        try:
-            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
-            rows = batch["metadatas"]
-            for m in rows:
-                w = m.get("wing", "unknown")
-                r = m.get("room", "unknown")
-                wings[w] = wings.get(w, 0) + 1
-                rooms[r] = rooms.get(r, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            error_info = f"Partial result, failed at offset {offset}: {str(e)}"
-            break
+    try:
+        for m in iter_collection_metadatas(col):
+            w = m.get("wing", "unknown")
+            r = m.get("room", "unknown")
+            wings[w] = wings.get(w, 0) + 1
+            rooms[r] = rooms.get(r, 0) + 1
+    except Exception as e:
+        error_info = f"Partial result: {e}"
     result = {
         "total_drawers": count,
         "wings": wings,
         "rooms": rooms,
-        "palace_path": _config.palace_path,
+        "palace_path": palace_path,
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
     }
@@ -214,28 +216,12 @@ def tool_list_wings():
     if not col:
         return _no_palace()
     wings = {}
-    batch_size = 5000
-    offset = 0
     try:
-        col.count()  # verify collection is accessible
+        for m in iter_collection_metadatas(col):
+            w = m.get("wing", "unknown")
+            wings[w] = wings.get(w, 0) + 1
     except Exception as e:
-        return {"wings": {}, "error": str(e)}
-    while True:
-        try:
-            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
-            rows = batch["metadatas"]
-            for m in rows:
-                w = m.get("wing", "unknown")
-                wings[w] = wings.get(w, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            return {
-                "wings": wings,
-                "error": f"Partial result, failed at offset {offset}: {str(e)}",
-                "partial": True,
-            }
+        return {"wings": wings, "error": f"Partial result: {e}", "partial": True}
     return {"wings": wings}
 
 
@@ -244,33 +230,18 @@ def tool_list_rooms(wing: str = None):
     if not col:
         return _no_palace()
     rooms = {}
-    batch_size = 5000
-    offset = 0
     where = {"wing": wing} if wing else None
     try:
-        col.count()  # verify collection is accessible
+        for m in iter_collection_metadatas(col, where=where):
+            r = m.get("room", "unknown")
+            rooms[r] = rooms.get(r, 0) + 1
     except Exception as e:
-        return {"wing": wing or "all", "rooms": {}, "error": str(e)}
-    while True:
-        try:
-            kwargs = {"include": ["metadatas"], "limit": batch_size, "offset": offset}
-            if where:
-                kwargs["where"] = where
-            batch = col.get(**kwargs)
-            rows = batch["metadatas"]
-            for m in rows:
-                r = m.get("room", "unknown")
-                rooms[r] = rooms.get(r, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            return {
-                "wing": wing or "all",
-                "rooms": rooms,
-                "error": f"Partial result, failed at offset {offset}: {str(e)}",
-                "partial": True,
-            }
+        return {
+            "wing": wing or "all",
+            "rooms": rooms,
+            "error": f"Partial result: {e}",
+            "partial": True,
+        }
     return {"wing": wing or "all", "rooms": rooms}
 
 
@@ -279,31 +250,15 @@ def tool_get_taxonomy():
     if not col:
         return _no_palace()
     taxonomy = {}
-    batch_size = 5000
-    offset = 0
     try:
-        col.count()  # verify collection is accessible
+        for m in iter_collection_metadatas(col):
+            w = m.get("wing", "unknown")
+            r = m.get("room", "unknown")
+            if w not in taxonomy:
+                taxonomy[w] = {}
+            taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
     except Exception as e:
-        return {"taxonomy": {}, "error": str(e)}
-    while True:
-        try:
-            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
-            rows = batch["metadatas"]
-            for m in rows:
-                w = m.get("wing", "unknown")
-                r = m.get("room", "unknown")
-                if w not in taxonomy:
-                    taxonomy[w] = {}
-                taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            return {
-                "taxonomy": taxonomy,
-                "error": f"Partial result, failed at offset {offset}: {str(e)}",
-                "partial": True,
-            }
+        return {"taxonomy": taxonomy, "error": f"Partial result: {e}", "partial": True}
     return {"taxonomy": taxonomy}
 
 
@@ -318,6 +273,7 @@ def tool_search(
         wing=wing,
         room=room,
         n_results=limit,
+        config=_config,
     )
     # Attach sanitizer metadata for transparency
     if sanitized["was_sanitized"]:

@@ -2,8 +2,10 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import chromadb
+import pytest
 import yaml
 
 from mempalace.miner import mine, scan_project
@@ -18,6 +20,25 @@ def write_file(path: Path, content: str):
 def scanned_files(project_root: Path, **kwargs):
     files = scan_project(str(project_root), **kwargs)
     return sorted(path.relative_to(project_root).as_posix() for path in files)
+
+
+class _PagedCollection:
+    def __init__(self, total):
+        self._metadatas = [
+            {"wing": "project" if i % 2 == 0 else "notes", "room": "backend" if i % 3 else "planning"}
+            for i in range(total)
+        ]
+
+    def count(self):
+        return len(self._metadatas)
+
+    def get(self, include, limit, offset, where=None):
+        del include, where
+        batch = self._metadatas[offset : offset + limit]
+        return {
+            "ids": [f"id{offset + i}" for i in range(len(batch))],
+            "metadatas": batch,
+        }
 
 
 def test_project_mining():
@@ -51,6 +72,40 @@ def test_project_mining():
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def test_project_mining_uses_configured_collection(monkeypatch):
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+        os.makedirs(project_root / "backend")
+        write_file(project_root / "backend" / "app.py", "def main():\n    return 1\n" * 20)
+        with open(project_root / "mempalace.yaml", "w") as f:
+            yaml.dump(
+                {
+                    "wing": "test_project",
+                    "rooms": [{"name": "backend", "description": "Backend code"}],
+                },
+                f,
+            )
+
+        palace_path = project_root / "palace"
+        monkeypatch.setattr(
+            "mempalace.palace.MempalaceConfig",
+            lambda: SimpleNamespace(
+                palace_path=str(palace_path),
+                collection_name="custom_drawers",
+            ),
+        )
+
+        mine(str(project_root), str(palace_path))
+
+        client = chromadb.PersistentClient(path=str(palace_path))
+        assert client.get_collection("custom_drawers").count() > 0
+        with pytest.raises(chromadb.errors.NotFoundError):
+            client.get_collection("mempalace_drawers")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def test_scan_project_respects_gitignore():
     tmpdir = tempfile.mkdtemp()
     try:
@@ -64,6 +119,19 @@ def test_scan_project_respects_gitignore():
         assert scanned_files(project_root) == ["src/app.py"]
     finally:
         shutil.rmtree(tmpdir)
+
+
+def test_status_pages_past_10000(monkeypatch, capsys):
+    from mempalace.miner import status
+
+    monkeypatch.setattr("mempalace.miner.get_drawer_collection", lambda *args, **kwargs: _PagedCollection(10_005))
+    status("/fake/palace")
+
+    out = capsys.readouterr().out
+    assert "10,005" not in out  # current output is plain int, keep shape unchanged
+    assert "10005 drawers" in out
+    assert "WING: project" in out
+    assert "WING: notes" in out
 
 
 def test_scan_project_respects_nested_gitignore():

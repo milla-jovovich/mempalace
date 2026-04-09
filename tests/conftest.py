@@ -43,7 +43,9 @@ def _reset_mcp_cache():
             from mempalace import mcp_server
 
             mcp_server._client_cache = None
+            mcp_server._client_cache_path = None
             mcp_server._collection_cache = None
+            mcp_server._collection_cache_key = None
         except (ImportError, AttributeError):
             pass
 

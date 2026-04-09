@@ -61,6 +61,11 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
 
+
+def _expand_path(path: str) -> str:
+    """Normalize user-home references without changing relative-path behavior."""
+    return os.path.expanduser(path)
+
 DEFAULT_TOPIC_WINGS = [
     "emotions",
     "consciousness",
@@ -144,8 +149,8 @@ class MempalaceConfig:
         """Path to the memory palace data directory."""
         env_val = os.environ.get("MEMPALACE_PALACE_PATH") or os.environ.get("MEMPAL_PALACE_PATH")
         if env_val:
-            return env_val
-        return self._file_config.get("palace_path", DEFAULT_PALACE_PATH)
+            return _expand_path(env_val)
+        return _expand_path(self._file_config.get("palace_path", DEFAULT_PALACE_PATH))
 
     @property
     def collection_name(self):

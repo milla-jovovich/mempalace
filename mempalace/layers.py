@@ -12,7 +12,7 @@ Load only what you need, when you need it.
 
 Wake-up cost: ~600-900 tokens (L0+L1). Leaves 95%+ of context free.
 
-Reads directly from ChromaDB (mempalace_drawers)
+Reads from the configured drawer collection
 and ~/.mempalace/identity.txt.
 """
 
@@ -21,9 +21,8 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
-import chromadb
-
 from .config import MempalaceConfig
+from .palace import get_drawer_collection
 
 
 # ---------------------------------------------------------------------------
@@ -84,16 +83,21 @@ class Layer1:
     MAX_CHARS = 3200  # hard cap on total L1 text (~800 tokens)
 
     def __init__(self, palace_path: str = None, wing: str = None):
-        cfg = MempalaceConfig()
-        self.palace_path = palace_path or cfg.palace_path
+        self._config = MempalaceConfig()
+        self.palace_path = palace_path or self._config.palace_path
         self.wing = wing
 
     def generate(self) -> str:
         """Pull top drawers from ChromaDB and format as compact L1 text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            col = get_drawer_collection(
+                palace_path=self.palace_path,
+                create=False,
+                config=self._config,
+            )
         except Exception:
+            return "## L1 — No palace found. Run: mempalace mine <dir>"
+        if col is None:
             return "## L1 — No palace found. Run: mempalace mine <dir>"
 
         # Fetch all drawers in batches to avoid SQLite variable limit (~999)
@@ -190,15 +194,20 @@ class Layer2:
     """
 
     def __init__(self, palace_path: str = None):
-        cfg = MempalaceConfig()
-        self.palace_path = palace_path or cfg.palace_path
+        self._config = MempalaceConfig()
+        self.palace_path = palace_path or self._config.palace_path
 
     def retrieve(self, wing: str = None, room: str = None, n_results: int = 10) -> str:
         """Retrieve drawers filtered by wing and/or room."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            col = get_drawer_collection(
+                palace_path=self.palace_path,
+                create=False,
+                config=self._config,
+            )
         except Exception:
+            return "No palace found."
+        if col is None:
             return "No palace found."
 
         where = {}
@@ -250,19 +259,24 @@ class Layer2:
 class Layer3:
     """
     Unlimited depth. Semantic search against the full palace.
-    Reuses searcher.py logic against mempalace_drawers.
+    Reuses searcher.py logic against the configured drawer collection.
     """
 
     def __init__(self, palace_path: str = None):
-        cfg = MempalaceConfig()
-        self.palace_path = palace_path or cfg.palace_path
+        self._config = MempalaceConfig()
+        self.palace_path = palace_path or self._config.palace_path
 
     def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
         """Semantic search, returns compact result text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            col = get_drawer_collection(
+                palace_path=self.palace_path,
+                create=False,
+                config=self._config,
+            )
         except Exception:
+            return "No palace found."
+        if col is None:
             return "No palace found."
 
         where = {}
@@ -316,9 +330,14 @@ class Layer3:
     ) -> list:
         """Return raw dicts instead of formatted text."""
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            col = get_drawer_collection(
+                palace_path=self.palace_path,
+                create=False,
+                config=self._config,
+            )
         except Exception:
+            return []
+        if col is None:
             return []
 
         where = {}
@@ -377,8 +396,8 @@ class MemoryStack:
     """
 
     def __init__(self, palace_path: str = None, identity_path: str = None):
-        cfg = MempalaceConfig()
-        self.palace_path = palace_path or cfg.palace_path
+        self._config = MempalaceConfig()
+        self.palace_path = palace_path or self._config.palace_path
         self.identity_path = identity_path or os.path.expanduser("~/.mempalace/identity.txt")
 
         self.l0 = Layer0(self.identity_path)
@@ -437,10 +456,12 @@ class MemoryStack:
 
         # Count drawers
         try:
-            client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
-            count = col.count()
-            result["total_drawers"] = count
+            col = get_drawer_collection(
+                palace_path=self.palace_path,
+                create=False,
+                config=self._config,
+            )
+            result["total_drawers"] = col.count() if col else 0
         except Exception:
             result["total_drawers"] = 0
 

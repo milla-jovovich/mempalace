@@ -7,6 +7,9 @@ via monkeypatch to avoid touching real data.
 """
 
 import json
+from types import SimpleNamespace
+
+import chromadb
 
 
 def _patch_mcp_server(monkeypatch, config, kg):
@@ -15,20 +18,45 @@ def _patch_mcp_server(monkeypatch, config, kg):
 
     monkeypatch.setattr(mcp_server, "_config", config)
     monkeypatch.setattr(mcp_server, "_kg", kg)
+    mcp_server._client_cache = None
+    mcp_server._client_cache_path = None
+    mcp_server._collection_cache = None
+    mcp_server._collection_cache_key = None
 
 
-def _get_collection(palace_path, create=False):
+def _get_collection(palace_path, create=False, collection_name="mempalace_drawers"):
     """Helper to get collection from test palace.
 
     Returns (client, collection) so callers can clean up the client
     when they are done.
     """
-    import chromadb
-
     client = chromadb.PersistentClient(path=palace_path)
     if create:
-        return client, client.get_or_create_collection("mempalace_drawers")
-    return client, client.get_collection("mempalace_drawers")
+        return client, client.get_or_create_collection(collection_name)
+    return client, client.get_collection(collection_name)
+
+
+class _PagedCollection:
+    def __init__(self, total):
+        self._metadatas = [
+            {"wing": "project" if i % 2 == 0 else "notes", "room": "backend" if i % 3 else "planning"}
+            for i in range(total)
+        ]
+
+    def count(self):
+        return len(self._metadatas)
+
+    def get(self, include, limit, offset, where=None):
+        del include
+        if where:
+            source = [m for m in self._metadatas if all(m.get(k) == v for k, v in where.items())]
+        else:
+            source = self._metadatas
+        batch = source[offset : offset + limit]
+        return {
+            "ids": [f"id{offset + i}" for i in range(len(batch))],
+            "metadatas": batch,
+        }
 
 
 # ── Protocol Layer ──────────────────────────────────────────────────────
@@ -181,6 +209,21 @@ class TestReadTools:
         assert "project" in result["wings"]
         assert "notes" in result["wings"]
 
+    def test_status_with_custom_collection(self, monkeypatch, palace_path, kg):
+        config = SimpleNamespace(palace_path=palace_path, collection_name="custom_drawers")
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, col = _get_collection(palace_path, create=True, collection_name="custom_drawers")
+        col.add(
+            ids=["drawer_custom"],
+            documents=["Custom collection drawer"],
+            metadatas=[{"wing": "project", "room": "backend", "source_file": "notes.txt"}],
+        )
+        del _client
+        from mempalace.mcp_server import tool_status
+
+        result = tool_status()
+        assert result["total_drawers"] == 1
+
     def test_list_wings(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_list_wings
@@ -221,6 +264,25 @@ class TestReadTools:
 
         result = tool_status()
         assert "error" in result
+
+    def test_read_tools_page_past_10000(self, monkeypatch, config, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        fake_collection = _PagedCollection(10_005)
+        monkeypatch.setattr("mempalace.mcp_server._get_collection", lambda create=False: fake_collection)
+        from mempalace.mcp_server import tool_get_taxonomy, tool_list_rooms, tool_list_wings, tool_status
+
+        status_result = tool_status()
+        wings_result = tool_list_wings()
+        rooms_result = tool_list_rooms(wing="project")
+        taxonomy_result = tool_get_taxonomy()
+
+        assert status_result["total_drawers"] == 10_005
+        assert sum(status_result["wings"].values()) == 10_005
+        assert wings_result["wings"] == status_result["wings"]
+        assert sum(rooms_result["rooms"].values()) == status_result["wings"]["project"]
+        assert sum(
+            count for wing_rooms in taxonomy_result["taxonomy"].values() for count in wing_rooms.values()
+        ) == 10_005
 
 
 # ── Search Tool ─────────────────────────────────────────────────────────
@@ -320,6 +382,47 @@ class TestWriteTools:
             threshold=0.99,
         )
         assert result["is_duplicate"] is False
+
+
+class TestCollectionCache:
+    def test_get_collection_rekeys_when_context_changes(self, monkeypatch, tmp_path, kg):
+        from mempalace import mcp_server
+
+        palace_a = tmp_path / "palace-a"
+        palace_b = tmp_path / "palace-b"
+        config_a = SimpleNamespace(palace_path=str(palace_a), collection_name="col_a")
+        config_b = SimpleNamespace(palace_path=str(palace_a), collection_name="col_b")
+        config_c = SimpleNamespace(palace_path=str(palace_b), collection_name="col_b")
+
+        _patch_mcp_server(monkeypatch, config_a, kg)
+        col_a = mcp_server._get_collection(create=True)
+        assert col_a.name == "col_a"
+        assert mcp_server._collection_cache_key == (str(palace_a), "col_a")
+
+        monkeypatch.setattr(mcp_server, "_config", config_b)
+        col_b = mcp_server._get_collection(create=True)
+        assert col_b.name == "col_b"
+        assert mcp_server._collection_cache_key == (str(palace_a), "col_b")
+
+        monkeypatch.setattr(mcp_server, "_config", config_c)
+        col_c = mcp_server._get_collection(create=True)
+        assert col_c.name == "col_b"
+        assert mcp_server._client_cache_path == str(palace_b)
+        assert mcp_server._collection_cache_key == (str(palace_b), "col_b")
+
+    def test_create_false_miss_does_not_poison_later_create_true(self, monkeypatch, tmp_path, kg):
+        from mempalace import mcp_server
+
+        palace_path = tmp_path / "palace"
+        palace_path.mkdir()
+        config = SimpleNamespace(palace_path=str(palace_path), collection_name="custom_drawers")
+        _patch_mcp_server(monkeypatch, config, kg)
+
+        assert mcp_server._get_collection(create=False) is None
+        created = mcp_server._get_collection(create=True)
+        assert created is not None
+        assert created.name == "custom_drawers"
+        assert mcp_server._get_collection(create=False).name == "custom_drawers"
 
 
 # ── KG Tools ────────────────────────────────────────────────────────────
