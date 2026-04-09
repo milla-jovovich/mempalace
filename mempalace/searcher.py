@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import chromadb
+from .embeddings import get_collection as _emb_get_collection
 
 
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
@@ -19,7 +20,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     """
     try:
         client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = _emb_get_collection(client, "mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
@@ -93,7 +94,7 @@ def search_memories(
     """
     try:
         client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = _emb_get_collection(client, "mempalace_drawers")
     except Exception as e:
         return {"error": f"No palace found at {palace_path}: {e}"}
 
