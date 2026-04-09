@@ -16,11 +16,15 @@ report the installed version and skip to Step 4.
 
 ## Step 3: Install mempalace
 
-Run `pip install mempalace`.
+Try these install methods in order:
 
-### Error handling -- pip failures
+1. `uv tool install mempalace` (recommended on modern Linux — works with PEP 668)
+2. `pipx install mempalace` (alternative isolated install)
+3. `pip install mempalace` (in a virtual environment, or on systems without PEP 668)
 
-If `pip install mempalace` fails, try these fallbacks in order:
+### Error handling -- install failures
+
+If all three methods above fail, try these additional fallbacks:
 
 1. Try `pip3 install mempalace`
 2. Try `python -m pip install mempalace` (or `python3 -m pip install mempalace`)
@@ -31,7 +35,9 @@ If `pip install mempalace` fails, try these fallbacks in order:
    - On Windows: suggest installing Microsoft C++ Build Tools from
      https://visualstudio.microsoft.com/visual-cpp-build-tools/
    - Then retry the install command
-4. If all attempts fail, report the error clearly and stop.
+4. If the error mentions `externally-managed-environment` (PEP 668), the user
+   must use `uv tool install` or `pipx install` instead of bare `pip install`.
+5. If all attempts fail, report the error clearly and stop.
 
 ## Step 4: Ask for project directory
 
@@ -49,7 +55,7 @@ If this fails, report the error and stop.
 
 Run the following command to register the MemPalace MCP server with Claude:
 
-    claude mcp add mempalace -- python -m mempalace.mcp_server
+    claude mcp add mempalace -- mempalace mcp-serve
 
 If this fails, report the error but continue to the next step (MCP
 configuration can be done manually later).

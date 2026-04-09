@@ -11,6 +11,7 @@ from mempalace.cli import (
     cmd_hook,
     cmd_init,
     cmd_instructions,
+    cmd_mcp_serve,
     cmd_mine,
     cmd_repair,
     cmd_search,
@@ -377,6 +378,27 @@ def test_main_compress_dispatches():
     ):
         main()
         mock_cmd.assert_called_once()
+
+
+def test_main_mcp_serve_dispatches():
+    with (
+        patch("sys.argv", ["mempalace", "mcp-serve"]),
+        patch("mempalace.cli.cmd_mcp_serve") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+
+
+def test_main_mcp_serve_palace_after_subcommand():
+    """mempalace mcp-serve --palace /path must work (not just mempalace --palace /path mcp-serve)."""
+    with (
+        patch("sys.argv", ["mempalace", "mcp-serve", "--palace", "/custom/palace"]),
+        patch("mempalace.cli.cmd_mcp_serve") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+        args = mock_cmd.call_args[0][0]
+        assert args.palace == "/custom/palace"
 
 
 # ── cmd_repair ─────────────────────────────────────────────────────────
