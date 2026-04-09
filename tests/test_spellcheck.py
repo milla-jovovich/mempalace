@@ -7,6 +7,7 @@ from unittest.mock import patch
 from mempalace.spellcheck import (
     _edit_distance,
     _get_system_words,
+    _load_known_names,
     _should_skip,
     spellcheck_transcript,
     spellcheck_transcript_line,
