@@ -236,7 +236,8 @@ def cmd_hook(args):
 
 def cmd_mcp_serve(args):
     """Start the MCP server (JSON-RPC over stdin/stdout)."""
-    sys.argv = ["mempalace-mcp-server"] + (["--palace", args.palace] if args.palace else [])
+    palace = os.path.expanduser(args.palace) if args.palace else None
+    sys.argv = ["mempalace-mcp-server"] + (["--palace", palace] if palace else [])
     from .mcp_server import main as mcp_main
 
     mcp_main()

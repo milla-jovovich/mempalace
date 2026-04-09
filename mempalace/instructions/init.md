@@ -11,8 +11,9 @@ tell the user they need Python 3.9+ installed and stop.
 
 ## Step 2: Check if mempalace is already installed
 
-Run `pip show mempalace` to see if the package is already present. If it is,
-report the installed version and skip to Step 4.
+Run `mempalace status` to see if the CLI is already available. If it runs
+successfully, report the version and skip to Step 4. If the command is not
+found, proceed to Step 3.
 
 ## Step 3: Install mempalace
 
