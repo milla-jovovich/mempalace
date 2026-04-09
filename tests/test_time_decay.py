@@ -1,10 +1,11 @@
 """Tests for time-decay scoring feature (#331)."""
 
 from datetime import datetime, timezone, timedelta
+from unittest.mock import MagicMock
 
 import pytest
 
-from mempalace.searcher import _apply_time_decay
+from mempalace.searcher import _apply_time_decay, search_memories
 
 
 class TestApplyTimeDecay:
@@ -109,3 +110,57 @@ class TestApplyTimeDecay:
         """Empty list should return empty list."""
         result = _apply_time_decay([], half_life_days=90)
         assert result == []
+
+
+class TestSearchMemoriesResponse:
+    """search_memories() response metadata for time decay."""
+
+    def test_response_includes_half_life_days_when_decay_enabled(self, monkeypatch):
+        """When time_decay is True, response includes half_life_days as the configured value."""
+        mock_col = MagicMock()
+        mock_col.query.return_value = {
+            "documents": [["hello"]],
+            "metadatas": [
+                [
+                    {
+                        "wing": "w",
+                        "room": "r",
+                        "source_file": "test.md",
+                        "filed_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ]
+            ],
+            "distances": [[0.1]],
+        }
+        mock_client = MagicMock()
+        mock_client.get_collection.return_value = mock_col
+        monkeypatch.setattr(
+            "mempalace.searcher.chromadb.PersistentClient", lambda path: mock_client
+        )
+
+        cfg = MagicMock()
+        cfg.time_decay_half_life_days = 90
+        monkeypatch.setattr("mempalace.searcher.MempalaceConfig", lambda: cfg)
+
+        result = search_memories("q", "/fake/path", time_decay=True)
+        assert "half_life_days" in result
+        assert result["time_decay"] is True
+        assert result["half_life_days"] == 90
+
+    def test_half_life_days_none_when_decay_disabled(self, monkeypatch):
+        """When time_decay is False, half_life_days is None."""
+        mock_col = MagicMock()
+        mock_col.query.return_value = {
+            "documents": [["hello"]],
+            "metadatas": [[{"wing": "w", "room": "r", "source_file": "test.md"}]],
+            "distances": [[0.1]],
+        }
+        mock_client = MagicMock()
+        mock_client.get_collection.return_value = mock_col
+        monkeypatch.setattr(
+            "mempalace.searcher.chromadb.PersistentClient", lambda path: mock_client
+        )
+
+        result = search_memories("q", "/fake/path", time_decay=False)
+        assert result["time_decay"] is False
+        assert result["half_life_days"] is None

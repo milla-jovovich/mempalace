@@ -193,16 +193,18 @@ def search_memories(
         )
 
     # Apply time-decay scoring
+    half_life_days = None
     if time_decay:
         try:
-            half_life = MempalaceConfig().time_decay_half_life_days
+            half_life_days = MempalaceConfig().time_decay_half_life_days
         except Exception:
-            half_life = 90
-        hits = _apply_time_decay(hits, half_life)
+            half_life_days = 90
+        hits = _apply_time_decay(hits, half_life_days)
 
     return {
         "query": query,
         "filters": {"wing": wing, "room": room},
         "time_decay": time_decay,
+        "half_life_days": half_life_days if time_decay else None,
         "results": hits,
     }
