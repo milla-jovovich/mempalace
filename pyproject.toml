@@ -40,6 +40,10 @@ mempalace = "mempalace:main"
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
 spellcheck = ["autocorrect>=2.0"]
+nlp-basic = ["pysbd>=0.3.4"]
+nlp = ["pysbd>=0.3.4", "spacy>=3.7", "coreferee>=1.4"]
+nlp-full = ["pysbd>=0.3.4", "spacy>=3.7", "coreferee>=1.4", "gliner>=0.2", "wtpsplit>=2.0"]
+nlp-slm = ["pysbd>=0.3.4", "spacy>=3.7", "coreferee>=1.4", "gliner>=0.2", "wtpsplit>=2.0", "onnxruntime-genai>=0.4"]
 
 [dependency-groups]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
