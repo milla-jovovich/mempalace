@@ -8,6 +8,18 @@
 
 <br>
 
+> **🦀 Rust port (v3.1.0):** MemPalace has been rewritten from Python
+> to pure Rust. The Rust workspace lives under `crates/` and builds a
+> single `mempalace` binary. The original Python implementation is
+> preserved under `legacy/` for reference. See
+> [`RUST_PORT.md`](RUST_PORT.md) for the full 7-phase port log and
+> security audit.
+>
+> **Build:** `cargo build --release` → `target/release/mempalace`
+> **Tests:** `cargo test --workspace` (373 tests across 5 crates)
+
+<br>
+
 Every conversation you have with an AI — every decision, every debugging session, every architecture debate — disappears when the session ends. Six months of work, gone. You start over every time.
 
 Other memory systems try to fix this by letting AI decide what's worth remembering. It extracts "user prefers Postgres" and throws away the conversation where you explained *why*. MemPalace takes a different approach: **store everything, then make it findable.**

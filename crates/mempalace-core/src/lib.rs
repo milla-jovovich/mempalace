@@ -31,15 +31,15 @@ mod tests {
     }
 
     #[test]
-    fn version_matches_pyproject() {
+    fn version_matches_legacy_pyproject() {
         let body = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../pyproject.toml"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../legacy/pyproject.toml"),
         )
         .unwrap();
         let line = body.lines().find(|l| l.starts_with("version")).unwrap();
         assert!(
             line.contains(VERSION),
-            "pyproject.toml version line `{line}` does not contain Rust VERSION `{VERSION}`"
+            "legacy/pyproject.toml version line `{line}` does not contain Rust VERSION `{VERSION}`"
         );
     }
 }

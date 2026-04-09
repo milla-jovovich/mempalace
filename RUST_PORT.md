@@ -3,7 +3,7 @@
 This repository is being converted from Python to pure Rust.
 
 - **Branch:** `feat/convert-to-rust`
-- **Status:** Phase 6 of 7 — `mempalace-cli` binary ported (373 tests passing)
+- **Status:** Phase 7 of 7 — Rust port complete. Python moved to `legacy/`. 373 tests passing.
 - **Plan:** [`.sisyphus/plans/rust-port.md`](.sisyphus/plans/rust-port.md)
 - **Research:**
   - [`.sisyphus/research/01-rust-stack.md`](.sisyphus/research/01-rust-stack.md)
@@ -20,7 +20,7 @@ This repository is being converted from Python to pure Rust.
 | 4 | `mempalace-store`: rusqlite KG, palace trait + in-memory backend, graph, layers (57 tests) | **done** |
 | 5 | `mempalace-server`: ingest, searcher, MCP server, hooks, onboarding (45 tests) | **done** |
 | 6 | `mempalace-cli`: clap binary + end-to-end integration tests (13 tests) | **done** |
-| 7 | Security audit, move Python to `legacy/`, final polish | todo |
+| 7 | Security audit, move Python to `legacy/`, final polish | **done** |
 
 ## Workspace layout
 
@@ -30,14 +30,18 @@ mempalace/
 ├── rust-toolchain.toml                 pinned stable
 ├── rustfmt.toml
 ├── .github/workflows/rust.yml          Rust CI (cargo fmt, clippy, test, audit)
-├── .github/workflows/ci.yml            Python CI (kept until Phase 7)
+├── .github/workflows/ci.yml.disabled   (old Python CI — kept for reference)
 ├── crates/
-│   ├── mempalace-core/                 leaf types, config, sanitize
-│   ├── mempalace-text/                 dialect, normalize, entity_*, spellcheck
-│   ├── mempalace-store/                lancedb + rusqlite + palace graph + layers
-│   ├── mempalace-server/               MCP server, ingest, searcher, hooks, onboarding
-│   └── mempalace-cli/                  `mempalace` binary
-└── mempalace/                          (Python — moves to legacy/ in Phase 7)
+│   ├── mempalace-core/                 leaf types, config, sanitize (32 tests)
+│   ├── mempalace-text/                 dialect, normalize, entity_*, spellcheck (226 tests)
+│   ├── mempalace-store/                rusqlite KG + Palace trait + graph + layers (57 tests)
+│   ├── mempalace-server/               MCP server, ingest, searcher, hooks, onboarding (45 tests)
+│   └── mempalace-cli/                  `mempalace` binary (13 end-to-end tests)
+└── legacy/                             (Python reference implementation)
+    ├── mempalace/                      old Python package
+    ├── tests/                          old Python test suite
+    ├── pyproject.toml
+    └── uv.lock
 ```
 
 ## Stack decisions
@@ -66,7 +70,28 @@ mempalace/
 
 ## Test strategy
 
-All ~315 unit tests from Python are ported to Rust. The ~68 `tests/benchmarks/` tests are excluded (they characterise ChromaDB-exact numerics and are re-baselined post-port). One known gap — `mempalace_get_aaak_spec` MCP tool — is closed in Phase 5.
+All 315 unit-test equivalents from Python are represented in the Rust
+workspace — 373 Rust tests total across 5 crates, exceeding the original
+count. The 68 `tests/benchmarks/` tests are excluded (they characterise
+ChromaDB-exact numerics and will be re-baselined against the lancedb
+backend in a follow-up). The previously untested
+`mempalace_get_aaak_spec` MCP tool is now covered in
+`crates/mempalace-server/tests/mcp.rs`.
+
+## Phase 7 audit results (2026-04-09)
+
+- `#![forbid(unsafe_code)]` present on every `lib.rs` and `main.rs`.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean.
+- `cargo fmt --check` — clean.
+- `cargo test --workspace` — 373 passed, 0 failed.
+- `grep -rn 'format!.*(SELECT|INSERT|UPDATE|DELETE)' crates/` — zero
+  matches; all rusqlite call sites use `params!` bindings.
+- No shell invocations anywhere in `crates/` (checked by hand, no
+  `std::process::Command::new("sh"|"bash")`).
+- Python implementation moved to `legacy/` for reference. The Rust
+  workspace no longer depends on Python at runtime.
+- `cargo audit` is not installed in the CI image yet — planned to be
+  added alongside the lancedb production backend in a follow-up.
 
 ## Why Rust?
 
