@@ -76,7 +76,7 @@ def tool_status():
             rooms[r] = rooms.get(r, 0) + 1
     except Exception:
         pass
-    return {
+    status_dict = {
         "total_drawers": count,
         "wings": wings,
         "rooms": rooms,
@@ -84,6 +84,26 @@ def tool_status():
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
     }
+    palace_path = _config.palace_path
+    # Synapse status
+    try:
+        cfg = MempalaceConfig()
+        status_dict["synapse_enabled"] = cfg.synapse_enabled
+        if cfg.synapse_enabled:
+            from .synapse import SynapseDB
+
+            synapse_db = SynapseDB(palace_path)
+            synapse_db.refresh_stats(window_days=cfg.synapse_ltp_window_days)
+            candidates = synapse_db.get_consolidation_candidates(inactive_days=180)
+            status_dict["synapse"] = {
+                "ltp_window_days": cfg.synapse_ltp_window_days,
+                "tagging_window_hours": cfg.synapse_tagging_window_hours,
+                "consolidation_candidates": len(candidates),
+                "consolidation_details": candidates[:10],  # 上位10件のみ
+            }
+    except Exception:
+        status_dict["synapse_enabled"] = False
+    return status_dict
 
 
 # ── AAAK Dialect Spec ─────────────────────────────────────────────────────────

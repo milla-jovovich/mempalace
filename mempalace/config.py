@@ -123,6 +123,18 @@ class MempalaceConfig:
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
+    @property
+    def synapse_enabled(self):
+        return self._file_config.get("synapse_enabled", False)
+
+    @property
+    def synapse_ltp_window_days(self):
+        return self._file_config.get("synapse_ltp_window_days", 30)
+
+    @property
+    def synapse_tagging_window_hours(self):
+        return self._file_config.get("synapse_tagging_window_hours", 24)
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)

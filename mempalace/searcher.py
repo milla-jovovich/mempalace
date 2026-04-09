@@ -6,7 +6,9 @@ Semantic search against the palace.
 Returns verbatim text — the actual words, never summaries.
 """
 
+import hashlib
 import logging
+import uuid
 from pathlib import Path
 
 import chromadb
@@ -132,11 +134,16 @@ def search_memories(
     docs = results["documents"][0]
     metas = results["metadatas"][0]
     dists = results["distances"][0]
+    ids = results.get("ids", [[]])[0]
 
     hits = []
-    for doc, meta, dist in zip(docs, metas, dists):
+    for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists)):
+        drawer_id = ids[i] if i < len(ids) else ""
+        meta = meta or {}
         hits.append(
             {
+                "id": drawer_id,
+                "metadata": meta,
                 "text": doc,
                 "wing": meta.get("wing", "unknown"),
                 "room": meta.get("room", "unknown"),
@@ -145,8 +152,71 @@ def search_memories(
             }
         )
 
-    return {
+    result = {
         "query": query,
         "filters": {"wing": wing, "room": room},
         "results": hits,
+        "hits": hits,
     }
+
+    # --- Synapse integration ---
+    try:
+        from .config import MempalaceConfig
+
+        cfg = MempalaceConfig()
+        if cfg.synapse_enabled:
+            from .synapse import SynapseDB
+
+            synapse_db = SynapseDB(palace_path)
+            query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
+            session_id = uuid.uuid4().hex[:16]
+
+            # 結果の drawer_id リストを収集
+            hit_drawer_ids = []
+            for hit in result["hits"]:
+                drawer_id = hit.get("metadata", {}).get("drawer_id", hit.get("id", ""))
+                if drawer_id:
+                    hit_drawer_ids.append(drawer_id)
+
+            # LTP スコアを一括取得
+            ltp_scores = synapse_db.get_ltp_scores_batch(
+                hit_drawer_ids,
+                window_days=cfg.synapse_ltp_window_days,
+            )
+
+            # 各ヒットに Synapse スコアを付与
+            for hit in result["hits"]:
+                drawer_id = hit.get("metadata", {}).get("drawer_id", hit.get("id", ""))
+                filed_at = hit.get("metadata", {}).get("filed_at", None)
+                similarity = hit.get("original_similarity", hit.get("similarity", 0.0))
+                decay = hit.get("decay", 1.0)
+
+                synapse_result = synapse_db.calculate_synapse_score(
+                    similarity=similarity,
+                    decay=decay,
+                    drawer_id=drawer_id,
+                    filed_at=filed_at,
+                    ltp_scores=ltp_scores,
+                    window_days=cfg.synapse_ltp_window_days,
+                )
+
+                hit["synapse_score"] = synapse_result["final_score"]
+                hit["synapse_factors"] = {
+                    "ltp": synapse_result["ltp"],
+                    "association": synapse_result["association"],
+                    "tagging": synapse_result["tagging"],
+                }
+
+            # Synapse スコアで再ソート（hits と results は同一リスト）
+            result["hits"].sort(key=lambda h: h.get("synapse_score", 0.0), reverse=True)
+            result["synapse_enabled"] = True
+
+            # 検索ログを fire-and-forget で記録
+            synapse_db.log_retrieval(hit_drawer_ids, query_hash, session_id)
+        else:
+            result["synapse_enabled"] = False
+    except Exception as e:
+        logger.warning("Synapse scoring skipped: %s", e)
+        result["synapse_enabled"] = False
+
+    return result
