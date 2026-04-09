@@ -183,10 +183,8 @@ def chunk_text(content: str, source_file: str) -> list:
 def get_collection(palace_path: str):
     os.makedirs(palace_path, exist_ok=True)
     client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
+    from .embeddings import get_collection as _emb_get_collection
+    return _emb_get_collection(client, "mempalace_drawers", create=True)
 
 
 def file_already_mined(collection, source_file: str) -> bool:
@@ -238,45 +236,45 @@ def process_file(
     rooms: list,
     agent: str,
     dry_run: bool,
-) -> int:
-    """Read, chunk, route, and file one file. Returns drawer count."""
+) -> list:
+    """Read, chunk, route, and prepare drawers for one file. Returns list of drawer dicts."""
 
-    # Skip if already filed
     source_file = str(filepath)
     if not dry_run and file_already_mined(collection, source_file):
-        return 0
+        return []
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
     except Exception:
-        return 0
+        return []
 
     content = content.strip()
     if len(content) < MIN_CHUNK_SIZE:
-        return 0
+        return []
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
-        return len(chunks)
+        return [{"dry_run": True} for _ in chunks]
 
-    drawers_added = 0
+    drawers = []
     for chunk in chunks:
-        added = add_drawer(
-            collection=collection,
-            wing=wing,
-            room=room,
-            content=chunk["content"],
-            source_file=source_file,
-            chunk_index=chunk["chunk_index"],
-            agent=agent,
-        )
-        if added:
-            drawers_added += 1
-
-    return drawers_added
+        drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:16]}"
+        drawers.append({
+            "id": drawer_id,
+            "document": chunk["content"],
+            "metadata": {
+                "wing": wing,
+                "room": room,
+                "source_file": source_file,
+                "chunk_index": chunk["chunk_index"],
+                "added_by": agent,
+                "filed_at": datetime.now().isoformat(),
+            }
+        })
+    return drawers
 
 
 # =============================================================================
@@ -348,10 +346,13 @@ def mine(
     else:
         collection = None
 
+    from .embeddings import flush_batch, BATCH_SIZE
+
     total_drawers = 0
     files_skipped = 0
     room_counts = defaultdict(int)
 
+    pending = []
     for i, filepath in enumerate(files, 1):
         drawers = process_file(
             filepath=filepath,
@@ -362,14 +363,25 @@ def mine(
             agent=agent,
             dry_run=dry_run,
         )
-        if drawers == 0 and not dry_run:
+        if not drawers:
             files_skipped += 1
-        else:
-            total_drawers += drawers
-            room = detect_room(filepath, "", rooms, project_path)
-            room_counts[room] += 1
-            if not dry_run:
-                print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+            continue
+
+        total_drawers += len(drawers)
+        room = detect_room(filepath, "", rooms, project_path)
+        room_counts[room] += 1
+
+        if not dry_run:
+            pending.extend(drawers)
+            if len(pending) >= BATCH_SIZE:
+                flush_batch(collection, pending)
+                print(f"  ✓ Batch flushed — {len(pending)} drawers (file {i}/{len(files)})")
+                pending = []
+
+    # Flush remaining
+    if pending and not dry_run:
+        flush_batch(collection, pending)
+        print(f"  ✓ Final batch — {len(pending)} drawers")
 
     print(f"\n{'=' * 55}")
     print("  Done.")
