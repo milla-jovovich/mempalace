@@ -13,15 +13,16 @@ from .config import MempalaceConfig
 from .config import DEFAULT_COLLECTION_NAME as DEFAULT_COLLECTION
 
 _http_clients = {}  # cache: (host, port, ssl) -> HttpClient
+_persistent_clients = {}  # cache: path -> PersistentClient
 
 
 def get_client(palace_path=None):
     """Return a ChromaDB client.
 
     Uses HttpClient when chroma_host is configured; PersistentClient otherwise.
+    Both client types are cached to avoid repeated connection overhead in
+    long-lived processes (e.g. MCP server).
     palace_path is ignored in remote mode — the server manages its own storage.
-    HttpClient instances are cached by (host, port, ssl) to avoid repeated
-    connection overhead in long-lived processes (e.g. MCP server).
     """
     cfg = MempalaceConfig()
     if cfg.chroma_host:
@@ -33,8 +34,10 @@ def get_client(palace_path=None):
         return _http_clients[key]
 
     path = palace_path or cfg.palace_path
-    os.makedirs(path, exist_ok=True)
-    return chromadb.PersistentClient(path=path)
+    if path not in _persistent_clients:
+        os.makedirs(path, exist_ok=True)
+        _persistent_clients[path] = chromadb.PersistentClient(path=path)
+    return _persistent_clients[path]
 
 
 def get_collection(palace_path=None, name=DEFAULT_COLLECTION):
@@ -44,3 +47,15 @@ def get_collection(palace_path=None, name=DEFAULT_COLLECTION):
     """
     client = get_client(palace_path=palace_path)
     return client.get_or_create_collection(name)
+
+
+def clear_caches():
+    """Clear all cached clients.
+
+    Call after config changes or in test teardown to force fresh client
+    creation on the next get_client() call.
+    Warning: env var changes to MEMPALACE_CHROMA_HOST are not picked up
+    automatically in long-running processes — call clear_caches() first.
+    """
+    _http_clients.clear()
+    _persistent_clients.clear()
