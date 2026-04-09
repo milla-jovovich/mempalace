@@ -478,8 +478,13 @@ def add_drawers_batch(
         ids.append(drawer_id)
         documents.append(chunk["content"])
         metadatas.append(metadata)
-    collection.upsert(documents=documents, ids=ids, metadatas=metadatas)
-    return len(ids)
+    try:
+        collection.add(documents=documents, ids=ids, metadatas=metadatas)
+        return len(ids)
+    except Exception as e:
+        if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+            return 0
+        raise
 
 # =============================================================================
 # PROCESS ONE FILE
@@ -516,23 +521,16 @@ def process_file(
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
-        return len(chunks), room
+        return len(chunks)
 
-    drawers_added = 0
-    for chunk in chunks:
-        added = add_drawer(
-            collection=collection,
-            wing=wing,
-            room=room,
-            content=chunk["content"],
-            source_file=source_file,
-            chunk_index=chunk["chunk_index"],
-            agent=agent,
-        )
-        if added:
-            drawers_added += 1
-
-    return drawers_added
+    return add_drawers_batch(
+        collection=collection,
+        wing=wing,
+        room=room,
+        chunks=chunks,
+        source_file=source_file,
+        agent=agent,
+    )
 
 
 # =============================================================================
@@ -650,8 +648,9 @@ def mine(
     files_skipped = 0
     room_counts = defaultdict(int)
 
-    for i, filepath in enumerate(files, 1):
-        drawers = process_file(
+    def _process(args):
+        i, filepath = args
+        return i, filepath, process_file(
             filepath=filepath,
             project_path=project_path,
             collection=collection,
@@ -660,15 +659,20 @@ def mine(
             agent=agent,
             dry_run=dry_run,
         )
-        if drawers == 0 and not dry_run:
-            files_skipped += 1
-        else:
-            total_drawers += drawers
-            room = detect_room(filepath, "", rooms, project_path)
-            room_counts[room] += 1
-            if not dry_run:
-                print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
 
+    workers = 1 if dry_run else min(4, os.cpu_count() or 1)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_process, (i, fp)): i for i, fp in enumerate(files, 1)}
+        for future in as_completed(futures):
+            i, filepath, drawers = future.result()
+            if drawers == 0 and not dry_run:
+                files_skipped += 1
+            else:
+                total_drawers += drawers
+                room = detect_room(filepath, "", rooms, project_path)
+                room_counts[room] += 1
+                if not dry_run:
+                    print(f"  ✔ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
     print(f"\n{'=' * 55}")
     print("  Done.")
     print(f"  Files processed: {len(files) - files_skipped}")
