@@ -34,6 +34,21 @@ from pathlib import Path
 from .config import MempalaceConfig
 
 
+def _resolve_palace(args, project_dir=None):
+    """Resolve palace path: explicit --palace > project-local > global.
+
+    When a project directory is provided, the palace defaults to
+    <project_dir>/.mempalace/palace, isolating each project so a
+    corruption in one cannot destroy another.
+    """
+    if args.palace:
+        return os.path.expanduser(args.palace)
+    if project_dir:
+        return str(Path(project_dir).expanduser().resolve() / '.mempalace' / 'palace')
+    return MempalaceConfig().palace_path
+
+
+
 def cmd_init(args):
     import json
     from pathlib import Path
@@ -64,7 +79,7 @@ def cmd_init(args):
 
 
 def cmd_mine(args):
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    palace_path = _resolve_palace(args, args.dir)
 
     if args.mode == "convos":
         from .convo_miner import mine_convos
@@ -94,7 +109,7 @@ def cmd_mine(args):
 def cmd_search(args):
     from .searcher import search
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    palace_path = _resolve_palace(args, getattr(args, "dir", None))
     search(
         query=args.query,
         palace_path=palace_path,
@@ -108,7 +123,7 @@ def cmd_wakeup(args):
     """Show L0 (identity) + L1 (essential story) — the wake-up context."""
     from .layers import MemoryStack
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    palace_path = _resolve_palace(args, getattr(args, "dir", None))
     stack = MemoryStack(palace_path=palace_path)
 
     text = stack.wake_up(wing=args.wing)
@@ -143,7 +158,7 @@ def cmd_split(args):
 def cmd_status(args):
     from .miner import status
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    palace_path = _resolve_palace(args, getattr(args, "dir", None))
     status(palace_path=palace_path)
 
 
@@ -152,7 +167,7 @@ def cmd_compress(args):
     import chromadb
     from .dialect import Dialect
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    palace_path = _resolve_palace(args, getattr(args, "dir", None))
 
     # Load dialect (with optional entity config)
     config_path = args.config
@@ -266,7 +281,7 @@ def main():
     parser.add_argument(
         "--palace",
         default=None,
-        help="Where the palace lives (default: from ~/.mempalace/config.json or ~/.mempalace/palace)",
+        help="Where the palace lives (default: <project>/.mempalace/palace when dir is given, else ~/.mempalace/palace)",
     )
 
     sub = parser.add_subparsers(dest="command")
@@ -307,6 +322,7 @@ def main():
     # search
     p_search = sub.add_parser("search", help="Find anything, exact words")
     p_search.add_argument("query", help="What to search for")
+    p_search.add_argument("--dir", default=None, help="Project directory (uses project-local palace)")
     p_search.add_argument("--wing", default=None, help="Limit to one project")
     p_search.add_argument("--room", default=None, help="Limit to one room")
     p_search.add_argument("--results", type=int, default=5, help="Number of results")
@@ -322,10 +338,12 @@ def main():
     p_compress.add_argument(
         "--config", default=None, help="Entity config JSON (e.g. entities.json)"
     )
+    p_compress.add_argument("--dir", default=None, help="Project directory (uses project-local palace)")
 
     # wake-up
     p_wakeup = sub.add_parser("wake-up", help="Show L0 + L1 wake-up context (~600-900 tokens)")
     p_wakeup.add_argument("--wing", default=None, help="Wake-up for a specific project/wing")
+    p_wakeup.add_argument("--dir", default=None, help="Project directory (uses project-local palace)")
 
     # split
     p_split = sub.add_parser(
@@ -351,7 +369,8 @@ def main():
     )
 
     # status
-    sub.add_parser("status", help="Show what's been filed")
+    p_status = sub.add_parser("status", help="Show what's been filed")
+    p_status.add_argument("--dir", default=None, help="Project directory (uses project-local palace)")
 
     args = parser.parse_args()
 
