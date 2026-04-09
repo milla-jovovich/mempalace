@@ -1,26 +1,27 @@
 ---
-title: "MemPalace"
+title: "MemPalace (High-Fidelity Hybrid Fork)"
 category: "Tool"
 status: "active"
-version: "3.0.0"
-summary: "High-fidelity AI memory palace with fused lexical-semantic retrieval."
-description: "MemPalace is a local-first long-term memory layer for AI agents. It implements a hybrid retrieval protocol combining ChromaDB (vector) and SQLite FTS5 (lexical) with Reciprocal Rank Fusion (RRF) to ensure perfect recall of technical symbols, exact identifiers, and code snippets alongside conceptual 'vibe' search. Built for high-entropy technical environments."
-tags: ["AI", "Memory", "RAG", "KnowledgeGraph", "Python", "Local-First", "Search"]
+version: "3.0.0-fused"
+summary: "Specialized fork of MemPalace featuring Hybrid Lexical-Semantic Retrieval (RRF)."
+description: "This is the PerseusXR high-fidelity fork of MemPalace. It introduces a structural upgrade to the retrieval layer by fusing ChromaDB (semantic) and SQLite FTS5 (lexical) using Reciprocal Rank Fusion (RRF). 
+
+Developed to solve 'The Vector Blur' in technical environments, this version provides perfect recall for exact identifiers, Git hashes, and code symbols while maintaining conceptual conceptual search capabilities. Benchmarked at +60% improvement in technical retrieval precision."
+tags: ["AI", "Memory", "RAG", "Hybrid-Search", "Information-Retrieval", "Python", "Local-First"]
 source_url: "https://github.com/Perseusxrltd/mempalace"
 collaboration_open: true
-skills_needed: ["Python", "SQLite", "Information Retrieval", "ChromaDB"]
-help_wanted: "Seeking maintainers for GraphRAG contextual expansion and CRDT-based cross-machine sync."
+skills_needed: ["Python", "SQLite", "ChromaDB", "RRF"]
 ---
 
-# MemPalace: Give your AI a long-term memory.
+# MemPalace: High-Fidelity Hybrid Fork
 
-MemPalace acts as a persistent, structured, and auditable brain for autonomous agents. It moves beyond standard "context window" limitations by providing a local-first jurisdiction where AI memories are filed into organized "Rooms" and "Wings".
+This repository is a specialized distribution of MemPalace optimized for high-entropy technical environments (Code, Crypto, Systems Architecture).
 
-## Key Characteristics
-- **Hybrid Retrieval Protocol:** Fuses Semantic (ChromaDB) and Lexical (SQLite FTS5) results using RRF. Verified +60% improvement in technical recall.
-- **Local-First Jurisdiction:** No cloud dependencies, no subscriptions. Your memory stays on your machine.
-- **Agent Operating Contract (SKILL):** Standardized protocol for agents to read, write, and verify memories verbatim.
-- **Knowledge Graph Integration:** Relational entity-predicate-object triples with temporal validity.
+## 🚀 Key Improvements in this Fork
+- **Hybrid Retrieval Protocol:** Fuses Semantic and Lexical results.
+- **SQLite FTS5 Integration:** Provides a lexical mirror for verbatim technical recall.
+- **Reciprocal Rank Fusion (RRF):** Mathematical fusion of search results for maximum accuracy.
+- **Verified Benchmarks:** Includes a formal evaluation suite showing significant MRR improvements over the vanilla vector-only implementation.
 
-## Why it matters
-In complex development environments, AI agents often suffer from "The Vector Blur"—failing to retrieve exact file paths, hashes, or function names. MemPalace solves this by anchoring conceptual search to hard lexical evidence.
+## Why this fork exists
+Vanilla vector-based RAG often fails to retrieve exact technical strings (e.g., `0x8004210B` or `verifyAgentKey`) because they lack semantic weight. This fork anchors your AI's memory to hard lexical evidence.
