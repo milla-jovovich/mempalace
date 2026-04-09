@@ -35,16 +35,18 @@ from .config import MempalaceConfig
 
 
 def _resolve_palace(args, project_dir=None):
-    """Resolve palace path: explicit --palace > project-local > global.
+    """Resolve palace path: explicit --palace > --local > --dir > global.
 
-    When a project directory is provided, the palace defaults to
-    <project_dir>/.mempalace/palace, isolating each project so a
-    corruption in one cannot destroy another.
+    By default, uses the global palace (~/.mempalace/palace) which enables
+    cross-project search across all wings. Use --local with mine to store
+    in <project_dir>/.mempalace/palace when isolation is preferred.
     """
     if args.palace:
         return os.path.expanduser(args.palace)
-    if project_dir:
+    if getattr(args, 'local', False) and project_dir:
         return str(Path(project_dir).expanduser().resolve() / '.mempalace' / 'palace')
+    if getattr(args, 'dir', None):
+        return str(Path(args.dir).expanduser().resolve() / '.mempalace' / 'palace')
     return MempalaceConfig().palace_path
 
 
@@ -281,7 +283,7 @@ def main():
     parser.add_argument(
         "--palace",
         default=None,
-        help="Where the palace lives (default: <project>/.mempalace/palace when dir is given, else ~/.mempalace/palace)",
+        help="Where the palace lives (default: ~/.mempalace/palace, or <project>/.mempalace/palace with --local)",
     )
 
     sub = parser.add_subparsers(dest="command")
@@ -311,6 +313,9 @@ def main():
     p_mine.add_argument("--limit", type=int, default=0, help="Max files to process (0 = all)")
     p_mine.add_argument(
         "--dry-run", action="store_true", help="Show what would be filed without filing"
+    )
+    p_mine.add_argument(
+        "--local", action="store_true", help="Store palace in <project>/.mempalace/palace instead of global"
     )
     p_mine.add_argument(
         "--extract",
