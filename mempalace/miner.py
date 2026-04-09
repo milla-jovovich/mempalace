@@ -467,37 +467,29 @@ def process_file(
     dry_run: bool,
 ) -> tuple:
     """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
-
-    # Skip if already filed
     source_file = str(filepath)
     if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
         return 0, None
 
-    try:
-        content = filepath.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    result = process_file_cpu(filepath, project_path, wing, rooms, agent)
+    if result is None:
         return 0, None
 
-    content = content.strip()
-    if len(content) < MIN_CHUNK_SIZE:
-        return 0, None
-
-    room = detect_room(filepath, content, rooms, project_path)
-    chunks = chunk_text(content, source_file)
+    _, room, records = result
 
     if dry_run:
-        print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
-        return len(chunks), room
+        print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(records)} drawers)")
+        return len(records), room
 
     drawers_added = 0
-    for chunk in chunks:
+    for drawer_id, chunk_content, meta in records:
         added = add_drawer(
             collection=collection,
             wing=wing,
             room=room,
-            content=chunk["content"],
+            content=chunk_content,
             source_file=source_file,
-            chunk_index=chunk["chunk_index"],
+            chunk_index=meta["chunk_index"],
             agent=agent,
         )
         if added:
@@ -645,11 +637,15 @@ def mine(
                 total_drawers += drawers
                 room_counts[room] += 1
     else:
+        # Issue 6: show progress during pre-filter so large repos don't appear to hang
+        print(f"  Checking {len(files)} files for changes...")
         pending = [fp for fp in files if not file_already_mined(collection, str(fp), check_mtime=True)]
-        files_skipped = len(files) - len(pending)
+        # Issue 5: files_skipped = already-mined + too-small/unreadable (result is None)
+        already_mined = len(files) - len(pending)
 
         batch_ids, batch_docs, batch_metas = [], [], []
         completed = 0
+        skipped_small = 0
 
         def flush_batch():
             if batch_ids:
@@ -658,28 +654,33 @@ def mine(
                 batch_docs.clear()
                 batch_metas.clear()
 
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = {
-                executor.submit(process_file_cpu, fp, project_path, wing, rooms, agent): fp
-                for fp in pending
-            }
-            for future in as_completed(futures):
-                result = future.result()
-                completed += 1
-                if result is None:
-                    continue
-                source_file, room, records = result
-                for drawer_id, content, meta in records:
-                    batch_ids.append(drawer_id)
-                    batch_docs.append(content)
-                    batch_metas.append(meta)
-                    if len(batch_ids) >= BATCH_SIZE:
-                        flush_batch()
-                total_drawers += len(records)
-                room_counts[room] += 1
-                print(f"  ✓ [{completed:4}/{len(pending)}] {Path(source_file).name[:50]:50} +{len(records)}")
+        # Issue 3: use try/finally so flush_batch() always runs even if a future raises
+        try:
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                futures = {
+                    executor.submit(process_file_cpu, fp, project_path, wing, rooms, agent): fp
+                    for fp in pending
+                }
+                for future in as_completed(futures):
+                    result = future.result()
+                    completed += 1
+                    if result is None:
+                        skipped_small += 1
+                        continue
+                    source_file, room, records = result
+                    for drawer_id, chunk_content, meta in records:
+                        batch_ids.append(drawer_id)
+                        batch_docs.append(chunk_content)
+                        batch_metas.append(meta)
+                        if len(batch_ids) >= BATCH_SIZE:
+                            flush_batch()
+                    total_drawers += len(records)
+                    room_counts[room] += 1
+                    print(f"  ✓ [{completed:4}/{len(pending)}] {Path(source_file).name[:50]:50} +{len(records)}")
+        finally:
+            flush_batch()
 
-        flush_batch()
+        files_skipped = already_mined + skipped_small
 
     print(f"\n{'=' * 55}")
     print("  Done.")
