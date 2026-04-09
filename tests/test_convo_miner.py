@@ -1,7 +1,7 @@
 import os
 import tempfile
 import shutil
-import chromadb
+from mempalace.chroma_client import get_persistent_client
 from mempalace.convo_miner import mine_convos
 
 
@@ -15,7 +15,7 @@ def test_convo_mining():
     palace_path = os.path.join(tmpdir, "palace")
     mine_convos(tmpdir, palace_path, wing="test_convos")
 
-    client = chromadb.PersistentClient(path=palace_path)
+    client = get_persistent_client(path=palace_path)
     col = client.get_collection("mempalace_drawers")
     assert col.count() >= 2
 

@@ -59,7 +59,7 @@ class TestSearchMemories:
         mock_client = MagicMock()
         mock_client.get_collection.return_value = mock_col
 
-        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+        with patch("mempalace.searcher.get_persistent_client", return_value=mock_client):
             result = search_memories("test", "/fake/path")
         assert "error" in result
         assert "query failed" in result["error"]
@@ -114,7 +114,7 @@ class TestSearchCLI:
         mock_client = MagicMock()
         mock_client.get_collection.return_value = mock_col
 
-        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+        with patch("mempalace.searcher.get_persistent_client", return_value=mock_client):
             with pytest.raises(SearchError, match="Search error"):
                 search("test", "/fake/path")
 

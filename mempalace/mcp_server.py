@@ -30,7 +30,7 @@ from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
-import chromadb
+from .chroma_client import get_persistent_client
 
 from .knowledge_graph import KnowledgeGraph
 
@@ -108,7 +108,7 @@ def _get_client():
     """Return a singleton ChromaDB PersistentClient."""
     global _client_cache
     if _client_cache is None:
-        _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+        _client_cache = get_persistent_client(path=_config.palace_path)
     return _client_cache
 
 

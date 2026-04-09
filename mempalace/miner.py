@@ -15,11 +15,13 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
-
+from .chroma_client import get_persistent_client
 from .palace import SKIP_DIRS, get_collection, file_already_mined
 
 READABLE_EXTENSIONS = {
+    ".c",
+    ".cc",
+    ".cpp",
     ".txt",
     ".md",
     ".py",
@@ -32,6 +34,13 @@ READABLE_EXTENSIONS = {
     ".yml",
     ".html",
     ".css",
+    ".h",
+    ".hh",
+    ".hpp",
+    ".hxx",
+    ".cxx",
+    ".inl",
+    ".ixx",
     ".java",
     ".go",
     ".rs",
@@ -501,7 +510,6 @@ def scan_project(
             filepath = root_path / filename
             force_include = is_force_included(filepath, project_path, include_paths)
             exact_force_include = is_exact_force_include(filepath, project_path, include_paths)
-
             if not force_include and filename in SKIP_FILENAMES:
                 continue
             if filepath.suffix.lower() not in READABLE_EXTENSIONS and not exact_force_include:
@@ -566,7 +574,7 @@ def mine(
         print("  .gitignore: DISABLED")
     if include_ignored:
         print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
-    print(f"{'─' * 55}\n")
+    print(f"{'-' * 55}\n")
 
     if not dry_run:
         collection = get_collection(palace_path)
@@ -615,7 +623,7 @@ def mine(
 def status(palace_path: str):
     """Show what's been filed in the palace."""
     try:
-        client = chromadb.PersistentClient(path=palace_path)
+        client = get_persistent_client(path=palace_path)
         col = client.get_collection("mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
