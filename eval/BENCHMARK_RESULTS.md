@@ -1,5 +1,5 @@
 # Retrieval Fidelity Benchmark Report
-Generated: 2026-04-09 11:26:16
+Generated: 2026-04-09 11:57:15
 
 ## Overview
 This report compares the baseline Semantic Retrieval (ChromaDB) with the Hybrid Retrieval Protocol (FTS5 + RRF).
