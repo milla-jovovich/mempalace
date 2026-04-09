@@ -20,7 +20,14 @@ class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
 
 
-def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
+def search(
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    include_archived: bool = False,
+):
     """
     Search the palace. Returns verbatim drawer content.
     Optionally filter by wing (project) or room (aspect).
@@ -41,11 +48,25 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         conditions.append({"room": room})
 
     # Exclude archived wings unless a specific wing is requested
-    if not wing:
+    if not wing and not include_archived:
         try:
             archived = MempalaceConfig().get_archived_wings()
             for aw in archived:
                 conditions.append({"wing": {"$ne": aw}})
+        except Exception:
+            pass
+
+    if not include_archived:
+        try:
+            config = MempalaceConfig()
+            if wing:
+                archived_rooms = config.get_archived_rooms(wing)
+            else:
+                archived_rooms = []
+                for w in config.load_wing_config():
+                    archived_rooms.extend(config.get_archived_rooms(w))
+            for ar in set(archived_rooms):
+                conditions.append({"room": {"$ne": ar}})
         except Exception:
             pass
 
@@ -141,6 +162,20 @@ def search_memories(
             archived = MempalaceConfig().get_archived_wings()
             for aw in archived:
                 conditions.append({"wing": {"$ne": aw}})
+        except Exception:
+            pass
+
+    if not include_archived:
+        try:
+            config = MempalaceConfig()
+            if wing:
+                archived_rooms = config.get_archived_rooms(wing)
+            else:
+                archived_rooms = []
+                for w in config.load_wing_config():
+                    archived_rooms.extend(config.get_archived_rooms(w))
+            for ar in set(archived_rooms):
+                conditions.append({"room": {"$ne": ar}})
         except Exception:
             pass
 

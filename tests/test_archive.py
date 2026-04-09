@@ -18,6 +18,12 @@ def temp_config(tmp_path):
     return config
 
 
+@pytest.fixture
+def config(temp_config):
+    """Alias for room-archive tests (same setup as temp_config)."""
+    return temp_config
+
+
 class TestArchiveWing:
     """Test archive/unarchive wing methods on config."""
 
@@ -100,3 +106,61 @@ class TestWingConfigIO:
             f.write("{broken json")
         wc = temp_config.load_wing_config()
         assert wc == {}
+
+
+class TestRoomArchive:
+    """Tests for room-level archiving."""
+
+    def test_archive_room(self, config):
+        """Room can be archived within a wing."""
+        config.archive_room("technical", "old_evidence")
+        assert "old_evidence" in config.get_archived_rooms("technical")
+
+    def test_unarchive_room(self, config):
+        """Archived room can be restored."""
+        config.archive_room("technical", "old_evidence")
+        config.unarchive_room("technical", "old_evidence")
+        assert "old_evidence" not in config.get_archived_rooms("technical")
+
+    def test_archive_room_idempotent(self, config):
+        """Archiving same room twice does not duplicate."""
+        config.archive_room("technical", "old_evidence")
+        config.archive_room("technical", "old_evidence")
+        assert config.get_archived_rooms("technical").count("old_evidence") == 1
+
+    def test_archive_room_preserves_wing_state(self, config):
+        """Archiving a room does not archive the wing itself."""
+        config.archive_room("technical", "old_evidence")
+        assert "technical" not in config.get_archived_wings()
+
+    def test_unarchive_room_nonexistent(self, config):
+        """Unarchiving a room that was never archived does not error."""
+        config.unarchive_room("technical", "nonexistent_room")
+        assert config.get_archived_rooms("technical") == []
+
+    def test_get_archived_rooms_empty_wing(self, config):
+        """Wing with no archived rooms returns empty list."""
+        assert config.get_archived_rooms("technical") == []
+
+    def test_archive_rooms_multiple_wings(self, config):
+        """Rooms can be archived independently across different wings."""
+        config.archive_room("technical", "old_api_docs")
+        config.archive_room("emotions", "past_events")
+        assert "old_api_docs" in config.get_archived_rooms("technical")
+        assert "past_events" in config.get_archived_rooms("emotions")
+        assert "old_api_docs" not in config.get_archived_rooms("emotions")
+
+    def test_wing_config_schema(self, config):
+        """wing_config.json stores archived_rooms as a list under the wing key."""
+        config.archive_room("technical", "room_a")
+        config.archive_room("technical", "room_b")
+        wc = config.load_wing_config()
+        assert isinstance(wc["technical"]["archived_rooms"], list)
+        assert set(wc["technical"]["archived_rooms"]) == {"room_a", "room_b"}
+
+    def test_cleanup_empty_archived_rooms(self, config):
+        """After unarchiving the last room, archived_rooms key is removed."""
+        config.archive_room("technical", "only_room")
+        config.unarchive_room("technical", "only_room")
+        wc = config.load_wing_config()
+        assert "archived_rooms" not in wc.get("technical", {})

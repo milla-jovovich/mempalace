@@ -169,6 +169,38 @@ class MempalaceConfig:
         wc = self.load_wing_config()
         return {name for name, cfg in wc.items() if cfg.get("archived") is True}
 
+    def archive_room(self, wing: str, room: str):
+        """Archive a specific room within a wing (exclude from search, keep data)."""
+        wc = self.load_wing_config()
+        if wing not in wc:
+            wc[wing] = {}
+        if "archived_rooms" not in wc[wing]:
+            wc[wing]["archived_rooms"] = []
+        if room not in wc[wing]["archived_rooms"]:
+            wc[wing]["archived_rooms"].append(room)
+            self.save_wing_config(wc)
+            return True
+        return False
+
+    def unarchive_room(self, wing: str, room: str):
+        """Restore a room to active search results."""
+        wc = self.load_wing_config()
+        if wing in wc and "archived_rooms" in wc[wing]:
+            if room in wc[wing]["archived_rooms"]:
+                wc[wing]["archived_rooms"].remove(room)
+                if not wc[wing]["archived_rooms"]:
+                    del wc[wing]["archived_rooms"]
+                self.save_wing_config(wc)
+                return True
+        return False
+
+    def get_archived_rooms(self, wing: str) -> list:
+        """Return list of archived room names for a given wing."""
+        wc = self.load_wing_config()
+        if wing in wc and "archived_rooms" in wc[wing]:
+            return list(wc[wing]["archived_rooms"])
+        return []
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
