@@ -44,7 +44,6 @@ COMMON_ENGLISH_WORDS = {
     "chance",
     "chase",
     "hunter",
-    "hunter",
     "dash",
     "flash",
     "star",
@@ -78,8 +77,6 @@ COMMON_ENGLISH_WORDS = {
     "january",
     "february",
     "march",
-    "april",
-    "june",
     "july",
     "august",
     "september",
@@ -256,7 +253,7 @@ def _wikipedia_lookup(word: str) -> dict:
                 "note": "not found in Wikipedia — likely a proper noun or unusual name",
             }
         return {"inferred_type": "unknown", "confidence": 0.0, "wiki_summary": None}
-    except Exception:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError):
         return {"inferred_type": "unknown", "confidence": 0.0, "wiki_summary": None}
 
 
@@ -597,7 +594,6 @@ class EntityRegistry:
         Returns list of canonical names found.
         """
         found = []
-        query.lower()
 
         for canonical, info in self.people.items():
             names_to_check = [canonical] + info.get("aliases", [])

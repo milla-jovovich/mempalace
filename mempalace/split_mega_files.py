@@ -34,20 +34,39 @@ LUMI_DIR = Path(os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/trans
 # People we know about (for name detection in content)
 # Loaded from ~/.mempalace/known_names.json if it exists, otherwise generic fallback.
 _KNOWN_NAMES_PATH = HOME / ".mempalace" / "known_names.json"
+_FALLBACK_KNOWN_PEOPLE = ["Alice", "Ben", "Riley", "Max", "Sam", "Devon", "Jordan"]
+_KNOWN_NAMES_CACHE = None
+
+
+def _load_known_names_config(force_reload: bool = False):
+    """Load and cache the optional known-names config file."""
+    global _KNOWN_NAMES_CACHE
+
+    if force_reload:
+        _KNOWN_NAMES_CACHE = None
+
+    if _KNOWN_NAMES_CACHE is not None:
+        return _KNOWN_NAMES_CACHE
+
+    if _KNOWN_NAMES_PATH.exists():
+        try:
+            _KNOWN_NAMES_CACHE = json.loads(_KNOWN_NAMES_PATH.read_text())
+            return _KNOWN_NAMES_CACHE
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    _KNOWN_NAMES_CACHE = None
+    return None
 
 
 def _load_known_people() -> list:
     """Load known names from config file, falling back to a generic list."""
-    if _KNOWN_NAMES_PATH.exists():
-        try:
-            data = json.loads(_KNOWN_NAMES_PATH.read_text())
-            if isinstance(data, list):
-                return data
-            return data.get("names", [])
-        except (json.JSONDecodeError, OSError):
-            pass
-    # Generic fallback — override by creating ~/.mempalace/known_names.json
-    return ["Alice", "Ben", "Riley", "Max", "Sam", "Devon", "Jordan"]
+    data = _load_known_names_config()
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        return data.get("names", [])
+    return list(_FALLBACK_KNOWN_PEOPLE)
 
 
 KNOWN_PEOPLE = _load_known_people()
@@ -55,13 +74,9 @@ KNOWN_PEOPLE = _load_known_people()
 
 def _load_username_map() -> dict:
     """Load username-to-name mapping from config file."""
-    if _KNOWN_NAMES_PATH.exists():
-        try:
-            data = json.loads(_KNOWN_NAMES_PATH.read_text())
-            if isinstance(data, dict):
-                return data.get("username_map", {})
-        except (json.JSONDecodeError, OSError):
-            pass
+    data = _load_known_names_config()
+    if isinstance(data, dict):
+        return data.get("username_map", {})
     return {}
 
 

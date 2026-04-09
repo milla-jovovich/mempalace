@@ -66,6 +66,9 @@ INPUT=$(cat)
 
 # Parse fields from Claude Code's JSON
 SESSION_ID=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id','unknown'))" 2>/dev/null)
+# Sanitize SESSION_ID to prevent path traversal (only allow alnum, dash, underscore)
+SESSION_ID=$(echo "$SESSION_ID" | tr -cd 'a-zA-Z0-9_-')
+[ -z "$SESSION_ID" ] && SESSION_ID="unknown"
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('stop_hook_active', False))" 2>/dev/null)
 TRANSCRIPT_PATH=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))" 2>/dev/null)
 
@@ -81,10 +84,10 @@ fi
 
 # Count human messages in the JSONL transcript
 if [ -f "$TRANSCRIPT_PATH" ]; then
-    EXCHANGE_COUNT=$(python3 -c "
+    EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
 import json, sys
 count = 0
-with open('$TRANSCRIPT_PATH') as f:
+with open(sys.argv[1]) as f:
     for line in f:
         try:
             entry = json.loads(line)
@@ -98,7 +101,8 @@ with open('$TRANSCRIPT_PATH') as f:
         except:
             pass
 print(count)
-" 2>/dev/null)
+PYEOF
+2>/dev/null)
 else
     EXCHANGE_COUNT=0
 fi

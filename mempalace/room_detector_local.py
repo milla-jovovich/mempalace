@@ -255,7 +255,14 @@ def get_user_approval(rooms: list) -> list:
 def save_config(project_dir: str, project_name: str, rooms: list):
     config = {
         "wing": project_name,
-        "rooms": [{"name": r["name"], "description": r["description"]} for r in rooms],
+        "rooms": [
+            {
+                "name": r["name"],
+                "description": r["description"],
+                "keywords": r.get("keywords", [r["name"]]),
+            }
+            for r in rooms
+        ],
     }
     config_path = Path(project_dir).expanduser().resolve() / "mempalace.yaml"
     with open(config_path, "w") as f:
@@ -267,7 +274,7 @@ def save_config(project_dir: str, project_name: str, rooms: list):
     print(f"\n{'=' * 55}\n")
 
 
-def detect_rooms_local(project_dir: str):
+def detect_rooms_local(project_dir: str, yes: bool = False):
     """Main entry point for local setup."""
     project_path = Path(project_dir).expanduser().resolve()
     project_name = project_path.name.lower().replace(" ", "_").replace("-", "_")
@@ -296,5 +303,8 @@ def detect_rooms_local(project_dir: str):
         source = "fallback (flat project)"
 
     print_proposed_structure(project_name, rooms, len(files), source)
-    approved_rooms = get_user_approval(rooms)
+    if yes:
+        approved_rooms = rooms
+    else:
+        approved_rooms = get_user_approval(rooms)
     save_config(project_dir, project_name, approved_rooms)
