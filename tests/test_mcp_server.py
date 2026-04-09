@@ -403,3 +403,55 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+
+# ── Unicode / non-ASCII handling ───────────────────────────────────────
+
+
+class TestUnicodeHandling:
+    """Verify json.dumps uses ensure_ascii=False so non-ASCII characters
+    survive round-trip through the MCP JSON-RPC layer (#359)."""
+
+    def test_tool_result_preserves_unicode(self, monkeypatch):
+        """Tool results with non-ASCII text should serialize without error."""
+        from mempalace import mcp_server
+
+        # Stub a tool that returns Chinese text
+        monkeypatch.setitem(
+            mcp_server.TOOLS,
+            "echo_unicode",
+            {
+                "handler": lambda text="": {"echo": text},
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                },
+            },
+        )
+
+        resp = mcp_server.handle_request(
+            {
+                "method": "tools/call",
+                "id": 99,
+                "params": {"name": "echo_unicode", "arguments": {"text": "你好世界"}},
+            }
+        )
+        assert "error" not in resp
+        payload = resp["result"]["content"][0]["text"]
+        # With ensure_ascii=False, Chinese chars appear verbatim
+        assert "你好世界" in payload
+        # Round-trip through json.dumps must not raise
+        json.dumps(resp, ensure_ascii=False)
+
+    def test_main_loop_writes_unicode(self, monkeypatch, tmp_path):
+        """The main loop stdout writer should handle non-ASCII responses."""
+        from mempalace import mcp_server
+
+        response = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"content": [{"type": "text", "text": "日本語テスト"}]},
+        }
+        # Verify json.dumps with ensure_ascii=False doesn't raise
+        encoded = json.dumps(response, ensure_ascii=False)
+        assert "日本語テスト" in encoded
