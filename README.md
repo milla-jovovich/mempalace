@@ -8,11 +8,11 @@
 
 <br>
 
-This is a specialized fork of MemPalace developed by **PerseusXR**. It maintains all the verbatim-first principles of the original project but introduces a structural upgrade to the retrieval layer to solve "The Vector Blur" in technical environments.
+This is a specialized distribution of MemPalace maintained by **PerseusXR**. It preserves the "Verbatim-First" philosophy of the original project while introducing a structural upgrade to the core retrieval architecture to ensure precision in professional engineering and systems environments.
 
-**Hybrid Retrieval Protocol** — While vanilla MemPalace relies on ChromaDB vector similarity, this fork integrates a parallel **SQLite FTS5** lexical engine. By fusing these two disparate scoring systems using **Reciprocal Rank Fusion (RRF)**, this version achieves significantly higher precision when searching for exact technical identifiers, Git hashes, function signatures, and API keys.
+**Hybrid Retrieval Protocol** — We have augmented the vanilla ChromaDB (Vector) store with a parallel **SQLite FTS5** (Lexical) mirror. By fusing these result sets using the **Reciprocal Rank Fusion (RRF)** algorithm, this version achieves significantly higher accuracy for technical identifiers, symbols, and code snippets.
 
-**Verified Benchmarks** — In objective local testing on a 4,300+ drawer palace, this hybrid implementation demonstrated a **+60% improvement** in technical retrieval fidelity (MRR) over the standard vector-only baseline.
+**Objectively Verified** — This implementation has been benchmarked on a local palace of 4,300+ drawers using a 15-target Gold Standard evaluation set. Results show a **+63.7% improvement** in Mean Reciprocal Rank (MRR) for technical string retrieval.
 
 <br>
 
@@ -23,19 +23,47 @@ This is a specialized fork of MemPalace developed by **PerseusXR**. It maintains
 
 <br>
 
-[Quick Start](#quick-start) · [Hybrid Search](#why-hybrid-search) · [The Palace](#the-palace) · [Benchmarks](#benchmarks) · [MCP Tools](#mcp-server)
+[The Contribution](#senior-engineering-contribution) · [Quick Start](#quick-start) · [Benchmarks](#verified-benchmarks) · [MCP Tools](#mcp-server)
 
 </div>
 
 ---
 
-## Why Hybrid Search?
+## Senior Engineering Contribution
 
-Standard semantic search (RAG) relies on embeddings to find "related" text. This is effective for high-level concepts but often fails in high-entropy technical environments:
+This fork exists to advance the retrieval fidelity of the MemPalace ecosystem. While the original project provides an excellent foundation for conceptual memory, we observed a "Vector Blur" effect where critical technical symbols were lost in high-dimensional space. 
 
-1.  **Exact Matching:** Vector models often "blur" distinct technical strings (e.g., `grid-admin` vs `grid-core`).
-2.  **Zero Semantic Weight:** Identifiers like Git hashes (`e8c6ed0`) or memory addresses have no semantic meaning to a transformer model and are often discarded as noise.
-3.  **The Fix:** This fork anchors conceptual search to hard lexical evidence. If an exact string match exists in your memory, RRF ensures it is "rescued" and brought to the top of the results, regardless of its semantic distance.
+**Our additions to this distribution include:**
+
+1.  **Fused Hybrid Engine (`hybrid_searcher.py`):** A custom retrieval module that orchestrates simultaneous Lexical and Semantic queries.
+2.  **Lexical Mirror (SQLite FTS5):** A structural schema update to `knowledge_graph.py` that indexes every memory drawer for exact keyword matching.
+3.  **RRF Fusion Algorithm:** A mathematical fusion layer that prioritizes exact matches (lexical) without losing conceptual context (semantic).
+4.  **Dual-Indexing Middleware:** Updates to `mcp_server.py` to ensure atomic writes to both data stores for all incoming AI memories.
+5.  **Formal Evaluation Suite (`/eval`):** A verifiable benchmarking framework including a Gold Standard dataset and an automated researcher tool.
+
+---
+
+## Verified Benchmarks
+
+We believe in empirical proof. The following metrics were recorded on a production-density memory palace (4,344 drawers) comparing the **Vanilla Baseline** (Vector-only) with this **High-Fidelity Fork** (Hybrid RRF):
+
+| Metric | Vector Only (Baseline) | Hybrid (RRF) | Delta |
+|---|---|---|---|
+| **Mean Reciprocal Rank (MRR)** | 0.5395 | 0.8833 | **+63.7%** |
+| **Hit@1 Accuracy** | 46.7% | 80.0% | **+33.3%** |
+
+*To reproduce these results, run `python eval/benchmark.py` in this repository.*
+
+---
+
+## Why this fork exists
+
+In high-entropy technical environments (Cryptography, Systems Architecture, Large-scale Refactoring), AI agents must be able to retrieve exact, non-semantic identifiers like:
+- Git Commit Hashes (`e8c6ed0`)
+- Memory Addresses or Hex Keys (`0x8004...`)
+- Case-Sensitive Function Signatures (`verifyAgentKey`)
+
+Standard vector-based RAG often fails these "Hard Tests" because identifiers possess low semantic weight. This fork provides the structural **Lexical Anchor** required for these tasks.
 
 ---
 
@@ -49,21 +77,13 @@ pip install .
 mempalace init ~/projects/myapp
 mempalace mine ~/projects/myapp
 
-# Search with Hybrid Precision
+# Search with High-Fidelity Precision
 mempalace search "0x8004210B"
 ```
 
 ---
 
-## Technical Characteristics (Fork Only)
-- **Engine:** `hybrid_searcher.py` (Fused ChromaDB + SQLite FTS5).
-- **Protocol:** Reciprocal Rank Fusion (RRF).
-- **Storage:** Dual-indexed (Vector + Lexical Mirror).
-- **Latency:** Sub-5ms fusion overhead.
-
----
-
-*(The rest of the documentation below is maintained from the original project by Milla Jovovich & Ben Sigman)*
+*(The documentation below is the original project guide by Milla Jovovich & Ben Sigman)*
 
 ---
 
