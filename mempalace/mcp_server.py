@@ -64,10 +64,6 @@ else:
     _kg = KnowledgeGraph()
 
 
-_client_cache = None
-_collection_cache = None
-
-
 # ==================== WRITE-AHEAD LOG ====================
 # Every write operation is logged to a JSONL file before execution.
 # This provides an audit trail for detecting memory poisoning and
@@ -103,14 +99,55 @@ def _wal_log(operation: str, params: dict, result: dict = None):
 
 _client_cache = None
 _collection_cache = None
+_last_known_count = 0
 
 
 def _get_client():
-    """Return a singleton ChromaDB PersistentClient."""
-    global _client_cache
+    """Return a ChromaDB PersistentClient, rebuilding if the DB changed externally.
+
+    When another process (e.g. ``mempalace mine``) writes to the same
+    chroma.sqlite3, the in-process HNSW index becomes stale and vector
+    queries fail with "Error finding id".  We detect this by comparing the
+    SQLite embedding count against the last value we saw.  On mismatch we
+    tear down the cached client and build a fresh one.
+    """
+    global _client_cache, _collection_cache, _last_known_count
+
     if _client_cache is None:
         _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+        _last_known_count = _sqlite_embedding_count()
+        return _client_cache
+
+    db_count = _sqlite_embedding_count()
+    if db_count != _last_known_count and _last_known_count > 0:
+        logger.info(
+            "Stale index detected (%d → %d). Rebuilding chroma client.",
+            _last_known_count, db_count,
+        )
+        try:
+            _client_cache.clear_system_cache()
+        except Exception:
+            pass
+        _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+        _collection_cache = None
+
+    _last_known_count = db_count
     return _client_cache
+
+
+def _sqlite_embedding_count() -> int:
+    """Read the raw embedding count straight from SQLite (bypasses chroma cache)."""
+    import sqlite3 as _sqlite3
+    try:
+        db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
+        conn = _sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM embeddings")
+        count = cur.fetchone()[0]
+        conn.close()
+        return count
+    except Exception:
+        return _last_known_count  # fallback: assume unchanged
 
 
 def _get_collection(create=False):
