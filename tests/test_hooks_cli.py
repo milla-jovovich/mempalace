@@ -82,6 +82,43 @@ def test_count_handles_list_content(tmp_path):
     assert _count_human_messages(str(transcript)) == 1
 
 
+def test_count_skips_tool_result_messages(tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [
+            {"message": {"role": "user", "content": "real question"}},
+            {
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": "x", "content": "result"}],
+                }
+            },
+        ],
+    )
+    assert _count_human_messages(str(transcript)) == 1
+
+
+def test_count_mixed_content_with_tool_result_counts(tmp_path):
+    """Messages with tool_result alongside other block types are counted."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [
+            {
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "x", "content": "result"},
+                        {"type": "text", "text": "also some text"},
+                    ],
+                }
+            },
+        ],
+    )
+    assert _count_human_messages(str(transcript)) == 1
+
+
 def test_count_missing_file():
     assert _count_human_messages("/nonexistent/path.jsonl") == 0
 

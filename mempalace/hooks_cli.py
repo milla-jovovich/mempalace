@@ -57,6 +57,12 @@ def _count_human_messages(transcript_path: str) -> int:
                             if "<command-message>" in content:
                                 continue
                         elif isinstance(content, list):
+                            if all(
+                                b.get("type") == "tool_result"
+                                for b in content
+                                if isinstance(b, dict)
+                            ):
+                                continue
                             text = " ".join(
                                 b.get("text", "") for b in content if isinstance(b, dict)
                             )
