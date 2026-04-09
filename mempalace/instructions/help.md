@@ -51,7 +51,7 @@ AI memory system. Store everything, find anything. Local, free, no API key.
 
 ## CLI Commands
 
-    mempalace init <dir>                  Initialize a new palace
+    mempalace init [dir]                  Initialize a new palace
     mempalace mine <dir>                  Mine a project (default mode)
     mempalace mine <dir> --mode convos    Mine conversation exports
     mempalace search "query"              Search your memories

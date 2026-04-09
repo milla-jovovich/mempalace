@@ -269,7 +269,7 @@ def cmd_compress(args):
         col = client.get_collection("mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
-        print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        print("  Run: mempalace init [dir] then mempalace mine <dir>")
         sys.exit(1)
 
     # Query drawers in batches to avoid SQLite variable limit (~999)

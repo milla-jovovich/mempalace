@@ -129,7 +129,7 @@ def _get_collection(create=False):
 def _no_palace():
     return {
         "error": "No palace found",
-        "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
+        "hint": "Run: mempalace init [dir] && mempalace mine <dir>",
     }
 
 
