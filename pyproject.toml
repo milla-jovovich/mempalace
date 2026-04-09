@@ -1,6 +1,6 @@
 [project]
 name = "mempalace"
-version = "3.0.14"
+version = "3.1.0"
 description = "Give your AI a memory — mine projects and conversations into a searchable palace. No API key required."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -26,7 +26,7 @@ classifiers = [
 ]
 dependencies = [
     "chromadb>=0.5.0,<0.7",
-    "pyyaml>=6.0",
+    "pyyaml>=6.0,<7",
 ]
 
 [project.urls]
@@ -77,7 +77,7 @@ markers = [
 source = ["mempalace"]
 
 [tool.coverage.report]
-fail_under = 30
+fail_under = 85
 show_missing = true
 exclude_lines = [
     "if __name__",

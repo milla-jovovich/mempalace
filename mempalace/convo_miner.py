@@ -17,6 +17,7 @@ from collections import defaultdict
 
 from .normalize import normalize
 from .vector_store import get_collection as _get_vector_store_collection
+from .palace import SKIP_DIRS, file_already_mined
 
 
 # File types that might contain conversations
@@ -27,22 +28,8 @@ CONVO_EXTENSIONS = {
     ".jsonl",
 }
 
-SKIP_DIRS = {
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "venv",
-    "env",
-    "dist",
-    "build",
-    ".next",
-    ".mempalace",
-    "tool-results",
-    "memory",
-}
-
 MIN_CHUNK_SIZE = 30
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
 
 
 # =============================================================================
@@ -210,14 +197,6 @@ def detect_convo_room(content: str) -> str:
 # =============================================================================
 
 
-def file_already_mined(collection, source_file: str) -> bool:
-    try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
-        return len(results.get("ids", [])) > 0
-    except Exception:
-        return False
-
-
 # =============================================================================
 # SCAN FOR CONVERSATION FILES
 # =============================================================================
@@ -234,6 +213,14 @@ def scan_convos(convo_dir: str) -> list:
                 continue
             filepath = Path(root) / filename
             if filepath.suffix.lower() in CONVO_EXTENSIONS:
+                # Skip symlinks and oversized files
+                if filepath.is_symlink():
+                    continue
+                try:
+                    if filepath.stat().st_size > MAX_FILE_SIZE:
+                        continue
+                except OSError:
+                    continue
                 files.append(filepath)
     return files
 
@@ -346,7 +333,7 @@ def mine_convos(
             chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
             if extract_mode == "general":
                 room_counts[chunk_room] += 1
-            drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.md5((source_file + str(chunk['chunk_index'])).encode(), usedforsecurity=False).hexdigest()[:16]}"
+            drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
             try:
                 collection.add(
                     documents=[chunk["content"]],
