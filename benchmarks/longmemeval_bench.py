@@ -186,22 +186,21 @@ def build_palace_and_retrieve(entry, granularity="session", n_results=50):
 
     for sess_idx, (session, sess_id, date) in enumerate(zip(sessions, session_ids, dates)):
         if granularity == "session":
-            # One document per session: join all user content
-            user_turns = [t["content"] for t in session if t["role"] == "user"]
-            if user_turns:
-                doc = "\n".join(user_turns)
+            # One document per session: join all turns (user + assistant) — #242
+            all_turns = [t["content"] for t in session]
+            if all_turns:
+                doc = "\n".join(all_turns)
                 corpus.append(doc)
                 corpus_ids.append(sess_id)
                 corpus_timestamps.append(date)
         else:
-            # One document per user turn
+            # One document per turn (user + assistant) — #242
             turn_num = 0
             for turn in session:
-                if turn["role"] == "user":
-                    corpus.append(turn["content"])
-                    corpus_ids.append(f"{sess_id}_turn_{turn_num}")
-                    corpus_timestamps.append(date)
-                    turn_num += 1
+                corpus.append(turn["content"])
+                corpus_ids.append(f"{sess_id}_turn_{turn_num}")
+                corpus_timestamps.append(date)
+                turn_num += 1
 
     if not corpus:
         return [], corpus, corpus_ids, corpus_timestamps
@@ -262,24 +261,25 @@ def build_palace_and_retrieve_aaak(entry, granularity="session", n_results=50):
 
     for sess_idx, (session, sess_id, date) in enumerate(zip(sessions, session_ids, dates)):
         if granularity == "session":
-            user_turns = [t["content"] for t in session if t["role"] == "user"]
-            if user_turns:
-                doc = "\n".join(user_turns)
+            # Join all turns (user + assistant) — #242
+            all_turns = [t["content"] for t in session]
+            if all_turns:
+                doc = "\n".join(all_turns)
                 compressed = dialect.compress(doc, metadata={"date": date})
                 corpus.append(doc)
                 corpus_compressed.append(compressed)
                 corpus_ids.append(sess_id)
                 corpus_timestamps.append(date)
         else:
+            # One document per turn (user + assistant) — #242
             turn_num = 0
             for turn in session:
-                if turn["role"] == "user":
-                    compressed = dialect.compress(turn["content"])
-                    corpus.append(turn["content"])
-                    corpus_compressed.append(compressed)
-                    corpus_ids.append(f"{sess_id}_turn_{turn_num}")
-                    corpus_timestamps.append(date)
-                    turn_num += 1
+                compressed = dialect.compress(turn["content"])
+                corpus.append(turn["content"])
+                corpus_compressed.append(compressed)
+                corpus_ids.append(f"{sess_id}_turn_{turn_num}")
+                corpus_timestamps.append(date)
+                turn_num += 1
 
     if not corpus:
         return [], corpus, corpus_ids, corpus_timestamps
@@ -413,24 +413,25 @@ def build_palace_and_retrieve_rooms(entry, granularity="session", n_results=50):
 
     for sess_idx, (session, sess_id, date) in enumerate(zip(sessions, session_ids, dates)):
         if granularity == "session":
-            user_turns = [t["content"] for t in session if t["role"] == "user"]
-            if user_turns:
-                doc = "\n".join(user_turns)
+            # Join all turns (user + assistant) — #242
+            all_turns = [t["content"] for t in session]
+            if all_turns:
+                doc = "\n".join(all_turns)
                 room = detect_room_for_text(doc)
                 corpus.append(doc)
                 corpus_ids.append(sess_id)
                 corpus_timestamps.append(date)
                 corpus_rooms.append(room)
         else:
+            # One document per turn (user + assistant) — #242
             turn_num = 0
             for turn in session:
-                if turn["role"] == "user":
-                    room = detect_room_for_text(turn["content"])
-                    corpus.append(turn["content"])
-                    corpus_ids.append(f"{sess_id}_turn_{turn_num}")
-                    corpus_timestamps.append(date)
-                    corpus_rooms.append(room)
-                    turn_num += 1
+                room = detect_room_for_text(turn["content"])
+                corpus.append(turn["content"])
+                corpus_ids.append(f"{sess_id}_turn_{turn_num}")
+                corpus_timestamps.append(date)
+                corpus_rooms.append(room)
+                turn_num += 1
 
     if not corpus:
         return [], corpus, corpus_ids, corpus_timestamps
@@ -571,20 +572,21 @@ def build_palace_and_retrieve_hybrid(
 
     for sess_idx, (session, sess_id, date) in enumerate(zip(sessions, session_ids, dates)):
         if granularity == "session":
-            user_turns = [t["content"] for t in session if t["role"] == "user"]
-            if user_turns:
-                doc = "\n".join(user_turns)
+            # Join all turns (user + assistant) — #242
+            all_turns = [t["content"] for t in session]
+            if all_turns:
+                doc = "\n".join(all_turns)
                 corpus.append(doc)
                 corpus_ids.append(sess_id)
                 corpus_timestamps.append(date)
         else:
+            # One document per turn (user + assistant) — #242
             turn_num = 0
             for turn in session:
-                if turn["role"] == "user":
-                    corpus.append(turn["content"])
-                    corpus_ids.append(f"{sess_id}_turn_{turn_num}")
-                    corpus_timestamps.append(date)
-                    turn_num += 1
+                corpus.append(turn["content"])
+                corpus_ids.append(f"{sess_id}_turn_{turn_num}")
+                corpus_timestamps.append(date)
+                turn_num += 1
 
     if not corpus:
         return [], corpus, corpus_ids, corpus_timestamps
@@ -2621,11 +2623,12 @@ def build_palace_and_retrieve_diary(
     pref_wing_meta = []
 
     for session, sess_id, date in zip(sessions, session_ids, dates):
-        user_turns = [t["content"] for t in session if t["role"] == "user"]
-        if not user_turns:
+        # #242: index all turns (user + assistant), not just user turns
+        all_turns = [t["content"] for t in session]
+        if not all_turns:
             continue
 
-        user_doc = "\n".join(user_turns)
+        user_doc = "\n".join(all_turns)
         corpus_user.append(user_doc)
         corpus_ids.append(sess_id)
         corpus_timestamps.append(date)
