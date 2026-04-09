@@ -47,7 +47,7 @@ def test_project_mining():
         col = client.get_collection("mempalace_drawers")
         assert col.count() > 0
     finally:
-        shutil.rmtree(tmpdir)
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def test_scan_project_respects_gitignore():

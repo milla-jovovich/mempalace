@@ -309,7 +309,7 @@ class EntityRegistry:
 
     def save(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(self._data, indent=2))
+        self._path.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
 
     @staticmethod
     def _empty() -> dict:

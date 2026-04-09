@@ -44,7 +44,9 @@ def _parse_args():
         metavar="PATH",
         help="Path to the palace directory (overrides config file and env var)",
     )
-    args, _ = parser.parse_known_args()
+    args, unknown = parser.parse_known_args()
+    if unknown:
+        logger.debug("Ignoring unknown args: %s", unknown)
     return args
 
 
