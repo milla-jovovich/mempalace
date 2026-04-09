@@ -290,7 +290,8 @@ def test_log_cleanup_removes_old_entries(tmp_palace):
         conn.commit()
     finally:
         conn.close()
-    db.cleanup_old_logs(retention_days=30)
+    deleted = db.cleanup_old_logs(retention_days=30)
+    assert deleted == 1
     conn = sqlite3.connect(db.db_path)
     try:
         rows = conn.execute("SELECT drawer_id FROM retrieval_log ORDER BY drawer_id").fetchall()

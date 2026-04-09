@@ -252,47 +252,54 @@ class SynapseDB:
             "tagging": tagging,
         }
 
-    def cleanup_old_logs(self, retention_days: int = 90) -> None:
+    def cleanup_old_logs(self, retention_days: int = 90) -> int:
         """
         retention_days より古い retrieval_log エントリを削除する。
-        mempalace status 実行時 または synapse refresh 時に呼ばれる。
+        削除件数を返す。
         """
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         conn = sqlite3.connect(self.db_path)
         try:
-            conn.execute("DELETE FROM retrieval_log WHERE retrieved_at < ?", (cutoff,))
+            cur = conn.execute("DELETE FROM retrieval_log WHERE retrieved_at < ?", (cutoff,))
+            deleted = cur.rowcount
             conn.commit()
         finally:
             conn.close()
-        # VACUUM はトランザクション外で実行する
-        conn2 = sqlite3.connect(self.db_path)
         try:
-            conn2.execute("VACUUM")
-            conn2.commit()
-        finally:
-            conn2.close()
+            vacuum_conn = sqlite3.connect(self.db_path)
+            try:
+                vacuum_conn.execute("VACUUM")
+                vacuum_conn.commit()
+            finally:
+                vacuum_conn.close()
+        except Exception as e:
+            logger.warning("VACUUM failed: %s", e)
+        if deleted is None or deleted < 0:
+            return 0
+        return int(deleted)
 
     def get_log_stats(self) -> dict[str, Any]:
-        """
-        ログの統計情報を返す。mempalace_status に表示する。
-        """
+        """ログの統計情報を返す。"""
         conn = sqlite3.connect(self.db_path)
         try:
-            total = conn.execute("SELECT COUNT(*) FROM retrieval_log").fetchone()[0]
-            unique = conn.execute("SELECT COUNT(DISTINCT drawer_id) FROM retrieval_log").fetchone()[0]
             row = conn.execute(
-                "SELECT MIN(retrieved_at), MAX(retrieved_at) FROM retrieval_log"
+                "SELECT COUNT(*), COUNT(DISTINCT drawer_id), MIN(retrieved_at), MAX(retrieved_at) "
+                "FROM retrieval_log"
             ).fetchone()
-            oldest, newest = row[0], row[1]
+            total, unique, oldest, newest = row
         finally:
             conn.close()
-        size_kb = os.path.getsize(self.db_path) / 1024.0
+        db_size_kb = 0.0
+        try:
+            db_size_kb = round(os.path.getsize(self.db_path) / 1024, 1)
+        except OSError:
+            pass
         return {
-            "total_entries": int(total),
-            "unique_drawers": int(unique),
+            "total_entries": int(total or 0),
+            "unique_drawers": int(unique or 0),
             "oldest_entry": oldest,
             "newest_entry": newest,
-            "db_size_kb": round(size_kb, 2),
+            "db_size_kb": db_size_kb,
         }
 
     def refresh_stats(

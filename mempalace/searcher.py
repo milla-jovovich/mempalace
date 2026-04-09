@@ -178,7 +178,7 @@ def search_memories(
                     hit_drawer_ids.append(drawer_id)
 
             ltp_scores = {}
-            if cfg.synapse_ltp_enabled:
+            if cfg.synapse_ltp_enabled and hit_drawer_ids:
                 ltp_scores = synapse_db.get_ltp_scores_batch(
                     hit_drawer_ids,
                     window_days=cfg.synapse_ltp_window_days,
@@ -195,8 +195,8 @@ def search_memories(
                 tagging = (
                     SynapseDB.calculate_tagging_boost(
                         filed_at,
-                        cfg.synapse_tagging_window_hours,
-                        cfg.synapse_tagging_max_boost,
+                        window_hours=cfg.synapse_tagging_window_hours,
+                        max_boost=cfg.synapse_tagging_max_boost,
                     )
                     if cfg.synapse_tagging_enabled
                     else 1.0
@@ -215,7 +215,7 @@ def search_memories(
             result["hits"].sort(key=lambda h: h.get("synapse_score", 0.0), reverse=True)
             result["synapse_enabled"] = True
 
-            if cfg.synapse_log_retrievals:
+            if cfg.synapse_log_retrievals and hit_drawer_ids:
                 synapse_db.log_retrieval(hit_drawer_ids, query_hash, session_id)
         else:
             result["synapse_enabled"] = False
