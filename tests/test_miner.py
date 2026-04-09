@@ -6,7 +6,7 @@ from pathlib import Path
 import chromadb
 import yaml
 
-from mempalace.miner import mine, scan_project
+from mempalace.miner import MAX_FILE_SIZE_BYTES, mine, scan_project
 
 
 def write_file(path: Path, content: str):
@@ -204,5 +204,47 @@ def test_scan_project_skip_dirs_still_apply_without_override():
         write_file(project_root / "main.py", "print('main')\n" * 20)
 
         assert scanned_files(project_root, respect_gitignore=False) == ["main.py"]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_scan_project_skips_large_files():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / "small.py", "print('small')\n" * 20)
+        (project_root / "large.py").write_text("a" * (MAX_FILE_SIZE_BYTES + 1024), encoding="utf-8")
+
+        assert scanned_files(project_root, respect_gitignore=False) == ["small.py"]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_scan_project_respects_mempalaceignore():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".mempalaceignore", "vendor/\n")
+        write_file(project_root / "app.py", "print('app')\n" * 20)
+        write_file(project_root / "vendor" / "big.py", "print('vendor')\n" * 20)
+
+        assert scanned_files(project_root) == ["app.py"]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_mempalaceignore_overrides_gitignore_include():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".gitignore", "vendor/*\n!vendor/keep.py\n")
+        write_file(project_root / ".mempalaceignore", "vendor/\n")
+        write_file(project_root / "app.py", "print('app')\n" * 20)
+        write_file(project_root / "vendor" / "keep.py", "print('keep')\n" * 20)
+
+        assert scanned_files(project_root) == ["app.py"]
     finally:
         shutil.rmtree(tmpdir)

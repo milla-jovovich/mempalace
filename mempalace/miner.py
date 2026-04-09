@@ -78,6 +78,7 @@ SKIP_FILENAMES = {
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
+MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 
 # =============================================================================
@@ -93,13 +94,12 @@ class GitignoreMatcher:
         self.rules = rules
 
     @classmethod
-    def from_dir(cls, dir_path: Path):
-        gitignore_path = dir_path / ".gitignore"
-        if not gitignore_path.is_file():
+    def from_file(cls, ignore_file: Path, base_dir: Path):
+        if not ignore_file.is_file():
             return None
 
         try:
-            lines = gitignore_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            lines = ignore_file.read_text(encoding="utf-8", errors="replace").splitlines()
         except Exception:
             return None
 
@@ -141,7 +141,11 @@ class GitignoreMatcher:
         if not rules:
             return None
 
-        return cls(dir_path, rules)
+        return cls(base_dir, rules)
+
+    @classmethod
+    def from_dir(cls, dir_path: Path):
+        return cls.from_file(dir_path / ".gitignore", dir_path)
 
     def matches(self, path: Path, is_dir: bool = None):
         try:
@@ -205,6 +209,12 @@ def load_gitignore_matcher(dir_path: Path, cache: dict):
     """Load and cache one directory's .gitignore matcher."""
     if dir_path not in cache:
         cache[dir_path] = GitignoreMatcher.from_dir(dir_path)
+    return cache[dir_path]
+
+
+def load_mempalaceignore_matcher(dir_path: Path, cache: dict):
+    if dir_path not in cache:
+        cache[dir_path] = GitignoreMatcher.from_file(dir_path / ".mempalaceignore", dir_path)
     return cache[dir_path]
 
 
@@ -521,6 +531,8 @@ def scan_project(
     files = []
     active_matchers = []
     matcher_cache = {}
+    active_mempalaceignore_matchers = []
+    mempalaceignore_cache = {}
     include_paths = normalize_include_paths(include_ignored)
 
     for root, dirs, filenames in os.walk(project_path):
@@ -536,6 +548,17 @@ def scan_project(
             if current_matcher is not None:
                 active_matchers.append(current_matcher)
 
+            active_mempalaceignore_matchers = [
+                matcher
+                for matcher in active_mempalaceignore_matchers
+                if root_path == matcher.base_dir or matcher.base_dir in root_path.parents
+            ]
+            current_mempalaceignore_matcher = load_mempalaceignore_matcher(
+                root_path, mempalaceignore_cache
+            )
+            if current_mempalaceignore_matcher is not None:
+                active_mempalaceignore_matchers.append(current_mempalaceignore_matcher)
+
         dirs[:] = [
             d
             for d in dirs
@@ -548,6 +571,13 @@ def scan_project(
                 for d in dirs
                 if is_force_included(root_path / d, project_path, include_paths)
                 or not is_gitignored(root_path / d, active_matchers, is_dir=True)
+            ]
+        if respect_gitignore and active_mempalaceignore_matchers:
+            dirs[:] = [
+                d
+                for d in dirs
+                if is_force_included(root_path / d, project_path, include_paths)
+                or not is_gitignored(root_path / d, active_mempalaceignore_matchers, is_dir=True)
             ]
 
         for filename in filenames:
@@ -562,6 +592,14 @@ def scan_project(
             if respect_gitignore and active_matchers and not force_include:
                 if is_gitignored(filepath, active_matchers, is_dir=False):
                     continue
+            if respect_gitignore and active_mempalaceignore_matchers and not exact_force_include:
+                if is_gitignored(filepath, active_mempalaceignore_matchers, is_dir=False):
+                    continue
+            try:
+                if filepath.stat().st_size > MAX_FILE_SIZE_BYTES:
+                    continue
+            except OSError:
+                continue
             files.append(filepath)
     return files
 
