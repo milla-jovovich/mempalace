@@ -8,6 +8,8 @@ via monkeypatch to avoid touching real data.
 
 import json
 
+import pytest
+
 
 def _patch_mcp_server(monkeypatch, config, kg):
     """Patch the mcp_server module globals to use test fixtures."""
@@ -368,7 +370,8 @@ def test_tool_list_wings_paginates_beyond_10k(monkeypatch):
 
 
 def test_tool_list_wings_logs_chromadb_error_instead_of_swallowing(monkeypatch, caplog):
-    """Issue #171: errors must surface in logs, not vanish into bare except."""
+    """Issue #171: errors must surface in logs AND propagate — not vanish into
+    bare except, not masquerade as partial data."""
     import logging
     from unittest.mock import MagicMock
 
@@ -379,6 +382,70 @@ def test_tool_list_wings_logs_chromadb_error_instead_of_swallowing(monkeypatch, 
     monkeypatch.setattr(mcp_server, "_get_collection", lambda create=False: fake_col)
 
     with caplog.at_level(logging.ERROR, logger="mempalace_mcp"):
-        result = mcp_server.tool_list_wings()
-    assert result == {"wings": {}}
+        with pytest.raises(RuntimeError, match="simulated chromadb failure"):
+            mcp_server.tool_list_wings()
+    assert any("simulated chromadb failure" in r.message for r in caplog.records)
+
+
+# Parameterized coverage for the three taxonomy tools that previously had no
+# pagination test — tool_list_rooms, tool_get_taxonomy, and tool_status (which
+# used to do its own truncated col.get with a bare except).
+
+
+def _two_page_metadatas():
+    """Return a list side_effect producing 10000 alpha rows then 5000 beta rows."""
+    return [
+        {"metadatas": [{"wing": "alpha", "room": "alpha"}] * 10000},
+        {"metadatas": [{"wing": "beta", "room": "beta"}] * 5000},
+    ]
+
+
+@pytest.mark.parametrize(
+    "tool_name,expected",
+    [
+        ("tool_list_rooms", lambda r: r["rooms"] == {"alpha": 10000, "beta": 5000}),
+        (
+            "tool_get_taxonomy",
+            lambda r: r["taxonomy"] == {"alpha": {"alpha": 10000}, "beta": {"beta": 5000}},
+        ),
+        (
+            "tool_status",
+            lambda r: r["wings"] == {"alpha": 10000, "beta": 5000}
+            and r["rooms"] == {"alpha": 10000, "beta": 5000},
+        ),
+    ],
+)
+def test_taxonomy_tools_paginate_beyond_10k(monkeypatch, tool_name, expected):
+    """Issue #171: all aggregation tools must page past the first 10k, not
+    silently truncate. Generalises the existing list_wings test to the three
+    siblings that previously lacked coverage."""
+    from unittest.mock import MagicMock
+
+    from mempalace import mcp_server
+
+    fake_col = MagicMock()
+    fake_col.get.side_effect = _two_page_metadatas()
+    fake_col.count.return_value = 15000
+    monkeypatch.setattr(mcp_server, "_get_collection", lambda create=False: fake_col)
+
+    result = getattr(mcp_server, tool_name)()
+    assert expected(result), f"{tool_name} returned {result!r}"
+
+
+def test_tool_status_propagates_chromadb_error(monkeypatch, caplog):
+    """Issue #171: tool_status used to wrap its metadata loop in `try/except: pass`
+    — failures must now log AND propagate, consistent with the other taxonomy tools."""
+    import logging
+    from unittest.mock import MagicMock
+
+    from mempalace import mcp_server
+
+    fake_col = MagicMock()
+    fake_col.get.side_effect = RuntimeError("simulated chromadb failure")
+    fake_col.count.return_value = 0
+    monkeypatch.setattr(mcp_server, "_get_collection", lambda create=False: fake_col)
+
+    with caplog.at_level(logging.ERROR, logger="mempalace_mcp"):
+        with pytest.raises(RuntimeError, match="simulated chromadb failure"):
+            mcp_server.tool_status()
     assert any("simulated chromadb failure" in r.message for r in caplog.records)

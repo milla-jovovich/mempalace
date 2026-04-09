@@ -96,15 +96,13 @@ def tool_status():
     count = col.count()
     wings = {}
     rooms = {}
-    try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-            rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
+    # Issue #171: paginate through the shared generator so >10k palaces don't
+    # truncate, and let exceptions propagate instead of masking them as {}.
+    for m in _iter_all_metadatas(col):
+        w = m.get("wing", "unknown")
+        r = m.get("room", "unknown")
+        wings[w] = wings.get(w, 0) + 1
+        rooms[r] = rooms.get(r, 0) + 1
     return {
         "total_drawers": count,
         "wings": wings,
@@ -150,8 +148,8 @@ When WRITING AAAK: use entity codes, mark emotions, keep structure tight."""
 
 def _iter_all_metadatas(col, where=None):
     """Yield every drawer's metadata, paginating so palaces with >10k drawers
-    don't silently truncate. Logs and stops on error rather than swallowing.
-    Issue #171."""
+    don't silently truncate. Logs and re-raises on error so callers never
+    receive partial data presented as a full result. Issue #171."""
     PAGE, offset = 10000, 0
     try:
         while True:
@@ -165,6 +163,7 @@ def _iter_all_metadatas(col, where=None):
             offset += PAGE
     except Exception as e:
         logger.error("metadata iteration failed at offset %d: %s", offset, e)
+        raise
 
 
 def tool_list_wings():
