@@ -4,8 +4,12 @@ palace.py — Shared palace operations.
 Consolidates ChromaDB access patterns used by both miners and the MCP server.
 """
 
+import logging
 import os
+
 import chromadb
+
+logger = logging.getLogger("mempalace")
 
 SKIP_DIRS = {
     ".git",
@@ -45,6 +49,7 @@ def get_collection(palace_path: str, collection_name: str = "mempalace_drawers")
     try:
         return client.get_collection(collection_name)
     except Exception:
+        logger.debug("Collection %r not found, creating it", collection_name)
         return client.create_collection(collection_name)
 
 
@@ -65,7 +70,7 @@ def file_already_mined(collection, source_file: str, check_mtime: bool = False) 
             if stored_mtime is None:
                 return False
             current_mtime = os.path.getmtime(source_file)
-            return float(stored_mtime) == current_mtime
+            return abs(float(stored_mtime) - current_mtime) < 0.01
         return True
     except Exception:
         return False

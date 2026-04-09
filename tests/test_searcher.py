@@ -123,3 +123,29 @@ class TestSearchCLI:
         captured = capsys.readouterr()
         # Should have output with at least one result block
         assert "[1]" in captured.out
+
+
+# ── Edge-case tests ──────────────────────────────────────────────────
+
+
+class TestSearchEdgeCases:
+    def test_search_nonexistent_wing(self, palace_path, seeded_collection):
+        """Filtering by a wing with no entries returns empty results."""
+        result = search_memories("code", palace_path, wing="nonexistent_wing_xyz")
+        assert result["results"] == []
+
+    def test_search_nonexistent_room(self, palace_path, seeded_collection):
+        """Filtering by a room with no entries returns empty results."""
+        result = search_memories("code", palace_path, room="nonexistent_room_xyz")
+        assert result["results"] == []
+
+    def test_search_special_characters(self, palace_path, seeded_collection):
+        """Queries with special characters should not crash."""
+        for query in ['"quoted"', "pipe|char", "back\\slash", "uni\u00e9code"]:
+            result = search_memories(query, palace_path)
+            assert "results" in result
+
+    def test_search_memories_nonexistent_wing_and_room(self, palace_path, seeded_collection):
+        """Combined nonexistent wing+room returns empty results."""
+        result = search_memories("anything", palace_path, wing="nope", room="nada")
+        assert result["results"] == []
