@@ -155,3 +155,69 @@ class TestDecode:
         assert decoded["header"]["file"] == "001"
         assert decoded["arc"] == "journey"
         assert len(decoded["zettels"]) == 1
+
+
+class TestExpand:
+    def test_expand_basic(self):
+        d = Dialect(entities={"Alice": "ALC", "Bob": "BOB"})
+        aaak = '001|ALC+BOB|2025-01-01|test_title\n001:ALC+BOB|memory_ai|"we decided to use GraphQL"|determ'
+        expanded = d.expand(aaak)
+        assert "Alice" in expanded or "ALC" in expanded
+        assert "memory" in expanded or "ai" in expanded
+        assert "we decided to use GraphQL" in expanded
+
+    def test_expand_preserves_entities(self):
+        d = Dialect(entities={"Alice": "ALC"})
+        aaak = '001|ALC|2025-01-01|meeting\n001:ALC|project_auth|"switched to JWT"|determ+convict'
+        expanded = d.expand(aaak)
+        assert "Alice" in expanded
+
+    def test_expand_preserves_key_sentence(self):
+        d = Dialect()
+        aaak = 'project|backend|2025-01-01|auth\n0:???|jwt_tokens|"Tokens expire after 24 hours"'
+        expanded = d.expand(aaak)
+        assert "Tokens expire after 24 hours" in expanded
+
+    def test_expand_handles_emotions(self):
+        d = Dialect()
+        aaak = '001|ALC|2025-01-01|talk\n001:ALC|life|"a turning point"|hope+joy'
+        expanded = d.expand(aaak)
+        assert "hope" in expanded
+        assert "joy" in expanded
+
+    def test_expand_empty_input(self):
+        d = Dialect()
+        expanded = d.expand("")
+        assert isinstance(expanded, str)
+
+    def test_expand_roundtrip_from_compress(self):
+        """Compress text then expand — key terms should survive."""
+        d = Dialect(entities={"Alice": "ALC"})
+        original = "Alice decided to switch from REST to GraphQL for the API layer."
+        compressed = d.compress(original)
+        expanded = d.expand(compressed)
+        # The key concept should survive the round-trip
+        assert "graphql" in expanded.lower() or "api" in expanded.lower()
+
+
+class TestLooksLikeAaak:
+    def test_positive_plain_compress(self):
+        d = Dialect()
+        compressed = d.compress(
+            "We decided to use PostgreSQL for the database.",
+            metadata={"wing": "project", "room": "backend"},
+        )
+        assert d.looks_like_aaak(compressed)
+
+    def test_positive_zettel_format(self):
+        aaak = '001|ALC|2025-01-01|title\n001:ALC|topic|"quote"|0.9|joy'
+        assert Dialect.looks_like_aaak(aaak)
+
+    def test_negative_plain_text(self):
+        assert not Dialect.looks_like_aaak("This is just plain English text.")
+
+    def test_negative_empty(self):
+        assert not Dialect.looks_like_aaak("")
+
+    def test_negative_pipe_but_no_colon_digit(self):
+        assert not Dialect.looks_like_aaak("wing|room|date|file")
