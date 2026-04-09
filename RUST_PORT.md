@@ -3,7 +3,7 @@
 This repository is being converted from Python to pure Rust.
 
 - **Branch:** `feat/convert-to-rust`
-- **Status:** Phase 2 of 7 — `mempalace-core` ported
+- **Status:** Phase 3 of 7 — `mempalace-text` ported
 - **Plan:** [`.sisyphus/plans/rust-port.md`](.sisyphus/plans/rust-port.md)
 - **Research:**
   - [`.sisyphus/research/01-rust-stack.md`](.sisyphus/research/01-rust-stack.md)
@@ -16,7 +16,7 @@ This repository is being converted from Python to pure Rust.
 |---|---|---|
 | 1 | Workspace skeleton, Cargo toml, rust-toolchain, CI, gitignore | **done** |
 | 2 | `mempalace-core`: config, sanitize, paths, version, errors (32 tests) | **done** |
-| 3 | `mempalace-text`: dialect, normalize, entity detection, extractors | todo |
+| 3 | `mempalace-text`: dialect, normalize, entity detection, extractors (226 tests) | **done** |
 | 4 | `mempalace-store`: lancedb vector store, rusqlite KG, graph, layers | todo |
 | 5 | `mempalace-server`: ingest, searcher, MCP server, hooks, onboarding | todo |
 | 6 | `mempalace-cli`: clap binary + end-to-end integration tests | todo |
