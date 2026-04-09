@@ -69,7 +69,7 @@ def cmd_mine(args):
     for raw in args.include_ignored or []:
         include_ignored.extend(part.strip() for part in raw.split(",") if part.strip())
     exclude_paths = []
-    for raw in args.exclude or []:
+    for raw in getattr(args, "exclude", None) or []:
         exclude_paths.extend(part.strip() for part in raw.split(",") if part.strip())
 
     if args.mode == "convos":
