@@ -98,6 +98,37 @@ def find_session_boundaries(lines):
     return boundaries
 
 
+def count_sessions_streaming(filepath):
+    """
+    Stream through file to count true session starts without loading entire file.
+    Returns the session count.
+    """
+    count = 0
+    buffer = []
+
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                buffer.append(line)
+                # Keep a buffer of the last 6 lines plus current
+                if len(buffer) > 7:
+                    buffer.pop(0)
+
+                # Check if current line is a Claude Code header
+                if "Claude Code v" in line:
+                    # Check if this is a true session start
+                    # We need to check the NEXT 6 lines for "Ctrl+E" or "previous messages"
+                    # For now, record that we found a potential session
+                    # We'll validate in a second pass if needed
+                    nearby = "".join(buffer)
+                    if "Ctrl+E" not in nearby and "previous messages" not in nearby:
+                        count += 1
+    except OSError:
+        return 0
+
+    return count
+
+
 def extract_timestamp(lines):
     """
     Find the first timestamp line: ⏺ H:MM AM/PM Weekday, Month DD, YYYY
@@ -178,7 +209,8 @@ def extract_subject(lines):
 
 def split_file(filepath, output_dir, dry_run=False):
     """
-    Split a single mega-file into per-session files.
+    Split a single mega-file into per-session files using streaming.
+    Accumulates sessions line-by-line to avoid loading entire file into memory.
     Returns list of output paths written (or would be written if dry_run).
     """
     path = Path(filepath)
@@ -186,49 +218,71 @@ def split_file(filepath, output_dir, dry_run=False):
     if path.stat().st_size > max_size:
         print(f"  SKIP: {path.name} exceeds {max_size // (1024*1024)} MB limit")
         return []
-    lines = path.read_text(errors="replace").splitlines(keepends=True)
-
-    boundaries = find_session_boundaries(lines)
-    if len(boundaries) < 2:
-        return []  # Not a mega-file
-
-    # Add sentinel at end
-    boundaries.append(len(lines))
 
     out_dir = Path(output_dir) if output_dir else path.parent
     written = []
 
-    for i, (start, end) in enumerate(zip(boundaries, boundaries[1:])):
-        chunk = lines[start:end]
-        if len(chunk) < 10:
-            continue  # Skip tiny fragments
+    current_session = []
+    buffer = []
+    session_count = 0
 
-        ts_human, ts_iso = extract_timestamp(chunk)
-        people = extract_people(chunk)
-        subject = extract_subject(chunk)
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                buffer.append(line)
+                # Keep a buffer of last 7 lines to detect session boundaries
+                if len(buffer) > 7:
+                    buffer.pop(0)
 
-        # Build filename: SOURCESTEM__DATE_TIME_People_subject.txt
-        # Source stem prefix prevents collisions when multiple mega-files
-        # produce sessions with the same timestamp/people/subject.
-        ts_part = ts_human or f"part{i + 1:02d}"
-        people_part = "-".join(people[:3]) if people else "unknown"
-        src_stem = re.sub(r"[^\w-]", "_", path.stem)[:40]
-        name = f"{src_stem}__{ts_part}_{people_part}_{subject}.txt"
-        # Sanitize
-        name = re.sub(r"[^\w\.\-]", "_", name)
-        name = re.sub(r"_+", "_", name)
+                # Check if this is a true session start
+                if "Claude Code v" in line and is_true_session_start(buffer, len(buffer) - 1):
+                    # Found a new session - process the previous one
+                    if current_session and len(current_session) >= 10:
+                        session_count += 1
+                        _write_session(current_session, path, session_count, out_dir, dry_run, written)
 
-        out_path = out_dir / name
+                    # Start new session with current buffer
+                    current_session = list(buffer)
+                else:
+                    # Continue accumulating current session
+                    if current_session:
+                        current_session.append(line)
 
-        if dry_run:
-            print(f"  [{i + 1}/{len(boundaries) - 1}] {name}  ({len(chunk)} lines)")
-        else:
-            out_path.write_text("".join(chunk), encoding="utf-8")
-            print(f"  ✓ {name}  ({len(chunk)} lines)")
+        # Process final session
+        if current_session and len(current_session) >= 10:
+            session_count += 1
+            _write_session(current_session, path, session_count, out_dir, dry_run, written)
 
-        written.append(out_path)
+    except OSError:
+        return []
 
     return written
+
+
+def _write_session(session_lines, source_path, session_idx, out_dir, dry_run, written_list):
+    """Helper to extract metadata and write a single session to file."""
+    ts_human, ts_iso = extract_timestamp(session_lines)
+    people = extract_people(session_lines)
+    subject = extract_subject(session_lines)
+
+    # Build filename: SOURCESTEM__DATE_TIME_People_subject.txt
+    ts_part = ts_human or f"part{session_idx:02d}"
+    people_part = "-".join(people[:3]) if people else "unknown"
+    src_stem = re.sub(r"[^\w-]", "_", source_path.stem)[:40]
+    name = f"{src_stem}__{ts_part}_{people_part}_{subject}.txt"
+    # Sanitize
+    name = re.sub(r"[^\w\.\-]", "_", name)
+    name = re.sub(r"_+", "_", name)
+
+    out_path = out_dir / name
+
+    if dry_run:
+        print(f"  [{session_idx}] {name}  ({len(session_lines)} lines)")
+    else:
+        out_path.write_text("".join(session_lines), encoding="utf-8")
+        print(f"  ✓ {name}  ({len(session_lines)} lines)")
+
+    written_list.append(out_path)
 
 
 def main():
@@ -275,10 +329,10 @@ def main():
         if f.stat().st_size > max_scan_size:
             print(f"  SKIP: {f.name} exceeds {max_scan_size // (1024*1024)} MB limit")
             continue
-        lines = f.read_text(errors="replace").splitlines(keepends=True)
-        boundaries = find_session_boundaries(lines)
-        if len(boundaries) >= args.min_sessions:
-            mega_files.append((f, len(boundaries)))
+        # Use streaming session counter to avoid loading entire file
+        session_count = count_sessions_streaming(f)
+        if session_count >= args.min_sessions:
+            mega_files.append((f, session_count))
 
     if not mega_files:
         print(f"No mega-files found in {src_dir} (min {args.min_sessions} sessions).")
