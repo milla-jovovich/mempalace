@@ -23,9 +23,11 @@ import sys
 import json
 import logging
 import hashlib
+import time
 from datetime import datetime
+from pathlib import Path
 
-from .config import MempalaceConfig
+from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
@@ -66,12 +68,64 @@ _client_cache = None
 _collection_cache = None
 
 
+# ==================== WRITE-AHEAD LOG ====================
+# Every write operation is logged to a JSONL file before execution.
+# This provides an audit trail for detecting memory poisoning and
+# enables review/rollback of writes from external or untrusted sources.
+
+_WAL_DIR = Path(os.path.expanduser("~/.mempalace/wal"))
+_WAL_DIR.mkdir(parents=True, exist_ok=True)
+_WAL_FILE = _WAL_DIR / "write_log.jsonl"
+
+
+def _wal_log(operation: str, params: dict, result: dict = None):
+    """Append a write operation to the write-ahead log."""
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "operation": operation,
+        "params": params,
+        "result": result,
+    }
+    try:
+        with open(_WAL_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+    except Exception as e:
+        logger.error(f"WAL write failed: {e}")
+
+
+_client = None
+
+
+def _get_client():
+    """Return a singleton ChromaDB PersistentClient."""
+    global _client
+    if _client is None:
+        _client = chromadb.PersistentClient(path=_config.palace_path)
+    return _client
+
+
+_meta_cache = {"data": None, "timestamp": 0, "ttl": 30}  # 30 second TTL
+
+
+def _get_cached_metadata():
+    """Return all record metadatas with a time-based cache to avoid repeated full scans."""
+    now = time.time()
+    if _meta_cache["data"] is not None and (now - _meta_cache["timestamp"]) < _meta_cache["ttl"]:
+        return _meta_cache["data"]
+    col = _get_collection()
+    if not col:
+        return None
+    all_meta = col.get(include=["metadatas"])["metadatas"]
+    _meta_cache["data"] = all_meta
+    _meta_cache["timestamp"] = now
+    return all_meta
+
+
 def _get_collection(create=False):
     """Return the ChromaDB collection, caching the client between calls."""
     global _client_cache, _collection_cache
     try:
-        if _client_cache is None:
-            _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+        _get_client()
         if create:
             _collection_cache = _client_cache.get_or_create_collection(_config.collection_name)
         elif _collection_cache is None:
@@ -99,12 +153,13 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-            rooms[r] = rooms.get(r, 0) + 1
+        all_meta = _get_cached_metadata()
+        if all_meta:
+            for m in all_meta:
+                w = m.get("wing", "unknown")
+                r = m.get("room", "unknown")
+                wings[w] = wings.get(w, 0) + 1
+                rooms[r] = rooms.get(r, 0) + 1
     except Exception:
         pass
     return {
@@ -156,10 +211,11 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            wings[w] = wings.get(w, 0) + 1
+        all_meta = _get_cached_metadata()
+        if all_meta:
+            for m in all_meta:
+                w = m.get("wing", "unknown")
+                wings[w] = wings.get(w, 0) + 1
     except Exception:
         pass
     return {"wings": wings}
@@ -171,10 +227,12 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
         if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
+            # Filtered query — cannot use the full metadata cache
+            all_meta = col.get(include=["metadatas"], where={"wing": wing})["metadatas"]
+        else:
+            # No filter — use the cached metadata
+            all_meta = _get_cached_metadata() or []
         for m in all_meta:
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
@@ -189,13 +247,14 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            if w not in taxonomy:
-                taxonomy[w] = {}
-            taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
+        all_meta = _get_cached_metadata()
+        if all_meta:
+            for m in all_meta:
+                w = m.get("wing", "unknown")
+                r = m.get("room", "unknown")
+                if w not in taxonomy:
+                    taxonomy[w] = {}
+                taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
     except Exception:
         pass
     return {"taxonomy": taxonomy}
@@ -282,11 +341,30 @@ def tool_add_drawer(
     wing: str, room: str, content: str, source_file: str = None, added_by: str = "mcp"
 ):
     """File verbatim content into a wing/room. Checks for duplicates first."""
+    try:
+        wing = sanitize_name(wing, "wing")
+        room = sanitize_name(room, "room")
+        content = sanitize_content(content)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
     col = _get_collection(create=True)
     if not col:
         return _no_palace()
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5(content.encode()).hexdigest()[:16]}"
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((content[:100] + datetime.now().isoformat()).encode()).hexdigest()[:24]}"
+
+    _wal_log(
+        "add_drawer",
+        {
+            "drawer_id": drawer_id,
+            "wing": wing,
+            "room": room,
+            "added_by": added_by,
+            "content_length": len(content),
+            "content_preview": content[:200],
+        },
+    )
 
     # Idempotency: if the deterministic ID already exists, return success as a no-op.
     try:
@@ -311,6 +389,7 @@ def tool_add_drawer(
                 }
             ],
         )
+        _meta_cache["data"] = None  # Invalidate metadata cache
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
     except Exception as e:
@@ -325,8 +404,22 @@ def tool_delete_drawer(drawer_id: str):
     existing = col.get(ids=[drawer_id])
     if not existing["ids"]:
         return {"success": False, "error": f"Drawer not found: {drawer_id}"}
+
+    # Log the deletion with the content being removed for audit trail
+    deleted_content = existing.get("documents", [""])[0] if existing.get("documents") else ""
+    deleted_meta = existing.get("metadatas", [{}])[0] if existing.get("metadatas") else {}
+    _wal_log(
+        "delete_drawer",
+        {
+            "drawer_id": drawer_id,
+            "deleted_meta": deleted_meta,
+            "content_preview": deleted_content[:200],
+        },
+    )
+
     try:
         col.delete(ids=[drawer_id])
+        _meta_cache["data"] = None  # Invalidate metadata cache
         logger.info(f"Deleted drawer: {drawer_id}")
         return {"success": True, "drawer_id": drawer_id}
     except Exception as e:
@@ -346,6 +439,23 @@ def tool_kg_add(
     subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
 ):
     """Add a relationship to the knowledge graph."""
+    try:
+        subject = sanitize_name(subject, "subject")
+        predicate = sanitize_name(predicate, "predicate")
+        object = sanitize_name(object, "object")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    _wal_log(
+        "kg_add",
+        {
+            "subject": subject,
+            "predicate": predicate,
+            "object": object,
+            "valid_from": valid_from,
+            "source_closet": source_closet,
+        },
+    )
     triple_id = _kg.add_triple(
         subject, predicate, object, valid_from=valid_from, source_closet=source_closet
     )
@@ -354,6 +464,10 @@ def tool_kg_add(
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
     """Mark a fact as no longer true (set end date)."""
+    _wal_log(
+        "kg_invalidate",
+        {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
+    )
     _kg.invalidate(subject, predicate, object, ended=ended)
     return {
         "success": True,
@@ -384,6 +498,12 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     This is the agent's personal journal — observations, thoughts,
     what it worked on, what it noticed, what it thinks matters.
     """
+    try:
+        agent_name = sanitize_name(agent_name, "agent_name")
+        entry = sanitize_content(entry)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     room = "diary"
     col = _get_collection(create=True)
@@ -391,9 +511,23 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return _no_palace()
 
     now = datetime.now()
-    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(entry[:50].encode()).hexdigest()[:8]}"
+    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.sha256(entry[:50].encode()).hexdigest()[:12]}"
+
+    _wal_log(
+        "diary_write",
+        {
+            "agent_name": agent_name,
+            "topic": topic,
+            "entry_id": entry_id,
+            "entry_preview": entry[:200],
+        },
+    )
 
     try:
+        # TODO: Future versions should expand AAAK before embedding to improve
+        # semantic search quality. For now, store raw AAAK in metadata so it's
+        # preserved, and keep the document as-is for embedding (even though
+        # compressed AAAK degrades embedding quality).
         col.add(
             ids=[entry_id],
             documents=[entry],
@@ -407,9 +541,11 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
                     "agent": agent_name,
                     "filed_at": now.isoformat(),
                     "date": now.strftime("%Y-%m-%d"),
+                    "raw_aaak": entry,
                 }
             ],
         )
+        _meta_cache["data"] = None  # Invalidate metadata cache
         logger.info(f"Diary entry: {entry_id} → {wing}/diary/{topic}")
         return {
             "success": True,
