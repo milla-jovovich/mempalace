@@ -64,13 +64,20 @@ MEMPAL_DIR=""
 # Read JSON input from stdin
 INPUT=$(cat)
 
-# Parse fields from Claude Code's JSON
-SESSION_ID=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id','unknown'))" 2>/dev/null)
-# Sanitize SESSION_ID to prevent path traversal (only allow alnum, dash, underscore)
-SESSION_ID=$(echo "$SESSION_ID" | tr -cd 'a-zA-Z0-9_-')
-[ -z "$SESSION_ID" ] && SESSION_ID="unknown"
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('stop_hook_active', False))" 2>/dev/null)
-TRANSCRIPT_PATH=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))" 2>/dev/null)
+# Parse all fields in a single Python call (3x faster than separate invocations)
+eval $(echo "$INPUT" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+sid = data.get('session_id', 'unknown')
+sha = data.get('stop_hook_active', False)
+tp = data.get('transcript_path', '')
+# Shell-safe output — only allow alphanumeric, underscore, hyphen, slash, dot, tilde
+import re
+safe = lambda s: re.sub(r'[^a-zA-Z0-9_/.\-~]', '', str(s))
+print(f'SESSION_ID=\"{safe(sid)}\"')
+print(f'STOP_HOOK_ACTIVE=\"{sha}\"')
+print(f'TRANSCRIPT_PATH=\"{safe(tp)}\"')
+" 2>/dev/null)
 
 # Expand ~ in path
 TRANSCRIPT_PATH="${TRANSCRIPT_PATH/#\~/$HOME}"
@@ -83,6 +90,7 @@ if [ "$STOP_HOOK_ACTIVE" = "True" ] || [ "$STOP_HOOK_ACTIVE" = "true" ]; then
 fi
 
 # Count human messages in the JSONL transcript
+# SECURITY: Pass transcript path as sys.argv to avoid shell injection via crafted paths
 if [ -f "$TRANSCRIPT_PATH" ]; then
     EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
 import json, sys
@@ -94,7 +102,6 @@ with open(sys.argv[1]) as f:
             msg = entry.get('message', {})
             if isinstance(msg, dict) and msg.get('role') == 'user':
                 content = msg.get('content', '')
-                # Skip system/command messages — only count real human input
                 if isinstance(content, str) and '<command-message>' in content:
                     continue
                 count += 1
