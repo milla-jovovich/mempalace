@@ -388,7 +388,7 @@ def cmd_hooks(args):
                 "Stop": [{"type": "command", "command": save, "timeout": 30}],
                 "PreCompact": [{"type": "command", "command": precompact, "timeout": 30}],
             }
-            print("Add to .codex/hooks.json:\n")
+            print("Add to .codex/hooks.json:\n", file=sys.stderr)
             print(json.dumps(config, indent=2))
         else:
             config = {
@@ -408,7 +408,7 @@ def cmd_hooks(args):
                     ],
                 }
             }
-            print("Add to .claude/settings.local.json:\n")
+            print("Add to .claude/settings.local.json:\n", file=sys.stderr)
             print(json.dumps(config, indent=2))
 
 

@@ -43,7 +43,7 @@ def test_cli_hooks_path():
         text=True,
     )
     assert result.returncode == 0
-    assert result.stdout.strip().endswith("hooks")
+    assert result.stdout.strip().endswith("mempalace/hooks")
 
 
 def test_cli_hooks_install_claude():
@@ -53,9 +53,7 @@ def test_cli_hooks_install_claude():
         text=True,
     )
     assert result.returncode == 0
-    lines = result.stdout.strip().split("\n")
-    json_str = "\n".join(lines[2:])  # skip header + blank line
-    config = json.loads(json_str)
+    config = json.loads(result.stdout)
     assert "hooks" in config
     assert "Stop" in config["hooks"]
     assert "PreCompact" in config["hooks"]
@@ -68,8 +66,6 @@ def test_cli_hooks_install_codex():
         text=True,
     )
     assert result.returncode == 0
-    lines = result.stdout.strip().split("\n")
-    json_str = "\n".join(lines[2:])  # skip header + blank line
-    config = json.loads(json_str)
+    config = json.loads(result.stdout)
     assert "Stop" in config
     assert "PreCompact" in config
