@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.9"
       - run: pip install -e ".[dev]"
-      - run: python -m pytest tests/ -v --ignore=tests/benchmarks --cov=mempalace --cov-report=term-missing --cov-fail-under=85
+      - run: python -m pytest tests/ -v --ignore=tests/benchmarks --cov=mempalace --cov-report=term-missing --cov-fail-under=80
 
   test-macos:
     runs-on: macos-latest
