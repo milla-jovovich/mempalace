@@ -471,6 +471,14 @@ def tool_kg_stats():
     return _kg.stats()
 
 
+def tool_check_facts(text: str):
+    """Check a statement for contradictions against the knowledge graph."""
+    from mempalace.fact_checker import check_assertion
+
+    result = check_assertion(text, _kg)
+    return result.to_dict()
+
+
 # ==================== AGENT DIARY ====================
 
 
@@ -698,6 +706,20 @@ TOOLS = {
         "description": "Knowledge graph overview: entities, triples, current vs expired facts, relationship types.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_kg_stats,
+    },
+    "mempalace_check_facts": {
+        "description": "Check a statement for contradictions against the knowledge graph. Returns RED (direct conflict), YELLOW (numeric mismatch), or GREEN (no conflict). Use before recording claims to catch errors.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Natural language assertion to fact-check (e.g. 'Soren finished the auth migration')",
+                },
+            },
+            "required": ["text"],
+        },
+        "handler": tool_check_facts,
     },
     "mempalace_traverse": {
         "description": "Walk the palace graph from a room. Shows connected ideas across wings — the tunnels. Like following a thread through the palace: start at 'chromadb-setup' in wing_code, discover it connects to wing_myproject (planning) and wing_user (feelings about it).",
