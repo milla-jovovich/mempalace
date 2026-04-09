@@ -2924,6 +2924,247 @@ def _load_or_create_split(split_file: str, data: list, dev_size: int = 50, seed:
     return split
 
 
+def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=50):
+    """
+    NLP-enhanced AAAK mode: uses NLP providers for better sentence splitting,
+    entity detection, and compression during AAAK ingestion.
+
+    When NLP flags are enabled (MEMPALACE_NLP_SENTENCES, MEMPALACE_NLP_NER, etc.),
+    the Dialect and entity_detector modules automatically use NLP providers
+    (pySBD, spaCy, GLiNER) for higher-quality processing.
+    """
+    from mempalace.dialect import Dialect
+    from mempalace.entity_detector import extract_candidates
+
+    # Pre-scan for entities across all sessions to build entity codes
+    all_text = []
+    sessions = entry["haystack_sessions"]
+    for session in sessions:
+        for turn in session:
+            if turn["role"] == "user":
+                all_text.append(turn["content"])
+    combined = " ".join(all_text[:20])
+    candidates = extract_candidates(combined)
+
+    # Build entity code map from detected entities
+    entity_codes = {}
+    for name in list(candidates.keys())[:20]:
+        code = name[:3].upper()
+        if code not in entity_codes.values():
+            entity_codes[name] = code
+
+    dialect = Dialect(entities=entity_codes)
+
+    corpus = []
+    corpus_compressed = []
+    corpus_ids = []
+    corpus_timestamps = []
+
+    session_ids = entry["haystack_session_ids"]
+    dates = entry["haystack_dates"]
+
+    for sess_idx, (session, sess_id, date) in enumerate(zip(sessions, session_ids, dates)):
+        if granularity == "session":
+            user_turns = [t["content"] for t in session if t["role"] == "user"]
+            if user_turns:
+                doc = "\n".join(user_turns)
+                compressed = dialect.compress(doc, metadata={"date": date})
+                corpus.append(doc)
+                corpus_compressed.append(compressed)
+                corpus_ids.append(sess_id)
+                corpus_timestamps.append(date)
+        else:
+            turn_num = 0
+            for turn in session:
+                if turn["role"] == "user":
+                    compressed = dialect.compress(turn["content"])
+                    corpus.append(turn["content"])
+                    corpus_compressed.append(compressed)
+                    corpus_ids.append(f"{sess_id}_turn_{turn_num}")
+                    corpus_timestamps.append(date)
+                    turn_num += 1
+
+    if not corpus:
+        return [], corpus, corpus_ids, corpus_timestamps
+
+    collection = _fresh_collection()
+    collection.add(
+        documents=corpus_compressed,
+        ids=[f"doc_{i}" for i in range(len(corpus_compressed))],
+        metadatas=[
+            {"corpus_id": cid, "timestamp": ts} for cid, ts in zip(corpus_ids, corpus_timestamps)
+        ],
+    )
+
+    query = entry["question"]
+    results = collection.query(
+        query_texts=[query],
+        n_results=min(n_results, len(corpus)),
+        include=["distances", "metadatas"],
+    )
+
+    result_ids = results["ids"][0]
+    doc_id_to_idx = {f"doc_{i}": i for i in range(len(corpus))}
+    ranked_indices = [doc_id_to_idx[rid] for rid in result_ids]
+
+    seen = set(ranked_indices)
+    for i in range(len(corpus)):
+        if i not in seen:
+            ranked_indices.append(i)
+
+    return ranked_indices, corpus, corpus_ids, corpus_timestamps
+
+
+def build_palace_and_retrieve_nlp_hybrid(
+    entry, granularity="session", n_results=50, hybrid_weight=0.30
+):
+    """
+    NLP-enhanced hybrid mode: uses NLP entity extraction to improve keyword
+    boosting in the hybrid retrieval pipeline.
+
+    When NLP NER is active, entity names detected by spaCy/GLiNER are added
+    to the keyword overlap computation with higher weight, improving recall
+    for entity-centric questions.
+    """
+    from mempalace.entity_detector import extract_candidates
+
+    STOP_WORDS = {
+        "what",
+        "when",
+        "where",
+        "who",
+        "how",
+        "which",
+        "did",
+        "do",
+        "was",
+        "were",
+        "have",
+        "has",
+        "had",
+        "is",
+        "are",
+        "the",
+        "a",
+        "an",
+        "my",
+        "me",
+        "i",
+        "you",
+        "your",
+        "their",
+        "it",
+        "its",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "ago",
+        "last",
+        "that",
+        "this",
+        "there",
+        "about",
+        "get",
+        "got",
+        "give",
+        "gave",
+        "buy",
+        "bought",
+        "made",
+        "make",
+    }
+
+    def extract_keywords(text):
+        words = re.findall(r"\b[a-z]{3,}\b", text.lower())
+        return [w for w in words if w not in STOP_WORDS]
+
+    def keyword_overlap(query_kws, query_entities, doc_text):
+        doc_lower = doc_text.lower()
+        if not query_kws and not query_entities:
+            return 0.0
+        total = len(query_kws) + len(query_entities)
+        hits = sum(1 for kw in query_kws if kw in doc_lower)
+        # Entity overlap (higher weight)
+        hits += sum(2 for ent in query_entities if ent.lower() in doc_lower)
+        total += len(query_entities)
+        return hits / total if total else 0.0
+
+    question = entry["question"]
+    query_entities = list(extract_candidates(question).keys())
+
+    corpus = []
+    corpus_ids = []
+    corpus_timestamps = []
+
+    sessions = entry["haystack_sessions"]
+    session_ids = entry["haystack_session_ids"]
+    dates = entry["haystack_dates"]
+
+    for sess_idx, (session, sess_id, date) in enumerate(zip(sessions, session_ids, dates)):
+        if granularity == "session":
+            user_turns = [t["content"] for t in session if t["role"] == "user"]
+            if user_turns:
+                doc = "\n".join(user_turns)
+                corpus.append(doc)
+                corpus_ids.append(sess_id)
+                corpus_timestamps.append(date)
+        else:
+            turn_num = 0
+            for turn in session:
+                if turn["role"] == "user":
+                    corpus.append(turn["content"])
+                    corpus_ids.append(f"{sess_id}_turn_{turn_num}")
+                    corpus_timestamps.append(date)
+                    turn_num += 1
+
+    if not corpus:
+        return [], corpus, corpus_ids, corpus_timestamps
+
+    collection = _fresh_collection()
+    collection.add(
+        documents=corpus,
+        ids=[f"doc_{i}" for i in range(len(corpus))],
+        metadatas=[
+            {"corpus_id": cid, "timestamp": ts} for cid, ts in zip(corpus_ids, corpus_timestamps)
+        ],
+    )
+
+    query_keywords = extract_keywords(question)
+    results = collection.query(
+        query_texts=[question],
+        n_results=min(n_results, len(corpus)),
+        include=["distances", "metadatas", "documents"],
+    )
+
+    result_ids = results["ids"][0]
+    distances = results["distances"][0]
+    documents = results["documents"][0]
+    doc_id_to_idx = {f"doc_{i}": i for i in range(len(corpus))}
+
+    scored = []
+    for rid, dist, doc in zip(result_ids, distances, documents):
+        idx = doc_id_to_idx[rid]
+        overlap = keyword_overlap(query_keywords, query_entities, doc)
+        fused_dist = dist * (1.0 - hybrid_weight * overlap)
+        scored.append((idx, fused_dist))
+
+    scored.sort(key=lambda x: x[1])
+    ranked_indices = [idx for idx, _ in scored]
+
+    seen = set(ranked_indices)
+    for i in range(len(corpus)):
+        if i not in seen:
+            ranked_indices.append(i)
+
+    return ranked_indices, corpus, corpus_ids, corpus_timestamps
+
+
 def run_benchmark(
     data_file,
     granularity="session",
@@ -3065,7 +3306,15 @@ def run_benchmark(
         answer_sids = set(entry["answer_session_ids"])
 
         # Run retrieval with selected mode
-        if mode == "aaak":
+        if mode == "nlp_aaak":
+            rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_nlp_aaak(
+                entry, granularity=granularity
+            )
+        elif mode == "nlp_hybrid":
+            rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_nlp_hybrid(
+                entry, granularity=granularity, hybrid_weight=hybrid_weight
+            )
+        elif mode == "aaak":
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_aaak(
                 entry, granularity=granularity
             )
@@ -3264,9 +3513,12 @@ if __name__ == "__main__":
             "palace",
             "diary",
             "full",
+            "nlp_aaak",
+            "nlp_hybrid",
         ],
         default="raw",
-        help="Retrieval mode: raw, hybrid, hybrid_v2, hybrid_v3, palace, diary (palace + LLM topic layer)",
+        help="Retrieval mode: raw, aaak, hybrid, hybrid_v2-v4, palace, diary, full, "
+        "nlp_aaak (NLP-enhanced AAAK), nlp_hybrid (NLP-enhanced hybrid)",
     )
     parser.add_argument("--out", default=None, help="Output JSONL file path")
     parser.add_argument(
