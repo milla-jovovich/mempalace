@@ -316,7 +316,6 @@ def cmd_mcp(args):
 def cmd_sync(args):
     """Sync palace with source files — re-mine changed files, report stale drawers."""
     import chromadb
-    import hashlib
     from pathlib import Path
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
@@ -395,8 +394,8 @@ def cmd_sync(args):
             continue
 
         try:
-            content = Path(sf).read_text(encoding="utf-8", errors="replace").strip()
-            current_hash = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
+            from .miner import file_content_hash
+            current_hash = file_content_hash(Path(sf))
         except OSError:
             missing.append(sf)
             continue
@@ -446,20 +445,49 @@ def cmd_sync(args):
         print(f"\n{'=' * 55}\n")
         return
 
-    # Delete stale drawers and re-mine
+    # Atomic per-file: delete stale drawers then re-mine immediately
     deleted = 0
     re_mined = 0
 
-    # Delete drawers for changed files
     if stale:
-        print("  Deleting stale drawers...")
+        from .miner import process_file, get_collection, load_config
+        from .convo_miner import mine_convos
+
+        print(f"  Re-syncing {len(stale)} changed files...")
         for sf in stale:
-            ids = source_files[sf]["drawer_ids"]
-            # ChromaDB delete in batches
+            info = source_files[sf]
+            ids = info["drawer_ids"]
+            wing = info["wing"]
+            is_convo = info.get("ingest_mode") == "convos"
+
+            # 1. Delete old drawers for this file
             for i in range(0, len(ids), 100):
                 col.delete(ids=ids[i:i + 100])
             deleted += len(ids)
-        print(f"  Deleted {deleted} stale drawers")
+
+            # 2. Re-mine the file immediately
+            filepath = Path(sf)
+            if is_convo:
+                mine_convos(
+                    convo_dir=str(filepath.parent),
+                    palace_path=palace_path,
+                    wing=wing,
+                    agent=args.agent,
+                )
+            else:
+                config = load_config(str(filepath.parent))
+                rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
+                process_file(
+                    filepath=filepath,
+                    project_path=filepath.parent,
+                    collection=col,
+                    wing=wing,
+                    rooms=rooms,
+                    agent=args.agent,
+                    dry_run=False,
+                )
+            re_mined += 1
+            print(f"    {filepath.name} — re-mined ({len(ids)} old drawers replaced)")
 
     # Delete drawers for missing files (if --clean flag)
     if missing and args.clean:
@@ -475,28 +503,9 @@ def cmd_sync(args):
     elif missing:
         print(f"  Skipped {len(missing)} missing files (use --clean to remove orphaned drawers)")
 
-    # Report re-mine instructions grouped by wing and mode
-    if stale:
-        # Group stale files by (wing, ingest_mode, parent_dir) to suggest
-        # the fewest possible mine commands.
-        mine_groups = {}  # (wing, mode, dir) -> count
-        for sf in stale:
-            info = source_files[sf]
-            wing = info["wing"]
-            mode = info.get("ingest_mode", "")
-            parent = str(Path(sf).parent)
-            key = (wing, mode, parent)
-            mine_groups[key] = mine_groups.get(key, 0) + 1
-
-        print(f"\n  To re-mine the {len(stale)} changed files, run:")
-        for (wing, mode, parent), count in mine_groups.items():
-            mode_flag = " --mode convos" if mode == "convos" else ""
-            print(f"    mempalace mine {parent}{mode_flag} --wing {wing} --force")
-
     print(f"\n  Sync complete.")
     print(f"  Deleted: {deleted} stale drawers")
-    if stale:
-        print(f"  Stale drawers removed: re-mine to refresh (see commands above)")
+    print(f"  Re-mined: {re_mined} files")
     print(f"\n{'=' * 55}\n")
 
 

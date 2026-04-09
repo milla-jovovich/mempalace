@@ -57,6 +57,12 @@ MIN_CHUNK_SIZE = 50  # skip tiny chunks
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
 
 
+def file_content_hash(filepath: Path) -> str:
+    """Single source of truth for content hashing — used by miners and sync."""
+    content = filepath.read_text(encoding="utf-8", errors="replace").strip()
+    return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
+
+
 # =============================================================================
 # IGNORE MATCHING
 # =============================================================================
@@ -384,10 +390,9 @@ def add_drawer(
         "added_by": agent,
         "filed_at": datetime.now().isoformat(),
     }
-    if not content_hash:
-        content_hash = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
-    if content_hash:
-        meta["content_hash"] = content_hash
+    meta["content_hash"] = content_hash or hashlib.md5(
+        content.encode(), usedforsecurity=False
+    ).hexdigest()
     # Store file mtime so we can detect modifications later.
     try:
         meta["source_mtime"] = os.path.getmtime(source_file)
@@ -436,7 +441,7 @@ def process_file(
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)
-    file_hash = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
+    file_hash = file_content_hash(filepath)
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
