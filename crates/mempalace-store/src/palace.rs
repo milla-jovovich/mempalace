@@ -5,8 +5,9 @@
 //! be tested against an in-memory backend while the production backend
 //! uses `lancedb`.
 //!
-//! A concrete [`LanceDbPalace`] backend lives in [`mod@lancedb_backend`].
-//! The default / test backend is [`InMemoryPalace`].
+//! A concrete `LanceDbPalace` backend lives in [`crate::lancedb_backend`]
+//! (gated behind the `lancedb-backend` feature). The default / test backend
+//! is [`InMemoryPalace`].
 
 use std::collections::{BTreeMap, HashMap};
 

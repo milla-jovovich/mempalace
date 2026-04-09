@@ -28,6 +28,10 @@ arrow-schema.workspace = true
 futures.workspace = true
 lzma-sys.workspace = true
 
+[features]
+default = ["lancedb-backend"]
+lancedb-backend = []
+
 [dev-dependencies]
 tempfile.workspace = true
 rstest.workspace = true

@@ -65,8 +65,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "fs"
 # mid-port. Revisit pin in Phase 7.
 lancedb = "=0.27.2"
 fastembed = "5"
-arrow-array = "56"
-arrow-schema = "56"
+arrow-array = "57"
+arrow-schema = "57"
 futures = "0.3"
 
 rmcp = { version = "0.16", features = ["server", "transport-io", "macros"] }
