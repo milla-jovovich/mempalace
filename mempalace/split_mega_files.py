@@ -102,25 +102,30 @@ def count_sessions_streaming(filepath):
     """
     Stream through file to count true session starts without loading entire file.
     Returns the session count.
+    
+    A true session start is a 'Claude Code v' header NOT followed by 
+    'Ctrl+E'/'previous messages' within the next 6 lines.
     """
     count = 0
-    buffer = []
 
     try:
         with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-            for line in f:
-                buffer.append(line)
-                # Keep a buffer of the last 6 lines plus current
-                if len(buffer) > 7:
-                    buffer.pop(0)
-
-                # Check if current line is a Claude Code header
+            while True:
+                try:
+                    line = next(f)
+                except StopIteration:
+                    break
+                    
                 if "Claude Code v" in line:
-                    # Check if this is a true session start
-                    # We need to check the NEXT 6 lines for "Ctrl+E" or "previous messages"
-                    # For now, record that we found a potential session
-                    # We'll validate in a second pass if needed
-                    nearby = "".join(buffer)
+                    # Peek ahead: read next 5 lines to check for Ctrl+E context
+                    context = [line]
+                    for _ in range(5):
+                        try:
+                            context.append(next(f))
+                        except StopIteration:
+                            break
+                    
+                    nearby = "".join(context)
                     if "Ctrl+E" not in nearby and "previous messages" not in nearby:
                         count += 1
     except OSError:
@@ -207,7 +212,7 @@ def extract_subject(lines):
     return "session"
 
 
-def split_file(filepath, output_dir, dry_run=False):
+def split_file(filepath, output_dir, dry_run=False, min_sessions=2):
     """
     Split a single mega-file into per-session files using streaming.
     Accumulates sessions line-by-line to avoid loading entire file into memory.
@@ -219,6 +224,11 @@ def split_file(filepath, output_dir, dry_run=False):
         print(f"  SKIP: {path.name} exceeds {max_size // (1024*1024)} MB limit")
         return []
 
+    # Check if this is actually a mega-file with multiple sessions
+    total_sessions = count_sessions_streaming(filepath)
+    if total_sessions < min_sessions:
+        return []
+
     out_dir = Path(output_dir) if output_dir else path.parent
     written = []
 
@@ -228,25 +238,56 @@ def split_file(filepath, output_dir, dry_run=False):
 
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            pending_header = None  # Lines collected while checking for context restore
+            
             for line in f:
-                buffer.append(line)
-                # Keep a buffer of last 7 lines to detect session boundaries
-                if len(buffer) > 7:
-                    buffer.pop(0)
-
-                # Check if this is a true session start
-                if "Claude Code v" in line and is_true_session_start(buffer, len(buffer) - 1):
-                    # Found a new session - process the previous one
+                # If we have a pending header, we're checking if it's a context restore
+                if pending_header is not None:
+                    pending_header.append(line)
+                    # Check if this is a context restore (Ctrl+E in first 6 lines)
+                    nearby = "".join(pending_header)
+                    
+                    if len(pending_header) >= 6 or "Ctrl+E" in nearby or "previous messages" in nearby:
+                        # We've collected enough context to decide
+                        if "Ctrl+E" not in nearby and "previous messages" not in nearby:
+                            # True session start - process previous session if exists
+                            if current_session and len(current_session) >= 10:
+                                session_count += 1
+                                _write_session(current_session, path, session_count, out_dir, dry_run, written)
+                            # Start new session
+                            current_session = list(pending_header)
+                        else:
+                            # Context restore - add to current session
+                            if current_session:
+                                current_session.extend(pending_header)
+                            else:
+                                # No current session yet, just discard or treat as partial
+                                current_session = list(pending_header)
+                        pending_header = None
+                    continue
+                
+                # Check for new session header
+                if "Claude Code v" in line:
+                    # Start collecting context to check for Ctrl+E
+                    pending_header = [line]
+                else:
+                    # Normal line - add to current session
+                    if current_session:
+                        current_session.append(line)
+            
+            # Handle any pending header at end of file
+            if pending_header is not None:
+                nearby = "".join(pending_header)
+                if "Ctrl+E" not in nearby and "previous messages" not in nearby:
                     if current_session and len(current_session) >= 10:
                         session_count += 1
                         _write_session(current_session, path, session_count, out_dir, dry_run, written)
-
-                    # Start new session with current buffer
-                    current_session = list(buffer)
+                    current_session = list(pending_header)
                 else:
-                    # Continue accumulating current session
                     if current_session:
-                        current_session.append(line)
+                        current_session.extend(pending_header)
+                    else:
+                        current_session = list(pending_header)
 
         # Process final session
         if current_session and len(current_session) >= 10:

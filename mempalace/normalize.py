@@ -154,6 +154,60 @@ def _try_claude_code_jsonl_streaming(filepath: str) -> Optional[str]:
     return None
 
 
+def _try_codex_jsonl_streaming(filepath: str) -> Optional[str]:
+    """OpenAI Codex CLI sessions - streaming version for large files.
+    
+    Uses only event_msg entries (user_message / agent_message) which represent
+    the canonical conversation turns. response_item entries are skipped.
+    """
+    messages = []
+    has_session_meta = False
+    
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+
+                entry_type = entry.get("type", "")
+                if entry_type == "session_meta":
+                    has_session_meta = True
+                    continue
+
+                if entry_type != "event_msg":
+                    continue
+
+                payload = entry.get("payload", {})
+                if not isinstance(payload, dict):
+                    continue
+
+                payload_type = payload.get("type", "")
+                msg = payload.get("message")
+                if not isinstance(msg, str):
+                    continue
+                text = msg.strip()
+                if not text:
+                    continue
+
+                if payload_type == "user_message":
+                    messages.append(("user", text))
+                elif payload_type == "agent_message":
+                    messages.append(("assistant", text))
+    except OSError:
+        return None
+
+    if len(messages) >= 2 and has_session_meta:
+        return _messages_to_transcript(messages)
+    return None
+
+
 def _try_codex_jsonl(content: str) -> Optional[str]:
     """OpenAI Codex CLI sessions (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl).
 

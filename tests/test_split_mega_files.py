@@ -228,6 +228,49 @@ def test_extract_subject_truncated():
     assert len(subject) <= 60
 
 
+# ── count_sessions_streaming ───────────────────────────────────────────
+
+
+def test_count_sessions_streaming_basic(tmp_path):
+    """Test streaming session counting matches expected count."""
+    mega = _make_mega_file(tmp_path, n_sessions=3)
+    count = smf.count_sessions_streaming(str(mega))
+    assert count == 3
+
+
+def test_count_sessions_streaming_no_sessions(tmp_path):
+    """Test counting on file with no sessions returns 0."""
+    path = tmp_path / "nosessions.txt"
+    path.write_text("Just some regular text\nNo Claude Code headers here\n")
+    count = smf.count_sessions_streaming(str(path))
+    assert count == 0
+
+
+def test_count_sessions_streaming_context_restore(tmp_path):
+    """Test that context restores (Ctrl+E) are not counted as sessions."""
+    content = "Claude Code v1.0\nContent here\n\n\n\n\n\n"
+    content += "Claude Code v1.0\nCtrl+E to show 5 previous messages\n\n\n\n\n\n"
+    content += "Claude Code v1.0\nNew real session\n\n\n\n\n\n"
+    path = tmp_path / "mixed.txt"
+    path.write_text(content)
+    count = smf.count_sessions_streaming(str(path))
+    assert count == 2  # Only the first and last are true sessions
+
+
+def test_count_sessions_streaming_large_file(tmp_path):
+    """Test streaming works efficiently on larger files without OOM."""
+    # Create a file with 100 sessions, each with 50 lines
+    mega = _make_mega_file(tmp_path, n_sessions=100, lines_per_session=50)
+    count = smf.count_sessions_streaming(str(mega))
+    assert count == 100
+
+
+def test_count_sessions_streaming_missing_file(tmp_path):
+    """Test handling of non-existent file."""
+    count = smf.count_sessions_streaming(str(tmp_path / "nonexistent.txt"))
+    assert count == 0
+
+
 # ── split_file ─────────────────────────────────────────────────────────
 
 
@@ -290,3 +333,61 @@ def test_split_file_tiny_fragments_skipped(tmp_path):
     # The first chunk is very small, should be skipped
     for p in written:
         assert p.stat().st_size > 0
+
+
+# ── Streaming regression tests ─────────────────────────────────────────
+
+
+def test_split_file_streaming_matches_original_behavior(tmp_path):
+    """Ensure streaming split produces same output as previous implementation."""
+    mega = _make_mega_file(tmp_path, n_sessions=5, lines_per_session=30)
+    out_dir = tmp_path / "output"
+    out_dir.mkdir()
+    
+    written = smf.split_file(str(mega), str(out_dir))
+    assert len(written) == 5
+    
+    # Verify each file has expected content
+    for i, p in enumerate(sorted(written)):
+        content = p.read_text()
+        assert f"Claude Code v1.{i}" in content
+        assert f"topic {i}" in content
+
+
+def test_split_file_streaming_with_context_restore(tmp_path):
+    """Test streaming correctly handles context restores mid-file."""
+    content = "Claude Code v1.0\n> First real session\n"
+    content += "line\n" * 10
+    content += "Claude Code v1.0\nCtrl+E to show previous messages\n"
+    content += "This is context restore, not new session\n"
+    content += "\n" * 5
+    content += "Claude Code v1.0\n> Second real session\n"
+    content += "more\n" * 15
+    
+    path = tmp_path / "with_restore.txt"
+    path.write_text(content)
+    
+    out_dir = tmp_path / "output"
+    out_dir.mkdir()
+    written = smf.split_file(str(path), str(out_dir))
+    
+    # Should only split 2 real sessions
+    assert len(written) == 2
+
+
+def test_split_file_empty_file(tmp_path):
+    """Test handling of empty file."""
+    path = tmp_path / "empty.txt"
+    path.write_text("")
+    written = smf.split_file(str(path), str(tmp_path))
+    assert written == []
+
+
+def test_split_file_single_session(tmp_path):
+    """Test file with only one session is not split."""
+    content = "Claude Code v1.0\n> Single session\n"
+    content += "more content\n" * 20
+    path = tmp_path / "single.txt"
+    path.write_text(content)
+    written = smf.split_file(str(path), str(tmp_path))
+    assert written == []  # Not a mega-file, no splitting
