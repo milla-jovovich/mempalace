@@ -46,6 +46,7 @@ mempalace = "mempalace:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "build>=1.0", "twine>=4.0"]
+gpu = ["sentence-transformers>=2.2.0", "torch>=2.0.0"]
 
 [tool.ruff]
 line-length = 100
