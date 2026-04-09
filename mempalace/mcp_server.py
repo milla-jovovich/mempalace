@@ -28,6 +28,7 @@ from pathlib import Path
 
 from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
+from .palace import iter_all_metadatas
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
@@ -144,8 +145,7 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
+        for m in iter_all_metadatas(col):
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -201,8 +201,7 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
+        for m in iter_all_metadatas(col):
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
     except Exception:
@@ -216,11 +215,8 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
-        if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
-        for m in all_meta:
+        where = {"wing": wing} if wing else None
+        for m in iter_all_metadatas(col, where=where):
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
     except Exception:
@@ -234,8 +230,7 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
+        for m in iter_all_metadatas(col):
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
             if w not in taxonomy:

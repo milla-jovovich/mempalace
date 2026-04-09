@@ -614,6 +614,8 @@ def mine(
 
 def status(palace_path: str):
     """Show what's been filed in the palace."""
+    from .palace import iter_all_metadatas
+
     try:
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
@@ -622,16 +624,14 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
-    metas = r["metadatas"]
-
+    # Authoritative total from ChromaDB; walk metadatas in pages for the breakdown
+    total = col.count()
     wing_rooms = defaultdict(lambda: defaultdict(int))
-    for m in metas:
+    for m in iter_all_metadatas(col):
         wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
 
     print(f"\n{'=' * 55}")
-    print(f"  MemPalace Status — {len(metas)} drawers")
+    print(f"  MemPalace Status — {total} drawers")
     print(f"{'=' * 55}\n")
     for wing, rooms in sorted(wing_rooms.items()):
         print(f"  WING: {wing}")

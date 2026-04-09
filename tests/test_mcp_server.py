@@ -222,6 +222,45 @@ class TestReadTools:
         result = tool_status()
         assert "error" in result
 
+    def test_status_above_10k_drawers(self, monkeypatch, config, palace_path, kg):
+        """Regression test: palaces over 10k drawers were silently truncated.
+
+        tool_status previously called col.get(limit=10000, ...) and reported
+        len(metadatas) as the total, so any palace bigger than 10k reported
+        exactly 10000. This test seeds 10,500 drawers across two wings and
+        confirms the full count and per-wing breakdown come back correct.
+        """
+        _patch_mcp_server(monkeypatch, config, kg)
+        client, col = _get_collection(palace_path, create=True)
+
+        total = 10500
+        wing_a_count = 6000
+        wing_b_count = total - wing_a_count
+
+        ids = [f"id_{i}" for i in range(total)]
+        docs = [f"doc body {i}" for i in range(total)]
+        metas = []
+        for i in range(total):
+            wing = "wing_a" if i < wing_a_count else "wing_b"
+            room = "room_1" if i % 2 == 0 else "room_2"
+            metas.append({"wing": wing, "room": room})
+
+        # Chroma has its own per-call add limit, so batch the seed data.
+        batch_size = 2000
+        for start in range(0, total, batch_size):
+            end = min(start + batch_size, total)
+            col.add(ids=ids[start:end], documents=docs[start:end], metadatas=metas[start:end])
+        del client
+
+        from mempalace.mcp_server import tool_status
+
+        result = tool_status()
+        assert result["total_drawers"] == total
+        assert result["wings"]["wing_a"] == wing_a_count
+        assert result["wings"]["wing_b"] == wing_b_count
+        # Per-room breakdown should also reflect the full dataset, not just 10k.
+        assert result["rooms"]["room_1"] + result["rooms"]["room_2"] == total
+
 
 # ── Search Tool ─────────────────────────────────────────────────────────
 

@@ -48,6 +48,27 @@ def get_collection(palace_path: str, collection_name: str = "mempalace_drawers")
         return client.create_collection(collection_name)
 
 
+def iter_all_metadatas(collection, where=None, page_size: int = 10000):
+    """Yield every metadata entry in the collection, paginating past the page cap.
+
+    ChromaDB's ``collection.get()`` enforces a per-call limit, so a single fetch
+    silently truncates large palaces. This walks the collection in pages so
+    callers see every drawer — with or without a ``where`` filter.
+    """
+    offset = 0
+    while True:
+        kwargs = {"include": ["metadatas"], "limit": page_size, "offset": offset}
+        if where is not None:
+            kwargs["where"] = where
+        page = collection.get(**kwargs)
+        metas = page.get("metadatas") or []
+        if not metas:
+            break
+        for m in metas:
+            yield m
+        offset += len(metas)
+
+
 def file_already_mined(collection, source_file: str, check_mtime: bool = False) -> bool:
     """Check if a file has already been filed in the palace.
 
