@@ -1,0 +1,32 @@
+[package]
+name = "mempalace-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "MemPalace command line interface."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mempalace"
+path = "src/main.rs"
+
+[dependencies]
+mempalace-core.workspace = true
+mempalace-text.workspace = true
+mempalace-store.workspace = true
+mempalace-server.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+assert_cmd.workspace = true
+predicates.workspace = true

@@ -1,0 +1,27 @@
+[package]
+name = "mempalace-text"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Text processing: AAAK dialect, normalization, entity detection, extractors, spellcheck."
+
+[lints]
+workspace = true
+
+[dependencies]
+mempalace-core.workspace = true
+thiserror.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+serde_yml.workspace = true
+regex.workspace = true
+once_cell.workspace = true
+tracing.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+rstest.workspace = true

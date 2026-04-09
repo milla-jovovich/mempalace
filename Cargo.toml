@@ -1,0 +1,101 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mempalace-core",
+    "crates/mempalace-text",
+    "crates/mempalace-store",
+    "crates/mempalace-server",
+    "crates/mempalace-cli",
+]
+
+[workspace.package]
+version = "3.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+authors = ["milla-jovovich", "Sisyphus (Rust port)"]
+repository = "https://github.com/milla-jovovich/mempalace"
+homepage = "https://github.com/milla-jovovich/mempalace"
+description = "Give your AI a memory — mine projects and conversations into a searchable palace. No API key required."
+keywords = ["ai", "memory", "llm", "rag", "mcp"]
+categories = ["command-line-utilities", "database"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yml = "0.0.12"
+
+regex = "1"
+once_cell = "1"
+
+dirs = "5"
+ignore = "0.4"
+
+sha2 = "0.10"
+blake3 = "1"
+
+rusqlite = { version = "0.39", features = ["bundled"] }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "fs", "sync", "time"] }
+
+# Pinned to =0.27.2 because lancedb has shipped 21 breaking changes across 47
+# releases; any upstream minor bump risks breaking the entire storage layer
+# mid-port. Revisit pin in Phase 7.
+lancedb = "=0.27.2"
+fastembed = "5"
+arrow-array = "56"
+arrow-schema = "56"
+futures = "0.3"
+
+rmcp = { version = "0.16", features = ["server", "transport-io", "macros"] }
+schemars = "1"
+
+ureq = { version = "2", default-features = false, features = ["json", "tls"] }
+
+clap = { version = "4", features = ["derive", "env"] }
+
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+rstest = "0.25"
+
+mempalace-core   = { path = "crates/mempalace-core" }
+mempalace-text   = { path = "crates/mempalace-text" }
+mempalace-store  = { path = "crates/mempalace-store" }
+mempalace-server = { path = "crates/mempalace-server" }
+
+# Forces static linking of liblzma (pulled in transitively by lancedb). Without
+# this, the binary dlopens the system liblzma at runtime and fails on distros
+# where it is absent or ABI-incompatible.
+lzma-sys = { version = "0.1", features = ["static"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = 1

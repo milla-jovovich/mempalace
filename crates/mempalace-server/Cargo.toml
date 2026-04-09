@@ -1,0 +1,32 @@
+[package]
+name = "mempalace-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Server layer: MCP server, ingest (miner, convo_miner), searcher, hooks, onboarding."
+
+[lints]
+workspace = true
+
+[dependencies]
+mempalace-core.workspace = true
+mempalace-text.workspace = true
+mempalace-store.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+ignore.workspace = true
+sha2.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+rstest.workspace = true

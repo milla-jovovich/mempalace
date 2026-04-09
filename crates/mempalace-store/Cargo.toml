@@ -1,0 +1,33 @@
+[package]
+name = "mempalace-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Storage layer: lancedb vector store, rusqlite knowledge graph, palace graph, memory layers."
+
+[lints]
+workspace = true
+
+[dependencies]
+mempalace-core.workspace = true
+mempalace-text.workspace = true
+thiserror.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+tracing.workspace = true
+sha2.workspace = true
+rusqlite.workspace = true
+tokio.workspace = true
+lancedb.workspace = true
+fastembed.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
+futures.workspace = true
+lzma-sys.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+rstest.workspace = true
