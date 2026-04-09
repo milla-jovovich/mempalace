@@ -418,7 +418,7 @@ def file_already_mined(collection, source_file: str) -> bool:
         if stored_mtime is None:
             return False
         current_mtime = os.path.getmtime(source_file)
-        return float(stored_mtime) == current_mtime
+        return abs(float(stored_mtime) - current_mtime) < 0.01
     except Exception:
         return False
 
@@ -648,6 +648,162 @@ def mine(
     for room, count in sorted(room_counts.items(), key=lambda x: x[1], reverse=True):
         print(f"    {room:20} {count} files")
     print('\n  Next: mempalace search "what you\'re looking for"')
+    print(f"{'=' * 55}\n")
+
+
+# =============================================================================
+# SYNC — incremental sync
+# =============================================================================
+
+
+def sync(
+    project_dir: str,
+    palace_path: str,
+    wing_override: str = None,
+    agent: str = "mempalace",
+    dry_run: bool = False,
+    respect_gitignore: bool = True,
+    include_ignored: list = None,
+):
+    """Sync palace with current file state.
+
+    Detects new, changed, and deleted files. Removes stale drawers,
+    re-mines modified files, and adds new ones.
+    """
+    project_path = Path(project_dir).expanduser().resolve()
+    config = load_config(project_dir)
+    wing = wing_override or config["wing"]
+    rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
+
+    disk_files = scan_project(
+        project_dir,
+        respect_gitignore=respect_gitignore,
+        include_ignored=include_ignored,
+    )
+    disk_paths = {str(f) for f in disk_files}
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Update")
+    print(f"{'=' * 55}")
+    print(f"  Wing:    {wing}")
+    print(f"  Files:   {len(disk_files)} on disk")
+    print(f"  Palace:  {palace_path}")
+    if dry_run:
+        print("  DRY RUN — nothing will change")
+    print(f"{'─' * 55}\n")
+
+    if not dry_run:
+        collection = get_collection(palace_path)
+    else:
+        # For dry-run, we still need to read existing state
+        try:
+            client = chromadb.PersistentClient(path=palace_path)
+            collection = client.get_collection("mempalace_drawers")
+        except Exception:
+            print("  No existing palace found. Use 'mempalace mine' first.")
+            return
+
+    # Get all drawers in this wing
+    try:
+        results = collection.get(
+            where={"wing": wing},
+            include=["metadatas"],
+        )
+    except Exception as e:
+        print(f"  ✗ Failed to read wing '{wing}': {e}")
+        print("  Cannot determine current state — aborting update.")
+        return
+
+    # Build map: source_file -> {ids: [...], source_mtime: float}
+    palace_files = defaultdict(lambda: {"ids": [], "source_mtime": None})
+    for drawer_id, meta in zip(results["ids"], results["metadatas"]):
+        sf = meta.get("source_file", "")
+        palace_files[sf]["ids"].append(drawer_id)
+        if meta.get("source_mtime") is not None:
+            palace_files[sf]["source_mtime"] = float(meta["source_mtime"])
+
+    palace_paths = set(palace_files.keys())
+
+    # Classify files
+    new_files = []
+    changed_files = []
+    deleted_paths = palace_paths - disk_paths
+    unchanged = 0
+
+    for filepath in disk_files:
+        source_file = str(filepath)
+        if source_file not in palace_paths:
+            new_files.append(filepath)
+        else:
+            stored_mtime = palace_files[source_file]["source_mtime"]
+            try:
+                current_mtime = os.path.getmtime(source_file)
+            except OSError:
+                continue
+            if stored_mtime is not None and abs(stored_mtime - current_mtime) < 0.01:
+                unchanged += 1
+            else:
+                changed_files.append(filepath)
+
+    print(f"  New:       {len(new_files)}")
+    print(f"  Changed:   {len(changed_files)}")
+    print(f"  Deleted:   {len(deleted_paths)}")
+    print(f"  Unchanged: {unchanged}")
+    print()
+
+    if not new_files and not changed_files and not deleted_paths:
+        print("  Everything up to date.")
+        print(f"{'=' * 55}\n")
+        return
+
+    total_drawers = 0
+    deleted_count = 0
+
+    # 1. Remove drawers for deleted files
+    for sf in deleted_paths:
+        ids = palace_files[sf]["ids"]
+        if dry_run:
+            print(f"    [DRY RUN] DELETE {Path(sf).name} ({len(ids)} drawers)")
+        else:
+            collection.delete(ids=ids)
+            print(f"  ✗ Removed {Path(sf).name} ({len(ids)} drawers)")
+        deleted_count += len(ids)
+
+    # 2. For changed files, delete old drawers first then re-mine
+    for filepath in changed_files:
+        sf = str(filepath)
+        old_ids = palace_files[sf]["ids"]
+        if not dry_run:
+            collection.delete(ids=old_ids)
+
+    # 3. Mine new + changed files
+    files_to_mine = new_files + changed_files
+    for filepath in files_to_mine:
+        label = "NEW" if filepath in new_files else "UPD"
+        drawers, room = process_file(
+            filepath=filepath,
+            project_path=project_path,
+            collection=collection,
+            wing=wing,
+            rooms=rooms,
+            agent=agent,
+            dry_run=dry_run,
+        )
+        if drawers > 0:
+            total_drawers += drawers
+            if dry_run:
+                print(f"    [DRY RUN] {label} {filepath.name} → room:{room} ({drawers} drawers)")
+            else:
+                print(f"  ✓ {label} {filepath.name} → room:{room} (+{drawers})")
+
+    print(f"\n{'=' * 55}")
+    print("  Update complete.")
+    if deleted_count:
+        print(f"  Removed: {deleted_count} drawers ({len(deleted_paths)} deleted files)")
+    if total_drawers:
+        print(f"  Filed:   {total_drawers} drawers ({len(files_to_mine)} files)")
+    if not deleted_count and not total_drawers:
+        print("  No changes applied.")
     print(f"{'=' * 55}\n")
 
 

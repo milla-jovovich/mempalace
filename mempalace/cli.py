@@ -13,6 +13,8 @@ Commands:
     mempalace split <dir>                 Split concatenated mega-files into per-session files
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
+    mempalace sync <dir>                  Sync palace with file changes (new, changed, deleted)
+    mempalace update                      Update mempalace to the latest version
     mempalace search "query"              Find anything, exact words
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
@@ -146,6 +148,101 @@ def cmd_split(args):
         split_main()
     finally:
         sys.argv = old_argv
+
+
+def cmd_sync(args):
+    """Sync palace with file changes (new, changed, deleted)."""
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    include_ignored = []
+    for raw in args.include_ignored or []:
+        include_ignored.extend(part.strip() for part in raw.split(",") if part.strip())
+
+    from .miner import sync
+
+    sync(
+        project_dir=args.dir,
+        palace_path=palace_path,
+        wing_override=args.wing,
+        agent=args.agent,
+        dry_run=args.dry_run,
+        respect_gitignore=not args.no_gitignore,
+        include_ignored=include_ignored,
+    )
+
+
+def cmd_update(args):
+    """Update mempalace to the latest version from PyPI."""
+    import subprocess
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Self-Update")
+    print(f"{'=' * 55}\n")
+
+    # Get current version
+    try:
+        from mempalace import __version__
+
+        print(f"  Current version: {__version__}")
+    except ImportError:
+        print("  Current version: unknown")
+
+    if args.dry_run:
+        print("  DRY RUN — checking for updates only\n")
+
+    # Find the pip that installed this package
+    pip_cmd = [sys.executable, "-m", "pip"]
+
+    # Check for available update
+    try:
+        result = subprocess.run(
+            pip_cmd + ["index", "versions", "mempalace"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0 and result.stdout:
+            print(f"  {result.stdout.strip()}")
+        else:
+            # Fallback: just try the upgrade
+            pass
+    except Exception:
+        pass
+
+    if args.dry_run:
+        print("\n  Run without --dry-run to install the update.")
+        print(f"{'=' * 55}\n")
+        return
+
+    print("\n  Installing latest version...")
+    try:
+        result = subprocess.run(
+            pip_cmd + ["install", "--upgrade", "mempalace"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode == 0:
+            # Get new version
+            check = subprocess.run(
+                pip_cmd + ["show", "mempalace"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            new_version = "unknown"
+            for line in check.stdout.splitlines():
+                if line.startswith("Version:"):
+                    new_version = line.split(":", 1)[1].strip()
+                    break
+            print(f"  Updated to version: {new_version}")
+        else:
+            print(f"  Update failed: {result.stderr.strip()}")
+    except subprocess.TimeoutExpired:
+        print("  Update timed out.")
+    except Exception as e:
+        print(f"  Update failed: {e}")
+
+    print(f"\n{'=' * 55}\n")
 
 
 def cmd_status(args):
@@ -419,6 +516,28 @@ def main():
         help="Extraction strategy for convos mode: 'exchange' (default) or 'general' (5 memory types)",
     )
 
+    # sync
+    p_sync = sub.add_parser("sync", help="Sync palace with file changes (new, changed, deleted)")
+    p_sync.add_argument("dir", help="Project directory to sync")
+    p_sync.add_argument("--wing", default=None, help="Wing name (default: from config)")
+    p_sync.add_argument(
+        "--no-gitignore", action="store_true", help="Don't respect .gitignore files"
+    )
+    p_sync.add_argument(
+        "--include-ignored",
+        action="append",
+        default=[],
+        help="Always scan these paths even if ignored",
+    )
+    p_sync.add_argument("--agent", default="mempalace", help="Your name (default: mempalace)")
+    p_sync.add_argument("--dry-run", action="store_true", help="Show what would change")
+
+    # update (self-update)
+    p_update = sub.add_parser("update", help="Update mempalace to the latest version")
+    p_update.add_argument(
+        "--dry-run", action="store_true", help="Check for updates without installing"
+    )
+
     # search
     p_search = sub.add_parser("search", help="Find anything, exact words")
     p_search.add_argument("query", help="What to search for")
@@ -529,6 +648,8 @@ def main():
     dispatch = {
         "init": cmd_init,
         "mine": cmd_mine,
+        "sync": cmd_sync,
+        "update": cmd_update,
         "split": cmd_split,
         "search": cmd_search,
         "compress": cmd_compress,
