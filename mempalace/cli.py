@@ -14,6 +14,7 @@ Commands:
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
     mempalace search "query"              Find anything, exact words
+    mempalace mcp                         Show MCP setup command
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
     mempalace status                      Show what's been filed
@@ -238,6 +239,14 @@ def cmd_instructions(args):
     from .instructions_cli import run_instructions
 
     run_instructions(name=args.name)
+
+
+def cmd_mcp(args):
+    """Show how to wire MemPalace into MCP-capable hosts."""
+    print("MemPalace MCP quick setup:")
+    print("  claude mcp add mempalace -- python -m mempalace.mcp_server")
+    print("\nRun the server directly:")
+    print("  python -m mempalace.mcp_server")
 
 
 def cmd_compress(args):
@@ -500,6 +509,12 @@ def main():
         help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
     )
 
+    # mcp
+    sub.add_parser(
+        "mcp",
+        help="Show MCP setup command for connecting MemPalace to your AI client",
+    )
+
     # status
     sub.add_parser("status", help="Show what's been filed")
 
@@ -531,6 +546,7 @@ def main():
         "mine": cmd_mine,
         "split": cmd_split,
         "search": cmd_search,
+        "mcp": cmd_mcp,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
