@@ -99,9 +99,6 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
-_collection_cache = None
-
-
 def _get_collection(create=False):
     """Return the configured collection, caching the wrapper between calls."""
     global _collection_cache
