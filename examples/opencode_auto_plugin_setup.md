@@ -17,6 +17,7 @@ This guide explains how to set up the **MemPalace Auto-Plugin** for [OpenCode](h
 
 - Python 3.9+ with MemPalace installed (`pip install mempalace` or editable install)
 - `mempalace` CLI on `$PATH` (verify with `mempalace --help`)
+- `git` on `$PATH` (the plugin uses `git rev-parse --show-toplevel` to detect repo roots)
 - [OpenCode](https://github.com/sst/opencode) installed and working
 - MemPalace MCP server already configured in OpenCode (see [mcp_setup.md](mcp_setup.md))
 
@@ -95,7 +96,8 @@ Fires on every OpenCode event. The first time a given project emits an event in 
 1. Walks up from `ctx.directory` to find the nearest `.git` directory.
 2. If a git root is found AND this process hasn't initialized it yet, spawns `mempalace init --yes <root>` detached with `unref()`.
 3. On init success, spawns `mempalace mine --limit 200 <root>` detached.
-4. All subsequent events in the same OpenCode process are a no-op (dedup via in-memory `Set`).
+4. While init/mine is in flight, subsequent events are a no-op (dedup via in-memory `Set`s).
+5. The project is marked initialized only after `mempalace mine` succeeds; failed mine runs are retried on later events.
 
 **Why detached + unref?** So OpenCode never waits for or blocks on these commands. They run fully in the background.
 
@@ -133,9 +135,9 @@ The plugin has three knobs you may want to tune (edit the top of `mempalace-auto
 
 ## Security Notes
 
-- The plugin only spawns `mempalace` (your already-trusted CLI). No other commands.
+- The plugin executes `git rev-parse --show-toplevel` to detect repo roots, then spawns `mempalace` for init/mine.
 - It only activates inside git repos, preventing accidental initialization of `~`, `/tmp`, or unrelated directories.
-- Log file is at `/tmp/mempalace-auto.log` — no sensitive content beyond project paths.
+- Log file is at `/tmp/mempalace-auto.log` and captures stdout/stderr from `mempalace init` and `mempalace mine`; treat it as local diagnostic output, not as sanitized audit logs.
 
 ## Comparison with Other Integration Methods
 

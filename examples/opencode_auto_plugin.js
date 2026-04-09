@@ -63,6 +63,7 @@ const LOG_FILE = '/tmp/mempalace-auto.log';
 // Dedup across an entire opencode process lifetime.
 const initializedProjects = new Set();
 const initializingProjects = new Set();
+const miningProjects = new Set();
 
 function log(msg) {
   try {
@@ -115,7 +116,13 @@ function spawnDetached(cmd, args, tag) {
 }
 
 function ensureInitialized(projectRoot) {
-  if (initializedProjects.has(projectRoot) || initializingProjects.has(projectRoot)) return;
+  if (
+    initializedProjects.has(projectRoot) ||
+    initializingProjects.has(projectRoot) ||
+    miningProjects.has(projectRoot)
+  ) {
+    return;
+  }
   initializingProjects.add(projectRoot);
 
   log(`init: ${projectRoot}`);
@@ -131,9 +138,40 @@ function ensureInitialized(projectRoot) {
     settled = true;
     initializingProjects.delete(projectRoot);
     if (code === 0) {
-      initializedProjects.add(projectRoot);
       log(`init ok → mine: ${projectRoot}`);
-      spawnDetached('mempalace', ['mine', '--limit', '200', projectRoot], 'mine');
+      miningProjects.add(projectRoot);
+      const mine = spawnDetached('mempalace', ['mine', '--limit', '200', projectRoot], 'mine');
+      if (!mine) {
+        miningProjects.delete(projectRoot);
+        log(`mine failed error=spawn-error: ${projectRoot}`);
+        return;
+      }
+
+      let mineSettled = false;
+      const finalizeMine = (mineCode, mineReason) => {
+        if (mineSettled) return;
+        mineSettled = true;
+        miningProjects.delete(projectRoot);
+        if (mineCode === 0) {
+          initializedProjects.add(projectRoot);
+          log(`mine ok: ${projectRoot}`);
+        } else {
+          initializedProjects.delete(projectRoot);
+          log(`mine failed ${mineReason}=${mineCode}: ${projectRoot}`);
+        }
+      };
+
+      mine.on('error', (error) => {
+        finalizeMine(error?.code ?? error?.message ?? 'spawn-error', 'error');
+      });
+
+      mine.on('exit', (mineCode) => {
+        finalizeMine(mineCode, 'code');
+      });
+
+      mine.on('close', (mineCode) => {
+        finalizeMine(mineCode, 'close');
+      });
     } else {
       log(`init failed ${reason}=${code}: ${projectRoot}`);
     }
