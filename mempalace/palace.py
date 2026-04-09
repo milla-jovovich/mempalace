@@ -59,9 +59,10 @@ def file_already_mined(
     When wing is provided, only records from that wing are considered.
     """
     try:
-        where_filter = {"source_file": source_file}
         if wing:
-            where_filter["wing"] = wing
+            where_filter = {"$and": [{"source_file": source_file}, {"wing": wing}]}
+        else:
+            where_filter = {"source_file": source_file}
 
         results = collection.get(where=where_filter, limit=1)
         if not results.get("ids"):
