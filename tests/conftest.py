@@ -10,6 +10,8 @@ mempalace imports — so that module-level initialisations (e.g.
 instead of the real user profile.
 """
 
+import hashlib
+import math
 import os
 import shutil
 import tempfile
@@ -29,9 +31,32 @@ os.environ["HOMEPATH"] = os.path.splitdrive(_session_tmp)[1] or _session_tmp
 # Now it is safe to import mempalace modules that trigger initialisation.
 import chromadb  # noqa: E402
 import pytest  # noqa: E402
+import chromadb.api.types as chroma_types  # noqa: E402
 
 from mempalace.config import MempalaceConfig  # noqa: E402
 from mempalace.knowledge_graph import KnowledgeGraph  # noqa: E402
+
+os.environ.setdefault("CHROMA_TELEMETRY", "FALSE")
+
+
+def _embed_text(text: str) -> list[float]:
+    vector = [0.0] * 8
+    tokens = text.lower().split() or [text.lower()]
+    for token in tokens:
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        for index in range(len(vector)):
+            vector[index] += digest[index] / 255.0
+
+    norm = math.sqrt(sum(value * value for value in vector)) or 1.0
+    return [value / norm for value in vector]
+
+
+class TestDefaultEmbeddingFunction(chroma_types.DefaultEmbeddingFunction):
+    def __call__(self, input):
+        return [_embed_text(document) for document in input]
+
+
+chroma_types.DefaultEmbeddingFunction = TestDefaultEmbeddingFunction
 
 
 @pytest.fixture(autouse=True)
