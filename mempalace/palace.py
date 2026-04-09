@@ -34,6 +34,8 @@ SKIP_DIRS = {
     "target",
 }
 
+_DEFAULT_BACKEND = ChromaBackend()
+
 
 def get_collection(
     palace_path: str,
@@ -41,7 +43,7 @@ def get_collection(
     create: bool = True,
 ):
     """Get the palace collection through the backend layer."""
-    return ChromaBackend().get_collection(
+    return _DEFAULT_BACKEND.get_collection(
         palace_path,
         collection_name=collection_name,
         create=create,
