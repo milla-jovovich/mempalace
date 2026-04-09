@@ -9,10 +9,11 @@ Returns verbatim text — the actual words, never summaries.
 import logging
 from pathlib import Path
 
-from .backends.chroma import chromadb
+from .backends import chroma as _chroma_backend
 from .palace import get_collection
 
 logger = logging.getLogger("mempalace_mcp")
+chromadb = _chroma_backend.chromadb
 
 
 class SearchError(Exception):
