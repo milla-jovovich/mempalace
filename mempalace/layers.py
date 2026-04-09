@@ -24,6 +24,7 @@ from collections import defaultdict
 import chromadb
 
 from .config import MempalaceConfig
+from .searcher import safe_query
 
 
 # ---------------------------------------------------------------------------
@@ -282,11 +283,11 @@ class Layer3:
             kwargs["where"] = where
 
         try:
-            results = col.query(**kwargs)
+            results = safe_query(col, **kwargs)
         except Exception as e:
             return f"Search error: {e}"
 
-        if not results["documents"] or not results["documents"][0]:
+        if results is None:
             return "No results found."
 
         docs = results["documents"][0]
@@ -338,8 +339,11 @@ class Layer3:
             kwargs["where"] = where
 
         try:
-            results = col.query(**kwargs)
+            results = safe_query(col, **kwargs)
         except Exception:
+            return []
+
+        if results is None:
             return []
 
         hits = []
