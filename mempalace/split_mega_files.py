@@ -32,7 +32,7 @@ HOME = Path.home()
 LUMI_DIR = Path(os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts")))
 
 # People we know about (for name detection in content)
-# Loaded from ~/.mempalace/known_names.json if it exists, otherwise generic fallback.
+# Loaded from ~/.mempalace/known_names.json if it exists; no built-in fallback names.
 _KNOWN_NAMES_PATH = HOME / ".mempalace" / "known_names.json"
 _FALLBACK_KNOWN_PEOPLE = []
 _KNOWN_NAMES_CACHE = None
