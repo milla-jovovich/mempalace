@@ -29,6 +29,7 @@ from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
 
 from .knowledge_graph import KnowledgeGraph
+from .embeddings import get_collection as _emb_get_collection
 
 _kg = KnowledgeGraph()
 
@@ -42,9 +43,7 @@ def _get_collection(create=False):
     """Return the ChromaDB collection, or None on failure."""
     try:
         client = chromadb.PersistentClient(path=_config.palace_path)
-        if create:
-            return client.get_or_create_collection(_config.collection_name)
-        return client.get_collection(_config.collection_name)
+        return _emb_get_collection(client, _config.collection_name, create=create, device=_config.device)
     except Exception:
         return None
 
