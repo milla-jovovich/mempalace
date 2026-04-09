@@ -76,7 +76,7 @@ markers = [
 source = ["mempalace"]
 
 [tool.coverage.report]
-fail_under = 30
+fail_under = 85
 show_missing = true
 exclude_lines = [
     "if __name__",
