@@ -266,3 +266,66 @@ def test_content_hash_changes_with_content():
     hash1 = hashlib.md5("version 1".encode(), usedforsecurity=False).hexdigest()
     hash2 = hashlib.md5("version 2".encode(), usedforsecurity=False).hexdigest()
     assert hash1 != hash2
+
+
+def test_sync_atomic_remine_project_file():
+    """E2E: mine a file, modify it, run sync logic, verify drawers exist with updated hash."""
+    import tempfile
+    from pathlib import Path
+    from mempalace.miner import process_file, get_collection, file_content_hash
+    from mempalace.cli import cmd_sync
+
+    # Setup palace and source file
+    palace_path = tempfile.mkdtemp(prefix="test_palace_sync_e2e_")
+    src_dir = tempfile.mkdtemp(prefix="test_src_")
+    src_file = Path(src_dir) / "module.py"
+    src_file.write_text("def original():\n    return 'v1'\n" * 10)
+    # Required by load_config inside cmd_sync
+    (Path(src_dir) / "mempalace.yaml").write_text(
+        "wing: test\nrooms:\n- name: general\n  description: all files\n"
+    )
+
+    col = get_collection(palace_path)
+
+    # Step 1: mine the file
+    process_file(
+        filepath=src_file,
+        project_path=Path(src_dir),
+        collection=col,
+        wing="test",
+        rooms=[{"name": "general", "description": "general"}],
+        agent="test",
+        dry_run=False,
+    )
+    assert col.count() > 0, "Should have drawers after mining"
+    original_count = col.count()
+
+    # Step 2: modify the file
+    src_file.write_text("def updated():\n    return 'v2'\n" * 10)
+
+    # Step 3: run sync via cmd_sync args simulation
+    import argparse
+    args = argparse.Namespace(
+        palace=palace_path,
+        dir=None,
+        dry_run=False,
+        clean=False,
+        agent="test",
+    )
+    cmd_sync(args)
+
+    # Step 4: verify drawers still exist (not deleted without re-mining)
+    col2 = get_collection(palace_path)
+    assert col2.count() > 0, "Palace must not be empty after sync — data loss detected"
+
+    # Step 5: verify the stored hash matches the updated file
+    # Query with the same path format that process_file stores (str(filepath), not resolved)
+    # because cmd_sync round-trips the path from stored metadata without resolving symlinks.
+    results = col2.get(
+        where={"source_file": str(src_file)},
+        include=["metadatas"],
+    )
+    assert results["ids"], "Drawers for the source file must exist"
+    stored_hash = results["metadatas"][0].get("content_hash", "")
+    current_hash = file_content_hash(src_file)
+    assert stored_hash == current_hash, "Stored hash must match updated file content"

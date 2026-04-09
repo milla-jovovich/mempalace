@@ -473,6 +473,7 @@ def cmd_sync(args):
                     palace_path=palace_path,
                     wing=wing,
                     agent=args.agent,
+                    filepath_filter=filepath,
                 )
             else:
                 config = load_config(str(filepath.parent))

@@ -327,6 +327,8 @@ def tool_add_drawer(
     wing: str, room: str, content: str, source_file: str = None, added_by: str = "mcp"
 ):
     """File verbatim content into a wing/room. Checks for duplicates first."""
+    from .miner import add_drawer as _add_drawer
+
     try:
         wing = sanitize_name(wing, "wing")
         room = sanitize_name(room, "room")
@@ -338,7 +340,11 @@ def tool_add_drawer(
     if not col:
         return _no_palace()
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content[:100]).encode()).hexdigest()[:24]}"
+    # For MCP-created drawers without a source file, derive a unique source
+    # identifier from content so each piece of content gets a distinct drawer ID.
+    # This must match the ID that add_drawer() will compute internally.
+    effective_source = source_file or f"mcp:{hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()}"
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((effective_source + '0').encode()).hexdigest()[:24]}"
 
     _wal_log(
         "add_drawer",
@@ -361,19 +367,14 @@ def tool_add_drawer(
         pass
 
     try:
-        col.upsert(
-            ids=[drawer_id],
-            documents=[content],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file or "",
-                    "chunk_index": 0,
-                    "added_by": added_by,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
+        _add_drawer(
+            collection=col,
+            wing=wing,
+            room=room,
+            content=content,
+            source_file=effective_source,
+            chunk_index=0,
+            agent=added_by,
         )
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
