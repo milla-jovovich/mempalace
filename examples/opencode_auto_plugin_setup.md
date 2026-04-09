@@ -3,7 +3,7 @@
 This guide explains how to set up the **MemPalace Auto-Plugin** for [OpenCode](https://github.com/sst/opencode) — a zero-config integration that automatically initializes MemPalace in every project and injects the Memory Protocol into every agent session.
 
 **What it does:**
-1. On first event of every OpenCode session, detects the current git repo root.
+1. On first event for a project in an OpenCode process, detects the current git repo root.
 2. Runs `mempalace init --yes <root>` in the background (idempotent — safe to re-run).
 3. After init succeeds, runs `mempalace mine --limit 200 <root>` in the background.
 4. Injects the **MemPalace Memory Protocol** section into the system prompt of every chat — so every agent automatically knows when and how to save memories.
@@ -91,7 +91,7 @@ You should see the palace summary update after init/mine completes.
 The plugin uses two OpenCode plugin hooks:
 
 ### `event` hook
-Fires on every OpenCode event. On the first event per session, the plugin:
+Fires on every OpenCode event. The first time a given project emits an event in an OpenCode process, the plugin:
 1. Walks up from `ctx.directory` to find the nearest `.git` directory.
 2. If a git root is found AND this process hasn't initialized it yet, spawns `mempalace init --yes <root>` detached with `unref()`.
 3. On init success, spawns `mempalace mine --limit 200 <root>` detached.

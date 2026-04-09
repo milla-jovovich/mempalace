@@ -2,7 +2,7 @@
  * mempalace-auto.js — Opencode plugin that auto-initializes MemPalace in every project.
  *
  * Behavior (once per project per opencode process):
- *   1. On first `event` in an opencode session, detect the git repo root of ctx.directory.
+ *   1. On first `event` for a project in an opencode process, detect the git repo root of ctx.directory.
  *   2. Spawn `mempalace init --yes <root>` in the background (detached, unref).
  *   3. After init succeeds, spawn `mempalace mine --limit 200 <root>` in the background.
  *   4. Inject the MemPalace Memory Protocol section into the system prompt on every chat
@@ -125,15 +125,30 @@ function ensureInitialized(projectRoot) {
     return;
   }
 
-  init.on('exit', (code) => {
+  let settled = false;
+  const finalize = (code, reason) => {
+    if (settled) return;
+    settled = true;
     initializingProjects.delete(projectRoot);
     if (code === 0) {
       initializedProjects.add(projectRoot);
       log(`init ok → mine: ${projectRoot}`);
       spawnDetached('mempalace', ['mine', '--limit', '200', projectRoot], 'mine');
     } else {
-      log(`init failed code=${code}: ${projectRoot}`);
+      log(`init failed ${reason}=${code}: ${projectRoot}`);
     }
+  };
+
+  init.on('error', (error) => {
+    finalize(error?.code ?? error?.message ?? 'spawn-error', 'error');
+  });
+
+  init.on('exit', (code) => {
+    finalize(code, 'code');
+  });
+
+  init.on('close', (code) => {
+    finalize(code, 'close');
   });
 }
 
