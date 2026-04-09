@@ -219,7 +219,7 @@ def split_file(filepath, output_dir, dry_run=False):
         if dry_run:
             print(f"  [{i + 1}/{len(boundaries) - 1}] {name}  ({len(chunk)} lines)")
         else:
-            out_path.write_text("".join(chunk))
+            out_path.write_text("".join(chunk), encoding="utf-8")
             print(f"  ✓ {name}  ({len(chunk)} lines)")
 
         written.append(out_path)
