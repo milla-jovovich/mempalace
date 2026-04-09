@@ -5,7 +5,8 @@ Consolidates ChromaDB access patterns used by both miners and the MCP server.
 """
 
 import os
-import chromadb
+
+from .config import get_chroma_client, get_collection_name
 
 SKIP_DIRS = {
     ".git",
@@ -34,18 +35,19 @@ SKIP_DIRS = {
 }
 
 
-def get_collection(palace_path: str, collection_name: str = "mempalace_drawers"):
+def get_collection(palace_path: str, collection_name: str = None):
     """Get or create the palace ChromaDB collection."""
     os.makedirs(palace_path, exist_ok=True)
     try:
         os.chmod(palace_path, 0o700)
     except (OSError, NotImplementedError):
         pass
-    client = chromadb.PersistentClient(path=palace_path)
+    client = get_chroma_client()
+    col_name = collection_name or get_collection_name()
     try:
-        return client.get_collection(collection_name)
+        return client.get_collection(col_name)
     except Exception:
-        return client.create_collection(collection_name)
+        return client.create_collection(col_name)
 
 
 def file_already_mined(collection, source_file: str, check_mtime: bool = False) -> bool:
