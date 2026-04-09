@@ -26,6 +26,9 @@ def normalize(filepath: str) -> str:
     Plain text files pass through unchanged.
     """
     try:
+        file_size = os.path.getsize(filepath)
+        if file_size > 500 * 1024 * 1024:  # 500 MB safety limit
+            raise IOError(f"File too large ({file_size // (1024*1024)} MB): {filepath}")
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
     except OSError as e:
