@@ -123,6 +123,52 @@ class MempalaceConfig:
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
+    @property
+    def wing_config_path(self):
+        """Path to wing_config.json."""
+        return self._config_dir / "wing_config.json"
+
+    def load_wing_config(self):
+        """Load wing_config.json and return as dict."""
+        if self.wing_config_path.exists():
+            try:
+                with open(self.wing_config_path, "r") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                return {}
+        return {}
+
+    def save_wing_config(self, wing_config):
+        """Write wing_config.json."""
+        self._config_dir.mkdir(parents=True, exist_ok=True)
+        with open(self.wing_config_path, "w") as f:
+            json.dump(wing_config, f, indent=2)
+
+    def archive_wing(self, wing_name):
+        """Set archived flag on a wing. Returns True if state changed."""
+        wc = self.load_wing_config()
+        if wing_name not in wc:
+            wc[wing_name] = {}
+        if wc[wing_name].get("archived") is True:
+            return False
+        wc[wing_name]["archived"] = True
+        self.save_wing_config(wc)
+        return True
+
+    def unarchive_wing(self, wing_name):
+        """Remove archived flag from a wing. Returns True if state changed."""
+        wc = self.load_wing_config()
+        if wing_name not in wc or not wc[wing_name].get("archived"):
+            return False
+        wc[wing_name]["archived"] = False
+        self.save_wing_config(wc)
+        return True
+
+    def get_archived_wings(self):
+        """Return set of archived wing names."""
+        wc = self.load_wing_config()
+        return {name for name, cfg in wc.items() if cfg.get("archived") is True}
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
