@@ -104,11 +104,16 @@ class SynapseDB:
         except Exception as e:
             logger.warning("log_retrieval failed: %s", e)
 
-    def get_ltp_score(self, drawer_id: str, window_days: int = DEFAULT_LTP_WINDOW_DAYS) -> float:
+    def get_ltp_score(
+        self,
+        drawer_id: str,
+        window_days: int = DEFAULT_LTP_WINDOW_DAYS,
+        max_boost: float = DEFAULT_LTP_MAX_BOOST,
+    ) -> float:
         """
         直近 window_days 日間の retrieval_log から drawer_id の検索回数を集計し、
         LTP スコアを計算して返す。
-        ltp = clamp(1.0 + log(1 + recent_count) * LTP_COEFFICIENT, 1.0, LTP_MAX_BOOST)
+        ltp = clamp(1.0 + log(1 + recent_count) * LTP_COEFFICIENT, 1.0, max_boost)
         retrieval_log にエントリがなければ 1.0 を返す。
         """
         cutoff_dt = datetime.now(timezone.utc) - timedelta(days=window_days)
@@ -127,10 +132,13 @@ class SynapseDB:
         if recent_count == 0:
             return 1.0
         raw = 1.0 + math.log(1 + recent_count) * DEFAULT_LTP_COEFFICIENT
-        return _clamp(raw, 1.0, DEFAULT_LTP_MAX_BOOST)
+        return _clamp(raw, 1.0, max_boost)
 
     def get_ltp_scores_batch(
-        self, drawer_ids: list[str], window_days: int = DEFAULT_LTP_WINDOW_DAYS
+        self,
+        drawer_ids: list[str],
+        window_days: int = DEFAULT_LTP_WINDOW_DAYS,
+        max_boost: float = DEFAULT_LTP_MAX_BOOST,
     ) -> dict[str, float]:
         """
         複数の drawer_id に対する LTP スコアを一括取得する。
@@ -156,20 +164,22 @@ class SynapseDB:
                     out[drawer_id] = 1.0
                 else:
                     raw = 1.0 + math.log(1 + recent_count) * DEFAULT_LTP_COEFFICIENT
-                    out[drawer_id] = _clamp(raw, 1.0, DEFAULT_LTP_MAX_BOOST)
+                    out[drawer_id] = _clamp(raw, 1.0, max_boost)
         finally:
             conn.close()
         return out
 
     @staticmethod
     def calculate_tagging_boost(
-        filed_at: Optional[str], window_hours: int = DEFAULT_TAGGING_WINDOW_HOURS
+        filed_at: Optional[str],
+        window_hours: int = DEFAULT_TAGGING_WINDOW_HOURS,
+        max_boost: float = DEFAULT_TAGGING_MAX_BOOST,
     ) -> float:
         """
         filed_at（ISO 8601 文字列）から現在までの経過時間を計算し、
         tagging boost を返す。
-        - 24h 以内: 1.0 + 0.5 * (1.0 - hours / window_hours)
-        - 24h 超: 1.0
+        - 窓内: 1.0 + (max_boost - 1.0) * (1.0 - hours / window_hours)
+        - 窓外: 1.0
         - filed_at が None またはパース失敗: 1.0
         """
         if filed_at is None:
@@ -191,8 +201,9 @@ class SynapseDB:
             return 1.0
         if hours < 0:
             hours = 0.0
-        boost = 1.0 + 0.5 * (1.0 - hours / float(window_hours))
-        return _clamp(boost, 1.0, DEFAULT_TAGGING_MAX_BOOST)
+        amplitude = max_boost - 1.0
+        boost = 1.0 + amplitude * (1.0 - hours / float(window_hours))
+        return _clamp(boost, 1.0, max_boost)
 
     def calculate_synapse_score(
         self,
@@ -202,6 +213,9 @@ class SynapseDB:
         filed_at: Optional[str],
         ltp_scores: Optional[dict[str, float]] = None,
         window_days: int = DEFAULT_LTP_WINDOW_DAYS,
+        ltp_max_boost: float = DEFAULT_LTP_MAX_BOOST,
+        tagging_window_hours: int = DEFAULT_TAGGING_WINDOW_HOURS,
+        tagging_max_boost: float = DEFAULT_TAGGING_MAX_BOOST,
     ) -> dict[str, Any]:
         """
         最終スコアを計算して返す。
@@ -221,8 +235,12 @@ class SynapseDB:
         if ltp_scores is not None:
             ltp = ltp_scores.get(drawer_id, 1.0)
         else:
-            ltp = self.get_ltp_score(drawer_id, window_days)
-        tagging = self.calculate_tagging_boost(filed_at)
+            ltp = self.get_ltp_score(drawer_id, window_days, max_boost=ltp_max_boost)
+        tagging = self.calculate_tagging_boost(
+            filed_at,
+            window_hours=tagging_window_hours,
+            max_boost=tagging_max_boost,
+        )
         association = 1.0
         final_score = similarity * decay * ltp * tagging * association
         return {
@@ -234,7 +252,54 @@ class SynapseDB:
             "tagging": tagging,
         }
 
-    def refresh_stats(self, window_days: int = DEFAULT_LTP_WINDOW_DAYS) -> None:
+    def cleanup_old_logs(self, retention_days: int = 90) -> None:
+        """
+        retention_days より古い retrieval_log エントリを削除する。
+        mempalace status 実行時 または synapse refresh 時に呼ばれる。
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("DELETE FROM retrieval_log WHERE retrieved_at < ?", (cutoff,))
+            conn.commit()
+        finally:
+            conn.close()
+        # VACUUM はトランザクション外で実行する
+        conn2 = sqlite3.connect(self.db_path)
+        try:
+            conn2.execute("VACUUM")
+            conn2.commit()
+        finally:
+            conn2.close()
+
+    def get_log_stats(self) -> dict[str, Any]:
+        """
+        ログの統計情報を返す。mempalace_status に表示する。
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            total = conn.execute("SELECT COUNT(*) FROM retrieval_log").fetchone()[0]
+            unique = conn.execute("SELECT COUNT(DISTINCT drawer_id) FROM retrieval_log").fetchone()[0]
+            row = conn.execute(
+                "SELECT MIN(retrieved_at), MAX(retrieved_at) FROM retrieval_log"
+            ).fetchone()
+            oldest, newest = row[0], row[1]
+        finally:
+            conn.close()
+        size_kb = os.path.getsize(self.db_path) / 1024.0
+        return {
+            "total_entries": int(total),
+            "unique_drawers": int(unique),
+            "oldest_entry": oldest,
+            "newest_entry": newest,
+            "db_size_kb": round(size_kb, 2),
+        }
+
+    def refresh_stats(
+        self,
+        window_days: int = DEFAULT_LTP_WINDOW_DAYS,
+        ltp_max_boost: float = DEFAULT_LTP_MAX_BOOST,
+    ) -> None:
         """
         synapse_stats テーブルを retrieval_log から再計算して更新する。
         mempalace status や明示的なリフレッシュ時に呼ばれる。
@@ -261,7 +326,7 @@ class SynapseDB:
                     ltp_score = 1.0
                 else:
                     raw = 1.0 + math.log(1 + rc) * DEFAULT_LTP_COEFFICIENT
-                    ltp_score = _clamp(raw, 1.0, DEFAULT_LTP_MAX_BOOST)
+                    ltp_score = _clamp(raw, 1.0, ltp_max_boost)
                 conn.execute(
                     "INSERT OR REPLACE INTO synapse_stats "
                     "(drawer_id, total_retrievals, recent_density, ltp_score, last_updated) "

@@ -7,11 +7,29 @@ import shutil
 import sqlite3
 import tempfile
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
+from mempalace.searcher import search_memories
 from mempalace.synapse import DEFAULT_LTP_WINDOW_DAYS, SynapseDB
+
+
+def _synapse_cfg(**overrides):
+    base = dict(
+        synapse_enabled=True,
+        synapse_ltp_enabled=True,
+        synapse_tagging_enabled=True,
+        synapse_association_enabled=False,
+        synapse_ltp_window_days=30,
+        synapse_ltp_max_boost=2.0,
+        synapse_tagging_window_hours=24,
+        synapse_tagging_max_boost=1.5,
+        synapse_log_retrievals=False,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
 
 
 @pytest.fixture
@@ -228,3 +246,54 @@ def test_consolidation_candidates_excludes_active(tmp_palace):
     cands = db.get_consolidation_candidates(inactive_days=180)
     ids = {c["drawer_id"] for c in cands}
     assert "active" not in ids
+
+
+# --- Config axis switches (search_memories integration) ---
+
+
+def test_ltp_disabled_returns_neutral(palace_path, seeded_collection):
+    cfg = _synapse_cfg(synapse_ltp_enabled=False)
+
+    def fake_batch(self, drawer_ids, window_days=30, max_boost=2.0):
+        return {d: 2.0 for d in drawer_ids}
+
+    with patch("mempalace.config.MempalaceConfig", return_value=cfg):
+        with patch.object(SynapseDB, "get_ltp_scores_batch", fake_batch):
+            result = search_memories("JWT authentication", palace_path)
+    assert result.get("synapse_enabled") is True
+    for hit in result["hits"]:
+        assert hit["synapse_factors"]["ltp"] == 1.0
+
+
+def test_tagging_disabled_returns_neutral(palace_path, seeded_collection):
+    cfg = _synapse_cfg(synapse_tagging_enabled=False)
+    with patch("mempalace.config.MempalaceConfig", return_value=cfg):
+        result = search_memories("JWT authentication", palace_path)
+    assert result.get("synapse_enabled") is True
+    for hit in result["hits"]:
+        assert hit["synapse_factors"]["tagging"] == 1.0
+
+
+# --- Log cleanup ---
+
+
+def test_log_cleanup_removes_old_entries(tmp_palace):
+    db = SynapseDB(tmp_palace)
+    old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+    new = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    conn = sqlite3.connect(db.db_path)
+    try:
+        conn.executemany(
+            "INSERT INTO retrieval_log (drawer_id, retrieved_at, query_hash, session_id) VALUES (?,?,?,?)",
+            [("a", old, "q", "s"), ("b", new, "q", "s")],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    db.cleanup_old_logs(retention_days=30)
+    conn = sqlite3.connect(db.db_path)
+    try:
+        rows = conn.execute("SELECT drawer_id FROM retrieval_log ORDER BY drawer_id").fetchall()
+    finally:
+        conn.close()
+    assert [r[0] for r in rows] == ["b"]

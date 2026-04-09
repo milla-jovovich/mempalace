@@ -93,13 +93,23 @@ def tool_status():
             from .synapse import SynapseDB
 
             synapse_db = SynapseDB(palace_path)
-            synapse_db.refresh_stats(window_days=cfg.synapse_ltp_window_days)
+            synapse_db.cleanup_old_logs(retention_days=cfg.synapse_log_retention_days)
+            synapse_db.refresh_stats(
+                window_days=cfg.synapse_ltp_window_days,
+                ltp_max_boost=cfg.synapse_ltp_max_boost,
+            )
             candidates = synapse_db.get_consolidation_candidates(inactive_days=180)
+            log_stats = synapse_db.get_log_stats()
             status_dict["synapse"] = {
                 "ltp_window_days": cfg.synapse_ltp_window_days,
                 "tagging_window_hours": cfg.synapse_tagging_window_hours,
+                "ltp_enabled": cfg.synapse_ltp_enabled,
+                "tagging_enabled": cfg.synapse_tagging_enabled,
+                "association_enabled": cfg.synapse_association_enabled,
+                "log_retrievals": cfg.synapse_log_retrievals,
                 "consolidation_candidates": len(candidates),
                 "consolidation_details": candidates[:10],  # 上位10件のみ
+                "log_stats": log_stats,
             }
     except Exception:
         status_dict["synapse_enabled"] = False

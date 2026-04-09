@@ -171,48 +171,52 @@ def search_memories(
             query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
             session_id = uuid.uuid4().hex[:16]
 
-            # 結果の drawer_id リストを収集
             hit_drawer_ids = []
             for hit in result["hits"]:
                 drawer_id = hit.get("metadata", {}).get("drawer_id", hit.get("id", ""))
                 if drawer_id:
                     hit_drawer_ids.append(drawer_id)
 
-            # LTP スコアを一括取得
-            ltp_scores = synapse_db.get_ltp_scores_batch(
-                hit_drawer_ids,
-                window_days=cfg.synapse_ltp_window_days,
-            )
+            ltp_scores = {}
+            if cfg.synapse_ltp_enabled:
+                ltp_scores = synapse_db.get_ltp_scores_batch(
+                    hit_drawer_ids,
+                    window_days=cfg.synapse_ltp_window_days,
+                    max_boost=cfg.synapse_ltp_max_boost,
+                )
 
-            # 各ヒットに Synapse スコアを付与
             for hit in result["hits"]:
                 drawer_id = hit.get("metadata", {}).get("drawer_id", hit.get("id", ""))
                 filed_at = hit.get("metadata", {}).get("filed_at", None)
                 similarity = hit.get("original_similarity", hit.get("similarity", 0.0))
                 decay = hit.get("decay", 1.0)
 
-                synapse_result = synapse_db.calculate_synapse_score(
-                    similarity=similarity,
-                    decay=decay,
-                    drawer_id=drawer_id,
-                    filed_at=filed_at,
-                    ltp_scores=ltp_scores,
-                    window_days=cfg.synapse_ltp_window_days,
+                ltp = ltp_scores.get(drawer_id, 1.0) if cfg.synapse_ltp_enabled else 1.0
+                tagging = (
+                    SynapseDB.calculate_tagging_boost(
+                        filed_at,
+                        cfg.synapse_tagging_window_hours,
+                        cfg.synapse_tagging_max_boost,
+                    )
+                    if cfg.synapse_tagging_enabled
+                    else 1.0
                 )
+                association = 1.0  # Phase 2: cfg.synapse_association_enabled
 
-                hit["synapse_score"] = synapse_result["final_score"]
+                final_score = similarity * decay * ltp * association * tagging
+
+                hit["synapse_score"] = final_score
                 hit["synapse_factors"] = {
-                    "ltp": synapse_result["ltp"],
-                    "association": synapse_result["association"],
-                    "tagging": synapse_result["tagging"],
+                    "ltp": ltp,
+                    "association": association,
+                    "tagging": tagging,
                 }
 
-            # Synapse スコアで再ソート（hits と results は同一リスト）
             result["hits"].sort(key=lambda h: h.get("synapse_score", 0.0), reverse=True)
             result["synapse_enabled"] = True
 
-            # 検索ログを fire-and-forget で記録
-            synapse_db.log_retrieval(hit_drawer_ids, query_hash, session_id)
+            if cfg.synapse_log_retrievals:
+                synapse_db.log_retrieval(hit_drawer_ids, query_hash, session_id)
         else:
             result["synapse_enabled"] = False
     except Exception as e:

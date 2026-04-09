@@ -125,15 +125,44 @@ class MempalaceConfig:
 
     @property
     def synapse_enabled(self):
+        """Synapse master switch — false disables scoring and retrieval logging."""
         return self._file_config.get("synapse_enabled", False)
+
+    @property
+    def synapse_ltp_enabled(self):
+        return self._file_config.get("synapse_ltp_enabled", True)
+
+    @property
+    def synapse_tagging_enabled(self):
+        return self._file_config.get("synapse_tagging_enabled", True)
+
+    @property
+    def synapse_association_enabled(self):
+        return self._file_config.get("synapse_association_enabled", False)
 
     @property
     def synapse_ltp_window_days(self):
         return self._file_config.get("synapse_ltp_window_days", 30)
 
     @property
+    def synapse_ltp_max_boost(self):
+        return self._file_config.get("synapse_ltp_max_boost", 2.0)
+
+    @property
     def synapse_tagging_window_hours(self):
         return self._file_config.get("synapse_tagging_window_hours", 24)
+
+    @property
+    def synapse_tagging_max_boost(self):
+        return self._file_config.get("synapse_tagging_max_boost", 1.5)
+
+    @property
+    def synapse_log_retrievals(self):
+        return self._file_config.get("synapse_log_retrievals", True)
+
+    @property
+    def synapse_log_retention_days(self):
+        return self._file_config.get("synapse_log_retention_days", 90)
 
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
