@@ -62,6 +62,7 @@ const LOG_FILE = '/tmp/mempalace-auto.log';
 
 // Dedup across an entire opencode process lifetime.
 const initializedProjects = new Set();
+const initializingProjects = new Set();
 
 function log(msg) {
   try {
@@ -102,6 +103,8 @@ function spawnDetached(cmd, args, tag) {
       detached: true,
       stdio: ['ignore', out, err],
     });
+    closeSync(out);
+    closeSync(err);
     child.on('error', (e) => log(`[${tag}] spawn error: ${e.message}`));
     child.unref();
     return child;
@@ -112,15 +115,20 @@ function spawnDetached(cmd, args, tag) {
 }
 
 function ensureInitialized(projectRoot) {
-  if (initializedProjects.has(projectRoot)) return;
-  initializedProjects.add(projectRoot);
+  if (initializedProjects.has(projectRoot) || initializingProjects.has(projectRoot)) return;
+  initializingProjects.add(projectRoot);
 
   log(`init: ${projectRoot}`);
   const init = spawnDetached('mempalace', ['init', '--yes', projectRoot], 'init');
-  if (!init) return;
+  if (!init) {
+    initializingProjects.delete(projectRoot);
+    return;
+  }
 
   init.on('exit', (code) => {
+    initializingProjects.delete(projectRoot);
     if (code === 0) {
+      initializedProjects.add(projectRoot);
       log(`init ok → mine: ${projectRoot}`);
       spawnDetached('mempalace', ['mine', '--limit', '200', projectRoot], 'mine');
     } else {

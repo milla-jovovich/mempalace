@@ -67,9 +67,9 @@ tail -f /tmp/mempalace-auto.log
 You should see lines like:
 
 ```
-[2025-04-08T14:32:01.234Z] plugin loaded, project=/Users/you/coding/my-project
-[2025-04-08T14:32:01.456Z] init: /Users/you/coding/my-project
-[2025-04-08T14:32:02.789Z] init ok → mine: /Users/you/coding/my-project
+[2026-04-08T14:32:01.234Z] plugin loaded, project=/Users/you/coding/my-project
+[2026-04-08T14:32:01.456Z] init: /Users/you/coding/my-project
+[2026-04-08T14:32:02.789Z] init ok → mine: /Users/you/coding/my-project
 ```
 
 Inside OpenCode, ask the agent:
@@ -78,13 +78,13 @@ Inside OpenCode, ask the agent:
 
 The agent should describe the protocol — proof that the system-prompt injection worked.
 
-Also verify that the wing was created:
+Also verify that MemPalace now has content for the project:
 
 ```bash
-mempalace list-wings
+mempalace status
 ```
 
-Your project should appear as a new wing.
+You should see the palace summary update after init/mine completes.
 
 ## How It Works
 
