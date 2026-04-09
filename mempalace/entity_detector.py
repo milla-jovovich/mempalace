@@ -395,6 +395,56 @@ STOPWORDS = {
     "inference",
 }
 
+# Programming language keywords, types, traits, and framework names
+# that should never be detected as entity candidates.
+CODE_KEYWORDS = {
+    # Rust types, traits, and derive macros
+    "string", "vec", "debug", "clone", "copy", "send", "sync",
+    "serialize", "deserialize", "display", "default", "hash",
+    "option", "result", "box", "arc", "mutex", "cell", "ref",
+    "impl", "trait", "struct", "enum", "match", "async", "await",
+    "tokio", "serde", "anyhow", "thiserror",
+    # Rust/C++ common
+    "iterator", "into", "from",
+    # JavaScript / TypeScript / React
+    "react", "vue", "angular", "svelte", "next", "nuxt",
+    "node", "deno", "bun", "express", "fetch", "promise",
+    "component", "props", "state", "hook", "context", "reducer",
+    "dispatch", "effect", "callback", "memo", "fragment",
+    "typescript", "javascript", "jquery",
+    # Python
+    "django", "flask", "fastapi", "pytest", "numpy", "pandas",
+    "pydantic", "dataclass", "decorator", "generator", "yield",
+    # Go
+    "goroutine", "channel", "defer", "panic", "recover",
+    # General programming
+    "tree", "graph", "queue", "stack", "array", "map", "set",
+    "index", "buffer", "stream", "socket", "thread", "process",
+    "handler", "middleware", "router", "controller", "service",
+    "schema", "query", "mutation", "resolver",
+    "config", "logger", "parser", "builder", "factory",
+    "event", "listener", "observer", "adapter", "wrapper",
+    "payload", "request", "response", "header", "body",
+    "token", "session", "cookie", "cache", "proxy",
+    # Language / runtime names (capitalized in prose)
+    "rust", "python", "golang", "kotlin", "swift", "scala",
+    "ruby", "java", "perl", "lua", "dart", "elixir",
+    # Build tools / package managers
+    "cargo", "npm", "yarn", "pnpm", "pip", "conda", "maven", "gradle",
+    # Frameworks / libraries commonly capitalized
+    "tauri", "electron", "vite", "webpack", "babel", "eslint",
+    "docker", "kubernetes", "redis", "postgres", "mongo", "sqlite",
+    # CSS / UI
+    "tailwind", "bootstrap", "material",
+    # Version control
+    "git", "github", "gitlab", "bitbucket",
+    # Common capitalized code patterns
+    "todo", "fixme", "hack", "note", "bug", "feature",
+    "phase", "flow", "step", "stage", "task", "action",
+    "view", "page", "layout", "modal", "dialog", "panel",
+    "table", "column", "row", "field", "form", "button",
+}
+
 # For entity detection — prose only, no code files
 # Code files have too many capitalized names (classes, functions) that aren't entities
 PROSE_EXTENSIONS = {
@@ -450,7 +500,7 @@ def extract_candidates(text: str) -> dict:
 
     counts = defaultdict(int)
     for word in raw:
-        if word.lower() not in STOPWORDS and len(word) > 1:
+        if word.lower() not in STOPWORDS and word.lower() not in CODE_KEYWORDS and len(word) > 1:
             counts[word] += 1
 
     # Also find multi-word proper nouns (e.g. "Memory Palace", "Claude Code")
