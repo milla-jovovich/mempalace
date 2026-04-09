@@ -261,9 +261,9 @@ Palace mode is a structural upgrade that uses the full MemPal hall/wing/closet/d
 flowchart TB
   P[PALACE]
   P --> H["HALL — preferences / facts / events / assistant_advice / general"]
-  H --> CL["CLOSET — user turns per session (primary index)"]
-  CL --> DR["DRAWER — assistant turns (on demand for assistant-reference questions)"]
-  P --> PW["PREFERENCE WING — synthetic docs from user expressions (separate from halls)"]
+  H --> CL["CLOSET — user turns per session — the primary index"]
+  CL --> DR["DRAWER — assistant turns — opened on demand for assistant-reference questions"]
+  P --> PW["PREFERENCE WING — synthetic docs extracted from user expressions — separate from halls"]
 ```
 
 ### Hall Classification

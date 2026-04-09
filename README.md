@@ -217,7 +217,7 @@ flowchart TB
     PrA --> PrCloset[Closet] --> PrDrawer[Drawer]
   end
 
-  PA -.->|tunnel| PrA
+  PA <-.->|tunnel| PrA
 ```
 
 **Wings** — a person or project. As many as you need.

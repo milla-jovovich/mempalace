@@ -90,13 +90,15 @@ flowchart TB
   B --> C[Claude Code fires Stop hook]
   C --> D[Hook counts human messages in JSONL transcript]
   D --> E{Messages since last save?}
-  E -->|less than 15| F["echo '{}' — let AI stop"]
+  E -->|less than 15| F["Allow stop — stdout is empty JSON"]
   E -->|15 or more| G["Block with reason: save to palace"]
   G --> H[AI saves to palace]
   H --> I[AI tries to stop again]
   I --> J["stop_hook_active = true"]
-  J --> K["Hook sees flag — echo '{}' — let it through"]
+  J --> K["Allow stop — stdout is empty JSON again"]
 ```
+
+When allowing a stop, the hook prints `echo "{}"` (empty JSON object) on stdout. Curly braces are omitted from the diagram labels because some Mermaid renderers treat `{}` as shape syntax.
 
 The `stop_hook_active` flag prevents infinite loops: block once → AI saves → tries to stop → flag is true → we let it through.
 

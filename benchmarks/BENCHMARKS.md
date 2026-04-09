@@ -264,7 +264,7 @@ Built independently from the hybrid track. Different architecture, same ceiling.
 ```mermaid
 flowchart TB
   P[PALACE]
-  P --> H["HALL — travel, work, health, relationships, general"]
+  P --> H["HALL (concept: travel, work, health, relationships, general)"]
   H --> TP[Two-pass retrieval]
   TP --> P1[Pass 1: tight search within inferred hall]
   TP --> P2[Pass 2: full haystack with hall-based score bonuses]
