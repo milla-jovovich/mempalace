@@ -205,10 +205,14 @@ def cmd_repair(args):
     offset = 0
     while offset < total:
         batch = col.get(limit=read_batch, offset=offset, include=["documents", "metadatas"])
+        got = len(batch["ids"])
+        if got == 0:
+            print(f"  WARNING: empty batch at offset {offset}, stopping early")
+            break
         all_ids.extend(batch["ids"])
         all_docs.extend(batch["documents"])
         all_metas.extend(batch["metadatas"])
-        offset += len(batch["ids"])
+        offset += got
         if offset % 5000 == 0 or offset >= total:
             print(f"  Read {offset}/{total}")
     print(f"  Extracted {len(all_ids)} drawers")
@@ -255,8 +259,16 @@ def cmd_repair(args):
     if os.path.exists(backup_path):
         shutil.rmtree(backup_path)
     print(f"\n  Backing up original to {backup_path}")
-    os.rename(palace_path, backup_path)
-    os.rename(rebuild_path, palace_path)
+    try:
+        shutil.move(palace_path, backup_path)
+        shutil.move(rebuild_path, palace_path)
+    except OSError as e:
+        print(f"\n  ERROR during swap: {e}")
+        if os.path.exists(backup_path) and not os.path.exists(palace_path):
+            print(f"  Your palace was moved to {backup_path}")
+            print(f"  Rebuilt palace is at {rebuild_path}")
+            print(f"  To recover: mv '{rebuild_path}' '{palace_path}'")
+        raise
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print(f"  Backup saved at {backup_path}")
