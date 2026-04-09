@@ -16,6 +16,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .writer import add_collection_drawer, build_drawer_id, build_shared_metadata
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -372,28 +373,31 @@ def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
 ):
     """Add one drawer to the palace."""
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
+    drawer_id = build_drawer_id(wing, room, source_file=source_file, chunk_index=chunk_index)
+    extra_metadata = {}
     try:
-        metadata = {
-            "wing": wing,
-            "room": room,
-            "source_file": source_file,
-            "chunk_index": chunk_index,
-            "added_by": agent,
-            "filed_at": datetime.now().isoformat(),
-        }
-        # Store file mtime so we can detect modifications later.
-        try:
-            metadata["source_mtime"] = os.path.getmtime(source_file)
-        except OSError:
-            pass
-        collection.upsert(
-            documents=[content],
-            ids=[drawer_id],
-            metadatas=[metadata],
-        )
+        extra_metadata["source_mtime"] = os.path.getmtime(source_file)
+    except OSError:
+        pass
+    metadata = build_shared_metadata(
+        wing=wing,
+        room=room,
+        content=content,
+        source_file=source_file,
+        chunk_index=chunk_index,
+        added_by=agent,
+        source_type="project_file",
+        hall="hall_project",
+        memory_type="project_chunk",
+        source_updated_at=source_file,
+        extra_metadata=extra_metadata or None,
+    )
+    try:
+        add_collection_drawer(collection, drawer_id, content, metadata)
         return True
-    except Exception:
+    except Exception as e:
+        if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+            return False
         raise
 
 

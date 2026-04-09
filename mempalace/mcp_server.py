@@ -33,6 +33,7 @@ import chromadb
 from .query_sanitizer import sanitize_query
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
+from .writer import add_collection_drawer, build_drawer_id, build_shared_metadata
 
 from .knowledge_graph import KnowledgeGraph
 
@@ -458,7 +459,7 @@ def tool_add_drawer(
     if not col:
         return _no_palace()
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content[:100]).encode()).hexdigest()[:24]}"
+    drawer_id = build_drawer_id(wing, room, content=content)
 
     _wal_log(
         "add_drawer",
@@ -480,21 +481,23 @@ def tool_add_drawer(
     except Exception:
         pass
 
+    filed_at = datetime.now().isoformat()
+    metadata = build_shared_metadata(
+        wing=wing,
+        room=room,
+        content=content,
+        source_file=source_file or "",
+        chunk_index=0,
+        added_by=added_by,
+        filed_at=filed_at,
+        source_type="manual_drawer",
+        hall="hall_manual",
+        memory_type="manual_drawer",
+        source_updated_at="",
+    )
+
     try:
-        col.upsert(
-            ids=[drawer_id],
-            documents=[content],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file or "",
-                    "chunk_index": 0,
-                    "added_by": added_by,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
-        )
+        add_collection_drawer(col, drawer_id, content, metadata)
         _metadata_cache = None
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
