@@ -359,6 +359,9 @@ def tool_sync_status(directory: str = None):
                     "wing": meta.get("wing", ""),
                     "ingest_mode": meta.get("ingest_mode", ""),
                 }
+            elif not source_files[sf]["hash"]:
+                # Use first non-empty hash found for this file
+                source_files[sf]["hash"] = meta.get("content_hash", "")
             source_files[sf]["drawer_count"] += 1
         offset += len(batch["ids"])
 
@@ -370,7 +373,6 @@ def tool_sync_status(directory: str = None):
         source_files = {
             sf: info for sf, info in source_files.items()
             if _resolve_path_safe(sf).startswith(dir_resolved)
-            or _resolve_path_safe(sf) == dir_resolved.rstrip(os.sep)
         }
 
     stale = []
@@ -433,19 +435,21 @@ def tool_sync_status(directory: str = None):
     if no_hash == len(source_files):
         result["status"] = "unknown"
         result["message"] = f"All {no_hash} source files lack content_hash (mined before sync support). Re-mine with latest version to enable freshness tracking."
-    elif fresh == len(source_files) and not stale and not missing:
-        result["status"] = "fresh"
-        result["message"] = "All source files are up to date."
     elif stale:
         result["status"] = "stale"
         result["message"] = f"{len(stale)} files changed since last mine. Run the remine_commands to refresh."
     elif missing:
         result["status"] = "orphaned"
         result["message"] = f"{len(missing)} source files no longer exist. Use 'mempalace sync --clean' to remove orphaned drawers."
+    elif fresh == len(source_files):
+        result["status"] = "fresh"
+        result["message"] = "All source files are up to date."
+    elif no_hash > 0:
+        result["status"] = "partial"
+        result["message"] = f"{fresh} files verified fresh, {no_hash} files unverifiable (no hash). Re-mine legacy files to enable tracking."
     else:
         result["status"] = "fresh"
         result["message"] = "All source files are up to date."
-
     return result
 
 

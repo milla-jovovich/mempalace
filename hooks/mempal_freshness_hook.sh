@@ -38,6 +38,7 @@ CHECK_INTERVAL=3600
 # ─── Implementation ──────────────────────────────────────
 
 set -euo pipefail
+trap 'echo "{\"decision\": \"allow\"}"'  EXIT
 
 # Read stdin
 INPUT=$(cat)
@@ -46,7 +47,6 @@ INPUT=$(cat)
 STOP_ACTIVE=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('stop_hook_active', False))" 2>/dev/null || echo "False")
 
 if [ "$STOP_ACTIVE" = "True" ] || [ "$STOP_ACTIVE" = "true" ]; then
-    echo '{"decision": "allow"}'
     exit 0
 fi
 
@@ -61,24 +61,23 @@ if [ -f "$STAMP_FILE" ]; then
     NOW=$(date +%s)
     ELAPSED=$((NOW - LAST_CHECK))
     if [ "$ELAPSED" -lt "$CHECK_INTERVAL" ]; then
-        echo '{"decision": "allow"}'
         exit 0
     fi
 fi
 
-# Run freshness check
-SYNC_ARGS="--dry-run"
+# Run freshness check — no eval, safe quoting
 if [ -n "$CHECK_DIR" ]; then
-    SYNC_ARGS="$SYNC_ARGS --dir \"$CHECK_DIR\""
+    SYNC_OUTPUT=$(python3 -m mempalace sync --dry-run --dir "$CHECK_DIR" 2>/dev/null || echo "")
+else
+    SYNC_OUTPUT=$(python3 -m mempalace sync --dry-run 2>/dev/null || echo "")
 fi
-
-SYNC_OUTPUT=$(eval python3 -m mempalace sync $SYNC_ARGS 2>/dev/null || echo "")
 STALE_COUNT=$(echo "$SYNC_OUTPUT" | sed -n 's/.*Stale (changed):[[:space:]]*\([0-9]*\).*/\1/p' 2>/dev/null)
 STALE_COUNT="${STALE_COUNT:-0}"
 
 # Record check time
 date +%s > "$STAMP_FILE"
 
+trap - EXIT
 if [ "$STALE_COUNT" -gt "0" ]; then
     # Stale files found — tell AI to check
     cat <<ENDJSON
