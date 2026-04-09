@@ -39,6 +39,25 @@ jobs:
           python-version: "3.9"
       - run: pip install -e ".[dev]"
       - run: python -m pytest tests/ -v --ignore=tests/benchmarks --cov=mempalace --cov-report=term-missing --cov-fail-under=80
+  test-nlp:
+    runs-on: ubuntu-latest
+    env:
+      MEMPALACE_NLP_SENTENCES: "1"
+      MEMPALACE_NLP_NEGATION: "1"
+      MEMPALACE_NLP_NER: "1"
+      MEMPALACE_NLP_CLASSIFY: "1"
+      MEMPALACE_NLP_TRIPLES: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev,nlp-full]"
+      - run: python -m spacy download xx_ent_wiki_sm
+      - run: python -m pytest tests/ -v --ignore=tests/benchmarks -m "not benchmark and not stress" --cov=mempalace --cov-report=term-missing
+      - run: python -m pytest tests/test_nlp_integration.py -v -m "nlp" --timeout=300
+        continue-on-error: true
+
   lint:
     runs-on: ubuntu-latest
     steps:
