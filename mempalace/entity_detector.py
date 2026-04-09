@@ -444,11 +444,30 @@ def extract_candidates(text: str) -> dict:
     """
     Extract all capitalized proper noun candidates from text.
     Returns {name: frequency} for names appearing 3+ times.
+    Uses NLP NER provider when available for better entity detection.
     """
-    # Find all capitalized words (not at sentence start — harder, so we use frequency as filter)
+    counts = defaultdict(int)
+
+    # Try NLP NER provider first to supplement regex extraction
+    try:
+        from mempalace.nlp_config import NLPConfig
+
+        config = NLPConfig.resolve()
+        if config.has("ner"):
+            from mempalace.nlp_providers.registry import get_registry
+
+            registry = get_registry()
+            entities = registry.extract_entities(text)
+            for ent in entities:
+                name = ent.get("text", "")
+                if name and len(name) > 1 and name.lower() not in STOPWORDS:
+                    counts[name] += 3  # NER entities get automatic threshold
+    except Exception:
+        pass
+
+    # Regex extraction (always runs, adds to NER results)
     raw = re.findall(r"\b([A-Z][a-z]{1,19})\b", text)
 
-    counts = defaultdict(int)
     for word in raw:
         if word.lower() not in STOPWORDS and len(word) > 1:
             counts[word] += 1
