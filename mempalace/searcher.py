@@ -47,6 +47,7 @@ def _verify_with_tardygrada(hits: list) -> dict:
             capture_output=True,
             text=True,
             timeout=10,
+            shell=False,
         )
         if result.returncode != 0:
             return {
@@ -63,6 +64,11 @@ def _verify_with_tardygrada(hits: list) -> dict:
         return {
             "contradictions": None,
             "verify_warning": "tardygrada verify-doc timeout after 10s",
+        }
+    except OSError as exc:
+        return {
+            "contradictions": None,
+            "verify_warning": f"tardygrada execution error: {exc}",
         }
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -226,6 +232,8 @@ def search_memories(
     }
 
     if verify:
-        response.update(_verify_with_tardygrada(hits))
+        verification = _verify_with_tardygrada(hits)
+        response["contradictions"] = verification.get("contradictions")
+        response["verify_warning"] = verification.get("verify_warning")
 
     return response
