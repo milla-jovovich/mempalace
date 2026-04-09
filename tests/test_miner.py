@@ -206,3 +206,139 @@ def test_scan_project_skip_dirs_still_apply_without_override():
         assert scanned_files(project_root, respect_gitignore=False) == ["main.py"]
     finally:
         shutil.rmtree(tmpdir)
+
+
+def test_sync_detects_changes():
+    """Test that sync finds new, changed, and deleted files."""
+    import time
+
+    from mempalace.miner import sync, get_collection
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(tmpdir, "file1.py"), "w") as f:
+            f.write("# File 1\n" + "x = 1\n" * 20)
+        with open(os.path.join(tmpdir, "file2.py"), "w") as f:
+            f.write("# File 2\n" + "y = 2\n" * 20)
+        with open(os.path.join(tmpdir, "mempalace.yaml"), "w") as f:
+            yaml.dump({"wing": "test", "rooms": [{"name": "general", "description": "all"}]}, f)
+
+        palace = tempfile.mkdtemp()
+        mine(tmpdir, palace)
+
+        col = get_collection(palace)
+        initial_count = col.count()
+        assert initial_count > 0
+
+        # Ensure mtime changes are detectable
+        time.sleep(0.1)
+
+        # Modify file1, delete file2, add file3
+        with open(os.path.join(tmpdir, "file1.py"), "w") as f:
+            f.write("# File 1 MODIFIED\n" + "x = 999\n" * 20)
+        os.remove(os.path.join(tmpdir, "file2.py"))
+        with open(os.path.join(tmpdir, "file3.py"), "w") as f:
+            f.write("# File 3 NEW\n" + "z = 3\n" * 20)
+
+        sync(tmpdir, palace)
+
+        # Verify
+        results = col.get(include=["metadatas"], limit=10000)
+        source_files = {m["source_file"] for m in results["metadatas"]}
+        assert os.path.join(tmpdir, "file2.py") not in source_files
+        assert os.path.join(tmpdir, "file3.py") in source_files
+        assert os.path.join(tmpdir, "file1.py") in source_files
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_sync_dry_run_does_not_modify():
+    """Verify --dry-run reports changes but doesn't touch the collection."""
+    import time
+
+    from mempalace.miner import sync, get_collection
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(tmpdir, "file1.py"), "w") as f:
+            f.write("# File 1\n" + "x = 1\n" * 20)
+        with open(os.path.join(tmpdir, "mempalace.yaml"), "w") as f:
+            yaml.dump({"wing": "test", "rooms": [{"name": "general", "description": "all"}]}, f)
+
+        palace = tempfile.mkdtemp()
+        mine(tmpdir, palace)
+
+        col = get_collection(palace)
+        count_before = col.count()
+
+        time.sleep(0.1)
+
+        # Modify the file and add a new one
+        with open(os.path.join(tmpdir, "file1.py"), "w") as f:
+            f.write("# MODIFIED\n" + "x = 999\n" * 20)
+        with open(os.path.join(tmpdir, "file2.py"), "w") as f:
+            f.write("# NEW\n" + "y = 2\n" * 20)
+
+        sync(tmpdir, palace, dry_run=True)
+
+        # Collection must be unchanged after dry-run
+        assert col.count() == count_before
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_sync_deletion_only():
+    """Test sync when only files are deleted (no new or changed)."""
+    from mempalace.miner import sync, get_collection
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(tmpdir, "file1.py"), "w") as f:
+            f.write("# File 1\n" + "x = 1\n" * 20)
+        with open(os.path.join(tmpdir, "file2.py"), "w") as f:
+            f.write("# File 2\n" + "y = 2\n" * 20)
+        with open(os.path.join(tmpdir, "mempalace.yaml"), "w") as f:
+            yaml.dump({"wing": "test", "rooms": [{"name": "general", "description": "all"}]}, f)
+
+        palace = tempfile.mkdtemp()
+        mine(tmpdir, palace)
+
+        col = get_collection(palace)
+        assert col.count() > 0
+
+        # Delete both files
+        os.remove(os.path.join(tmpdir, "file1.py"))
+        os.remove(os.path.join(tmpdir, "file2.py"))
+
+        sync(tmpdir, palace)
+
+        # All drawers should be gone
+        assert col.count() == 0
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_sync_on_empty_palace():
+    """Test sync before any mine — should treat all files as new."""
+    from mempalace.miner import sync, get_collection
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(tmpdir, "file1.py"), "w") as f:
+            f.write("# File 1\n" + "x = 1\n" * 20)
+        with open(os.path.join(tmpdir, "mempalace.yaml"), "w") as f:
+            yaml.dump({"wing": "test", "rooms": [{"name": "general", "description": "all"}]}, f)
+
+        palace = tempfile.mkdtemp()
+
+        # sync without prior mine
+        sync(tmpdir, palace)
+
+        col = get_collection(palace)
+        assert col.count() > 0
+
+        results = col.get(include=["metadatas"], limit=10000)
+        source_files = {m["source_file"] for m in results["metadatas"]}
+        assert os.path.join(tmpdir, "file1.py") in source_files
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
