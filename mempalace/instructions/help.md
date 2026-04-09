@@ -60,6 +60,7 @@ AI memory system. Store everything, find anything. Local, free, no API key.
     mempalace compress                    Compress palace storage
     mempalace status                      Show palace status
     mempalace repair                      Rebuild vector index
+    mempalace mcp                         Show MCP setup command
     mempalace hook run                    Run hook logic (for harness integration)
     mempalace instructions <name>         Output skill instructions
 
