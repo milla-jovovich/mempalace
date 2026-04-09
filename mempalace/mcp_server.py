@@ -1,16 +1,8 @@
-import sys as _sys
-_real_stdout = _sys.stdout
-_sys.stdout = _sys.stderr
-import os as _os
-_os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
-_os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
-import warnings as _warnings
-_warnings.filterwarnings("ignore")
 #!/usr/bin/env python3
 """
 MemPalace MCP Server — read/write palace access for Claude Code
 ================================================================
-Install: claude mcp add mempalace -- python /path/to/mcp_server.py
+Install: claude mcp add mempalace -- python -m mempalace.mcp_server
 
 Tools (read):
   mempalace_status          — total drawers, wing/room breakdown
@@ -25,6 +17,9 @@ Tools (write):
   mempalace_delete_drawer   — remove a drawer by ID
 """
 
+import sys as _sys
+_real_stdout = _sys.stdout
+_sys.stdout = _sys.stderr
 import sys
 import json
 import logging
@@ -35,6 +30,7 @@ from .config import MempalaceConfig
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
 from .knowledge_graph import KnowledgeGraph
+from .version import __version__
 
 _kg = KnowledgeGraph()
 
@@ -654,7 +650,7 @@ def handle_request(request):
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "mempalace", "version": "2.0.0"},
+                "serverInfo": {"name": "mempalace", "version": __version__},
             },
         }
     elif method == "notifications/initialized":
@@ -679,6 +675,14 @@ def handle_request(request):
                 "id": req_id,
                 "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
             }
+        schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
+        for key, value in list(tool_args.items()):
+            prop_schema = schema_props.get(key, {})
+            declared_type = prop_schema.get("type")
+            if declared_type == "integer" and not isinstance(value, int):
+                tool_args[key] = int(value)
+            elif declared_type == "number" and not isinstance(value, (int, float)):
+                tool_args[key] = float(value)
         try:
             result = TOOLS[tool_name]["handler"](**tool_args)
             return {
@@ -686,9 +690,9 @@ def handle_request(request):
                 "id": req_id,
                 "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
             }
-        except Exception as e:
-            logger.error(f"Tool error in {tool_name}: {e}")
-            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": str(e)}}
+        except Exception:
+            logger.exception(f"Tool error in {tool_name}")
+            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": "Internal tool error"}}
 
     return {
         "jsonrpc": "2.0",
