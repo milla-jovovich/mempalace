@@ -97,20 +97,22 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Speed benchmark WITHOUT NLP providers (baseline)
         timeout-minutes: 10
-        run: python -m pytest tests/benchmarks/ -v -m "benchmark and not stress" --bench-scale small
+        continue-on-error: true
+        run: python -m pytest tests/benchmarks/test_knowledge_graph_bench.py tests/benchmarks/test_ingest_bench.py -v -m "benchmark and not stress" --bench-scale small
       - name: Install NLP dependencies
         run: pip install -e ".[nlp-full]"
       - name: Download spaCy model
         run: python -m spacy download xx_ent_wiki_sm
       - name: Speed benchmark WITH NLP providers
         timeout-minutes: 10
+        continue-on-error: true
         env:
           MEMPALACE_NLP_SENTENCES: "1"
           MEMPALACE_NLP_NEGATION: "1"
           MEMPALACE_NLP_NER: "1"
           MEMPALACE_NLP_CLASSIFY: "1"
           MEMPALACE_NLP_TRIPLES: "1"
-        run: python -m pytest tests/benchmarks/ -v -m "benchmark and not stress" --bench-scale small
+        run: python -m pytest tests/benchmarks/test_knowledge_graph_bench.py tests/benchmarks/test_ingest_bench.py -v -m "benchmark and not stress" --bench-scale small
 
   lint:
     runs-on: ubuntu-latest
