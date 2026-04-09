@@ -7,11 +7,52 @@ Returns verbatim text — the actual words, never summaries.
 """
 
 import logging
+from datetime import datetime, timezone
+import math
 from pathlib import Path
 
 import chromadb
 
 logger = logging.getLogger("mempalace_mcp")
+
+from mempalace.config import MempalaceConfig
+
+
+def _apply_time_decay(hits, half_life_days):
+    """Re-rank hits by applying exponential time-decay to similarity scores.
+
+    Args:
+        hits: list of dicts with 'similarity' and 'filed_at' keys.
+        half_life_days: half-life in days. If 0 or negative, no decay applied.
+
+    Returns:
+        Sorted list of hits with 'decay', 'original_similarity', and updated 'similarity'.
+    """
+    if not half_life_days or half_life_days <= 0:
+        return hits
+
+    now = datetime.now(timezone.utc)
+
+    for hit in hits:
+        filed_at_str = hit.get("filed_at", "")
+        if filed_at_str:
+            try:
+                filed_at = datetime.fromisoformat(filed_at_str)
+                if filed_at.tzinfo is None:
+                    filed_at = filed_at.replace(tzinfo=timezone.utc)
+                age_days = max((now - filed_at).total_seconds() / 86400, 0)
+            except (ValueError, TypeError):
+                age_days = 0
+        else:
+            age_days = 0
+
+        decay = math.pow(0.5, age_days / half_life_days)
+        hit["original_similarity"] = hit["similarity"]
+        hit["decay"] = round(decay, 4)
+        hit["similarity"] = round(hit["similarity"] * decay, 4)
+
+    hits.sort(key=lambda h: h["similarity"], reverse=True)
+    return hits
 
 
 class SearchError(Exception):
@@ -91,7 +132,12 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    time_decay: bool = True,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
@@ -142,11 +188,21 @@ def search_memories(
                 "room": meta.get("room", "unknown"),
                 "source_file": Path(meta.get("source_file", "?")).name,
                 "similarity": round(1 - dist, 3),
+                "filed_at": meta.get("filed_at", ""),
             }
         )
+
+    # Apply time-decay scoring
+    if time_decay:
+        try:
+            half_life = MempalaceConfig().time_decay_half_life_days
+        except Exception:
+            half_life = 90
+        hits = _apply_time_decay(hits, half_life)
 
     return {
         "query": query,
         "filters": {"wing": wing, "room": room},
+        "time_decay": time_decay,
         "results": hits,
     }
