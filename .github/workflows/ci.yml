@@ -49,21 +49,19 @@ jobs:
           python-version: "3.11"
       - run: pip install -e ".[dev,nlp-full]"
       - run: python -m spacy download xx_ent_wiki_sm
-      - name: Run base test suite (NLP packages installed but flags off)
-        run: python -m pytest tests/ -v --ignore=tests/benchmarks -m "not benchmark and not stress" --cov=mempalace --cov-report=term-missing
-      - name: Run NLP feature flag tests with flags enabled
+      - name: Run base test suite with NLP flags enabled
         env:
           MEMPALACE_NLP_SENTENCES: "1"
           MEMPALACE_NLP_NEGATION: "1"
           MEMPALACE_NLP_NER: "1"
           MEMPALACE_NLP_CLASSIFY: "1"
           MEMPALACE_NLP_TRIPLES: "1"
-        run: python -m pytest tests/test_nlp_feature_flags.py tests/test_nlp_e2e.py -v
+        run: python -m pytest tests/ -v --ignore=tests/benchmarks -m "not benchmark and not stress" --cov=mempalace --cov-report=term-missing --cov-fail-under=80
       - name: Run NLP integration tests with real providers
         run: python -m pytest tests/test_nlp_integration.py -v -m "nlp"
         continue-on-error: true
 
-  benchmark:
+  benchmark-quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -72,13 +70,13 @@ jobs:
           python-version: "3.11"
       - name: Install base dependencies
         run: pip install -e ".[dev]"
-      - name: Benchmark WITHOUT NLP providers (baseline)
+      - name: Quality benchmark WITHOUT NLP providers (baseline)
         run: python benchmarks/with-nlp-provider/bench_nlp_providers.py --iterations 20
       - name: Install NLP dependencies
         run: pip install -e ".[nlp-full]"
       - name: Download spaCy model
         run: python -m spacy download xx_ent_wiki_sm
-      - name: Benchmark WITH NLP providers
+      - name: Quality benchmark WITH NLP providers
         env:
           MEMPALACE_NLP_SENTENCES: "1"
           MEMPALACE_NLP_NEGATION: "1"
@@ -86,6 +84,30 @@ jobs:
           MEMPALACE_NLP_CLASSIFY: "1"
           MEMPALACE_NLP_TRIPLES: "1"
         run: python benchmarks/with-nlp-provider/bench_nlp_providers.py --iterations 20
+
+  benchmark-speed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install base dependencies
+        run: pip install -e ".[dev]"
+      - name: Speed benchmark WITHOUT NLP providers (baseline)
+        run: python -m pytest tests/benchmarks/ -v -m "benchmark and not stress" --bench-scale small
+      - name: Install NLP dependencies
+        run: pip install -e ".[nlp-full]"
+      - name: Download spaCy model
+        run: python -m spacy download xx_ent_wiki_sm
+      - name: Speed benchmark WITH NLP providers
+        env:
+          MEMPALACE_NLP_SENTENCES: "1"
+          MEMPALACE_NLP_NEGATION: "1"
+          MEMPALACE_NLP_NER: "1"
+          MEMPALACE_NLP_CLASSIFY: "1"
+          MEMPALACE_NLP_TRIPLES: "1"
+        run: python -m pytest tests/benchmarks/ -v -m "benchmark and not stress" --bench-scale small
 
   lint:
     runs-on: ubuntu-latest
