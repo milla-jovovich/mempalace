@@ -613,7 +613,7 @@ def mine(
 def status(palace_path: str):
     """Show what's been filed in the palace."""
     try:
-        col = get_collection(palace_path)
+        col = get_collection(palace_path, create=False)
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")

@@ -36,6 +36,9 @@ class ChromaBackend:
     """Factory for MemPalace's default ChromaDB backend."""
 
     def get_collection(self, palace_path: str, collection_name: str, create: bool = False):
+        if not create and not os.path.isdir(palace_path):
+            raise FileNotFoundError(palace_path)
+
         if create:
             os.makedirs(palace_path, exist_ok=True)
             try:

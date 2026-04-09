@@ -21,13 +21,8 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
-from .backends import chroma as _chroma_backend
 from .config import MempalaceConfig
 from .palace import get_collection as _get_collection
-
-# Keep this module-level alias so existing tests can still patch
-# `mempalace.layers.chromadb.PersistentClient` unchanged.
-chromadb = _chroma_backend.chromadb
 
 
 # ---------------------------------------------------------------------------
