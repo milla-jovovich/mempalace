@@ -227,6 +227,71 @@ def split_file(filepath, output_dir, dry_run=False):
     return written
 
 
+def run(
+    source: str = None,
+    output_dir: str = None,
+    dry_run: bool = False,
+    min_sessions: int = 2,
+    file: str = None,
+):
+    """
+    Split mega-files. Called directly by the CLI dispatcher and by main().
+
+    Args:
+        source:       Source directory (default: MEMPALACE_SOURCE_DIR or ~/Desktop/transcripts).
+        output_dir:   Output directory (default: same dir as each source file).
+        dry_run:      If True, print what would happen without writing anything.
+        min_sessions: Only split files containing at least this many sessions.
+        file:         If given, split this single file instead of scanning source.
+    """
+    src_dir = Path(source) if source else LUMI_DIR
+    out_dir = output_dir or None  # None = same dir as file
+
+    if file:
+        files = [Path(file)]
+    else:
+        files = sorted(src_dir.glob("*.txt"))
+
+    mega_files = []
+    for f in files:
+        lines = f.read_text(errors="replace").splitlines(keepends=True)
+        boundaries = find_session_boundaries(lines)
+        if len(boundaries) >= min_sessions:
+            mega_files.append((f, len(boundaries)))
+
+    if not mega_files:
+        print(f"No mega-files found in {src_dir} (min {min_sessions} sessions).")
+        return
+
+    print(f"\n{'=' * 60}")
+    print(f"  Mega-file splitter — {'DRY RUN' if dry_run else 'SPLITTING'}")
+    print(f"{'=' * 60}")
+    print(f"  Source:      {src_dir}")
+    print(f"  Output:      {out_dir or 'same dir as source'}")
+    print(f"  Mega-files:  {len(mega_files)}")
+    print(f"{'─' * 60}\n")
+
+    total_written = 0
+    for f, n_sessions in mega_files:
+        print(f"  {f.name}  ({n_sessions} sessions, {f.stat().st_size // 1024}KB)")
+        written = split_file(f, out_dir, dry_run=dry_run)
+        total_written += len(written)
+
+        if not dry_run and written:
+            backup = f.with_suffix(".mega_backup")
+            f.rename(backup)
+            print(f"  → Original renamed to {backup.name}\n")
+        else:
+            print()
+
+    print(f"{'─' * 60}")
+    if dry_run:
+        print(f"  DRY RUN — would create {total_written} files from {len(mega_files)} mega-files")
+    else:
+        print(f"  Done — created {total_written} files from {len(mega_files)} mega-files")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Split concatenated transcript mega-files into per-session files"
@@ -256,53 +321,13 @@ def main():
         help="Split a single specific file instead of scanning dir",
     )
     args = parser.parse_args()
-
-    src_dir = Path(args.source) if args.source else LUMI_DIR
-    output_dir = args.output_dir or None  # None = same dir as file
-
-    if args.file:
-        files = [Path(args.file)]
-    else:
-        files = sorted(src_dir.glob("*.txt"))
-
-    mega_files = []
-    for f in files:
-        lines = f.read_text(errors="replace").splitlines(keepends=True)
-        boundaries = find_session_boundaries(lines)
-        if len(boundaries) >= args.min_sessions:
-            mega_files.append((f, len(boundaries)))
-
-    if not mega_files:
-        print(f"No mega-files found in {src_dir} (min {args.min_sessions} sessions).")
-        return
-
-    print(f"\n{'=' * 60}")
-    print(f"  Mega-file splitter — {'DRY RUN' if args.dry_run else 'SPLITTING'}")
-    print(f"{'=' * 60}")
-    print(f"  Source:      {src_dir}")
-    print(f"  Output:      {output_dir or 'same dir as source'}")
-    print(f"  Mega-files:  {len(mega_files)}")
-    print(f"{'─' * 60}\n")
-
-    total_written = 0
-    for f, n_sessions in mega_files:
-        print(f"  {f.name}  ({n_sessions} sessions, {f.stat().st_size // 1024}KB)")
-        written = split_file(f, output_dir, dry_run=args.dry_run)
-        total_written += len(written)
-
-        if not args.dry_run and written:
-            backup = f.with_suffix(".mega_backup")
-            f.rename(backup)
-            print(f"  → Original renamed to {backup.name}\n")
-        else:
-            print()
-
-    print(f"{'─' * 60}")
-    if args.dry_run:
-        print(f"  DRY RUN — would create {total_written} files from {len(mega_files)} mega-files")
-    else:
-        print(f"  Done — created {total_written} files from {len(mega_files)} mega-files")
-    print()
+    run(
+        source=args.source,
+        output_dir=args.output_dir,
+        dry_run=args.dry_run,
+        min_sessions=args.min_sessions,
+        file=args.file,
+    )
 
 
 if __name__ == "__main__":

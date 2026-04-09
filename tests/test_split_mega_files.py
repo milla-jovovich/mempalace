@@ -290,3 +290,28 @@ def test_split_file_tiny_fragments_skipped(tmp_path):
     # The first chunk is very small, should be skipped
     for p in written:
         assert p.stat().st_size > 0
+
+
+def _make_run_input(path, n_sessions=2):
+    """Write a .txt file with n_sessions genuine Claude Code session headers."""
+    session = "Claude Code v1.0.0\n" + ("line of content\n" * 10)
+    path.write_text(session * n_sessions)
+
+
+def test_run_dry_run_does_not_write(tmp_path):
+    mega = tmp_path / "chat.txt"
+    _make_run_input(mega)
+    smf.run(source=str(tmp_path), dry_run=True, min_sessions=2)
+    # dry_run must not create new files or rename the original
+    assert list(tmp_path.glob("*.txt")) == [mega]
+    assert not list(tmp_path.glob("*.mega_backup"))
+
+
+def test_run_splits_and_renames_original(tmp_path):
+    mega = tmp_path / "chat.txt"
+    _make_run_input(mega, n_sessions=2)
+    smf.run(source=str(tmp_path), min_sessions=2)
+    # original renamed to .mega_backup
+    assert (tmp_path / "chat.mega_backup").exists()
+    # two split files created
+    assert len(list(tmp_path.glob("*.txt"))) == 2
