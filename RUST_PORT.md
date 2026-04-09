@@ -3,7 +3,7 @@
 This repository is being converted from Python to pure Rust.
 
 - **Branch:** `feat/convert-to-rust`
-- **Status:** Phase 5 of 7 — `mempalace-server` ported
+- **Status:** Phase 6 of 7 — `mempalace-cli` binary ported (373 tests passing)
 - **Plan:** [`.sisyphus/plans/rust-port.md`](.sisyphus/plans/rust-port.md)
 - **Research:**
   - [`.sisyphus/research/01-rust-stack.md`](.sisyphus/research/01-rust-stack.md)
@@ -19,7 +19,7 @@ This repository is being converted from Python to pure Rust.
 | 3 | `mempalace-text`: dialect, normalize, entity detection, extractors (226 tests) | **done** |
 | 4 | `mempalace-store`: rusqlite KG, palace trait + in-memory backend, graph, layers (57 tests) | **done** |
 | 5 | `mempalace-server`: ingest, searcher, MCP server, hooks, onboarding (45 tests) | **done** |
-| 6 | `mempalace-cli`: clap binary + end-to-end integration tests | todo |
+| 6 | `mempalace-cli`: clap binary + end-to-end integration tests (13 tests) | **done** |
 | 7 | Security audit, move Python to `legacy/`, final polish | todo |
 
 ## Workspace layout
