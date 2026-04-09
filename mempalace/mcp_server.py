@@ -199,13 +199,15 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None,
+               min_similarity: float = 0.0):
     return search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
+        min_similarity=min_similarity,
     )
 
 
@@ -622,6 +624,10 @@ TOOLS = {
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "min_similarity": {
+                    "type": "number",
+                    "description": "Minimum similarity threshold 0.0–1.0 (default 0.0). Use 0.5+ to filter low-quality matches.",
+                },
             },
             "required": ["query"],
         },

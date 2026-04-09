@@ -91,11 +91,16 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5,
+    min_similarity: float = 0.0
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
     Used by the MCP server and other callers that need data.
+
+    Args:
+        min_similarity: Minimum similarity score (0.0–1.0). Results below this threshold
+            are excluded. Default 0.0 returns all results.
     """
     try:
         client = chromadb.PersistentClient(path=palace_path)
@@ -135,13 +140,16 @@ def search_memories(
 
     hits = []
     for doc, meta, dist in zip(docs, metas, dists):
+        similarity = round(1 - dist, 3)
+        if similarity < min_similarity:
+            continue
         hits.append(
             {
                 "text": doc,
                 "wing": meta.get("wing", "unknown"),
                 "room": meta.get("room", "unknown"),
                 "source_file": Path(meta.get("source_file", "?")).name,
-                "similarity": round(1 - dist, 3),
+                "similarity": similarity,
             }
         )
 

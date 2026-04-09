@@ -43,3 +43,18 @@ class TestSearchMemories:
         assert "source_file" in hit
         assert "similarity" in hit
         assert isinstance(hit["similarity"], float)
+
+    def test_min_similarity_filters_low_scores(self, palace_path, seeded_collection):
+        # A very high threshold should return fewer (or zero) results than no threshold.
+        result_all = search_memories("authentication", palace_path, n_results=5)
+        result_high = search_memories("authentication", palace_path, n_results=5, min_similarity=0.9999)
+        assert len(result_high["results"]) <= len(result_all["results"])
+
+    def test_min_similarity_zero_returns_all(self, palace_path, seeded_collection):
+        result = search_memories("authentication", palace_path, n_results=5, min_similarity=0.0)
+        assert len(result["results"]) > 0
+
+    def test_min_similarity_respected_on_results(self, palace_path, seeded_collection):
+        result = search_memories("authentication", palace_path, n_results=10, min_similarity=0.3)
+        for hit in result["results"]:
+            assert hit["similarity"] >= 0.3
