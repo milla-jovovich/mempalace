@@ -409,8 +409,16 @@ class TestDiaryTools:
 
 
 class TestSyncStatusTool:
+    def _patch_sync(self, monkeypatch, config, palace_path, kg):
+        """Patch MCP server and reset collection cache for sync tests."""
+        from mempalace import mcp_server
+        config._file_config["palace_path"] = palace_path
+        _patch_mcp_server(monkeypatch, config, kg)
+        monkeypatch.setattr(mcp_server, "_client_cache", None)
+        monkeypatch.setattr(mcp_server, "_collection_cache", None)
+
     def test_sync_status_empty_palace(self, monkeypatch, config, palace_path, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        self._patch_sync(monkeypatch, config, palace_path, kg)
         _get_collection(palace_path, create=True)
         from mempalace.mcp_server import tool_sync_status
 
@@ -418,8 +426,7 @@ class TestSyncStatusTool:
         assert result["status"] == "empty"
 
     def test_sync_status_no_palace(self, monkeypatch, config, kg):
-        config._file_config["palace_path"] = "/nonexistent/path"
-        _patch_mcp_server(monkeypatch, config, "/nonexistent/path", kg)
+        self._patch_sync(monkeypatch, config, "/nonexistent/path", kg)
         from mempalace.mcp_server import tool_sync_status
 
         result = tool_sync_status()
@@ -427,7 +434,7 @@ class TestSyncStatusTool:
 
     def test_sync_status_fresh_files(self, monkeypatch, config, palace_path, kg, tmp_path):
         """Source files unchanged since mining — all should be fresh."""
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        self._patch_sync(monkeypatch, config, palace_path, kg)
         import hashlib
 
         # Create real source files
@@ -435,7 +442,7 @@ class TestSyncStatusTool:
         src_file.write_text("def hello(): return True")
         content_hash = hashlib.md5("def hello(): return True".encode(), usedforsecurity=False).hexdigest()
 
-        col = _get_collection(palace_path, create=True)
+        _, col = _get_collection(palace_path, create=True)
         col.add(
             ids=["drawer_test_general_001"],
             documents=["def hello(): return True"],
@@ -458,14 +465,14 @@ class TestSyncStatusTool:
 
     def test_sync_status_stale_file(self, monkeypatch, config, palace_path, kg, tmp_path):
         """Source file changed since mining — should be detected as stale."""
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        self._patch_sync(monkeypatch, config, palace_path, kg)
         import hashlib
 
         src_file = tmp_path / "code.py"
         src_file.write_text("original content")
         old_hash = hashlib.md5("original content".encode(), usedforsecurity=False).hexdigest()
 
-        col = _get_collection(palace_path, create=True)
+        _, col = _get_collection(palace_path, create=True)
         col.add(
             ids=["drawer_test_general_001"],
             documents=["original content"],
@@ -488,14 +495,14 @@ class TestSyncStatusTool:
         assert result["status"] == "stale"
         assert result["stale"] == 1
         assert len(result["stale_files"]) == 1
-        assert result["stale_files"][0]["file"] == "code.py"
+        assert result["stale_files"][0]["file"] == str(src_file)
         assert "remine_commands" in result
 
     def test_sync_status_missing_file(self, monkeypatch, config, palace_path, kg):
         """Source file deleted — drawers should be reported as orphaned."""
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        self._patch_sync(monkeypatch, config, palace_path, kg)
 
-        col = _get_collection(palace_path, create=True)
+        _, col = _get_collection(palace_path, create=True)
         col.add(
             ids=["drawer_test_general_001"],
             documents=["content from deleted file"],
@@ -517,12 +524,12 @@ class TestSyncStatusTool:
 
     def test_sync_status_legacy_no_hash(self, monkeypatch, config, palace_path, kg, tmp_path):
         """Drawers without content_hash should be counted as no_hash_legacy."""
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        self._patch_sync(monkeypatch, config, palace_path, kg)
 
         src_file = tmp_path / "old.py"
         src_file.write_text("legacy code")
 
-        col = _get_collection(palace_path, create=True)
+        _, col = _get_collection(palace_path, create=True)
         col.add(
             ids=["drawer_test_general_001"],
             documents=["legacy code"],
@@ -539,11 +546,11 @@ class TestSyncStatusTool:
         from mempalace.mcp_server import tool_sync_status
         result = tool_sync_status()
         assert result["no_hash_legacy"] == 1
-        assert result["status"] == "fresh"  # no hash = can't determine, treat as ok
+        assert result["status"] == "unknown"  # no hash = can't determine freshness
 
     def test_sync_status_directory_filter(self, monkeypatch, config, palace_path, kg, tmp_path):
         """Directory filter should only check files under the specified path."""
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        self._patch_sync(monkeypatch, config, palace_path, kg)
         import hashlib
 
         dir_a = tmp_path / "project_a"
@@ -556,7 +563,7 @@ class TestSyncStatusTool:
         file_a.write_text("code A")
         file_b.write_text("code B")
 
-        col = _get_collection(palace_path, create=True)
+        _, col = _get_collection(palace_path, create=True)
         for sf, content, wing in [
             (str(file_a), "code A", "proj-a"),
             (str(file_b), "code B", "proj-b"),

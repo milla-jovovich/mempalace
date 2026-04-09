@@ -365,9 +365,12 @@ def tool_sync_status(directory: str = None):
     # Filter by directory if specified
     if directory:
         dir_resolved = str(Path(directory).expanduser().resolve())
+        if not dir_resolved.endswith(os.sep):
+            dir_resolved += os.sep
         source_files = {
             sf: info for sf, info in source_files.items()
             if _resolve_path_safe(sf).startswith(dir_resolved)
+            or _resolve_path_safe(sf) == dir_resolved.rstrip(os.sep)
         }
 
     stale = []
@@ -404,9 +407,9 @@ def tool_sync_status(directory: str = None):
             key = (parent, wing, mode)
             if key not in seen_dirs:
                 seen_dirs.add(key)
-                cmd = f"mempalace mine {parent} --wing {wing} --force"
+                cmd = f"mempalace mine {parent} --wing {wing}"
                 if mode == "convos":
-                    cmd = f"mempalace mine {parent} --mode convos --wing {wing} --force"
+                    cmd = f"mempalace mine {parent} --mode convos --wing {wing}"
                 remine_commands.append(cmd)
 
     result = {
@@ -418,7 +421,7 @@ def tool_sync_status(directory: str = None):
     }
     if stale:
         result["stale_files"] = [
-            {"file": Path(s["file"]).name, "drawers": s["drawers"], "wing": s["wing"]}
+            {"file": s["file"], "drawers": s["drawers"], "wing": s["wing"]}
             for s in stale[:20]
         ]
         result["remine_commands"] = remine_commands
@@ -427,7 +430,10 @@ def tool_sync_status(directory: str = None):
             {"file": Path(m["file"]).name, "drawers": m["drawers"]}
             for m in missing[:10]
         ]
-    if fresh == len(source_files) and not stale and not missing:
+    if no_hash == len(source_files):
+        result["status"] = "unknown"
+        result["message"] = f"All {no_hash} source files lack content_hash (mined before sync support). Re-mine with latest version to enable freshness tracking."
+    elif fresh == len(source_files) and not stale and not missing:
         result["status"] = "fresh"
         result["message"] = "All source files are up to date."
     elif stale:

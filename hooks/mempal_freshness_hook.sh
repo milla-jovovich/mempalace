@@ -52,6 +52,8 @@ fi
 
 # Session tracking — only check once per session
 SESSION_ID=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('session_id', 'unknown'))" 2>/dev/null || echo "unknown")
+# Sanitize session ID to prevent path traversal
+SESSION_ID=$(echo "$SESSION_ID" | tr -cd 'A-Za-z0-9_-')
 STAMP_FILE="/tmp/mempalace_freshness_${SESSION_ID}"
 
 if [ -f "$STAMP_FILE" ]; then
@@ -67,11 +69,12 @@ fi
 # Run freshness check
 SYNC_ARGS="--dry-run"
 if [ -n "$CHECK_DIR" ]; then
-    SYNC_ARGS="$SYNC_ARGS --dir $CHECK_DIR"
+    SYNC_ARGS="$SYNC_ARGS --dir \"$CHECK_DIR\""
 fi
 
-SYNC_OUTPUT=$(python3 -m mempalace sync $SYNC_ARGS 2>/dev/null || echo "")
-STALE_COUNT=$(echo "$SYNC_OUTPUT" | grep -oP 'Stale \(changed\):\s+\K\d+' 2>/dev/null || echo "0")
+SYNC_OUTPUT=$(eval python3 -m mempalace sync $SYNC_ARGS 2>/dev/null || echo "")
+STALE_COUNT=$(echo "$SYNC_OUTPUT" | sed -n 's/.*Stale (changed):[[:space:]]*\([0-9]*\).*/\1/p' 2>/dev/null)
+STALE_COUNT="${STALE_COUNT:-0}"
 
 # Record check time
 date +%s > "$STAMP_FILE"
