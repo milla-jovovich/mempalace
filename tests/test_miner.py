@@ -260,3 +260,53 @@ def test_file_already_mined_check_mtime():
         # Release ChromaDB file handles before cleanup (required on Windows)
         del col, client
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_process_file_returns_room():
+    """process_file returns (drawer_count, room) and mine summary handles None rooms."""
+    from mempalace.miner import process_file
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        # File with enough content to be processed
+        write_file(
+            project_root / "backend" / "app.py", "def main():\n    print('hello world')\n" * 20
+        )
+        # File too small to be processed (returns 0, None)
+        write_file(project_root / "tiny.py", "x = 1")
+
+        rooms = [
+            {"name": "backend", "description": "Backend code", "keywords": ["backend"]},
+            {"name": "general", "description": "General", "keywords": []},
+        ]
+
+        # Normal file returns (count > 0, room_name)
+        count, room = process_file(
+            filepath=project_root / "backend" / "app.py",
+            project_path=project_root,
+            collection=None,
+            wing="test",
+            rooms=rooms,
+            agent="test",
+            dry_run=True,
+        )
+        assert count > 0
+        assert room is not None
+        assert isinstance(room, str)
+
+        # Tiny file returns (0, None)
+        count, room = process_file(
+            filepath=project_root / "tiny.py",
+            project_path=project_root,
+            collection=None,
+            wing="test",
+            rooms=rooms,
+            agent="test",
+            dry_run=True,
+        )
+        assert count == 0
+        assert room is None
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
