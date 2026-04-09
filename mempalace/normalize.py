@@ -177,8 +177,8 @@ def _try_claude_ai_json(data) -> Optional[str]:
             for item in chat_msgs:
                 if not isinstance(item, dict):
                     continue
-                role = item.get("sender", item.get("role", ""))
-                text = item.get("text", "").strip() or _extract_content(
+                role = item.get("sender") or item.get("role") or ""
+                text = (item.get("text") or "").strip() or _extract_content(
                     item.get("content", "")
                 )
                 if role in ("user", "human") and text:
@@ -186,7 +186,7 @@ def _try_claude_ai_json(data) -> Optional[str]:
                 elif role in ("assistant", "ai") and text:
                     messages.append(("assistant", text))
             if len(messages) >= 2:
-                header = convo.get("name", "").strip()
+                header = (convo.get("name") or "").strip()
                 t = _messages_to_transcript(messages)
                 if header:
                     t = f"--- {header} ---\n\n{t}"
@@ -200,8 +200,8 @@ def _try_claude_ai_json(data) -> Optional[str]:
     for item in data:
         if not isinstance(item, dict):
             continue
-        role = item.get("sender", item.get("role", ""))
-        text = item.get("text", "").strip() or _extract_content(
+        role = item.get("sender") or item.get("role") or ""
+        text = (item.get("text") or "").strip() or _extract_content(
             item.get("content", "")
         )
         if role in ("user", "human") and text:
