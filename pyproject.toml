@@ -70,6 +70,7 @@ markers = [
     "benchmark: scale/performance benchmark tests",
     "slow: tests that take more than 30 seconds",
     "stress: destructive scale tests (100K+ drawers)",
+    "nlp: NLP integration tests requiring real packages (pysbd, spacy, gliner, wtpsplit)",
 ]
 
 [tool.coverage.run]
