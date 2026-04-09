@@ -17,6 +17,8 @@ from collections import defaultdict
 
 import chromadb
 
+from .palace import SKIP_DIRS, get_collection, file_already_mined
+
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
@@ -40,32 +42,6 @@ READABLE_EXTENSIONS = {
     ".toml",
 }
 
-SKIP_DIRS = {
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "venv",
-    "env",
-    "dist",
-    "build",
-    ".next",
-    "coverage",
-    ".mempalace",
-    ".ruff_cache",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".cache",
-    ".tox",
-    ".nox",
-    ".idea",
-    ".vscode",
-    ".ipynb_checkpoints",
-    ".eggs",
-    "htmlcov",
-    "target",
-}
-
 SKIP_FILENAMES = {
     "mempalace.yaml",
     "mempalace.yml",
@@ -78,6 +54,7 @@ SKIP_FILENAMES = {
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
 
 
 # =============================================================================
@@ -393,41 +370,11 @@ def chunk_text(content: str, source_file: str) -> list:
 # =============================================================================
 
 
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
-
-
-def file_already_mined(collection, source_file: str) -> bool:
-    """Fast check: has this file been filed before and is unchanged?
-
-    Compares the stored mtime in drawer metadata against the file's current
-    mtime.  Returns False (needs re-mining) when the file has been modified
-    since it was last mined, or when no mtime was stored.
-    """
-    try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
-        if not results.get("ids"):
-            return False
-        stored_meta = results["metadatas"][0] if results.get("metadatas") else {}
-        stored_mtime = stored_meta.get("source_mtime")
-        if stored_mtime is None:
-            return False
-        current_mtime = os.path.getmtime(source_file)
-        return float(stored_mtime) == current_mtime
-    except Exception:
-        return False
-
-
 def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
 ):
     """Add one drawer to the palace."""
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk_index)).encode(), usedforsecurity=False).hexdigest()[:16]}"
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
     try:
         metadata = {
             "wing": wing,
@@ -470,7 +417,7 @@ def process_file(
 
     # Skip if already filed
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file):
+    if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
         return 0, None
 
     try:
@@ -562,6 +509,15 @@ def scan_project(
             if respect_gitignore and active_matchers and not force_include:
                 if is_gitignored(filepath, active_matchers, is_dir=False):
                     continue
+            # Skip symlinks — prevents following links to /dev/urandom, etc.
+            if filepath.is_symlink():
+                continue
+            # Skip files exceeding size limit
+            try:
+                if filepath.stat().st_size > MAX_FILE_SIZE:
+                    continue
+            except OSError:
+                continue
             files.append(filepath)
     return files
 
