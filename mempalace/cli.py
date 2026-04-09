@@ -254,7 +254,7 @@ def cmd_instructions(args):
 
 def cmd_mcp(args):
     """Show how to wire MemPalace into MCP-capable hosts."""
-    base_server_cmd = "python -m mempalace.mcp_server"
+    base_server_cmd = "mempalace mcp-serve"
 
     if args.palace:
         resolved_palace = str(Path(args.palace).expanduser())
