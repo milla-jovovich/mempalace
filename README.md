@@ -585,6 +585,9 @@ mempalace compress --wing myapp                   # AAAK compress
 
 # Status
 mempalace status                                  # palace overview
+
+# MCP
+mempalace mcp                                     # show MCP setup command
 ```
 
 All commands accept `--palace <path>` to override the default location.
