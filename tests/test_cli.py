@@ -543,7 +543,8 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     out = capsys.readouterr().out
     assert "dry run" in out.lower()
     assert "Compressing" in out
-    assert "25t -> 8t" in out
+    assert "25t -> 8t (3.3x)" in out
+    assert "Total: 25t -> 8t (3.1x compression)" in out
 
 
 @patch("mempalace.cli.MempalaceConfig")
@@ -616,7 +617,7 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
         cmd_compress(args)
     out = capsys.readouterr().out
     assert "Stored" in out
-    assert "25t -> 8t" in out
+    assert "Total: 25t -> 8t (3.1x compression)" in out
     mock_comp_col.upsert.assert_called_once()
 
 

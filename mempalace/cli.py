@@ -9,7 +9,7 @@ Two ways to ingest:
 Same palace. Same search. Different ingest strategies.
 
 Commands:
-    mempalace init <dir>                  Detect rooms from folder structure
+    mempalace init [dir]                  Detect rooms from folder structure
     mempalace split <dir>                 Split concatenated mega-files into per-session files
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
@@ -19,6 +19,7 @@ Commands:
     mempalace status                      Show what's been filed
 
 Examples:
+    mempalace init
     mempalace init ~/projects/my_app
     mempalace mine ~/projects/my_app
     mempalace mine ~/chats/claude-sessions --mode convos
@@ -32,25 +33,6 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
-
-
-def _first_present(mapping, *keys):
-    """Return the first available key from a mapping."""
-    for key in keys:
-        if key in mapping:
-            return mapping[key]
-    raise KeyError(keys[0])
-
-
-def _normalize_compression_stats(stats):
-    """Accept both current and legacy compression_stats key names."""
-    return {
-        "original_chars": _first_present(stats, "original_chars"),
-        "summary_chars": _first_present(stats, "summary_chars", "compressed_chars"),
-        "original_tokens": _first_present(stats, "original_tokens_est", "original_tokens"),
-        "summary_tokens": _first_present(stats, "summary_tokens_est", "compressed_tokens"),
-        "size_ratio": _first_present(stats, "size_ratio", "ratio"),
-    }
 
 
 def cmd_init(args):
@@ -328,31 +310,28 @@ def cmd_compress(args):
     )
     print()
 
-    total_original = 0
-    total_compressed = 0
     total_original_tokens = 0
     total_summary_tokens = 0
     compressed_entries = []
 
     for doc, meta, doc_id in zip(docs, metas, ids):
         compressed = dialect.compress(doc, metadata=meta)
-        stats = _normalize_compression_stats(dialect.compression_stats(doc, compressed))
+        stats = dialect.compression_stats(doc, compressed)
+        original_tokens = stats["original_tokens_est"]
+        summary_tokens = stats["summary_tokens_est"]
+        size_ratio = stats["size_ratio"]
 
-        total_original += stats["original_chars"]
-        total_compressed += stats["summary_chars"]
-        total_original_tokens += stats["original_tokens"]
-        total_summary_tokens += stats["summary_tokens"]
+        total_original_tokens += original_tokens
+        total_summary_tokens += summary_tokens
 
-        compressed_entries.append((doc_id, compressed, meta, stats))
+        compressed_entries.append((doc_id, compressed, meta, original_tokens, summary_tokens, size_ratio))
 
         if args.dry_run:
             wing_name = meta.get("wing", "?")
             room_name = meta.get("room", "?")
             source = Path(meta.get("source_file", "?")).name
             print(f"  [{wing_name}/{room_name}] {source}")
-            print(
-                f"    {stats['original_tokens']}t -> {stats['summary_tokens']}t ({stats['size_ratio']:.1f}x)"
-            )
+            print(f"    {original_tokens}t -> {summary_tokens}t ({size_ratio:.1f}x)")
             print(f"    {compressed}")
             print()
 
@@ -360,11 +339,11 @@ def cmd_compress(args):
     if not args.dry_run:
         try:
             comp_col = client.get_or_create_collection("mempalace_compressed")
-            for doc_id, compressed, meta, stats in compressed_entries:
+            for doc_id, compressed, meta, original_tokens, summary_tokens, size_ratio in compressed_entries:
                 comp_meta = dict(meta)
-                comp_meta["compression_ratio"] = round(stats["size_ratio"], 1)
-                comp_meta["original_tokens"] = stats["original_tokens"]
-                comp_meta["summary_tokens"] = stats["summary_tokens"]
+                comp_meta["compression_ratio"] = size_ratio
+                comp_meta["original_tokens"] = original_tokens
+                comp_meta["summary_tokens"] = summary_tokens
                 comp_col.upsert(
                     ids=[doc_id],
                     documents=[compressed],
@@ -378,7 +357,7 @@ def cmd_compress(args):
             sys.exit(1)
 
     # Summary
-    ratio = total_original / max(total_compressed, 1)
+    ratio = total_original_tokens / max(total_summary_tokens, 1)
     print(
         f"  Total: {total_original_tokens:,}t -> {total_summary_tokens:,}t ({ratio:.1f}x compression)"
     )

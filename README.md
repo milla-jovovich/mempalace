@@ -712,4 +712,3 @@ MIT — see [LICENSE](LICENSE).
 [python-link]: https://www.python.org/
 [license-shield]: https://img.shields.io/badge/license-MIT-b0e8ff?style=flat-square&labelColor=0a0e14
 [license-link]: https://github.com/milla-jovovich/mempalace/blob/main/LICENSE
-[discord-shield]: https://img.shields.io/badge/discord-join-5865F2?style=flat-square&labelColor=0a0e14&logo=discord&logoColor=5865F2

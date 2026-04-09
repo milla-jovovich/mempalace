@@ -29,7 +29,6 @@ import re
 from pathlib import Path
 
 HOME = Path.home()
-LUMI_DIR = Path(os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts")))
 
 # People we know about (for name detection in content)
 # Loaded from ~/.mempalace/known_names.json if it exists. There is no built-in
@@ -37,6 +36,12 @@ LUMI_DIR = Path(os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/trans
 _KNOWN_NAMES_PATH = HOME / ".mempalace" / "known_names.json"
 _FALLBACK_KNOWN_PEOPLE = []
 _KNOWN_NAMES_CACHE = None
+
+
+def _default_source_dir() -> Path:
+    """Resolve the default transcript source directory, honoring ~ in env config."""
+    raw = os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts"))
+    return Path(raw).expanduser()
 
 
 def _load_known_names_config(force_reload: bool = False):
@@ -262,7 +267,7 @@ def main():
     )
     args = parser.parse_args()
 
-    src_dir = Path(args.source).expanduser() if args.source else LUMI_DIR
+    src_dir = Path(args.source).expanduser() if args.source else _default_source_dir()
     output_dir = str(Path(args.output_dir).expanduser()) if args.output_dir else None
 
     if args.file:
