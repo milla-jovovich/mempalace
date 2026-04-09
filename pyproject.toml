@@ -26,7 +26,7 @@ classifiers = [
 ]
 dependencies = [
     "chromadb>=0.5.0,<0.7",
-    "pyyaml>=6.0",
+    "pyyaml>=6.0,<7",
 ]
 
 [project.urls]
@@ -76,7 +76,7 @@ markers = [
 source = ["mempalace"]
 
 [tool.coverage.report]
-fail_under = 30
+fail_under = 85
 show_missing = true
 exclude_lines = [
     "if __name__",
