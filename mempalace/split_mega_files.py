@@ -32,9 +32,10 @@ HOME = Path.home()
 LUMI_DIR = Path(os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts")))
 
 # People we know about (for name detection in content)
-# Loaded from ~/.mempalace/known_names.json if it exists, otherwise generic fallback.
+# Loaded from ~/.mempalace/known_names.json if it exists. There is no built-in
+# fallback list because shipping names creates surprising, user-specific output.
 _KNOWN_NAMES_PATH = HOME / ".mempalace" / "known_names.json"
-_FALLBACK_KNOWN_PEOPLE = ["Alice", "Ben", "Riley", "Max", "Sam", "Devon", "Jordan"]
+_FALLBACK_KNOWN_PEOPLE = []
 _KNOWN_NAMES_CACHE = None
 
 
@@ -60,7 +61,7 @@ def _load_known_names_config(force_reload: bool = False):
 
 
 def _load_known_people() -> list:
-    """Load known names from config file, falling back to a generic list."""
+    """Load known names from config file, defaulting to an empty list."""
     data = _load_known_names_config()
     if isinstance(data, list):
         return data
@@ -261,11 +262,11 @@ def main():
     )
     args = parser.parse_args()
 
-    src_dir = Path(args.source) if args.source else LUMI_DIR
-    output_dir = args.output_dir or None  # None = same dir as file
+    src_dir = Path(args.source).expanduser() if args.source else LUMI_DIR
+    output_dir = str(Path(args.output_dir).expanduser()) if args.output_dir else None
 
     if args.file:
-        files = [Path(args.file)]
+        files = [Path(args.file).expanduser()]
     else:
         files = sorted(src_dir.glob("*.txt"))
 

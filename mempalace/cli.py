@@ -34,6 +34,25 @@ from pathlib import Path
 from .config import MempalaceConfig
 
 
+def _first_present(mapping, *keys):
+    """Return the first available key from a mapping."""
+    for key in keys:
+        if key in mapping:
+            return mapping[key]
+    raise KeyError(keys[0])
+
+
+def _normalize_compression_stats(stats):
+    """Accept both current and legacy compression_stats key names."""
+    return {
+        "original_chars": _first_present(stats, "original_chars"),
+        "summary_chars": _first_present(stats, "summary_chars", "compressed_chars"),
+        "original_tokens": _first_present(stats, "original_tokens_est", "original_tokens"),
+        "summary_tokens": _first_present(stats, "summary_tokens_est", "compressed_tokens"),
+        "size_ratio": _first_present(stats, "size_ratio", "ratio"),
+    }
+
+
 def cmd_init(args):
     import json
     from pathlib import Path
@@ -311,14 +330,18 @@ def cmd_compress(args):
 
     total_original = 0
     total_compressed = 0
+    total_original_tokens = 0
+    total_summary_tokens = 0
     compressed_entries = []
 
     for doc, meta, doc_id in zip(docs, metas, ids):
         compressed = dialect.compress(doc, metadata=meta)
-        stats = dialect.compression_stats(doc, compressed)
+        stats = _normalize_compression_stats(dialect.compression_stats(doc, compressed))
 
         total_original += stats["original_chars"]
-        total_compressed += stats["compressed_chars"]
+        total_compressed += stats["summary_chars"]
+        total_original_tokens += stats["original_tokens"]
+        total_summary_tokens += stats["summary_tokens"]
 
         compressed_entries.append((doc_id, compressed, meta, stats))
 
@@ -328,7 +351,7 @@ def cmd_compress(args):
             source = Path(meta.get("source_file", "?")).name
             print(f"  [{wing_name}/{room_name}] {source}")
             print(
-                f"    {stats['original_tokens']}t -> {stats['compressed_tokens']}t ({stats['ratio']:.1f}x)"
+                f"    {stats['original_tokens']}t -> {stats['summary_tokens']}t ({stats['size_ratio']:.1f}x)"
             )
             print(f"    {compressed}")
             print()
@@ -339,8 +362,9 @@ def cmd_compress(args):
             comp_col = client.get_or_create_collection("mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
-                comp_meta["compression_ratio"] = round(stats["ratio"], 1)
+                comp_meta["compression_ratio"] = round(stats["size_ratio"], 1)
                 comp_meta["original_tokens"] = stats["original_tokens"]
+                comp_meta["summary_tokens"] = stats["summary_tokens"]
                 comp_col.upsert(
                     ids=[doc_id],
                     documents=[compressed],
@@ -355,9 +379,9 @@ def cmd_compress(args):
 
     # Summary
     ratio = total_original / max(total_compressed, 1)
-    orig_tokens = Dialect.count_tokens("x" * total_original)
-    comp_tokens = Dialect.count_tokens("x" * total_compressed)
-    print(f"  Total: {orig_tokens:,}t -> {comp_tokens:,}t ({ratio:.1f}x compression)")
+    print(
+        f"  Total: {total_original_tokens:,}t -> {total_summary_tokens:,}t ({ratio:.1f}x compression)"
+    )
     if args.dry_run:
         print("  (dry run -- nothing stored)")
 
@@ -378,7 +402,12 @@ def main():
 
     # init
     p_init = sub.add_parser("init", help="Detect rooms from your folder structure")
-    p_init.add_argument("dir", help="Project directory to set up")
+    p_init.add_argument(
+        "dir",
+        nargs="?",
+        default=".",
+        help="Project directory to set up (default: current directory)",
+    )
     p_init.add_argument(
         "--yes", action="store_true", help="Auto-accept all detected entities (non-interactive)"
     )
