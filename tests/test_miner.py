@@ -1,7 +1,6 @@
 import gc
 import os
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
@@ -10,20 +9,7 @@ import yaml
 
 from mempalace.miner import mine, scan_project
 
-
-def _force_cleanup(path):
-    """Best-effort temp dir removal; ChromaDB may hold file locks on Windows."""
-    try:
-        shutil.rmtree(path)
-    except PermissionError:
-        if sys.platform == "win32":
-            gc.collect()
-            import time
-
-            time.sleep(0.5)
-            shutil.rmtree(path, ignore_errors=True)
-        else:
-            raise
+from conftest import force_cleanup_tempdir as _force_cleanup
 
 
 def write_file(path: Path, content: str):
@@ -292,6 +278,15 @@ def test_detect_room_exact_match_no_substring():
     filepath = Path("/fake/project/visualizeml/chart.tsx")
     result = detect_room(filepath, "", rooms, project_path)
     assert result == "visualizeml", f"Expected visualizeml but got {result}"
+
+    # hyphen-component match: "backend" matches keyword "backend-api"
+    rooms_with_hyphen = [
+        {"name": "api", "description": "API layer", "keywords": ["backend-api"]},
+        {"name": "general", "description": "Catch-all", "keywords": []},
+    ]
+    filepath = Path("/fake/project/backend/server.py")
+    result = detect_room(filepath, "", rooms_with_hyphen, project_path)
+    assert result == "api", f"Expected api but got {result}"
 
     # unrelated folder falls through to general
     filepath = Path("/fake/project/docs/readme.md")

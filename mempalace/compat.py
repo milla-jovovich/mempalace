@@ -8,7 +8,7 @@ def _stdout_supports(chars: str) -> bool:
     try:
         chars.encode(encoding)
         return True
-    except (UnicodeEncodeError, LookupError):
+    except (UnicodeEncodeError, LookupError, TypeError):
         return False
 
 

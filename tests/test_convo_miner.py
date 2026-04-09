@@ -1,25 +1,10 @@
 import gc
 import os
-import sys
 import tempfile
-import shutil
 import chromadb
 from mempalace.convo_miner import mine_convos
 
-
-def _force_cleanup(path):
-    """Best-effort temp dir removal; ChromaDB may hold file locks on Windows."""
-    try:
-        shutil.rmtree(path)
-    except PermissionError:
-        if sys.platform == "win32":
-            import time
-
-            gc.collect()
-            time.sleep(0.5)
-            shutil.rmtree(path, ignore_errors=True)
-        else:
-            raise
+from conftest import force_cleanup_tempdir as _force_cleanup
 
 
 def test_convo_mining():

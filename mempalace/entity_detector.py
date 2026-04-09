@@ -18,6 +18,8 @@ Usage:
 import re
 import os
 from pathlib import Path
+
+from .compat import _stdout_supports
 from collections import defaultdict
 
 
@@ -704,8 +706,6 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
 
 
 def _print_entity_list(entities: list, label: str):
-    from .compat import _stdout_supports
-
     print(f"\n  {label}:")
     if not entities:
         print("    (none detected)")

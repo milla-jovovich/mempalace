@@ -10,8 +10,10 @@ mempalace imports — so that module-level initialisations (e.g.
 instead of the real user profile.
 """
 
+import gc
 import os
 import shutil
+import sys
 import tempfile
 
 # ── Isolate HOME before any mempalace imports ──────────────────────────
@@ -32,6 +34,21 @@ import pytest  # noqa: E402
 
 from mempalace.config import MempalaceConfig  # noqa: E402
 from mempalace.knowledge_graph import KnowledgeGraph  # noqa: E402
+
+
+def force_cleanup_tempdir(path):
+    """Best-effort temp dir removal; ChromaDB may hold file locks on Windows."""
+    try:
+        shutil.rmtree(path)
+    except PermissionError:
+        if sys.platform == "win32":
+            gc.collect()
+            import time
+
+            time.sleep(0.5)
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            raise
 
 
 @pytest.fixture(autouse=True)
