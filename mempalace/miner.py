@@ -393,13 +393,21 @@ def chunk_text(content: str, source_file: str) -> list:
 # =============================================================================
 
 
+_HNSW_METADATA = {
+    "hnsw:batch_size": 50_000,
+    "hnsw:sync_threshold": 50_000,
+}
+
+
 def get_collection(palace_path: str):
     os.makedirs(palace_path, exist_ok=True)
     client = chromadb.PersistentClient(path=palace_path)
     try:
         return client.get_collection("mempalace_drawers")
     except Exception:
-        return client.create_collection("mempalace_drawers")
+        return client.create_collection(
+            "mempalace_drawers", metadata=_HNSW_METADATA
+        )
 
 
 def file_already_mined(collection, source_file: str) -> bool:
@@ -489,21 +497,34 @@ def process_file(
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
         return len(chunks), room
 
-    drawers_added = 0
+    ids = []
+    documents = []
+    metadatas = []
+    now = datetime.now().isoformat()
+    try:
+        mtime = os.path.getmtime(source_file)
+    except OSError:
+        mtime = None
     for chunk in chunks:
-        added = add_drawer(
-            collection=collection,
-            wing=wing,
-            room=room,
-            content=chunk["content"],
-            source_file=source_file,
-            chunk_index=chunk["chunk_index"],
-            agent=agent,
-        )
-        if added:
-            drawers_added += 1
+        drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk['chunk_index'])).encode(), usedforsecurity=False).hexdigest()[:16]}"
+        meta = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file,
+            "chunk_index": chunk["chunk_index"],
+            "added_by": agent,
+            "filed_at": now,
+        }
+        if mtime is not None:
+            meta["source_mtime"] = mtime
+        ids.append(drawer_id)
+        documents.append(chunk["content"])
+        metadatas.append(meta)
 
-    return drawers_added, room
+    if ids:
+        collection.upsert(documents=documents, ids=ids, metadatas=metadatas)
+
+    return len(ids), room
 
 
 # =============================================================================

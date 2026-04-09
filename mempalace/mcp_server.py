@@ -71,7 +71,13 @@ def _get_collection(create=False):
         if _client_cache is None:
             _client_cache = chromadb.PersistentClient(path=_config.palace_path)
         if create:
-            _collection_cache = _client_cache.get_or_create_collection(_config.collection_name)
+            _collection_cache = _client_cache.get_or_create_collection(
+                _config.collection_name,
+                metadata={
+                    "hnsw:batch_size": 50_000,
+                    "hnsw:sync_threshold": 50_000,
+                },
+            )
         elif _collection_cache is None:
             _collection_cache = _client_cache.get_collection(_config.collection_name)
         return _collection_cache
