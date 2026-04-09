@@ -29,6 +29,7 @@ Examples:
 
 import os
 import sys
+import shlex
 import argparse
 from pathlib import Path
 
@@ -243,10 +244,17 @@ def cmd_instructions(args):
 
 def cmd_mcp(args):
     """Show how to wire MemPalace into MCP-capable hosts."""
+    palace_flag = "[--palace /path/to/palace]"
+    if args.palace:
+        resolved_palace = str(Path(args.palace).expanduser())
+        palace_flag = f"--palace {shlex.quote(resolved_palace)}"
+
+    server_cmd = f"python -m mempalace.mcp_server {palace_flag}"
+
     print("MemPalace MCP quick setup:")
-    print("  claude mcp add mempalace -- python -m mempalace.mcp_server")
+    print(f"  claude mcp add mempalace -- {server_cmd}")
     print("\nRun the server directly:")
-    print("  python -m mempalace.mcp_server")
+    print(f"  {server_cmd}")
 
 
 def cmd_compress(args):
