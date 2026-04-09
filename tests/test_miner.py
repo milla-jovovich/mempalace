@@ -1,7 +1,6 @@
 import os
 import shutil
 import tempfile
-import time
 from pathlib import Path
 
 import chromadb
@@ -240,10 +239,10 @@ def test_file_already_mined_check_mtime():
         # Already mined (mtime matches)
         assert file_already_mined(col, test_file, check_mtime=True) is True
 
-        # Modify file so mtime changes
-        time.sleep(0.1)
+        # Modify file and force a different mtime (Windows has low mtime resolution)
         with open(test_file, "w") as f:
             f.write("modified content")
+        os.utime(test_file, (mtime + 10, mtime + 10))
 
         # Still mined without mtime check
         assert file_already_mined(col, test_file) is True
@@ -258,4 +257,6 @@ def test_file_already_mined_check_mtime():
         )
         assert file_already_mined(col, "/fake/no_mtime.txt", check_mtime=True) is False
     finally:
-        shutil.rmtree(tmpdir)
+        # Release ChromaDB file handles before cleanup (required on Windows)
+        del col, client
+        shutil.rmtree(tmpdir, ignore_errors=True)
