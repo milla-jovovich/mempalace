@@ -1,6 +1,7 @@
 """Tests for mempalace.cli — the main CLI dispatcher."""
 
 import argparse
+import os
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -411,6 +412,25 @@ def test_main_mcp_serve_palace_before_subcommand():
         mock_cmd.assert_called_once()
         args = mock_cmd.call_args[0][0]
         assert args.palace == "/global/palace"
+
+
+def test_cmd_mcp_serve_expands_tilde():
+    """cmd_mcp_serve must expand ~ in --palace for non-shell launchers (MCP JSON configs)."""
+    args = argparse.Namespace(palace="~/custom/palace")
+    captured_argv = None
+
+    def capture_main():
+        nonlocal captured_argv
+        captured_argv = sys.argv[:]
+
+    mock_mcp = MagicMock()
+    mock_mcp.main = capture_main
+    with patch.dict("sys.modules", {"mempalace.mcp_server": mock_mcp}):
+        cmd_mcp_serve(args)
+
+    expected = os.path.expanduser("~/custom/palace")
+    assert captured_argv == ["mempalace-mcp-server", "--palace", expected]
+    assert "~" not in expected
 
 
 # ── cmd_repair ─────────────────────────────────────────────────────────
