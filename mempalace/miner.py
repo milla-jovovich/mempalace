@@ -637,10 +637,8 @@ def mine(
                 total_drawers += drawers
                 room_counts[room] += 1
     else:
-        # Issue 6: show progress during pre-filter so large repos don't appear to hang
         print(f"  Checking {len(files)} files for changes...")
         pending = [fp for fp in files if not file_already_mined(collection, str(fp), check_mtime=True)]
-        # Issue 5: files_skipped = already-mined + too-small/unreadable (result is None)
         already_mined = len(files) - len(pending)
 
         batch_ids, batch_docs, batch_metas = [], [], []
@@ -654,7 +652,7 @@ def mine(
                 batch_docs.clear()
                 batch_metas.clear()
 
-        # Issue 3: use try/finally so flush_batch() always runs even if a future raises
+        # flush_batch() runs even if a future raises
         try:
             with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 futures = {
