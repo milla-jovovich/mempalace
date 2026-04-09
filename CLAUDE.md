@@ -141,6 +141,30 @@ Add `tests/test_palace_db.py` covering:
 - Follow existing code style — no type annotation style changes, no formatter
   changes unless the file already uses one.
 
+## Development Workflow
+
+```bash
+# Run tests
+uv run python -m pytest tests/ -q --ignore=tests/benchmarks
+
+# Lint and format (run before every commit)
+uv run ruff check --fix <changed files>
+uv run ruff format <changed files>
+
+# Sync upstream changes
+git fetch upstream   # upstream = git@github.com:milla-jovovich/mempalace.git
+git merge upstream/main
+# Conflicts in version.py / pyproject.toml / .claude-plugin/*.json / .codex-plugin/plugin.json
+# are always version-number-only — resolve with:
+git checkout --theirs <conflicted files> && git add <conflicted files>
+```
+
+## Commit Rules
+
+- One commit per logical change (feat, fix, test, ci, docs, bench, chore)
+- Run ruff check + format on staged files before every commit — no exceptions
+- `tests/benchmarks/` = upstream's benchmark suite (do not edit); `benchmarks/` = our scripts
+
 ## Verification
 
 After implementation, verify manually:
@@ -163,5 +187,5 @@ MEMPALACE_CHROMA_HOST=localhost mempalace search "test"
 This fork is intended to be contributed back upstream once the architecture
 stabilises. Keep the diff minimal and the commit history clean (one logical
 commit per step above, or squash to a single clean commit before PR).
-The upstream maintainer (bensig) has indicated preference for small,
+The upstream maintainer has indicated preference for small,
 single-concern PRs.
