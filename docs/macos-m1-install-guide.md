@@ -158,9 +158,10 @@ mempalace mine ~/projects/my-project
 ### Multiple repos concurrently (safe pattern)
 
 **Key rule**: never run two processes against the same palace simultaneously. Each
-concurrent mine must have its own `--palace` directory. The ChromaDB HNSW index does not
-support concurrent writes and will crash (SIGSEGV) if two processes write to the same
-index at the same time.
+concurrent mine must have its own `--palace` directory. Chroma's local persistent store
+is backed by SQLite, which only allows one writer at a time — concurrent writers can
+produce lock errors, corrupted state, or crashes in the HNSW index. There is no safe
+way to share a single palace directory across processes; use separate directories.
 
 `init` does not need `--palace` — it only writes `mempalace.yaml` to the source directory.
 Only `mine` (and other read/write commands) need `--palace`.
