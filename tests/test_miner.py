@@ -1,5 +1,7 @@
+import gc
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -7,6 +9,21 @@ import chromadb
 import yaml
 
 from mempalace.miner import mine, scan_project
+
+
+def _force_cleanup(path):
+    """Best-effort temp dir removal; ChromaDB may hold file locks on Windows."""
+    try:
+        shutil.rmtree(path)
+    except PermissionError:
+        if sys.platform == "win32":
+            gc.collect()
+            import time
+
+            time.sleep(0.5)
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            raise
 
 
 def write_file(path: Path, content: str):
@@ -46,8 +63,10 @@ def test_project_mining():
         client = chromadb.PersistentClient(path=str(palace_path))
         col = client.get_collection("mempalace_drawers")
         assert col.count() > 0
+        del col, client
+        gc.collect()
     finally:
-        shutil.rmtree(tmpdir)
+        _force_cleanup(tmpdir)
 
 
 def test_scan_project_respects_gitignore():
@@ -206,3 +225,34 @@ def test_scan_project_skip_dirs_still_apply_without_override():
         assert scanned_files(project_root, respect_gitignore=False) == ["main.py"]
     finally:
         shutil.rmtree(tmpdir)
+
+
+def test_detect_room_exact_match_no_substring():
+    """Short folder names must not match room names via substring.
+
+    Regression test: a folder named 'ml/' was matching a room called
+    'visualizeml' because the old logic used ``part in room_name``.
+    """
+    from mempalace.miner import detect_room
+
+    rooms = [
+        {"name": "visualizeml", "description": "ML visualizations", "keywords": ["visualizeml"]},
+        {"name": "ml-infra", "description": "ML infrastructure", "keywords": ["ml-infra", "ml"]},
+        {"name": "general", "description": "Catch-all", "keywords": []},
+    ]
+    project_path = Path("/fake/project")
+
+    # ml/ folder should match ml-infra (exact keyword 'ml'), NOT visualizeml
+    filepath = Path("/fake/project/ml/village.ai/train.py")
+    result = detect_room(filepath, "", rooms, project_path)
+    assert result == "ml-infra", f"Expected ml-infra but got {result}"
+
+    # visualizeml/ folder should still match visualizeml (exact name)
+    filepath = Path("/fake/project/visualizeml/chart.tsx")
+    result = detect_room(filepath, "", rooms, project_path)
+    assert result == "visualizeml", f"Expected visualizeml but got {result}"
+
+    # unrelated folder falls through to general
+    filepath = Path("/fake/project/docs/readme.md")
+    result = detect_room(filepath, "", rooms, project_path)
+    assert result == "general", f"Expected general but got {result}"

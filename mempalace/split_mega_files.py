@@ -28,6 +28,8 @@ import os
 import re
 from pathlib import Path
 
+from .compat import CHECKMARK as _CHECKMARK
+
 HOME = Path.home()
 LUMI_DIR = Path(os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts")))
 
@@ -220,7 +222,7 @@ def split_file(filepath, output_dir, dry_run=False):
             print(f"  [{i + 1}/{len(boundaries) - 1}] {name}  ({len(chunk)} lines)")
         else:
             out_path.write_text("".join(chunk))
-            print(f"  ✓ {name}  ({len(chunk)} lines)")
+            print(f"  {_CHECKMARK} {name}  ({len(chunk)} lines)")
 
         written.append(out_path)
 

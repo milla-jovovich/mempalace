@@ -17,6 +17,8 @@ from collections import defaultdict
 
 import chromadb
 
+from .compat import CHECKMARK as _CHECKMARK
+
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
@@ -312,16 +314,19 @@ def detect_room(filepath: Path, content: str, rooms: list, project_path: Path) -
     content_lower = content[:2000].lower()
 
     # Priority 1: folder path matches room name or keywords
+    # Uses exact match to avoid false positives from short directory names
+    # (e.g. "ml/" matching room "visualizeml" via substring)
     path_parts = relative.replace("\\", "/").split("/")
     for part in path_parts[:-1]:  # skip filename itself
         for room in rooms:
             candidates = [room["name"].lower()] + [k.lower() for k in room.get("keywords", [])]
-            if any(part == c or c in part or part in c for c in candidates):
+            if any(part == c for c in candidates):
                 return room["name"]
 
-    # Priority 2: filename matches room name
+    # Priority 2: filename matches room name or keywords (exact match)
     for room in rooms:
-        if room["name"].lower() in filename or filename in room["name"].lower():
+        candidates = [room["name"].lower()] + [k.lower() for k in room.get("keywords", [])]
+        if any(filename == c for c in candidates):
             return room["name"]
 
     # Priority 3: keyword scoring from room keywords + name
@@ -638,7 +643,7 @@ def mine(
             room = detect_room(filepath, "", rooms, project_path)
             room_counts[room] += 1
             if not dry_run:
-                print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+                print(f"  {_CHECKMARK} [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
 
     print(f"\n{'=' * 55}")
     print("  Done.")

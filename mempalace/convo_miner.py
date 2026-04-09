@@ -17,6 +17,7 @@ from collections import defaultdict
 
 import chromadb
 
+from .compat import CHECKMARK as _CHECKMARK
 from .normalize import normalize
 
 
@@ -380,7 +381,7 @@ def mine_convos(
                     raise
 
         total_drawers += drawers_added
-        print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
+        print(f"  {_CHECKMARK} [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
 
     print(f"\n{'=' * 55}")
     print("  Done.")
