@@ -244,17 +244,23 @@ def cmd_instructions(args):
 
 def cmd_mcp(args):
     """Show how to wire MemPalace into MCP-capable hosts."""
-    palace_flag = "[--palace /path/to/palace]"
+    base_server_cmd = "python -m mempalace.mcp_server"
+
     if args.palace:
         resolved_palace = str(Path(args.palace).expanduser())
-        palace_flag = f"--palace {shlex.quote(resolved_palace)}"
-
-    server_cmd = f"python -m mempalace.mcp_server {palace_flag}"
+        server_cmd = f"{base_server_cmd} --palace {shlex.quote(resolved_palace)}"
+    else:
+        server_cmd = base_server_cmd
 
     print("MemPalace MCP quick setup:")
     print(f"  claude mcp add mempalace -- {server_cmd}")
     print("\nRun the server directly:")
     print(f"  {server_cmd}")
+
+    if not args.palace:
+        print("\nOptional custom palace:")
+        print(f"  claude mcp add mempalace -- {base_server_cmd} --palace /path/to/palace")
+        print(f"  {base_server_cmd} --palace /path/to/palace")
 
 
 def cmd_compress(args):
