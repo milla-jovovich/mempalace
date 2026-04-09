@@ -9,7 +9,7 @@
   "commands": [],
   "mcpServers": {
     "mempalace": {
-      "command": "python3",
+      "command": "${env:OS == 'Windows_NT' ? 'py' : 'python3'}",
       "args": [
         "-m",
         "mempalace.mcp_server"
