@@ -417,7 +417,7 @@ def process_file(
 
     # Skip if already filed
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file):
+    if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
         return 0, None
 
     try:

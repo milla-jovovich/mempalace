@@ -57,7 +57,6 @@ class KnowledgeGraph:
         conn = self._conn()
         conn.executescript("""
             PRAGMA journal_mode=WAL;
-            PRAGMA foreign_keys=ON;
 
             CREATE TABLE IF NOT EXISTS entities (
                 id TEXT PRIMARY KEY,
@@ -91,7 +90,7 @@ class KnowledgeGraph:
 
     def _conn(self):
         if self._connection is None:
-            self._connection = sqlite3.connect(self.db_path, timeout=10)
+            self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
             self._connection.execute("PRAGMA journal_mode=WAL")
             self._connection.row_factory = sqlite3.Row
         return self._connection
@@ -101,9 +100,6 @@ class KnowledgeGraph:
         if self._connection is not None:
             self._connection.close()
             self._connection = None
-
-    def __del__(self):
-        self.close()
 
     def _entity_id(self, name: str) -> str:
         return name.lower().replace(" ", "_").replace("'", "")

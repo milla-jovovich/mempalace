@@ -74,6 +74,10 @@ _collection_cache = None
 
 _WAL_DIR = Path(os.path.expanduser("~/.mempalace/wal"))
 _WAL_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    _WAL_DIR.chmod(0o700)
+except (OSError, NotImplementedError):
+    pass
 _WAL_FILE = _WAL_DIR / "write_log.jsonl"
 
 
@@ -88,6 +92,10 @@ def _wal_log(operation: str, params: dict, result: dict = None):
     try:
         with open(_WAL_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, default=str) + "\n")
+        try:
+            _WAL_FILE.chmod(0o600)
+        except (OSError, NotImplementedError):
+            pass
     except Exception as e:
         logger.error(f"WAL write failed: {e}")
 
@@ -136,7 +144,7 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -193,7 +201,7 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -208,7 +216,7 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"]}
+        kwargs = {"include": ["metadatas"], "limit": 10000}
         if wing:
             kwargs["where"] = {"wing": wing}
         all_meta = col.get(**kwargs)["metadatas"]
@@ -226,7 +234,7 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -517,7 +525,6 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
                     "agent": agent_name,
                     "filed_at": now.isoformat(),
                     "date": now.strftime("%Y-%m-%d"),
-                    "raw_aaak": entry,
                 }
             ],
         )
