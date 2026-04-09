@@ -47,6 +47,9 @@ SKIP_DIRS = {
     ".venv",
     "venv",
     "env",
+    ".pixi",
+    ".conda",
+    ".virtualenvs",
     "dist",
     "build",
     ".next",
@@ -206,6 +209,59 @@ def load_gitignore_matcher(dir_path: Path, cache: dict):
     if dir_path not in cache:
         cache[dir_path] = GitignoreMatcher.from_dir(dir_path)
     return cache[dir_path]
+
+
+def load_mempalaceignore_matcher(project_path: Path) -> "GitignoreMatcher | None":
+    """Load a .mempalaceignore file from the project root.
+
+    The file uses the same syntax as .gitignore and is applied on top of
+    the normal .gitignore rules, giving users a way to exclude paths that
+    are not in .gitignore (e.g. large data directories they still want
+    tracked by git but not indexed by MemPalace).
+    """
+    ignore_path = project_path / ".mempalaceignore"
+    if not ignore_path.is_file():
+        return None
+
+    try:
+        lines = ignore_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return None
+
+    rules = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        negated = line.startswith("!")
+        if negated:
+            line = line[1:]
+
+        anchored = line.startswith("/")
+        if anchored:
+            line = line.lstrip("/")
+
+        dir_only = line.endswith("/")
+        if dir_only:
+            line = line.rstrip("/")
+
+        if not line:
+            continue
+
+        rules.append(
+            {
+                "pattern": line,
+                "anchored": anchored,
+                "dir_only": dir_only,
+                "negated": negated,
+            }
+        )
+
+    if not rules:
+        return None
+
+    return GitignoreMatcher(project_path, rules)
 
 
 def is_gitignored(path: Path, matchers: list, is_dir: bool = False) -> bool:
@@ -523,6 +579,9 @@ def scan_project(
     matcher_cache = {}
     include_paths = normalize_include_paths(include_ignored)
 
+    # Load .mempalaceignore from project root (same syntax as .gitignore)
+    mempalace_ignore_matcher = load_mempalaceignore_matcher(project_path)
+
     for root, dirs, filenames in os.walk(project_path):
         root_path = Path(root)
 
@@ -549,6 +608,14 @@ def scan_project(
                 if is_force_included(root_path / d, project_path, include_paths)
                 or not is_gitignored(root_path / d, active_matchers, is_dir=True)
             ]
+        # Apply .mempalaceignore rules to directories
+        if mempalace_ignore_matcher is not None:
+            dirs[:] = [
+                d
+                for d in dirs
+                if is_force_included(root_path / d, project_path, include_paths)
+                or not mempalace_ignore_matcher.matches(root_path / d, is_dir=True)
+            ]
 
         for filename in filenames:
             filepath = root_path / filename
@@ -561,6 +628,10 @@ def scan_project(
                 continue
             if respect_gitignore and active_matchers and not force_include:
                 if is_gitignored(filepath, active_matchers, is_dir=False):
+                    continue
+            # Apply .mempalaceignore rules to files
+            if mempalace_ignore_matcher is not None and not force_include:
+                if mempalace_ignore_matcher.matches(filepath, is_dir=False):
                     continue
             files.append(filepath)
     return files
