@@ -31,6 +31,7 @@ SKIP_DIRS = {
     ".eggs",
     "htmlcov",
     "target",
+    ".pnpm-store",
 }
 
 
