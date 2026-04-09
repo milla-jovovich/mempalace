@@ -17,6 +17,7 @@ from collections import defaultdict
 
 import chromadb
 
+from .config import DRAWER_HNSW_METADATA
 from .normalize import normalize
 
 
@@ -217,13 +218,7 @@ def get_collection(palace_path: str):
     try:
         return client.get_collection("mempalace_drawers")
     except Exception:
-        # hnsw:space=cosine is required because searcher.py computes
-        # similarity = 1 - distance, which only yields a meaningful score
-        # in the [0, 1] range when the underlying distance is cosine.
-        # See issue #218.
-        return client.create_collection(
-            "mempalace_drawers", metadata={"hnsw:space": "cosine"}
-        )
+        return client.create_collection("mempalace_drawers", metadata=DRAWER_HNSW_METADATA)
 
 
 def file_already_mined(collection, source_file: str) -> bool:

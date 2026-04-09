@@ -11,6 +11,11 @@ from pathlib import Path
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
 
+# hnsw:space=cosine is required because searcher.py computes
+# similarity = 1 - distance, which only yields a meaningful score in [0, 1]
+# when the underlying distance is cosine. Issue #218.
+DRAWER_HNSW_METADATA = {"hnsw:space": "cosine"}
+
 DEFAULT_TOPIC_WINGS = [
     "emotions",
     "consciousness",

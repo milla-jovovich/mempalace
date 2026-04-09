@@ -161,6 +161,17 @@ class TestReadTools:
         result = tool_status()
         assert "error" in result
 
+    def test_get_collection_create_uses_cosine_metadata(self, monkeypatch, config, palace_path, kg):
+        """Issue #218: MCP-first palaces (no prior `mempalace mine`) must still
+        get hnsw:space=cosine, otherwise similarity = 1 - distance returns
+        negative L2 scores."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import _get_collection
+
+        col = _get_collection(create=True)
+        assert col is not None
+        assert col.metadata.get("hnsw:space") == "cosine"
+
 
 # ── Search Tool ─────────────────────────────────────────────────────────
 

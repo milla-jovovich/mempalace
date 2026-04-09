@@ -25,7 +25,7 @@ import logging
 import hashlib
 from datetime import datetime
 
-from .config import MempalaceConfig
+from .config import DRAWER_HNSW_METADATA, MempalaceConfig
 from .version import __version__
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
@@ -71,7 +71,10 @@ def _get_collection(create=False):
         if _client_cache is None:
             _client_cache = chromadb.PersistentClient(path=_config.palace_path)
         if create:
-            _collection_cache = _client_cache.get_or_create_collection(_config.collection_name)
+            # Issue #218: cosine required so similarity = 1 - distance is meaningful.
+            _collection_cache = _client_cache.get_or_create_collection(
+                _config.collection_name, metadata=DRAWER_HNSW_METADATA
+            )
         elif _collection_cache is None:
             _collection_cache = _client_cache.get_collection(_config.collection_name)
         return _collection_cache

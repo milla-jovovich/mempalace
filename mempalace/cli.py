@@ -31,7 +31,7 @@ import sys
 import argparse
 from pathlib import Path
 
-from .config import MempalaceConfig
+from .config import DRAWER_HNSW_METADATA, MempalaceConfig
 
 
 def cmd_init(args):
@@ -210,7 +210,8 @@ def cmd_repair(args):
 
     print("  Rebuilding collection...")
     client.delete_collection("mempalace_drawers")
-    new_col = client.create_collection("mempalace_drawers")
+    # Issue #218: preserve cosine metric on rebuild, don't silently revert to L2.
+    new_col = client.create_collection("mempalace_drawers", metadata=DRAWER_HNSW_METADATA)
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
