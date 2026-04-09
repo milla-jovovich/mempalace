@@ -1724,6 +1724,20 @@ def _restore_stdout():
 
 def main():
     _restore_stdout()
+
+    # On Windows, Python defaults stdin/stdout to the system ANSI codepage
+    # (e.g. cp1251 or cp1252).  MCP clients send UTF-8 JSON, so non-ASCII
+    # characters arrive as mojibake with surrogate escapes and eventually
+    # break the HuggingFace tokenizer inside ChromaDB's embedding function.
+    # Reconfiguring to UTF-8 here fixes it for every downstream reader.
+    if sys.platform == "win32":
+        try:
+            sys.stdin.reconfigure(encoding="utf-8", errors="strict")
+            sys.stdout.reconfigure(encoding="utf-8", errors="strict")
+            sys.stderr.reconfigure(encoding="utf-8", errors="strict")
+        except Exception as e:
+            logger.warning("Could not reconfigure stdio to UTF-8: %s", e)
+
     logger.info("MemPalace MCP Server starting...")
     while True:
         try:
