@@ -145,6 +145,40 @@ class TestZettelEncoding:
         assert "002" in result
 
 
+class TestCompressQuery:
+    def test_compress_query_keyword_rich(self):
+        """Keyword-rich question produces output containing topic words."""
+        d = Dialect()
+        result = d.compress_query("Where do we do yoga in the morning?")
+        assert "yoga" in result
+
+    def test_compress_query_with_known_entity(self):
+        """Known entity name is encoded as its AAAK code in the query output."""
+        d = Dialect(entities={"Alice": "ALC"})
+        result = d.compress_query("What did Alice say about the project?")
+        assert "ALC" in result
+
+    def test_compress_query_sparse_falls_back_to_raw(self):
+        """Sparse question with no extractable content returns the original string."""
+        d = Dialect()
+        question = "Why?"
+        result = d.compress_query(question)
+        assert result == question
+
+    def test_compress_query_aaak_format_for_rich_input(self):
+        """Keyword-rich question produces AAAK pipe-separated format."""
+        d = Dialect()
+        result = d.compress_query("What programming language should I use for my machine learning project?")
+        assert "|" in result
+
+    def test_compress_query_no_quoted_fragment(self):
+        """compress_query never includes a quoted key sentence — queries are not documents."""
+        import re
+        d = Dialect()
+        result = d.compress_query("Where did we go for dinner last Tuesday?")
+        assert not re.search(r'"[^"]+"', result)
+
+
 class TestDecode:
     def test_decode_roundtrip(self):
         d = Dialect()

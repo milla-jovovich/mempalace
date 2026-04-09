@@ -607,6 +607,31 @@ class Dialect:
 
         return "\n".join(lines)
 
+    def compress_query(self, text: str) -> str:
+        """
+        Encode a question into lightweight AAAK format for symmetric retrieval.
+
+        Extracts entity codes and topic keywords only — no emotions, flags, or
+        key sentences (questions don't have those). Keeps query and stored
+        documents in the same representational space for ChromaDB, avoiding the
+        vocabulary mismatch that occurs when raw natural language is compared
+        against AAAK-compressed documents.
+
+        Falls back to raw text if the question is too sparse to compress
+        meaningfully (avoids producing useless 0:???|misc output that would
+        be worse than the original question for retrieval).
+        """
+        entities = self._detect_entities_in_text(text)
+        entity_str = "+".join(entities[:3]) if entities else "???"
+        topics = self._extract_topics(text)
+
+        # Fallback: if we can't extract anything meaningful, raw text retrieves better
+        if not topics and entity_str == "???":
+            return text
+
+        topic_str = "_".join(topics[:3]) if topics else "misc"
+        return f"0:{entity_str}|{topic_str}"
+
     # === ZETTEL-BASED ENCODING (original format, kept for compatibility) ===
 
     def extract_key_quote(self, zettel: dict) -> str:

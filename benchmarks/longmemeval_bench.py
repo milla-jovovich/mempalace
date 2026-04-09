@@ -244,8 +244,8 @@ def build_palace_and_retrieve(entry, granularity="session", n_results=50):
 def build_palace_and_retrieve_aaak(entry, granularity="session", n_results=50):
     """
     AAAK mode: compress each session/turn with AAAK dialect before ingesting.
-    Query still uses raw question text — tests whether compressed representations
-    retain enough semantic signal for retrieval.
+    Query is also compressed with compress_query() for symmetric retrieval —
+    both query and documents share the same AAAK representational space.
     """
     from mempalace.dialect import Dialect
 
@@ -295,8 +295,8 @@ def build_palace_and_retrieve_aaak(entry, granularity="session", n_results=50):
         ],
     )
 
-    # Query with raw question (not compressed)
-    query = entry["question"]
+    # Query with compressed question for symmetric AAAK retrieval
+    query = dialect.compress_query(entry["question"])
     results = collection.query(
         query_texts=[query],
         n_results=min(n_results, len(corpus)),
