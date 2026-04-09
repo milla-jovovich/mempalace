@@ -412,6 +412,7 @@ def process_file(
     rooms: list,
     agent: str,
     dry_run: bool,
+    palace_path: str = None,
 ) -> tuple:
     """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
 
@@ -450,7 +451,49 @@ def process_file(
         if added:
             drawers_added += 1
 
+    # Extract and store KG triples if NLP is enabled
+    _extract_triples_if_enabled(content, source_file, palace_path=palace_path)
+
     return drawers_added, room
+
+
+def _extract_triples_if_enabled(content: str, source_file: str, palace_path: str = None):
+    """Extract KG triples from content using NLP provider if enabled."""
+    try:
+        from mempalace.nlp_config import NLPConfig
+
+        config = NLPConfig.resolve()
+        if not config.has("triples"):
+            return
+
+        from mempalace.nlp_providers.registry import get_registry
+
+        registry = get_registry()
+        triples = registry.extract_triples(content)
+        if not triples:
+            return
+
+        from mempalace.knowledge_graph import KnowledgeGraph
+
+        db_path = None
+        if palace_path:
+            db_path = os.path.join(palace_path, "knowledge_graph.sqlite3")
+        kg = KnowledgeGraph(db_path=db_path)
+        for triple in triples:
+            subject = triple.get("subject", "")
+            predicate = triple.get("predicate", "")
+            obj = triple.get("object", "")
+            confidence = triple.get("confidence", 0.5)
+            if subject and predicate and obj:
+                kg.add_triple(
+                    subject=subject,
+                    predicate=predicate,
+                    obj=obj,
+                    confidence=confidence,
+                    source_file=source_file,
+                )
+    except Exception:
+        pass  # NLP triple extraction is best-effort
 
 
 # =============================================================================
@@ -586,6 +629,7 @@ def mine(
             rooms=rooms,
             agent=agent,
             dry_run=dry_run,
+            palace_path=palace_path,
         )
         if drawers == 0 and not dry_run:
             files_skipped += 1
