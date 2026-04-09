@@ -232,6 +232,31 @@ class MempalaceConfig:
         with open(wing_config_path, "w", encoding="utf-8") as f:
             json.dump(wing_config, f, indent=2, ensure_ascii=False)
 
+    # ── ★ ここに追加 ──
+
+    @property
+    def config_dir(self):
+        """Public access to the config directory path."""
+        return self._config_dir
+
+    def load_wing_config(self):
+        """Load wing_config.json and return as dict."""
+        wing_config_path = self._config_dir / "wing_config.json"
+        if wing_config_path.exists():
+            try:
+                with open(wing_config_path) as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {}
+
+    def save_wing_config(self, wing_config):
+        """Save wing_config.json."""
+        self._config_dir.mkdir(parents=True, exist_ok=True)
+        wing_config_path = self._config_dir / "wing_config.json"
+        with open(wing_config_path, "w") as f:
+            json.dump(wing_config, f, indent=2)
+
     def init(self, root_dir=None):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)

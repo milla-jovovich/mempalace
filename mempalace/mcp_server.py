@@ -225,6 +225,7 @@ IGNORE_DIRS = {
     ".idea", ".vs", ".vscode",
 }
 
+# Cache for discovered wings — avoids repeated filesystem scans
 _discovered_wings_cache = None
 
 
@@ -250,6 +251,9 @@ def _sync_wings_from_root(force=False):
 
     Called once on server startup. Results are cached so subsequent
     calls (e.g. from tool_status) are free unless force=True.
+
+    New folders become wings automatically. Deleted folders are left alone
+    (memories are preserved).
     """
     global _discovered_wings_cache
 
@@ -364,12 +368,11 @@ def _sanitize_optional_name(value: str = None, field_name: str = "name") -> str:
 
 # ==================== READ TOOLS ====================
 
-
-
 def tool_status():
     _sync_wings_from_root(force=False)
     col = _get_collection()
     if not col:
+
 
         return _no_palace()
     count = col.count()
