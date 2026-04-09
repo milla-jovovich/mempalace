@@ -168,6 +168,11 @@ class KnowledgeGraph:
         """
         Add a relationship triple: subject → predicate → object.
 
+        Examples:
+            add_triple("Max", "child_of", "Alice", valid_from="2015-04-01")
+            add_triple("Max", "does", "swimming", valid_from="2025-01-01")
+            add_triple("Alice", "worried_about", "Max injury", valid_from="2026-01", valid_to="2026-02")
+
         Returns the triple id string.
 
         If a conflicting active fact exists for a single-valued predicate,
@@ -393,6 +398,14 @@ class KnowledgeGraph:
         Seed the knowledge graph from a provided entity facts mapping.
         This bootstraps the graph with known ground truth.
         """
+
+        def _seed_triple(*args, **kwargs):
+            try:
+                self.add_triple(*args, **kwargs)
+            except KnowledgeConflictError:
+                return None
+            return True
+
         for key, facts in entity_facts.items():
             name = facts.get("full_name", key.capitalize())
             etype = facts.get("type", "person")
@@ -408,30 +421,28 @@ class KnowledgeGraph:
             # Relationships
             parent = facts.get("parent")
             if parent:
-                self.add_triple(
-                    name, "child_of", parent.capitalize(), valid_from=facts.get("birthday")
-                )
+                _seed_triple(name, "child_of", parent.capitalize(), valid_from=facts.get("birthday"))
 
             partner = facts.get("partner")
             if partner:
-                self.add_triple(name, "married_to", partner.capitalize())
+                _seed_triple(name, "married_to", partner.capitalize())
 
             relationship = facts.get("relationship", "")
             if relationship == "daughter":
-                self.add_triple(
+                _seed_triple(
                     name,
                     "is_child_of",
                     facts.get("parent", "").capitalize() or name,
                     valid_from=facts.get("birthday"),
                 )
             elif relationship == "husband":
-                self.add_triple(name, "is_partner_of", facts.get("partner", name).capitalize())
+                _seed_triple(name, "is_partner_of", facts.get("partner", name).capitalize())
             elif relationship == "brother":
-                self.add_triple(name, "is_sibling_of", facts.get("sibling", name).capitalize())
+                _seed_triple(name, "is_sibling_of", facts.get("sibling", name).capitalize())
             elif relationship == "dog":
-                self.add_triple(name, "is_pet_of", facts.get("owner", name).capitalize())
+                _seed_triple(name, "is_pet_of", facts.get("owner", name).capitalize())
                 self.add_entity(name, "animal")
 
             # Interests
             for interest in facts.get("interests", []):
-                self.add_triple(name, "loves", interest.capitalize(), valid_from="2025-01-01")
+                _seed_triple(name, "loves", interest.capitalize(), valid_from="2025-01-01")

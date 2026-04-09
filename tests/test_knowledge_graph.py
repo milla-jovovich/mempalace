@@ -5,6 +5,8 @@ Covers: entity CRUD, triple CRUD, temporal queries, invalidation,
 timeline, stats, and edge cases (duplicate triples, ID collisions).
 """
 
+import pytest
+
 from mempalace.knowledge_graph import KnowledgeConflictError
 
 
@@ -44,11 +46,9 @@ class TestTripleOperations:
     def test_conflicting_single_value_triple_raises(self, kg):
         tid = kg.add_triple("Alice", "works_at", "Acme")
         assert tid.startswith("t_alice_works_at_acme_")
-        try:
+        with pytest.raises(KnowledgeConflictError) as exc_info:
             kg.add_triple("Alice", "works_at", "NewCo")
-            assert False, "Expected KnowledgeConflictError"
-        except KnowledgeConflictError as exc:
-            assert exc.conflicts[0]["object"] == "Acme"
+        assert exc_info.value.conflicts[0]["object"] == "Acme"
 
     def test_invalidated_triple_allows_re_add(self, kg):
         tid1 = kg.add_triple("Alice", "works_at", "Acme")
