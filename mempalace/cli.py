@@ -17,6 +17,10 @@ Commands:
     mempalace mcp                         Show MCP setup command
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
+    mempalace backup                      Backup the palace
+    mempalace backup --zip                Backup as zip archive
+    mempalace export                      Export to JSONL (git-friendly)
+    mempalace import <dir>                Import JSONL into palace
     mempalace status                      Show what's been filed
 
 Examples:
@@ -67,6 +71,10 @@ def cmd_init(args):
 
 def cmd_mine(args):
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+
+    if getattr(args, "backup", False):
+        from .backup import backup_palace
+        backup_palace(palace_path=palace_path, zip_mode=False, max_backups=5)
     include_ignored = []
     for raw in args.include_ignored or []:
         include_ignored.extend(part.strip() for part in raw.split(",") if part.strip())
@@ -264,6 +272,39 @@ def cmd_mcp(args):
         print(f"  {base_server_cmd} --palace /path/to/palace")
 
 
+
+def cmd_backup(args):
+    """Create a timestamped backup of the palace."""
+    from .backup import backup_palace
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    print()
+    backup_palace(
+        palace_path=palace_path,
+        zip_mode=args.zip,
+        max_backups=args.max_backups,
+    )
+
+
+def cmd_export(args):
+    """Export palace drawers to JSONL files organized by wing/room."""
+    from .backup import export_palace
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    output_dir = args.output or os.path.join(os.path.dirname(palace_path), "export")
+    print()
+    export_palace(palace_path=palace_path, output_dir=output_dir)
+
+
+def cmd_import(args):
+    """Import JSONL drawers into the palace (merge, deduplicate)."""
+    from .backup import import_palace
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    print()
+    import_palace(palace_path=palace_path, input_dir=args.input)
+
+
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
     import chromadb
@@ -437,6 +478,9 @@ def main():
         "--dry-run", action="store_true", help="Show what would be filed without filing"
     )
     p_mine.add_argument(
+        "--backup", action="store_true", help="Create a backup before mining"
+    )
+    p_mine.add_argument(
         "--extract",
         choices=["exchange", "general"],
         default="exchange",
@@ -530,6 +574,19 @@ def main():
         help="Show MCP setup command for connecting MemPalace to your AI client",
     )
 
+    # backup
+    p_backup = sub.add_parser("backup", help="Create a timestamped backup of the palace")
+    p_backup.add_argument("--zip", action="store_true", help="Create a zip archive instead of directory copy")
+    p_backup.add_argument("--max-backups", type=int, default=5, help="Max backups to retain (default: 5, 0=unlimited)")
+
+    # export
+    p_export = sub.add_parser("export", help="Export drawers to JSONL files (git-friendly)")
+    p_export.add_argument("--output", default=None, help="Output directory (default: ~/.mempalace/export/)")
+
+    # import
+    p_import = sub.add_parser("import", help="Import JSONL drawers into the palace (merge, deduplicate)")
+    p_import.add_argument("input", help="Directory containing wing/room.jsonl files")
+
     # status
     sub.add_parser("status", help="Show what's been filed")
 
@@ -565,6 +622,9 @@ def main():
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
+        "backup": cmd_backup,
+        "export": cmd_export,
+        "import": cmd_import,
         "status": cmd_status,
     }
     dispatch[args.command](args)
