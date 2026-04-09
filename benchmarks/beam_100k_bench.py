@@ -135,8 +135,21 @@ def llm_chat(client, model, messages, max_tokens=512, temperature=0.0, json_mode
 # CHROMADB SETUP
 # =============================================================================
 
-_bench_client = chromadb.EphemeralClient()
+# Lazy-initialized so that `import beam_100k_bench` has no side effects.
+# The client is created on first call to _get_bench_client(). This matches
+# the pattern in convomem_bench.py (which creates its client inside the
+# per-evaluation function) rather than longmemeval_bench.py (which creates
+# its client at module load).
+_bench_client = None
 _bench_embed_fn = None
+
+
+def _get_bench_client():
+    """Return the shared EphemeralClient, creating it on first use."""
+    global _bench_client
+    if _bench_client is None:
+        _bench_client = chromadb.EphemeralClient()
+    return _bench_client
 
 
 def _make_embed_fn(model_name):
@@ -174,13 +187,14 @@ def _make_embed_fn(model_name):
 def _fresh_collection(name="mempalace_beam"):
     """Delete and recreate collection for a clean conversation."""
     global _bench_embed_fn
+    client = _get_bench_client()
     try:
-        _bench_client.delete_collection(name)
+        client.delete_collection(name)
     except Exception:
         pass
     if _bench_embed_fn is not None:
-        return _bench_client.create_collection(name, embedding_function=_bench_embed_fn)
-    return _bench_client.create_collection(name)
+        return client.create_collection(name, embedding_function=_bench_embed_fn)
+    return client.create_collection(name)
 
 
 # =============================================================================
