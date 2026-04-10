@@ -180,6 +180,22 @@ class TestEdgeCases:
         triples = extract_from_text("Alice works at Acme.", source_file="notes.md")
         assert triples[0]["source"] == "notes.md"
 
+    def test_long_unpunctuated_line(self):
+        """Creation pattern on a long line without punctuation should truncate cleanly."""
+        long_obj = "the " + "very " * 20 + "important authentication module"
+        text = f"Alice created {long_obj}"
+        triples = extract_from_text(text)
+        created = [t for t in triples if t["predicate"] == "created"]
+        if created:
+            assert len(created[0]["object"]) <= 60
+
+    def test_entity_types_inferred(self):
+        """Employment triples should have subject_type and object_type."""
+        triples = extract_from_text("Alice works at Acme Corp.")
+        emp = [t for t in triples if t["predicate"] == "works_at"]
+        assert emp[0]["subject_type"] == "person"
+        assert emp[0]["object_type"] == "company"
+
 
 # ── Full pipeline with ChromaDB ──────────────────────────────────────
 

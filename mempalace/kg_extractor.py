@@ -241,6 +241,8 @@ def extract_from_text(text: str, source_file: str = "") -> List[dict]:
                     "predicate": "works_at",
                     "object": org,
                     "source": source_file,
+                    "subject_type": "person",
+                    "object_type": "company",
                 })
 
     # Roles — only if the extracted role contains a role-like word
@@ -254,6 +256,8 @@ def extract_from_text(text: str, source_file: str = "") -> List[dict]:
                     "predicate": "has_role",
                     "object": role,
                     "source": source_file,
+                    "subject_type": "person",
+                    "object_type": "role",
                 })
 
     # Family relationships
@@ -304,6 +308,8 @@ def extract_from_text(text: str, source_file: str = "") -> List[dict]:
                     "predicate": "uses",
                     "object": tool,
                     "source": source_file,
+                    "subject_type": "team",
+                    "object_type": "tool",
                 })
 
     # Creation
@@ -317,6 +323,7 @@ def extract_from_text(text: str, source_file: str = "") -> List[dict]:
                     "predicate": "created",
                     "object": thing,
                     "source": source_file,
+                    "subject_type": "person",
                 })
 
     # Interests
@@ -330,13 +337,20 @@ def extract_from_text(text: str, source_file: str = "") -> List[dict]:
                     "predicate": "loves",
                     "object": interest,
                     "source": source_file,
+                    "subject_type": "person",
                 })
 
     return triples
 
 
 def _dedupe_triples(triples: List[dict]) -> List[dict]:
-    """Remove duplicate triples (same subject+predicate+object)."""
+    """Remove duplicate triples (same subject+predicate+object).
+
+    TODO: Add fuzzy dedup for entity aliases (e.g. "PostgreSQL" vs "Postgres").
+    Suggested approach: hard dedup at cosine >= 0.86, soft dedup at >= 0.55
+    flagged for review. Requires embedding similarity — separate PR.
+    (Credit: @web3guru888 for the tiered threshold idea)
+    """
     seen = set()
     unique = []
     for t in triples:
@@ -436,6 +450,9 @@ def extract_kg(
     result.entities_found = len(entities)
 
     # Write to KG
+    # Count triples once before the batch, not per-triple (avoids 2N SQLite queries)
+    triples_before = kg.stats()["triples"] if not dry_run else 0
+
     for t in all_triples:
         if dry_run:
             result.triples_added += 1
@@ -447,26 +464,33 @@ def extract_kg(
             })
         else:
             try:
-                stats_before = kg.stats()["triples"]
+                # Add entities with inferred types based on pattern
+                sub_type = t.get("subject_type", "unknown")
+                obj_type = t.get("object_type", "unknown")
+                if sub_type != "unknown":
+                    kg.add_entity(t["subject"], entity_type=sub_type)
+                if obj_type != "unknown":
+                    kg.add_entity(t["object"], entity_type=obj_type)
+
                 triple_id = kg.add_triple(
                     t["subject"],
                     t["predicate"],
                     t["object"],
                     source_file=t["source"],
                 )
-                stats_after = kg.stats()["triples"]
-                if stats_after > stats_before:
-                    result.triples_added += 1
-                    result.details.append({
-                        "subject": t["subject"],
-                        "predicate": t["predicate"],
-                        "object": t["object"],
-                        "source": t["source"],
-                        "triple_id": triple_id,
-                    })
-                else:
-                    result.triples_skipped += 1
+                result.details.append({
+                    "subject": t["subject"],
+                    "predicate": t["predicate"],
+                    "object": t["object"],
+                    "source": t["source"],
+                    "triple_id": triple_id,
+                })
             except Exception as e:
                 result.errors.append(f"Error adding triple {t}: {e}")
+
+    if not dry_run:
+        triples_after = kg.stats()["triples"]
+        result.triples_added = triples_after - triples_before
+        result.triples_skipped = len(all_triples) - result.triples_added - len(result.errors)
 
     return result
