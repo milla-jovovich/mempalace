@@ -471,6 +471,44 @@ def tool_kg_stats():
     return _kg.stats()
 
 
+
+def tool_export(output: str, format: str = "auto"):
+    """Export palace data -- auto-detects format from output path."""
+    from mempalace.exporter import auto_export
+
+    result = auto_export(
+        palace_path=_config.palace_path,
+        output=output,
+        kg=_kg,
+        format=format,
+    )
+    return result.to_dict()
+
+
+def tool_import(input_path: str):
+    """Import palace data -- auto-detects format from input path."""
+    from mempalace.exporter import auto_import
+
+    result = auto_import(
+        input_path=input_path,
+        palace_path=_config.palace_path,
+        kg=_kg,
+    )
+    return result.to_dict()
+
+
+def tool_backup(zip: bool = False, max_backups: int = 5):
+    """Create a binary backup of the palace (fast restore, no re-embedding)."""
+    from mempalace.exporter import backup_palace
+
+    result = backup_palace(
+        palace_path=_config.palace_path,
+        zip_mode=zip,
+        max_backups=max_backups,
+    )
+    return result.to_dict()
+
+
 # ==================== AGENT DIARY ====================
 
 
@@ -698,6 +736,56 @@ TOOLS = {
         "description": "Knowledge graph overview: entities, triples, current vs expired facts, relationship types.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_kg_stats,
+    },
+    "mempalace_export": {
+        "description": "Export all palace data (drawers + knowledge graph). Auto-detects format: .json file gives a single portable file, directory path gives JSONL per wing/room (git-friendly).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "output": {
+                    "type": "string",
+                    "description": "Output path: .json file or directory",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["auto", "json", "jsonl"],
+                    "description": "Format override (default: auto-detect from path)",
+                },
+            },
+            "required": ["output"],
+        },
+        "handler": tool_export,
+    },
+    "mempalace_import": {
+        "description": "Import palace data. Auto-detects format from input path (.json file or directory of JSONL files). Skips existing drawers to avoid duplicates.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "input_path": {
+                    "type": "string",
+                    "description": "Input path: .json file or directory of JSONL files",
+                },
+            },
+            "required": ["input_path"],
+        },
+        "handler": tool_import,
+    },
+    "mempalace_backup": {
+        "description": "Create a binary backup of the palace (fast restore, no re-embedding). Use export for portability, backup for speed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "zip": {
+                    "type": "boolean",
+                    "description": "Create a zip archive instead of a directory copy (default: false)",
+                },
+                "max_backups": {
+                    "type": "integer",
+                    "description": "Maximum number of backups to retain (default: 5, 0 = unlimited)",
+                },
+            },
+        },
+        "handler": tool_backup,
     },
     "mempalace_traverse": {
         "description": "Walk the palace graph from a room. Shows connected ideas across wings — the tunnels. Like following a thread through the palace: start at 'chromadb-setup' in wing_code, discover it connects to wing_myproject (planning) and wing_user (feelings about it).",

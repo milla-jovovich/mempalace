@@ -173,6 +173,11 @@ class MempalaceConfig:
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
+    @property
+    def backup_max_retained(self):
+        """Maximum number of backups to retain (configurable in config.json)."""
+        return self._file_config.get("backup", {}).get("max_retained", 5)
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)

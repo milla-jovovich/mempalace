@@ -73,7 +73,7 @@ def cmd_mine(args):
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
     if getattr(args, "backup", False):
-        from .backup import backup_palace
+        from .exporter import backup_palace
         backup_palace(palace_path=palace_path, zip_mode=False, max_backups=5)
     include_ignored = []
     for raw in args.include_ignored or []:
@@ -275,7 +275,7 @@ def cmd_mcp(args):
 
 def cmd_backup(args):
     """Create a timestamped backup of the palace."""
-    from .backup import backup_palace
+    from .exporter import backup_palace
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     print()
