@@ -50,11 +50,14 @@ class KnowledgeGraph:
     def __init__(self, db_path: str = None):
         self.db_path = db_path or DEFAULT_KG_PATH
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._connection = None
         self._init_db()
 
     def _init_db(self):
         conn = self._conn()
         conn.executescript("""
+            PRAGMA journal_mode=WAL;
+
             CREATE TABLE IF NOT EXISTS entities (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -84,12 +87,19 @@ class KnowledgeGraph:
             CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);
         """)
         conn.commit()
-        conn.close()
 
     def _conn(self):
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        if self._connection is None:
+            self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
+            self._connection.execute("PRAGMA journal_mode=WAL")
+            self._connection.row_factory = sqlite3.Row
+        return self._connection
+
+    def close(self):
+        """Close the database connection."""
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
 
     def _entity_id(self, name: str) -> str:
         return name.lower().replace(" ", "_").replace("'", "")
@@ -101,12 +111,11 @@ class KnowledgeGraph:
         eid = self._entity_id(name)
         props = json.dumps(properties or {})
         conn = self._conn()
-        conn.execute(
-            "INSERT OR REPLACE INTO entities (id, name, type, properties) VALUES (?, ?, ?, ?)",
-            (eid, name, entity_type, props),
-        )
-        conn.commit()
-        conn.close()
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO entities (id, name, type, properties) VALUES (?, ?, ?, ?)",
+                (eid, name, entity_type, props),
+            )
         return eid
 
     def add_triple(
@@ -134,38 +143,38 @@ class KnowledgeGraph:
 
         # Auto-create entities if they don't exist
         conn = self._conn()
-        conn.execute("INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (sub_id, subject))
-        conn.execute("INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (obj_id, obj))
+        with conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (sub_id, subject)
+            )
+            conn.execute("INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (obj_id, obj))
 
-        # Check for existing identical triple
-        existing = conn.execute(
-            "SELECT id FROM triples WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
-            (sub_id, pred, obj_id),
-        ).fetchone()
+            # Check for existing identical triple
+            existing = conn.execute(
+                "SELECT id FROM triples WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
+                (sub_id, pred, obj_id),
+            ).fetchone()
 
-        if existing:
-            conn.close()
-            return existing[0]  # Already exists and still valid
+            if existing:
+                return existing["id"]  # Already exists and still valid
 
-        triple_id = f"t_{sub_id}_{pred}_{obj_id}_{hashlib.md5(f'{valid_from}{datetime.now().isoformat()}'.encode()).hexdigest()[:8]}"
+            triple_id = f"t_{sub_id}_{pred}_{obj_id}_{hashlib.sha256(f'{valid_from}{datetime.now().isoformat()}'.encode()).hexdigest()[:12]}"
 
-        conn.execute(
-            """INSERT INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, source_closet, source_file)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                triple_id,
-                sub_id,
-                pred,
-                obj_id,
-                valid_from,
-                valid_to,
-                confidence,
-                source_closet,
-                source_file,
-            ),
-        )
-        conn.commit()
-        conn.close()
+            conn.execute(
+                """INSERT INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, source_closet, source_file)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    triple_id,
+                    sub_id,
+                    pred,
+                    obj_id,
+                    valid_from,
+                    valid_to,
+                    confidence,
+                    source_closet,
+                    source_file,
+                ),
+            )
         return triple_id
 
     def invalidate(self, subject: str, predicate: str, obj: str, ended: str = None):
@@ -176,12 +185,11 @@ class KnowledgeGraph:
         ended = ended or date.today().isoformat()
 
         conn = self._conn()
-        conn.execute(
-            "UPDATE triples SET valid_to=? WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
-            (ended, sub_id, pred, obj_id),
-        )
-        conn.commit()
-        conn.close()
+        with conn:
+            conn.execute(
+                "UPDATE triples SET valid_to=? WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
+                (ended, sub_id, pred, obj_id),
+            )
 
     # ── Query operations ──────────────────────────────────────────────────
 
@@ -208,13 +216,13 @@ class KnowledgeGraph:
                     {
                         "direction": "outgoing",
                         "subject": name,
-                        "predicate": row[2],
-                        "object": row[10],  # obj_name
-                        "valid_from": row[4],
-                        "valid_to": row[5],
-                        "confidence": row[6],
-                        "source_closet": row[7],
-                        "current": row[5] is None,
+                        "predicate": row["predicate"],
+                        "object": row["obj_name"],
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
                     }
                 )
 
@@ -228,18 +236,17 @@ class KnowledgeGraph:
                 results.append(
                     {
                         "direction": "incoming",
-                        "subject": row[10],  # sub_name
-                        "predicate": row[2],
+                        "subject": row["sub_name"],
+                        "predicate": row["predicate"],
                         "object": name,
-                        "valid_from": row[4],
-                        "valid_to": row[5],
-                        "confidence": row[6],
-                        "source_closet": row[7],
-                        "current": row[5] is None,
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
                     }
                 )
 
-        conn.close()
         return results
 
     def query_relationship(self, predicate: str, as_of: str = None):
@@ -262,15 +269,14 @@ class KnowledgeGraph:
         for row in conn.execute(query, params).fetchall():
             results.append(
                 {
-                    "subject": row[10],
+                    "subject": row["sub_name"],
                     "predicate": pred,
-                    "object": row[11],
-                    "valid_from": row[4],
-                    "valid_to": row[5],
-                    "current": row[5] is None,
+                    "object": row["obj_name"],
+                    "valid_from": row["valid_from"],
+                    "valid_to": row["valid_to"],
+                    "current": row["valid_to"] is None,
                 }
             )
-        conn.close()
         return results
 
     def timeline(self, entity_name: str = None):
@@ -300,15 +306,14 @@ class KnowledgeGraph:
                 LIMIT 100
             """).fetchall()
 
-        conn.close()
         return [
             {
-                "subject": r[10],
-                "predicate": r[2],
-                "object": r[11],
-                "valid_from": r[4],
-                "valid_to": r[5],
-                "current": r[5] is None,
+                "subject": r["sub_name"],
+                "predicate": r["predicate"],
+                "object": r["obj_name"],
+                "valid_from": r["valid_from"],
+                "valid_to": r["valid_to"],
+                "current": r["valid_to"] is None,
             }
             for r in rows
         ]
@@ -317,17 +322,18 @@ class KnowledgeGraph:
 
     def stats(self):
         conn = self._conn()
-        entities = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
-        triples = conn.execute("SELECT COUNT(*) FROM triples").fetchone()[0]
-        current = conn.execute("SELECT COUNT(*) FROM triples WHERE valid_to IS NULL").fetchone()[0]
+        entities = conn.execute("SELECT COUNT(*) as cnt FROM entities").fetchone()["cnt"]
+        triples = conn.execute("SELECT COUNT(*) as cnt FROM triples").fetchone()["cnt"]
+        current = conn.execute(
+            "SELECT COUNT(*) as cnt FROM triples WHERE valid_to IS NULL"
+        ).fetchone()["cnt"]
         expired = triples - current
         predicates = [
-            r[0]
+            r["predicate"]
             for r in conn.execute(
                 "SELECT DISTINCT predicate FROM triples ORDER BY predicate"
             ).fetchall()
         ]
-        conn.close()
         return {
             "entities": entities,
             "triples": triples,
