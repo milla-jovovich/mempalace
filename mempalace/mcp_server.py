@@ -79,10 +79,32 @@ try:
 except (OSError, NotImplementedError):
     pass
 _WAL_FILE = _WAL_DIR / "write_log.jsonl"
+_WAL_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _wal_rotate():
+    """Rotate WAL file when it exceeds _WAL_MAX_BYTES.
+
+    Keeps one backup (write_log.jsonl.1). Older backups are discarded.
+    """
+    try:
+        if not _WAL_FILE.exists() or _WAL_FILE.stat().st_size < _WAL_MAX_BYTES:
+            return
+        backup = _WAL_FILE.with_suffix(".jsonl.1")
+        if backup.exists():
+            backup.unlink()
+        _WAL_FILE.rename(backup)
+        try:
+            backup.chmod(0o600)
+        except (OSError, NotImplementedError):
+            pass
+    except Exception as e:
+        logger.error("WAL rotation failed: %s", e)
 
 
 def _wal_log(operation: str, params: dict, result: dict = None):
     """Append a write operation to the write-ahead log."""
+    _wal_rotate()
     entry = {
         "timestamp": datetime.now().isoformat(),
         "operation": operation,
@@ -97,7 +119,7 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         except (OSError, NotImplementedError):
             pass
     except Exception as e:
-        logger.error(f"WAL write failed: {e}")
+        logger.error("WAL write failed: %s", e)
 
 
 _client_cache = None
