@@ -60,9 +60,7 @@ class ContentHashDB:
         self.bloom_path = db_path + ".bloom"
         self.hashes = {}
         self._hash_set = set()
-        self.bloom = (
-            BloomFilter.load(self.bloom_path) if os.path.exists(self.bloom_path) else BloomFilter()
-        )
+        self.bloom = BloomFilter()
         self._load()
 
     def _load(self):
@@ -70,8 +68,13 @@ class ContentHashDB:
             with open(self.db_path, "r") as f:
                 self.hashes = json.load(f)
         self.hashes = {str(k): v for k, v in self.hashes.items()}
-        # Build set for O(1) verification of content hashes
         self._hash_set = set(self.hashes.values())
+        if self._hash_set and os.path.exists(self.bloom_path):
+            self.bloom = BloomFilter.load(self.bloom_path)
+        else:
+            self.bloom = BloomFilter(capacity=max(1000, len(self._hash_set) * 2))
+            for h in self._hash_set:
+                self.bloom.add(h)
 
     def _save(self):
         with open(self.db_path, "w") as f:
