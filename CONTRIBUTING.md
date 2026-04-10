@@ -13,10 +13,17 @@ pip install -e ".[dev]"    # installs with dev dependencies (pytest, build, twin
 ## Running Tests
 
 ```bash
-pytest tests/ -v
+pytest tests/ -v --ignore=tests/benchmarks
 ```
 
 All tests must pass before submitting a PR. Tests should run without API keys or network access.
+
+You must also pass linting and formatting checks:
+
+```bash
+ruff check .
+ruff format --check .
+```
 
 ## Running Benchmarks
 
@@ -33,10 +40,12 @@ See [benchmarks/README.md](benchmarks/README.md) for data download instructions 
 ## Project Structure
 
 ```
-mempalace/          ← core package (see mempalace/README.md for module guide)
+mempalace/          ← core package (27 modules — see AGENTS.md for full listing)
 benchmarks/         ← reproducible benchmark runners
-hooks/              ← Claude Code auto-save hooks
+docs/               ← additional documentation
 examples/           ← usage examples
+hooks/              ← Claude Code auto-save hooks
+integrations/       ← third-party integration configs
 tests/              ← test suite
 assets/             ← logo + brand
 ```
@@ -85,7 +94,6 @@ If you're planning a significant change, open an issue first to discuss the appr
 
 - **Discord**: [Join us](https://discord.com/invite/ycTQQCu6kn)
 - **Issues**: Bug reports and feature requests welcome
-- **Discussions**: For questions and ideas
 
 ## License
 
