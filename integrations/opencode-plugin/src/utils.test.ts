@@ -10,6 +10,6 @@ describe('getWingFromPath', () => {
   });
 
   it('replaces spaces and special chars with hyphens', () => {
-    expect(getWingFromPath('/projects/My Awesome App!')).toBe('wing_my-awesome-app-');
+    expect(getWingFromPath('/projects/My Awesome App!')).toBe('wing_my-awesome-app');
   });
 });

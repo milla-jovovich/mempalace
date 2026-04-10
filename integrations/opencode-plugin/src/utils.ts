@@ -1,4 +1,4 @@
-import fs from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
 
 export function getWingFromPath(workspacePath: string): string {
@@ -7,13 +7,16 @@ export function getWingFromPath(workspacePath: string): string {
   }
 
   const baseName = path.basename(workspacePath);
-  const sanitized = baseName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  const sanitized = baseName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
   return `wing_${sanitized}`;
 }
 
-export function isEmptyWorkspace(dir: string): boolean {
+export async function isEmptyWorkspace(dir: string): Promise<boolean> {
   try {
-    const files = fs.readdirSync(dir);
+    const files = await fs.readdir(dir);
     const ignored = new Set([
       '.git',
       '.mempalace',

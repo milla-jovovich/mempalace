@@ -28,6 +28,11 @@ export class StateManager {
     this.counts.set(sessionId, 0);
   }
 
+  removeSession(sessionId: string): void {
+    this.counts.delete(sessionId);
+    this.miningLocks.delete(sessionId);
+  }
+
   getDirtySessions(): string[] {
     const dirty: string[] = [];
     for (const [sessionId, count] of this.counts.entries()) {

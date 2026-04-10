@@ -1,6 +1,6 @@
 {
   "name": "opencode-plugin-mempalace",
-  "version": "1.2.1",
+  "version": "1.0.0",
   "description": "An OpenCode plugin that integrates MemPalace's lifetime memory (L0-L3 memory stack, AAAK compression, auto context saving) into the OpenCode terminal assistant.",
   "type": "module",
   "main": "dist/index.js",

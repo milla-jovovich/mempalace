@@ -1,42 +1,42 @@
+import type { PluginInput } from '@opencode-ai/plugin';
 import { wakeUp, mine, mineSync, isInitialized, initialize } from './mempalace-cli.js';
 import { StateManager } from './state.js';
 import { getWingFromPath, isEmptyWorkspace } from './utils.js';
 
-export default async function mempalacePlugin(input: any, options?: any): Promise<any> {
+export default async function mempalacePlugin(
+  input: PluginInput,
+  options?: { threshold?: number },
+): Promise<any> {
   const dir = input.worktree || input.directory || process.cwd();
   const wing = getWingFromPath(dir);
-  const threshold = (options?.threshold as number) || 15;
+  const threshold = options?.threshold || 15;
   const stateManager = new StateManager(threshold);
 
   let initializationDone = false;
   let isInitializing = false;
 
   const ensureInitialized = async (): Promise<'ready' | 'initializing' | 'empty'> => {
-    if (isEmptyWorkspace(dir)) {
+    if (await isEmptyWorkspace(dir)) {
       return 'empty';
     }
 
-    if (initializationDone) {
-      return 'ready';
-    }
-
-    if (isInitializing) {
-      return 'initializing';
-    }
+    if (initializationDone) return 'ready';
+    if (isInitializing) return 'initializing';
+    isInitializing = true;
 
     const initialized = await isInitialized(dir);
     if (initialized) {
       initializationDone = true;
+      isInitializing = false;
       return 'ready';
     }
 
-    isInitializing = true;
     initialize(dir)
       .then(() => {
         initializationDone = true;
       })
-      .catch((e) => {
-        console.warn('Background initialization failed:', e);
+      .catch((e: any) => {
+        console.warn('[MemPalace] Background initialization failed:', e.message);
       })
       .finally(() => {
         isInitializing = false;
@@ -46,6 +46,48 @@ export default async function mempalacePlugin(input: any, options?: any): Promis
   };
 
   const MAX_MEMORY_LENGTH = 4000;
+  const CACHE_TTL = 60_000; // 1 minute
+  let cachedMemory: string | null = null;
+  let cacheTime = 0;
+
+  async function getCachedMemory(targetWing: string): Promise<string | null> {
+    if (cachedMemory && Date.now() - cacheTime < CACHE_TTL) {
+      return cachedMemory;
+    }
+    cachedMemory = await wakeUp(targetWing);
+    cacheTime = Date.now();
+    return cachedMemory;
+  }
+
+  function invalidateCache() {
+    cachedMemory = null;
+    cacheTime = 0;
+  }
+
+  async function injectMemory(outputArray: string[], targetWing: string): Promise<void> {
+    const state = await ensureInitialized();
+    if (state === 'empty') {
+      outputArray.push(
+        '[MemPalace]: This environment has no memory yet. Please proceed with standard logic.',
+      );
+      return;
+    }
+    if (state === 'initializing') {
+      outputArray.push(
+        '[MemPalace]: The memory system is being built asynchronously in the background. The current response will not include historical memory context.',
+      );
+      return;
+    }
+
+    const memory = await getCachedMemory(targetWing);
+    if (memory) {
+      const truncatedMemory =
+        memory.length > MAX_MEMORY_LENGTH
+          ? memory.substring(0, MAX_MEMORY_LENGTH) + '\n...[Memory Truncated]'
+          : memory;
+      outputArray.push(truncatedMemory);
+    }
+  }
 
   let isFlushing = false;
   const flushDirtySessions = () => {
@@ -58,26 +100,28 @@ export default async function mempalacePlugin(input: any, options?: any): Promis
         stateManager.resetCount(id);
       }
     }
+    isFlushing = false;
   };
 
-  process.on('exit', flushDirtySessions);
-  process.on('SIGINT', () => {
-    flushDirtySessions();
-    process.exit(130);
-  });
-  process.on('SIGTERM', () => {
-    flushDirtySessions();
-    process.exit(143);
-  });
+  const exitHandler = () => flushDirtySessions();
+  const sigHandler = () => flushDirtySessions();
+
+  process.on('exit', exitHandler);
+  process.on('SIGINT', sigHandler);
+  process.on('SIGTERM', sigHandler);
 
   return {
     event: async ({ event }: { event: any }) => {
+      const sessionID = event.properties?.sessionID || event.properties?.info?.id;
+      if (event.type === 'session.deleted' && sessionID) {
+        stateManager.removeSession(sessionID);
+      }
+
       if (
         event.type === 'session.idle' ||
         event.type === 'session.deleted' ||
         (event.type === 'session.status' && event.properties?.status?.type === 'idle')
       ) {
-        const sessionID = event.properties?.sessionID || event.properties?.info?.id;
         if (sessionID && stateManager.hasPendingMessages(sessionID)) {
           if (!stateManager.acquireMiningLock(sessionID)) return;
 
@@ -89,7 +133,8 @@ export default async function mempalacePlugin(input: any, options?: any): Promis
 
           setTimeout(() => {
             mine(dir, 'convos', wing)
-              .catch(() => {})
+              .then(invalidateCache)
+              .catch((e: any) => console.warn('[MemPalace] idle mine failed:', e.message))
               .finally(() => {
                 stateManager.releaseMiningLock(sessionID);
                 stateManager.resetCount(sessionID);
@@ -103,53 +148,11 @@ export default async function mempalacePlugin(input: any, options?: any): Promis
       _: any,
       output: { context: string[]; prompt?: string },
     ) => {
-      const state = await ensureInitialized();
-      if (state === 'empty') {
-        output.context.push(
-          '[MemPalace]: This environment has no memory yet. Please proceed with standard logic.',
-        );
-        return;
-      }
-      if (state === 'initializing') {
-        output.context.push(
-          '[MemPalace]: The memory system is being built asynchronously in the background. The current response will not include historical memory context.',
-        );
-        return;
-      }
-
-      const memory = await wakeUp(wing);
-      if (memory) {
-        const truncatedMemory =
-          memory.length > MAX_MEMORY_LENGTH
-            ? memory.substring(0, MAX_MEMORY_LENGTH) + '\n...[Memory Truncated]'
-            : memory;
-        output.context.push(truncatedMemory);
-      }
+      await injectMemory(output.context, wing);
     },
 
     'experimental.chat.system.transform': async (_: any, output: { system: string[] }) => {
-      const state = await ensureInitialized();
-      if (state === 'empty') {
-        output.system.push(
-          '[MemPalace]: This environment has no memory yet. Please proceed with standard logic.',
-        );
-        return;
-      }
-      if (state === 'initializing') {
-        output.system.push(
-          '[MemPalace]: The memory system is being built asynchronously in the background. The current response will not include historical memory context.',
-        );
-        return;
-      }
-
-      const memory = await wakeUp(wing);
-      if (memory) {
-        const truncatedMemory =
-          memory.length > MAX_MEMORY_LENGTH
-            ? memory.substring(0, MAX_MEMORY_LENGTH) + '\n...[Memory Truncated]'
-            : memory;
-        output.system.push(truncatedMemory);
-      }
+      await injectMemory(output.system, wing);
     },
 
     'chat.message': async ({ sessionID }: { sessionID: string }) => {
@@ -162,10 +165,10 @@ export default async function mempalacePlugin(input: any, options?: any): Promis
           return;
         }
 
-        // Delay to protect TTFT
         setTimeout(() => {
           mine(dir, 'convos', wing)
-            .catch(() => {})
+            .then(invalidateCache)
+            .catch((e: any) => console.warn('[MemPalace] auto-mine failed:', e.message))
             .finally(() => {
               stateManager.releaseMiningLock(sessionID);
             });
