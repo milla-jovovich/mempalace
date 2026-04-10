@@ -12,13 +12,21 @@ from mempalace.nlp_providers.slm_provider import SLMProvider
 
 def _make_mock_og(generated_text="positive"):
     """Create a mock onnxruntime_genai module."""
+    import numpy as np
+
     mock_og = types.ModuleType("onnxruntime_genai")
 
     mock_model = MagicMock()
     mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.return_value = [1, 2, 3]
+    mock_tokenizer.encode.return_value = np.array([1, 2, 3])
     mock_tokenizer.decode.return_value = generated_text
-    mock_model.generate.return_value = [[4, 5, 6]]
+
+    # Mock the Generator class (new onnxruntime-genai API)
+    mock_generator = MagicMock()
+    # Simulate generating tokens then stopping
+    mock_generator.is_done.side_effect = [False, True]
+    mock_generator.get_next_tokens.return_value = [4]
+    mock_og.Generator = MagicMock(return_value=mock_generator)
 
     mock_og.Model = MagicMock(return_value=mock_model)
     mock_og.Tokenizer = MagicMock(return_value=mock_tokenizer)
@@ -41,6 +49,16 @@ def _setup_provider_with_mock(monkeypatch, mock_og, model_path="/fake/model"):
         patch(
             "mempalace.nlp_providers.model_manager.ModelManager.get",
             return_value=mock_mm,
+        ),
+        patch.object(
+            SLMProvider,
+            "_find_genai_dir",
+            return_value=model_path if model_path else "/fake/model",
+        ),
+        patch.object(
+            SLMProvider,
+            "_detect_model_type",
+            return_value="phi3",
         ),
     ):
         p._loaded = False
@@ -177,7 +195,8 @@ class TestSLMGenerate:
     def test_handles_generation_exception(self, monkeypatch):
         mock_og, mock_model, _ = _make_mock_og()
         p = _setup_provider_with_mock(monkeypatch, mock_og)
-        mock_model.generate.side_effect = RuntimeError("generation failed")
+        # New API uses Generator class — make it raise
+        mock_og.Generator.side_effect = RuntimeError("generation failed")
         assert p.generate("test") == ""
 
 

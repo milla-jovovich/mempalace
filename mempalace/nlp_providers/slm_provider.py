@@ -39,9 +39,7 @@ COREF_BODY = (
 def _chat_wrap(user_msg: str, model_type: str = "phi3") -> str:
     """Wrap a user message in the appropriate chat template."""
     if "gemma" in model_type:
-        return (
-            f"<start_of_turn>user\n{user_msg}<end_of_turn>\n<start_of_turn>model\n"
-        )
+        return f"<start_of_turn>user\n{user_msg}<end_of_turn>\n<start_of_turn>model\n"
     # Phi-3 / Phi-3.5 chat template
     return f"<|user|>\n{user_msg}<|end|>\n<|assistant|>\n"
 

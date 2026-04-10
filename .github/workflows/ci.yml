@@ -84,6 +84,16 @@ jobs:
           MEMPALACE_NLP_CLASSIFY: "1"
           MEMPALACE_NLP_TRIPLES: "1"
         run: python benchmarks/with-nlp-provider/bench_nlp_providers.py --mode nlp_aaak --limit 20
+      - name: Install SLM dependencies
+        run: pip install onnxruntime-genai>=0.4
+        continue-on-error: true
+      - name: Triple extraction quality benchmark — all providers
+        env:
+          MEMPALACE_NLP_BACKEND: gliner
+          MEMPALACE_NLP_TRIPLES: "1"
+          MEMPALACE_NLP_SLM: "1"
+          MEMPALACE_AUTO_DOWNLOAD: "1"
+        run: python benchmarks/bench_triples.py --provider all
 
   benchmark-speed:
     runs-on: ubuntu-latest
