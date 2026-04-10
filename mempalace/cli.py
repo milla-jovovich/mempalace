@@ -14,6 +14,7 @@ Commands:
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
     mempalace search "query"              Find anything, exact words
+    mempalace mcp                         Show MCP setup command
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
     mempalace status                      Show what's been filed
@@ -28,6 +29,7 @@ Examples:
 
 import os
 import sys
+import shlex
 import argparse
 from pathlib import Path
 
@@ -202,6 +204,7 @@ def cmd_repair(args):
     print(f"  Extracted {len(all_ids)} drawers")
 
     # Backup and rebuild
+    palace_path = palace_path.rstrip(os.sep)
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
         shutil.rmtree(backup_path)
@@ -224,6 +227,41 @@ def cmd_repair(args):
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print(f"  Backup saved at {backup_path}")
     print(f"\n{'=' * 55}\n")
+
+
+def cmd_hook(args):
+    """Run hook logic: reads JSON from stdin, outputs JSON to stdout."""
+    from .hooks_cli import run_hook
+
+    run_hook(hook_name=args.hook, harness=args.harness)
+
+
+def cmd_instructions(args):
+    """Output skill instructions to stdout."""
+    from .instructions_cli import run_instructions
+
+    run_instructions(name=args.name)
+
+
+def cmd_mcp(args):
+    """Show how to wire MemPalace into MCP-capable hosts."""
+    base_server_cmd = "python -m mempalace.mcp_server"
+
+    if args.palace:
+        resolved_palace = str(Path(args.palace).expanduser())
+        server_cmd = f"{base_server_cmd} --palace {shlex.quote(resolved_palace)}"
+    else:
+        server_cmd = base_server_cmd
+
+    print("MemPalace MCP quick setup:")
+    print(f"  claude mcp add mempalace -- {server_cmd}")
+    print("\nRun the server directly:")
+    print(f"  {server_cmd}")
+
+    if not args.palace:
+        print("\nOptional custom palace:")
+        print(f"  claude mcp add mempalace -- {base_server_cmd} --palace /path/to/palace")
+        print(f"  {base_server_cmd} --palace /path/to/palace")
 
 
 def cmd_compress(args):
@@ -451,10 +489,45 @@ def main():
         help="Only split files containing at least N sessions (default: 2)",
     )
 
+    # hook
+    p_hook = sub.add_parser(
+        "hook",
+        help="Run hook logic (reads JSON from stdin, outputs JSON to stdout)",
+    )
+    hook_sub = p_hook.add_subparsers(dest="hook_action")
+    p_hook_run = hook_sub.add_parser("run", help="Execute a hook")
+    p_hook_run.add_argument(
+        "--hook",
+        required=True,
+        choices=["session-start", "stop", "precompact"],
+        help="Hook name to run",
+    )
+    p_hook_run.add_argument(
+        "--harness",
+        required=True,
+        choices=["claude-code", "codex"],
+        help="Harness type (determines stdin JSON format)",
+    )
+
+    # instructions
+    p_instructions = sub.add_parser(
+        "instructions",
+        help="Output skill instructions to stdout",
+    )
+    instructions_sub = p_instructions.add_subparsers(dest="instructions_name")
+    for instr_name in ["init", "search", "mine", "help", "status"]:
+        instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
+
     # repair
     sub.add_parser(
         "repair",
         help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
+    )
+
+    # mcp
+    sub.add_parser(
+        "mcp",
+        help="Show MCP setup command for connecting MemPalace to your AI client",
     )
 
     # status
@@ -466,11 +539,29 @@ def main():
         parser.print_help()
         return
 
+    # Handle two-level subcommands
+    if args.command == "hook":
+        if not getattr(args, "hook_action", None):
+            p_hook.print_help()
+            return
+        cmd_hook(args)
+        return
+
+    if args.command == "instructions":
+        name = getattr(args, "instructions_name", None)
+        if not name:
+            p_instructions.print_help()
+            return
+        args.name = name
+        cmd_instructions(args)
+        return
+
     dispatch = {
         "init": cmd_init,
         "mine": cmd_mine,
         "split": cmd_split,
         "search": cmd_search,
+        "mcp": cmd_mcp,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
