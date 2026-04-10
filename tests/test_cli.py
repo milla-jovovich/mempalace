@@ -163,6 +163,7 @@ def test_cmd_mine_projects_mode(mock_config_cls):
         no_gitignore=False,
         include_ignored=[],
         extract="exchange",
+        device="auto",
     )
     with patch("mempalace.miner.mine") as mock_mine:
         cmd_mine(args)
@@ -192,6 +193,7 @@ def test_cmd_mine_convos_mode(mock_config_cls):
         no_gitignore=False,
         include_ignored=[],
         extract="general",
+        device="auto",
     )
     with patch("mempalace.convo_miner.mine_convos") as mock_mine:
         cmd_mine(args)
@@ -220,6 +222,7 @@ def test_cmd_mine_include_ignored_comma_split(mock_config_cls):
         no_gitignore=False,
         include_ignored=["a.txt,b.txt", "c.txt"],
         extract="exchange",
+        device="auto",
     )
     with patch("mempalace.miner.mine") as mock_mine:
         cmd_mine(args)

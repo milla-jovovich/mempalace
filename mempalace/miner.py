@@ -17,7 +17,8 @@ from collections import defaultdict
 
 import chromadb
 
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS, file_already_mined
+from .embeddings import get_collection as _emb_get_collection
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -370,6 +371,17 @@ def chunk_text(content: str, source_file: str) -> list:
 # =============================================================================
 
 
+def _get_collection(palace_path: str):
+    """Get or create the palace collection with shared embedding function."""
+    os.makedirs(palace_path, exist_ok=True)
+    try:
+        os.chmod(palace_path, 0o700)
+    except (OSError, NotImplementedError):
+        pass
+    client = chromadb.PersistentClient(path=palace_path)
+    return _emb_get_collection(client, "mempalace_drawers", create=True)
+
+
 def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
 ):
@@ -569,7 +581,7 @@ def mine(
     print(f"{'─' * 55}\n")
 
     if not dry_run:
-        collection = get_collection(palace_path)
+        collection = _get_collection(palace_path)
     else:
         collection = None
 
@@ -616,7 +628,7 @@ def status(palace_path: str):
     """Show what's been filed in the palace."""
     try:
         client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = _emb_get_collection(client, "mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")

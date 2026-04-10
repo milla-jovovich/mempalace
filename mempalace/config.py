@@ -153,6 +153,14 @@ class MempalaceConfig:
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
 
     @property
+    def device(self):
+        """Embedding device: auto (detect GPU), cuda, rocm, mps, or cpu."""
+        env_val = os.environ.get("MEMPALACE_DEVICE")
+        if env_val:
+            return env_val
+        return self._file_config.get("device", "auto")
+
+    @property
     def people_map(self):
         """Mapping of name variants to canonical names."""
         if self._people_map_file.exists():
@@ -185,6 +193,7 @@ class MempalaceConfig:
             default_config = {
                 "palace_path": DEFAULT_PALACE_PATH,
                 "collection_name": DEFAULT_COLLECTION_NAME,
+                "device": "auto",
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,
             }

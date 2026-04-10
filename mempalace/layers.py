@@ -24,6 +24,7 @@ from collections import defaultdict
 import chromadb
 
 from .config import MempalaceConfig
+from .embeddings import get_collection as _emb_get_collection
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +93,7 @@ class Layer1:
         """Pull top drawers from ChromaDB and format as compact L1 text."""
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            col = _emb_get_collection(client, "mempalace_drawers")
         except Exception:
             return "## L1 — No palace found. Run: mempalace mine <dir>"
 
@@ -197,7 +198,7 @@ class Layer2:
         """Retrieve drawers filtered by wing and/or room."""
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            col = _emb_get_collection(client, "mempalace_drawers")
         except Exception:
             return "No palace found."
 
@@ -261,7 +262,7 @@ class Layer3:
         """Semantic search, returns compact result text."""
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            col = _emb_get_collection(client, "mempalace_drawers")
         except Exception:
             return "No palace found."
 
@@ -317,7 +318,7 @@ class Layer3:
         """Return raw dicts instead of formatted text."""
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            col = _emb_get_collection(client, "mempalace_drawers")
         except Exception:
             return []
 
@@ -438,7 +439,7 @@ class MemoryStack:
         # Count drawers
         try:
             client = chromadb.PersistentClient(path=self.palace_path)
-            col = client.get_collection("mempalace_drawers")
+            col = _emb_get_collection(client, "mempalace_drawers")
             count = col.count()
             result["total_drawers"] = count
         except Exception:
