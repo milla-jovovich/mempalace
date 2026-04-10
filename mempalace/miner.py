@@ -18,7 +18,7 @@ from collections import defaultdict
 import chromadb
 
 from .palace import SKIP_DIRS, get_collection, file_already_mined
-from .scanner import scan_content
+from .scanner import scan_content, format_warnings
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -432,9 +432,8 @@ def process_file(
 
     findings = scan_content(content)
     if findings:
-        names = ", ".join(sorted({f["pattern_name"] for f in findings}))
         print(
-            f"  ⚠ {filepath.name}: sensitive content detected ({names})",
+            f"  ⚠ {filepath.name}: {format_warnings(findings)}",
             file=sys.stderr,
         )
 
