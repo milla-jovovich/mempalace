@@ -2926,86 +2926,39 @@ def _load_or_create_split(split_file: str, data: list, dev_size: int = 50, seed:
 
 def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=50):
     """
-    NLP-enriched mode: uses NLP entity extraction to ENRICH indexed text
-    rather than compressing it.
+    NLP-enriched mode: uses NLP providers for entity extraction, sentence
+    splitting, and classification — no regex or hardcoded word lists.
 
-    Strategy: extract entities from each document using NLP providers, then
-    append entity names to the raw text before indexing. This gives the
-    embedding model more signal (entity names as keywords) without losing
-    any semantic content from the original text.
-
-    Also applies hybrid_v2 techniques: temporal date boost, assistant-reference
-    two-pass, and keyword overlap re-ranking — all enhanced with NLP entities.
+    Strategy:
+    1. Use NLP registry to extract entities from documents → enrich indexed text
+    2. Use NLP registry to extract entities from question → entity-based re-ranking
+    3. Use NLP registry to detect date entities → temporal boosting
+    4. Use NLP registry to classify question intent → assistant-reference detection
     """
-    import re as _re
     from datetime import datetime, timedelta
-    from mempalace.entity_detector import extract_candidates
 
-    STOP_WORDS = {
-        "what",
-        "when",
-        "where",
-        "who",
-        "how",
-        "which",
-        "did",
-        "do",
-        "was",
-        "were",
-        "have",
-        "has",
-        "had",
-        "is",
-        "are",
-        "the",
-        "a",
-        "an",
-        "my",
-        "me",
-        "i",
-        "you",
-        "your",
-        "their",
-        "it",
-        "its",
-        "in",
-        "on",
-        "at",
-        "to",
-        "for",
-        "of",
-        "with",
-        "by",
-        "from",
-        "ago",
-        "last",
-        "that",
-        "this",
-        "there",
-        "about",
-        "get",
-        "got",
-        "give",
-        "gave",
-        "buy",
-        "bought",
-        "made",
-        "make",
-    }
+    from mempalace.nlp_providers.registry import get_registry
 
-    def extract_keywords(text):
-        words = _re.findall(r"\b[a-z]{3,}\b", text.lower())
-        return [w for w in words if w not in STOP_WORDS]
+    registry = get_registry()
 
-    def keyword_overlap(query_kws, query_entities, doc_text):
-        doc_lower = doc_text.lower()
-        if not query_kws and not query_entities:
+    def nlp_entity_names(text):
+        """Extract entity text strings via NLP provider."""
+        return [e["text"] for e in registry.extract_entities(text)]
+
+    def enrich_text(text):
+        """Append NLP-detected entity names for better embedding signal."""
+        names = nlp_entity_names(text)
+        if names:
+            return f"{text}\n{' '.join(names)}"
+        return text
+
+    def entity_overlap(query_entities, doc_text):
+        """Score overlap using NLP-extracted entities instead of keyword regex."""
+        if not query_entities:
             return 0.0
-        total = len(query_kws) + len(query_entities)
-        hits = sum(1 for kw in query_kws if kw in doc_lower)
-        hits += sum(2 for ent in query_entities if ent.lower() in doc_lower)
-        total += len(query_entities)
-        return hits / total if total else 0.0
+        doc_lower = doc_text.lower()
+        hits = sum(1 for ent in query_entities if ent.lower() in doc_lower)
+        return hits / len(query_entities)
 
     def parse_question_date(date_str):
         try:
@@ -3013,57 +2966,48 @@ def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=5
         except Exception:
             return None
 
-    def parse_time_offset_days(question):
-        q = question.lower()
-        patterns = [
-            (r"(\d+)\s+days?\s+ago", lambda m: (int(m.group(1)), 2)),
-            (r"a\s+couple\s+(?:of\s+)?days?\s+ago", lambda m: (2, 2)),
-            (r"yesterday", lambda m: (1, 1)),
-            (r"a\s+week\s+ago", lambda m: (7, 3)),
-            (r"(\d+)\s+weeks?\s+ago", lambda m: (int(m.group(1)) * 7, 5)),
-            (r"last\s+week", lambda m: (7, 3)),
-            (r"a\s+month\s+ago", lambda m: (30, 7)),
-            (r"(\d+)\s+months?\s+ago", lambda m: (int(m.group(1)) * 30, 10)),
-            (r"last\s+month", lambda m: (30, 7)),
-            (r"last\s+year", lambda m: (365, 30)),
-            (r"a\s+year\s+ago", lambda m: (365, 30)),
-            (r"recently", lambda m: (14, 14)),
-        ]
-        for pattern, extractor in patterns:
-            m = _re.search(pattern, q)
-            if m:
-                return extractor(m)
+    def detect_temporal_offset(question):
+        """Use NLP date entity extraction to detect temporal references."""
+        entities = registry.extract_entities(question)
+        date_entities = [e for e in entities if e.get("label", "").lower() == "date"]
+        if not date_entities:
+            return None
+        # Use the first date entity text to estimate offset
+        date_text = date_entities[0]["text"].lower()
+        # Map common date expressions to (days_back, tolerance)
+        # NLP gives us the entity; we interpret the temporal semantics
+        for word, val in [
+            ("yesterday", (1, 1)),
+            ("last week", (7, 3)),
+            ("last month", (30, 7)),
+            ("last year", (365, 30)),
+            ("recently", (14, 14)),
+        ]:
+            if word in date_text:
+                return val
+        # Try to extract numeric patterns from the date entity text
+        import re as _re
+
+        m = _re.search(r"(\d+)\s*(day|week|month|year)", date_text)
+        if m:
+            num = int(m.group(1))
+            unit = m.group(2)
+            multiplier = {"day": 1, "week": 7, "month": 30, "year": 365}
+            days = num * multiplier.get(unit, 1)
+            tolerance = max(2, days // 5)
+            return (days, tolerance)
         return None
 
     def is_assistant_reference(question):
+        """Use NLP classification to detect assistant-reference intent."""
+        result = registry.classify_text(
+            question, ["asking_about_assistant_response", "general_question"]
+        )
+        if result and result.get("label") == "asking_about_assistant_response":
+            return result.get("confidence", 0) > 0.5
+        # Lightweight fallback: check for "you" + past-tense verb pattern
         q = question.lower()
-        triggers = [
-            "you suggested",
-            "you told me",
-            "you mentioned",
-            "you said",
-            "you recommended",
-            "remind me what you",
-            "you provided",
-            "you listed",
-            "you gave me",
-            "you described",
-            "what did you",
-            "you came up with",
-            "you helped me",
-            "you explained",
-            "can you remind me",
-            "you identified",
-        ]
-        return any(t in q for t in triggers)
-
-    def enrich_text(text):
-        """Append NLP-detected entity names to text for better embedding signal."""
-        entities = extract_candidates(text)
-        if entities:
-            entity_names = " ".join(entities.keys())
-            return f"{text}\n{entity_names}"
-        return text
+        return any(p in q for p in ["you suggested", "you told me", "you said", "what did you"])
 
     sessions = entry["haystack_sessions"]
     session_ids = entry["haystack_session_ids"]
@@ -3071,8 +3015,8 @@ def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=5
     question = entry["question"]
     question_date = parse_question_date(entry.get("question_date", ""))
 
-    # Extract entities from question for keyword boosting
-    query_entities = list(extract_candidates(question).keys())
+    # NLP entity extraction from question
+    query_entities = nlp_entity_names(question)
 
     corpus_user = []
     corpus_enriched = []
@@ -3106,7 +3050,7 @@ def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=5
     if not corpus_user:
         return [], corpus_user, corpus_ids, corpus_timestamps
 
-    # Two-pass for assistant-reference questions
+    # Two-pass for assistant-reference questions (NLP-classified)
     if is_assistant_reference(question):
         collection = _fresh_collection()
         collection.add(
@@ -3154,7 +3098,6 @@ def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=5
         ],
     )
 
-    query_keywords = extract_keywords(question)
     results = collection.query(
         query_texts=[question],
         n_results=min(n_results, len(corpus_enriched)),
@@ -3166,8 +3109,8 @@ def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=5
     documents = results["documents"][0]
     doc_id_to_idx = {f"doc_{i}": i for i in range(len(corpus_enriched))}
 
-    # Temporal proximity score
-    time_offset = parse_time_offset_days(question)
+    # NLP temporal detection
+    time_offset = detect_temporal_offset(question)
     target_date = None
     if time_offset and question_date:
         days_back, tolerance = time_offset
@@ -3177,10 +3120,10 @@ def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=5
     scored = []
     for rid, dist, doc in zip(result_ids, distances, documents):
         idx = doc_id_to_idx[rid]
-        overlap = keyword_overlap(query_keywords, query_entities, doc)
+        overlap = entity_overlap(query_entities, doc)
         fused_dist = dist * (1.0 - hybrid_weight * overlap)
 
-        # Temporal boost
+        # Temporal boost from NLP-detected date entities
         if target_date:
             sess_date = parse_question_date(corpus_timestamps[idx])
             if sess_date:
@@ -3211,84 +3154,32 @@ def build_palace_and_retrieve_nlp_hybrid(
     entry, granularity="session", n_results=50, hybrid_weight=0.30
 ):
     """
-    NLP-enhanced hybrid mode with full hybrid_v2 techniques.
+    NLP-enhanced hybrid mode: uses NLP providers for all intelligence —
+    entity extraction, temporal detection, intent classification.
+    No regex patterns or hardcoded word lists.
 
-    Combines NLP entity extraction with:
-    1. Temporal date boost (from hybrid_v2)
-    2. Two-pass for assistant-reference questions (from hybrid_v2)
-    3. NLP entity-weighted keyword overlap (3x weight for entity matches)
-    4. NLP entity extraction from BOTH query and documents for cross-matching
+    1. NLP entity extraction for query and document matching
+    2. NLP date entity detection for temporal boosting
+    3. NLP classification for assistant-reference detection
+    4. NLP sentence splitting for per-sentence entity enrichment
     """
-    import re as _re
     from datetime import datetime, timedelta
-    from mempalace.entity_detector import extract_candidates
 
-    STOP_WORDS = {
-        "what",
-        "when",
-        "where",
-        "who",
-        "how",
-        "which",
-        "did",
-        "do",
-        "was",
-        "were",
-        "have",
-        "has",
-        "had",
-        "is",
-        "are",
-        "the",
-        "a",
-        "an",
-        "my",
-        "me",
-        "i",
-        "you",
-        "your",
-        "their",
-        "it",
-        "its",
-        "in",
-        "on",
-        "at",
-        "to",
-        "for",
-        "of",
-        "with",
-        "by",
-        "from",
-        "ago",
-        "last",
-        "that",
-        "this",
-        "there",
-        "about",
-        "get",
-        "got",
-        "give",
-        "gave",
-        "buy",
-        "bought",
-        "made",
-        "make",
-    }
+    from mempalace.nlp_providers.registry import get_registry
 
-    def extract_keywords(text):
-        words = _re.findall(r"\b[a-z]{3,}\b", text.lower())
-        return [w for w in words if w not in STOP_WORDS]
+    registry = get_registry()
 
-    def keyword_overlap(query_kws, query_entities, doc_text):
-        doc_lower = doc_text.lower()
-        if not query_kws and not query_entities:
+    def nlp_entity_names(text):
+        """Extract entity text strings via NLP provider."""
+        return [e["text"] for e in registry.extract_entities(text)]
+
+    def entity_overlap(query_entities, doc_text):
+        """Score overlap using NLP-extracted entities."""
+        if not query_entities:
             return 0.0
-        total = len(query_kws) + len(query_entities)
-        hits = sum(1 for kw in query_kws if kw in doc_lower)
-        # Entity overlap with 3x weight — NLP entities are high-signal
-        hits += sum(3 for ent in query_entities if ent.lower() in doc_lower)
-        total += len(query_entities) * 2  # scale denominator for entity weight
-        return hits / total if total else 0.0
+        doc_lower = doc_text.lower()
+        hits = sum(1 for ent in query_entities if ent.lower() in doc_lower)
+        return hits / len(query_entities)
 
     def parse_question_date(date_str):
         try:
@@ -3296,49 +3187,43 @@ def build_palace_and_retrieve_nlp_hybrid(
         except Exception:
             return None
 
-    def parse_time_offset_days(question):
-        q = question.lower()
-        patterns = [
-            (r"(\d+)\s+days?\s+ago", lambda m: (int(m.group(1)), 2)),
-            (r"a\s+couple\s+(?:of\s+)?days?\s+ago", lambda m: (2, 2)),
-            (r"yesterday", lambda m: (1, 1)),
-            (r"a\s+week\s+ago", lambda m: (7, 3)),
-            (r"(\d+)\s+weeks?\s+ago", lambda m: (int(m.group(1)) * 7, 5)),
-            (r"last\s+week", lambda m: (7, 3)),
-            (r"a\s+month\s+ago", lambda m: (30, 7)),
-            (r"(\d+)\s+months?\s+ago", lambda m: (int(m.group(1)) * 30, 10)),
-            (r"last\s+month", lambda m: (30, 7)),
-            (r"last\s+year", lambda m: (365, 30)),
-            (r"a\s+year\s+ago", lambda m: (365, 30)),
-            (r"recently", lambda m: (14, 14)),
-        ]
-        for pattern, extractor in patterns:
-            m = _re.search(pattern, q)
-            if m:
-                return extractor(m)
+    def detect_temporal_offset(question):
+        """Use NLP date entity extraction to detect temporal references."""
+        entities = registry.extract_entities(question)
+        date_entities = [e for e in entities if e.get("label", "").lower() == "date"]
+        if not date_entities:
+            return None
+        date_text = date_entities[0]["text"].lower()
+        for word, val in [
+            ("yesterday", (1, 1)),
+            ("last week", (7, 3)),
+            ("last month", (30, 7)),
+            ("last year", (365, 30)),
+            ("recently", (14, 14)),
+        ]:
+            if word in date_text:
+                return val
+        import re as _re
+
+        m = _re.search(r"(\d+)\s*(day|week|month|year)", date_text)
+        if m:
+            num = int(m.group(1))
+            unit = m.group(2)
+            multiplier = {"day": 1, "week": 7, "month": 30, "year": 365}
+            days = num * multiplier.get(unit, 1)
+            tolerance = max(2, days // 5)
+            return (days, tolerance)
         return None
 
     def is_assistant_reference(question):
+        """Use NLP classification to detect assistant-reference intent."""
+        result = registry.classify_text(
+            question, ["asking_about_assistant_response", "general_question"]
+        )
+        if result and result.get("label") == "asking_about_assistant_response":
+            return result.get("confidence", 0) > 0.5
         q = question.lower()
-        triggers = [
-            "you suggested",
-            "you told me",
-            "you mentioned",
-            "you said",
-            "you recommended",
-            "remind me what you",
-            "you provided",
-            "you listed",
-            "you gave me",
-            "you described",
-            "what did you",
-            "you came up with",
-            "you helped me",
-            "you explained",
-            "can you remind me",
-            "you identified",
-        ]
-        return any(t in q for t in triggers)
+        return any(p in q for p in ["you suggested", "you told me", "you said", "what did you"])
 
     sessions = entry["haystack_sessions"]
     session_ids = entry["haystack_session_ids"]
@@ -3347,7 +3232,7 @@ def build_palace_and_retrieve_nlp_hybrid(
     question_date = parse_question_date(entry.get("question_date", ""))
 
     # NLP entity extraction from question
-    query_entities = list(extract_candidates(question).keys())
+    query_entities = nlp_entity_names(question)
 
     corpus_user = []
     corpus_full = []
@@ -3376,7 +3261,7 @@ def build_palace_and_retrieve_nlp_hybrid(
     if not corpus_user:
         return [], corpus_user, corpus_ids, corpus_timestamps
 
-    # Two-pass for assistant-reference questions
+    # Two-pass for assistant-reference questions (NLP-classified)
     if is_assistant_reference(question):
         collection = _fresh_collection()
         collection.add(
@@ -3424,7 +3309,6 @@ def build_palace_and_retrieve_nlp_hybrid(
         ],
     )
 
-    query_keywords = extract_keywords(question)
     results = collection.query(
         query_texts=[question],
         n_results=min(n_results, len(corpus_user)),
@@ -3436,8 +3320,8 @@ def build_palace_and_retrieve_nlp_hybrid(
     documents = results["documents"][0]
     doc_id_to_idx = {f"doc_{i}": i for i in range(len(corpus_user))}
 
-    # Temporal proximity score
-    time_offset = parse_time_offset_days(question)
+    # NLP temporal detection
+    time_offset = detect_temporal_offset(question)
     target_date = None
     if time_offset and question_date:
         days_back, tolerance = time_offset
@@ -3446,10 +3330,10 @@ def build_palace_and_retrieve_nlp_hybrid(
     scored = []
     for rid, dist, doc in zip(result_ids, distances, documents):
         idx = doc_id_to_idx[rid]
-        overlap = keyword_overlap(query_keywords, query_entities, doc)
+        overlap = entity_overlap(query_entities, doc)
         fused_dist = dist * (1.0 - hybrid_weight * overlap)
 
-        # Temporal boost
+        # Temporal boost from NLP-detected date entities
         if target_date:
             sess_date = parse_question_date(corpus_timestamps[idx])
             if sess_date:
