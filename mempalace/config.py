@@ -189,8 +189,8 @@ class MempalaceConfig:
             self._file_config["hooks"] = {}
         self._file_config["hooks"][key] = value
         try:
-            with open(self._config_file, "w") as f:
-                json.dump(self._file_config, f, indent=2)
+            with open(self._config_file, "w", encoding="utf-8") as f:
+                json.dump(self._file_config, f, indent=2, ensure_ascii=False)
         except OSError:
             pass
 

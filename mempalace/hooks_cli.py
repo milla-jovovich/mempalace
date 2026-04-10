@@ -22,12 +22,18 @@ def _mempalace_python() -> str:
     """Return the python interpreter that has mempalace installed.
 
     When hooks are invoked by Claude Code, sys.executable may be the system
-    python which lacks chromadb and other deps.  Walk up from this file to
-    find the venv's python, falling back to sys.executable.
+    python which lacks chromadb and other deps.  Resolution order:
+    1. MEMPALACE_PYTHON env var (explicit override)
+    2. Venv python from package install path
+    3. Editable install: venv/ sibling to mempalace/
+    4. sys.executable fallback
     """
+    # Honor explicit override (used by shell hook wrappers)
+    env_python = os.environ.get("MEMPALACE_PYTHON", "")
+    if env_python and os.path.isfile(env_python) and os.access(env_python, os.X_OK):
+        return env_python
     # This file lives at <venv>/lib/pythonX.Y/site-packages/mempalace/hooks_cli.py
     # or <project>/mempalace/hooks_cli.py (editable install).
-    # In either case, the venv bin/python sits alongside the venv's lib/.
     venv_bin = Path(__file__).resolve().parents[3] / "bin" / "python"
     if venv_bin.is_file():
         return str(venv_bin)

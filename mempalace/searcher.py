@@ -76,7 +76,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     print(f"{'=' * 60}\n")
 
     for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
-        similarity = round(1 - dist, 3)
+        similarity = round(max(0.0, 1 - dist), 3)
         source = Path(meta.get("source_file", "?")).name
         wing_name = meta.get("wing", "?")
         room_name = meta.get("room", "?")
@@ -157,7 +157,7 @@ def search_memories(
                 "wing": meta.get("wing", "unknown"),
                 "room": meta.get("room", "unknown"),
                 "source_file": Path(meta.get("source_file", "?")).name,
-                "similarity": round(1 - dist, 3),
+                "similarity": round(max(0.0, 1 - dist), 3),
                 "distance": round(dist, 4),
             }
         )
