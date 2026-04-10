@@ -17,8 +17,8 @@ Commands:
     mempalace mcp                         Show MCP setup command
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
-    mempalace status                      Show what's been filed
-    mempalace stats                       Show counts for wings, halls, rooms, memories
+    mempalace status                      Show palace structure and what's been filed
+    mempalace stats                       Show numeric counts for wings, halls, rooms, memories
 
 Examples:
     mempalace init ~/projects/my_app
@@ -595,10 +595,10 @@ def main():
     )
 
     # status
-    sub.add_parser("status", help="Show what's been filed")
+    sub.add_parser("status", help="Show palace structure and what's been filed")
 
     # stats
-    sub.add_parser("stats", help="Show counts for wings, halls, rooms, memories")
+    sub.add_parser("stats", help="Show numeric counts for wings, halls, rooms, memories")
 
     args = parser.parse_args()
 
