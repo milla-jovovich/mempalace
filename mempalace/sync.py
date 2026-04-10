@@ -169,16 +169,14 @@ class SyncEngine:
         return self._vv.to_dict()
 
     def get_changes_since(self, remote_vv: dict[str, int]) -> ChangeSet:
-        """Get all local records that the remote hasn't seen.
+        """Get all records that the remote hasn't seen.
 
-        Scans records written by THIS node whose seq > remote_vv[our_node_id].
+        Scans ALL records and exports those whose seq > remote_vv[record.node_id].
+        This is essential for hub-and-spoke: the hub must relay records from
+        any node, not just its own.
         """
         our_node = self._identity.node_id
-        remote_knows = remote_vv.get(our_node, 0)
 
-        # Scan all records and filter by node_id + seq
-        # (LanceDB doesn't have complex metadata queries inside metadata_json,
-        # so we scan and filter in Python.)
         all_records = self._col.get(limit=100_000, include=["documents", "metadatas"])
 
         changeset = ChangeSet(source_node=our_node)
@@ -191,7 +189,8 @@ class SyncEngine:
             if isinstance(rec_seq, str):
                 rec_seq = int(rec_seq)
 
-            if rec_node == our_node and rec_seq > remote_knows:
+            remote_knows = remote_vv.get(rec_node, 0)
+            if rec_seq > remote_knows:
                 changeset.records.append(
                     SyncRecord(
                         id=id_,
@@ -246,28 +245,65 @@ class SyncEngine:
                     result.rejected_conflicts += 1
 
         if to_upsert_ids:
-            # If any records lack embeddings, let the collection re-embed
-            has_embs = all(e is not None for e in to_upsert_embs)
-            self._col.upsert(
-                documents=to_upsert_docs,
-                ids=to_upsert_ids,
-                metadatas=to_upsert_metas,
-                embeddings=to_upsert_embs if has_embs else None,
-                _raw=True,  # preserve original sync metadata
-            )
+            # Split: records with embeddings vs those needing re-embedding
+            with_emb_docs, with_emb_ids, with_emb_metas, with_emb_vecs = [], [], [], []
+            without_emb_docs, without_emb_ids, without_emb_metas = [], [], []
+
+            for doc, id_, meta, emb in zip(
+                to_upsert_docs, to_upsert_ids, to_upsert_metas, to_upsert_embs
+            ):
+                if emb is not None:
+                    with_emb_docs.append(doc)
+                    with_emb_ids.append(id_)
+                    with_emb_metas.append(meta)
+                    with_emb_vecs.append(emb)
+                else:
+                    without_emb_docs.append(doc)
+                    without_emb_ids.append(id_)
+                    without_emb_metas.append(meta)
+
+            if with_emb_ids:
+                self._col.upsert(
+                    documents=with_emb_docs,
+                    ids=with_emb_ids,
+                    metadatas=with_emb_metas,
+                    embeddings=with_emb_vecs,
+                    _raw=True,
+                )
+            if without_emb_ids:
+                self._col.upsert(
+                    documents=without_emb_docs,
+                    ids=without_emb_ids,
+                    metadatas=without_emb_metas,
+                    _raw=True,
+                )
 
         # Advance our version vector
         self._vv.update_from_records(changeset.records)
 
         return result
 
+    @staticmethod
+    def _parse_ts(raw: str):
+        """Parse an ISO 8601 timestamp to a timezone-aware datetime."""
+        from datetime import datetime, timezone
+
+        if not raw:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        # Handle 'Z' suffix
+        normalized = raw.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
     def _remote_wins(self, remote_meta: dict, local_meta: dict) -> bool:
         """Return True if the remote record should overwrite the local one.
 
-        Comparison: updated_at descending, then node_id descending as tiebreak.
+        Comparison: updated_at descending (parsed as UTC), then node_id tiebreak.
         """
-        r_time = remote_meta.get("updated_at", "")
-        l_time = local_meta.get("updated_at", "")
+        r_time = self._parse_ts(remote_meta.get("updated_at", ""))
+        l_time = self._parse_ts(local_meta.get("updated_at", ""))
 
         if r_time > l_time:
             return True

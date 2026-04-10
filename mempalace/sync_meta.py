@@ -17,10 +17,21 @@ Metadata injected into every record:
 """
 
 import os
-import fcntl
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+
+try:
+    import fcntl
+    _HAS_FCNTL = True
+except ImportError:
+    _HAS_FCNTL = False
+
+try:
+    import msvcrt
+    _HAS_MSVCRT = True
+except ImportError:
+    _HAS_MSVCRT = False
 
 
 class NodeIdentity:
@@ -54,6 +65,20 @@ class NodeIdentity:
 
         return self._node_id
 
+    @staticmethod
+    def _lock(fd):
+        if _HAS_FCNTL:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        elif _HAS_MSVCRT:
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+
+    @staticmethod
+    def _unlock(fd):
+        if _HAS_FCNTL:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        elif _HAS_MSVCRT:
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
     def next_seq(self, count: int = 1) -> int:
         """Atomically increment and return the sequence counter.
 
@@ -70,7 +95,7 @@ class NodeIdentity:
         # Open-or-create the seq file
         fd = os.open(str(self._seq_file), os.O_RDWR | os.O_CREAT)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            self._lock(fd)
             data = os.read(fd, 64)
             current = int(data.strip()) if data.strip() else 0
             first = current + 1
@@ -79,7 +104,7 @@ class NodeIdentity:
             os.ftruncate(fd, 0)
             os.write(fd, str(new_val).encode())
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            self._unlock(fd)
             os.close(fd)
 
         return first
