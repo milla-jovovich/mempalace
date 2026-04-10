@@ -91,11 +91,14 @@ class LanceCollection:
     FILTER_COLUMNS = {"wing", "room", "source_file"}
     # Columns that are part of the schema but not user metadata.
     SCHEMA_COLUMNS = {"id", "document", "vector", "wing", "room", "source_file", "metadata_json"}
+    # Fields that are internal bookkeeping (not returned in metadata unless stored in metadata_json).
+    INTERNAL_FIELDS = {"_distance", "_relevance_score"}
 
-    def __init__(self, db, table_name: str, embedder):
+    def __init__(self, db, table_name: str, embedder, sync_identity=None):
         self._db = db
         self._table_name = table_name
         self._embedder = embedder
+        self._sync_identity = sync_identity
         self._table = None
         if table_name in self._list_table_names():
             self._table = db.open_table(table_name)
@@ -137,8 +140,17 @@ class LanceCollection:
         else:
             self._table = self._db.create_table(self._table_name, data=records)
 
+    def _inject_sync(self, metadatas: list) -> list:
+        """Inject sync metadata (node_id, seq, updated_at) into a write batch."""
+        if self._sync_identity is None:
+            from .sync_meta import get_identity
+            self._sync_identity = get_identity()
+        from .sync_meta import inject_sync_meta
+        return inject_sync_meta(metadatas, self._sync_identity)
+
     def upsert(self, documents, ids, metadatas, embeddings=None):
         """Insert or update records. Computes embeddings automatically."""
+        metadatas = self._inject_sync(metadatas)
         records = self._to_records(documents, ids, metadatas, embeddings)
 
         if self._table is None:
@@ -253,7 +265,11 @@ class LanceCollection:
         }
 
     def delete(self, ids):
-        """Delete records by ID."""
+        """Delete records by ID.
+
+        Performs a hard delete.  The sync layer (Phase 4) will convert
+        these into tombstoned upserts when sync is active.
+        """
         if self._table is None:
             return
         escaped = [id_.replace("'", "''") for id_ in ids]
@@ -376,6 +392,7 @@ def open_collection(
     backend: str = None,
     embedder=None,
     create: bool = True,
+    sync_identity=None,
 ):
     """Open or create a palace collection.
 
@@ -385,6 +402,7 @@ def open_collection(
         backend: "lance" or "chroma". Auto-detected if None.
         embedder: Embedder instance (required for lance, ignored for chroma).
         create: If True, create the collection if it doesn't exist.
+        sync_identity: NodeIdentity for sync metadata injection (auto-created if None).
 
     Returns:
         A LanceCollection or ChromaCollection instance.
@@ -399,14 +417,14 @@ def open_collection(
         pass
 
     if backend == "lance":
-        return _open_lance(palace_path, collection_name, embedder)
+        return _open_lance(palace_path, collection_name, embedder, sync_identity)
     elif backend == "chroma":
         return _open_chroma(palace_path, collection_name, create)
     else:
         raise ValueError(f"Unknown backend: {backend}")
 
 
-def _open_lance(palace_path, collection_name, embedder):
+def _open_lance(palace_path, collection_name, embedder, sync_identity=None):
     """Open a LanceDB-backed collection."""
     import lancedb
 
@@ -416,7 +434,7 @@ def _open_lance(palace_path, collection_name, embedder):
         embedder = get_embedder(MempalaceConfig().embedder_config)
 
     db = lancedb.connect(palace_path)
-    return LanceCollection(db, collection_name, embedder)
+    return LanceCollection(db, collection_name, embedder, sync_identity=sync_identity)
 
 
 def _open_chroma(palace_path, collection_name, create):

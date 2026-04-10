@@ -170,6 +170,12 @@ class MempalaceConfig:
         }
 
     @property
+    def node_id(self):
+        """This machine's unique sync node ID."""
+        from .sync_meta import get_identity
+        return get_identity(str(self._config_dir)).node_id
+
+    @property
     def people_map(self):
         """Mapping of name variants to canonical names."""
         if self._people_map_file.exists():

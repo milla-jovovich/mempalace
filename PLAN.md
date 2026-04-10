@@ -6,7 +6,7 @@
 |-------|-------------|--------|
 | **Phase 1** | Database abstraction + LanceDB backend | ✅ Done |
 | **Phase 2** | Pluggable vectorizers + `mempalace reindex` | ✅ Done |
-| **Phase 3** | Sync metadata in all writes (`node_id`, `seq`, `updated_at`) | Planned |
+| **Phase 3** | Sync metadata in all writes (`node_id`, `seq`, `updated_at`) | ✅ Done |
 | **Phase 4** | Sync engine + server + `mempalace serve/sync` CLI | Planned |
 | **Phase 5** | Unify knowledge graph into LanceDB tables | Planned |
 | **Phase 6** | Benchmarks — re-run LongMemEval with new vectorizers | Planned |
@@ -81,7 +81,11 @@ if the stored model differs from the active embedder, log a warning and suggest
 
 ---
 
-## Phase 3 — Sync Metadata in All Writes
+## Phase 3 — Sync Metadata in All Writes ✅
+
+**Completed.** Every LanceCollection write now injects `node_id`, `seq`, and
+`updated_at` into stored metadata.  `sync_meta.py` manages a persistent
+12-char node ID and an atomic file-locked sequence counter.  568 tests pass.
 
 ### Goal
 
