@@ -177,7 +177,7 @@ def desktop_token() -> str:
 def desktop_cookie() -> str:
     safe_key = slack_safe_storage_key()
     decrypted = decrypt_chromium_cookie(encrypted_cookie_hex("d"), safe_key)
-    match = re.search(r"(xoxd-[A-Za-z0-9%._/\\-+=]+)", decrypted)
+    match = re.search(r"(xoxd-[A-Za-z0-9%._/+=-]+)", decrypted)
     if not match:
         raise RuntimeError("Could not find Slack desktop xoxd cookie")
     return match.group(1)
