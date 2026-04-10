@@ -9,8 +9,10 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use mempalace_server::hooks::{SaveHook, SaveRequest};
 use mempalace_server::ingest::{Miner, MinerOptions};
+use mempalace_server::mcp::McpServer;
 use mempalace_server::onboarding::WingConfig;
 use mempalace_server::searcher::{format_human, search_memories, SearchQuery};
+use mempalace_store::knowledge_graph::KnowledgeGraph;
 use mempalace_store::layers::MemoryStack;
 use mempalace_store::palace::{InMemoryPalace, Palace};
 use tracing_subscriber::EnvFilter;
@@ -89,6 +91,9 @@ enum Command {
         content: String,
     },
 
+    #[command(about = "Run MCP server over stdio (for Claude / ChatGPT / Cursor)")]
+    McpServe,
+
     #[command(about = "Print version and build info")]
     Instructions,
 }
@@ -119,6 +124,7 @@ fn main() -> Result<()> {
         Command::WakeUp { wing } => cmd_wake_up(palace.as_ref(), wing.as_deref()),
         Command::Split { dir, dry_run } => cmd_split(&dir, dry_run),
         Command::Mcp => cmd_mcp(),
+        Command::McpServe => cmd_mcp_serve(),
         Command::HookSave {
             wing,
             room,
@@ -253,6 +259,17 @@ fn cmd_hook_save(
         .context("save hook failed")?;
     println!("{result:#?}");
     Ok(())
+}
+
+fn cmd_mcp_serve() -> Result<()> {
+    let palace: Box<dyn Palace> = Box::new(InMemoryPalace::new());
+    // TODO(R4): wire LanceDbPalace behind --in-memory=false / lancedb-backend feature
+    let kg =
+        KnowledgeGraph::open(":memory:").context("failed to open in-memory knowledge graph")?;
+    let server = McpServer::new(palace, kg);
+
+    let rt = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
+    rt.block_on(mempalace_server::serve_stdio(server))
 }
 
 fn cmd_instructions() -> Result<()> {

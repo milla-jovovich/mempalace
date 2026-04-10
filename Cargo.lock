@@ -3984,6 +3984,7 @@ dependencies = [
  "mempalace-store",
  "mempalace-text",
  "predicates",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",
