@@ -47,6 +47,7 @@ class TestVersionVector:
         path = str(tmp_path / "vv.json")
         vv1 = VersionVector(path=path)
         vv1.update("node_a", 42)
+        vv1.save()
 
         vv2 = VersionVector(path=path)
         assert vv2.get("node_a") == 42
@@ -66,6 +67,33 @@ class TestVersionVector:
         vv = VersionVector.from_dict({"x": 10, "y": 20})
         assert vv.get("x") == 10
         assert vv.get("y") == 20
+
+    def test_update_does_not_save_per_call(self, tmp_path):
+        """update() must not write to disk on every call — only on save()."""
+        path = str(tmp_path / "vv.json")
+        vv = VersionVector(path=path)
+        for i in range(500):
+            vv.update(f"node_{i % 10}", i)
+        # Not persisted yet — a fresh load should see nothing
+        vv2 = VersionVector(path=path)
+        assert vv2.to_dict() == {}
+        # Explicit save persists everything
+        vv.save()
+        vv3 = VersionVector(path=path)
+        assert vv3.get("node_9") == 499
+
+    def test_update_from_records_saves_once(self, tmp_path):
+        """update_from_records() should persist exactly once at the end."""
+        path = str(tmp_path / "vv.json")
+        vv = VersionVector(path=path)
+        records = [
+            SyncRecord(id=f"r{i}", document="", metadata={"node_id": "a", "seq": i})
+            for i in range(100)
+        ]
+        vv.update_from_records(records)
+        # Should be persisted after the call
+        vv2 = VersionVector(path=path)
+        assert vv2.get("a") == 99
 
 
 # ── ChangeSet serialisation ───────────────────────────────────────────────────
