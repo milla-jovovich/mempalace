@@ -171,36 +171,48 @@ class SyncEngine:
     def version_vector(self) -> dict[str, int]:
         return self._vv.to_dict()
 
+    def _build_changes_filter(self, remote_vv: dict[str, int]) -> dict | None:
+        """Build a where clause that selects records the remote hasn't seen.
+
+        Uses indexed node_id/seq columns so LanceDB can filter at the
+        storage layer instead of scanning every record into Python.
+        """
+        if not remote_vv:
+            # Remote has seen nothing — return all records that have a seq
+            return {"seq": {"$gt": 0}}
+
+        # For each known node: records where seq > what remote has seen.
+        # Plus: records from any node NOT in remote_vv (seq > 0).
+        clauses = []
+        for node_id, seen_seq in remote_vv.items():
+            clauses.append({"$and": [{"node_id": node_id}, {"seq": {"$gt": seen_seq}}]})
+
+        # Unknown nodes: build NOT-IN via chained $and of $ne
+        unknown_filter = [{"seq": {"$gt": 0}}]
+        for node_id in remote_vv:
+            unknown_filter.append({"node_id": {"$ne": node_id}})
+        clauses.append({"$and": unknown_filter})
+
+        return {"$or": clauses}
+
     def get_changes_since(self, remote_vv: dict[str, int]) -> ChangeSet:
         """Get all records that the remote hasn't seen.
 
-        Scans ALL records and exports those whose seq > remote_vv[record.node_id].
-        This is essential for hub-and-spoke: the hub must relay records from
-        any node, not just its own.
+        Uses indexed node_id/seq columns for efficient filtering.
+        Essential for hub-and-spoke: the hub relays records from any node.
         """
         our_node = self._identity.node_id
+        where = self._build_changes_filter(remote_vv)
 
-        all_records = self._col.get(limit=100_000, include=["documents", "metadatas"])
+        records = self._col.get(
+            where=where, limit=100_000, include=["documents", "metadatas"],
+        )
 
         changeset = ChangeSet(source_node=our_node)
-
         for id_, doc, meta in zip(
-            all_records["ids"], all_records["documents"], all_records["metadatas"]
+            records["ids"], records["documents"], records["metadatas"]
         ):
-            rec_node = meta.get("node_id", "")
-            rec_seq = meta.get("seq", 0)
-            if isinstance(rec_seq, str):
-                rec_seq = int(rec_seq)
-
-            remote_knows = remote_vv.get(rec_node, 0)
-            if rec_seq > remote_knows:
-                changeset.records.append(
-                    SyncRecord(
-                        id=id_,
-                        document=doc,
-                        metadata=meta,
-                    )
-                )
+            changeset.records.append(SyncRecord(id=id_, document=doc, metadata=meta))
 
         return changeset
 

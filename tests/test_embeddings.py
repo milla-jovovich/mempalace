@@ -316,6 +316,7 @@ def test_lance_node_id_seq_are_filterable_columns(tmp_path):
             {"wing": "w", "room": "r", "source_file": "", "node_id": "aaa", "seq": 1},
             {"wing": "w", "room": "r", "source_file": "", "node_id": "bbb", "seq": 5},
         ],
+        _raw=True,
     )
 
     # Filter by node_id — only works if it's a real column
