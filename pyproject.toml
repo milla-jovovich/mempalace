@@ -26,6 +26,7 @@ classifiers = [
 ]
 dependencies = [
     "chromadb>=0.5.0,<0.7",
+    "openai>=2.31.0",
     "pyyaml>=6.0,<7",
 ]
 
@@ -40,6 +41,7 @@ mempalace = "mempalace:main"
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
 spellcheck = ["autocorrect>=2.0"]
+agent = ["fastapi>=0.100", "uvicorn>=0.23", "httpx>=0.24"]
 
 [dependency-groups]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
