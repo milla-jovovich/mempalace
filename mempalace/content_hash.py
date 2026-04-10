@@ -1,7 +1,7 @@
 import hashlib
-import json
 import math
 import os
+import sqlite3
 from pathlib import Path
 
 
@@ -34,6 +34,8 @@ class BloomFilter:
         return all(self.array[idx] for idx in self._hashes(item))
 
     def save(self, path: str):
+        import json
+
         with open(path, "w") as f:
             json.dump(
                 {"array_size": self.size, "hash_count": self.hash_count, "array": self.array}, f
@@ -41,6 +43,8 @@ class BloomFilter:
 
     @classmethod
     def load(cls, path: str) -> "BloomFilter":
+        import json
+
         if not os.path.exists(path):
             return cls()
         with open(path, "r") as f:
@@ -53,22 +57,33 @@ class BloomFilter:
 
 
 class ContentHashDB:
-    """Persistent hash database for file content."""
+    """Persistent hash database for file content using SQLite."""
 
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.bloom_path = db_path + ".bloom"
-        self.hashes = {}
+        self._conn = sqlite3.connect(db_path)
+        self._conn.row_factory = sqlite3.Row
         self._hash_set = set()
         self.bloom = BloomFilter()
+        self._initialize()
         self._load()
 
+    def _initialize(self):
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS content_hashes (
+                filepath TEXT PRIMARY KEY,
+                content_hash TEXT NOT NULL
+            )
+        """)
+        self._conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_content_hash ON content_hashes(content_hash)
+        """)
+        self._conn.commit()
+
     def _load(self):
-        if os.path.exists(self.db_path):
-            with open(self.db_path, "r") as f:
-                self.hashes = json.load(f)
-        self.hashes = {str(k): v for k, v in self.hashes.items()}
-        self._hash_set = set(self.hashes.values())
+        cursor = self._conn.execute("SELECT content_hash FROM content_hashes")
+        self._hash_set = {row[0] for row in cursor.fetchall()}
         if self._hash_set and os.path.exists(self.bloom_path):
             self.bloom = BloomFilter.load(self.bloom_path)
         else:
@@ -76,13 +91,9 @@ class ContentHashDB:
             for h in self._hash_set:
                 self.bloom.add(h)
 
-    def _save(self):
-        with open(self.db_path, "w") as f:
-            json.dump(self.hashes, f)
-
     def flush(self):
         """Persist bloom filter to disk. Call after batch operations."""
-        self._save()
+        self._conn.commit()
         self.bloom.save(self.bloom_path)
 
     def compute_hash(self, filepath: Path) -> str:
@@ -104,11 +115,17 @@ class ContentHashDB:
             if content_hash in self._hash_set:
                 return True
             self._hash_set.add(content_hash)
-            self.hashes[filepath_str] = content_hash
+            self._conn.execute(
+                "INSERT INTO content_hashes (filepath, content_hash) VALUES (?, ?)",
+                (filepath_str, content_hash),
+            )
             return False
         else:
             self._hash_set.add(content_hash)
-            self.hashes[filepath_str] = content_hash
+            self._conn.execute(
+                "INSERT INTO content_hashes (filepath, content_hash) VALUES (?, ?)",
+                (filepath_str, content_hash),
+            )
             self.bloom.add(content_hash)
             return False
 
@@ -119,15 +136,29 @@ class ContentHashDB:
         except (OSError, IOError):
             return
         filepath_str = str(filepath)
-        self.hashes[filepath_str] = content_hash
         self._hash_set.add(content_hash)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO content_hashes (filepath, content_hash) VALUES (?, ?)",
+            (filepath_str, content_hash),
+        )
         self.bloom.add(content_hash)
 
+    def _get_hashes(self) -> dict:
+        """Get all hashes as a dict (filepath -> content_hash)."""
+        cursor = self._conn.execute("SELECT filepath, content_hash FROM content_hashes")
+        return {row[0]: row[1] for row in cursor.fetchall()}
+
+    @property
+    def hashes(self) -> dict:
+        return self._get_hashes()
+
     def clear(self):
-        self.hashes = {}
         self._hash_set = set()
         self.bloom = BloomFilter()
-        if os.path.exists(self.db_path):
-            os.remove(self.db_path)
+        self._conn.execute("DELETE FROM content_hashes")
+        self._conn.commit()
         if os.path.exists(self.bloom_path):
             os.remove(self.bloom_path)
+
+    def close(self):
+        self._conn.close()

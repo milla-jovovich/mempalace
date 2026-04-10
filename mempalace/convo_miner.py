@@ -266,9 +266,7 @@ def mine_convos(
     print(f"{'-' * 55}\n")
 
     collection = get_collection(palace_path) if not dry_run else None
-    hash_db = (
-        ContentHashDB(os.path.join(palace_path, "content_hashes.json")) if not dry_run else None
-    )
+    hash_db = ContentHashDB(os.path.join(palace_path, "content_hashes.db")) if not dry_run else None
 
     total_drawers = 0
     files_skipped = 0
@@ -384,6 +382,7 @@ def mine_convos(
 
     if not dry_run and hash_db:
         hash_db.flush()
+        hash_db.close()
 
 
 if __name__ == "__main__":

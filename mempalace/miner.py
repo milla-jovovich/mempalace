@@ -413,6 +413,7 @@ def process_file(
     wing: str,
     rooms: list,
     agent: str,
+    dry_run: bool = False,
     hash_db: ContentHashDB = None,
 ) -> int:
     """Read, chunk, route, and file one file. Returns drawer count."""
@@ -433,7 +434,7 @@ def process_file(
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return 0, None
+        return 0
 
     content = content.strip()
     if len(content) < MIN_CHUNK_SIZE:
@@ -580,7 +581,7 @@ def mine(
 
     if not dry_run:
         collection = get_collection(palace_path)
-        hash_db = ContentHashDB(os.path.join(palace_path, "content_hashes.json"))
+        hash_db = ContentHashDB(os.path.join(palace_path, "content_hashes.db"))
     else:
         collection = None
         hash_db = None
@@ -621,6 +622,7 @@ def mine(
 
     if not dry_run and hash_db:
         hash_db.flush()
+        hash_db.close()
 
 
 # =============================================================================
