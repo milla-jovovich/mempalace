@@ -69,6 +69,61 @@ class TestSearchMemories:
         assert result["filters"]["wing"] == "project"
         assert result["filters"]["room"] == "backend"
 
+    def test_search_memories_deep_false(self, palace_path, seeded_collection):
+        """Test that deep=False requests more results and post-filters."""
+        mock_col = MagicMock()
+        mock_col.query.return_value = {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+        mock_client = MagicMock()
+        mock_client.get_collection.return_value = mock_col
+
+        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+            search_memories("test", "/fake/path", deep=False, n_results=5)
+            # Should request 10 results (5 * 2) because not deep and not wing
+            mock_col.query.assert_called_with(
+                query_texts=["test"],
+                n_results=10,
+                include=["documents", "metadatas", "distances"],
+            )
+
+    def test_search_memories_deep_true(self, palace_path, seeded_collection):
+        """Test that deep=True does not exclude 'archive' wing."""
+        mock_col = MagicMock()
+        mock_col.query.return_value = {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+        mock_client = MagicMock()
+        mock_client.get_collection.return_value = mock_col
+
+        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+            search_memories("test", "/fake/path", deep=True)
+            mock_col.query.assert_called_with(
+                query_texts=["test"],
+                n_results=5,
+                include=["documents", "metadatas", "distances"],
+            )
+
+    def test_search_missing_wing_metadata(self):
+        """Test post-filtering handles missing wing metadata."""
+        mock_col = MagicMock()
+        mock_client = MagicMock()
+        mock_client.get_collection.return_value = mock_col
+
+        # Simulate Chroma returning 3 results:
+        # 1. No wing metadata
+        # 2. wing: "work"
+        # 3. wing: "archive"
+        mock_col.query.return_value = {
+            "documents": [["doc1", "doc2", "doc3"]],
+            "metadatas": [[{}, {"wing": "work"}, {"wing": "archive"}]],
+            "distances": [[0.1, 0.2, 0.3]],
+        }
+
+        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+            # Standard search (deep=False) should return doc1 and doc2, filter doc3
+            res = search_memories("dummy", "dummy_path", n_results=3, deep=False)
+
+            assert len(res["results"]) == 2
+            assert res["results"][0]["text"] == "doc1"
+            assert res["results"][1]["text"] == "doc2"
+
 
 # ── search() (CLI print function) ─────────────────────────────────────
 
@@ -123,3 +178,18 @@ class TestSearchCLI:
         captured = capsys.readouterr()
         # Should have output with at least one result block
         assert "[1]" in captured.out
+
+    def test_search_deep_false(self, palace_path, seeded_collection):
+        mock_col = MagicMock()
+        mock_col.query.return_value = {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+        mock_client = MagicMock()
+        mock_client.get_collection.return_value = mock_col
+
+        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+            search("test", "/fake/path", deep=False, n_results=5)
+            # Should request 10 results (5 * 2) because not deep and not wing
+            mock_col.query.assert_called_with(
+                query_texts=["test"],
+                n_results=10,
+                include=["documents", "metadatas", "distances"],
+            )

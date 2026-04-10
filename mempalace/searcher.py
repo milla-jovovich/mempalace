@@ -18,7 +18,14 @@ class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
 
 
-def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
+def search(
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    deep: bool = False,
+) -> list[dict]:
     """
     Search the palace. Returns verbatim drawer content.
     Optionally filter by wing (project) or room (aspect).
@@ -32,18 +39,24 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         raise SearchError(f"No palace found at {palace_path}")
 
     # Build where filter
+    where_clauses = []
+    if wing:
+        where_clauses.append({"wing": wing})
+
+    if room:
+        where_clauses.append({"room": room})
+
     where = {}
-    if wing and room:
-        where = {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        where = {"wing": wing}
-    elif room:
-        where = {"room": room}
+    if len(where_clauses) == 1:
+        where = where_clauses[0]
+    elif len(where_clauses) > 1:
+        where = {"$and": where_clauses}
 
     try:
+        fetch_n = n_results * 2 if not deep and not wing else n_results
         kwargs = {
             "query_texts": [query],
-            "n_results": n_results,
+            "n_results": fetch_n,
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
@@ -63,6 +76,20 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f'\n  No results found for: "{query}"')
         return
 
+    # Post-filter if not deep
+    filtered = []
+    for doc, meta, dist in zip(docs, metas, dists):
+        meta = meta or {}
+        if not deep and meta.get("wing") == "archive":
+            continue
+        filtered.append((doc, meta, dist))
+        if len(filtered) >= n_results:
+            break
+
+    if not filtered:
+        print(f'\n  No results found for: "{query}"')
+        return
+
     print(f"\n{'=' * 60}")
     print(f'  Results for: "{query}"')
     if wing:
@@ -71,13 +98,19 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"  Room: {room}")
     print(f"{'=' * 60}\n")
 
-    for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
+    for i, (doc, meta, dist) in enumerate(filtered, 1):
         similarity = round(1 - dist, 3)
         source = Path(meta.get("source_file", "?")).name
         wing_name = meta.get("wing", "?")
         room_name = meta.get("room", "?")
 
-        print(f"  [{i}] {wing_name} / {room_name}")
+        prefix = ""
+        if wing_name == "archive":
+            prefix = "[ARCHIVE] "
+            if "original_wing" in meta and "original_room" in meta:
+                room_name = f"{meta['original_room']} (from {meta['original_wing']})"
+
+        print(f"  [{i}] {prefix}{wing_name} / {room_name}")
         print(f"      Source: {source}")
         print(f"      Match:  {similarity}")
         print()
@@ -91,7 +124,12 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    deep: bool = False,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
@@ -108,18 +146,24 @@ def search_memories(
         }
 
     # Build where filter
+    where_clauses = []
+    if wing:
+        where_clauses.append({"wing": wing})
+
+    if room:
+        where_clauses.append({"room": room})
+
     where = {}
-    if wing and room:
-        where = {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        where = {"wing": wing}
-    elif room:
-        where = {"room": room}
+    if len(where_clauses) == 1:
+        where = where_clauses[0]
+    elif len(where_clauses) > 1:
+        where = {"$and": where_clauses}
 
     try:
+        fetch_n = n_results * 2 if not deep and not wing else n_results
         kwargs = {
             "query_texts": [query],
-            "n_results": n_results,
+            "n_results": fetch_n,
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
@@ -135,6 +179,10 @@ def search_memories(
 
     hits = []
     for doc, meta, dist in zip(docs, metas, dists):
+        meta = meta or {}
+        if not deep and meta.get("wing") == "archive":
+            continue
+
         hits.append(
             {
                 "text": doc,
@@ -144,6 +192,8 @@ def search_memories(
                 "similarity": round(1 - dist, 3),
             }
         )
+        if len(hits) >= n_results:
+            break
 
     return {
         "query": query,
