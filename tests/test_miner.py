@@ -6,7 +6,7 @@ from pathlib import Path
 import chromadb
 import yaml
 
-from mempalace.miner import mine, scan_project
+from mempalace.miner import chunked_add, chunked_upsert, mine, scan_project
 from mempalace.palace import file_already_mined
 
 
@@ -260,3 +260,89 @@ def test_file_already_mined_check_mtime():
         # Release ChromaDB file handles before cleanup (required on Windows)
         del col, client
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# =============================================================================
+# CHUNKED ADD / UPSERT
+# =============================================================================
+
+
+def _make_embeddings(n: int) -> list:
+    """Return *n* trivial 3-d embeddings so ChromaDB skips its default model."""
+    return [[float(i), 0.0, 0.0] for i in range(n)]
+
+
+def test_chunked_add_large_batch():
+    """Verify chunked_add splits batches larger than the ChromaDB limit."""
+    client = chromadb.Client()
+    col = client.create_collection("test_large")
+
+    n = 6000
+    ids = [f"id_{i}" for i in range(n)]
+    docs = [f"document {i}" for i in range(n)]
+    metas = [{"index": i} for i in range(n)]
+
+    chunked_add(col, documents=docs, ids=ids, metadatas=metas, embeddings=_make_embeddings(n))
+
+    assert col.count() == n
+
+
+def test_chunked_add_small_batch():
+    """Verify chunked_add works normally for small batches."""
+    client = chromadb.Client()
+    col = client.create_collection("test_small")
+
+    n = 100
+    ids = [f"id_{i}" for i in range(n)]
+    docs = [f"document {i}" for i in range(n)]
+
+    chunked_add(col, documents=docs, ids=ids, embeddings=_make_embeddings(n))
+
+    assert col.count() == n
+
+
+def test_chunked_add_empty():
+    """Verify chunked_add handles empty input gracefully."""
+    client = chromadb.Client()
+    col = client.create_collection("test_empty")
+
+    chunked_add(col, documents=[], ids=[])
+
+    assert col.count() == 0
+
+
+def test_chunked_add_at_boundary():
+    """Verify chunked_add works at exactly 5000 items (the chunk size)."""
+    client = chromadb.Client()
+    col = client.create_collection("test_boundary")
+
+    n = 5000
+    ids = [f"id_{i}" for i in range(n)]
+    docs = [f"document {i}" for i in range(n)]
+
+    chunked_add(col, documents=docs, ids=ids, embeddings=_make_embeddings(n))
+
+    assert col.count() == n
+
+
+def test_chunked_upsert_large_batch():
+    """Verify chunked_upsert splits batches larger than the limit."""
+    client = chromadb.Client()
+    col = client.create_collection("test_upsert_large")
+
+    n = 6000
+    ids = [f"id_{i}" for i in range(n)]
+    docs = [f"document {i}" for i in range(n)]
+    metas = [{"index": i} for i in range(n)]
+
+    chunked_upsert(col, documents=docs, ids=ids, metadatas=metas, embeddings=_make_embeddings(n))
+
+    assert col.count() == n
+
+    # Upsert again with updated documents — count should stay the same
+    updated_docs = [f"updated {i}" for i in range(n)]
+    chunked_upsert(
+        col, documents=updated_docs, ids=ids, metadatas=metas, embeddings=_make_embeddings(n)
+    )
+
+    assert col.count() == n
