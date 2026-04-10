@@ -7,6 +7,7 @@ Routes each file to the right room based on content.
 Stores verbatim chunks as drawers. No summaries. Ever.
 """
 
+import logging
 import os
 import re
 import sys
@@ -15,6 +16,8 @@ import fnmatch
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 import chromadb
 
@@ -743,8 +746,7 @@ def mine(
 
         # Phase 0: bulk-fetch already-mined mtimes to skip files without
         # per-file DB queries.
-        filepaths_str = [str(f) for f in files]
-        mined_map = bulk_check_mined(collection, filepaths_str)
+        mined_map = bulk_check_mined(collection)
 
         # Filter out already-mined files before spawning threads.
         files_to_process = []
@@ -774,7 +776,14 @@ def mine(
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(prepare_one, fp): fp for fp in files_to_process}
             for future in concurrent.futures.as_completed(futures):
-                filepath, (batch_docs, batch_ids, batch_metas, room) = future.result()
+                try:
+                    filepath, (batch_docs, batch_ids, batch_metas, room) = future.result()
+                except Exception as exc:
+                    failed_path = futures[future]
+                    logger.warning("Skipping %s: %s", failed_path, exc)
+                    with counter_lock:
+                        files_skipped += 1
+                    continue
                 if batch_docs is None:
                     with counter_lock:
                         files_skipped += 1

@@ -23,6 +23,7 @@ import sys
 import json
 import logging
 import hashlib
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -90,18 +91,16 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         "result": result,
     }
     try:
+        created = not _WAL_FILE.exists()
         with open(_WAL_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, default=str) + "\n")
-        try:
-            _WAL_FILE.chmod(0o600)
-        except (OSError, NotImplementedError):
-            pass
+        if created:
+            try:
+                _WAL_FILE.chmod(0o600)
+            except (OSError, NotImplementedError):
+                pass
     except Exception as e:
         logger.error(f"WAL write failed: {e}")
-
-
-_client_cache = None
-_collection_cache = None
 
 
 def _get_client():
@@ -114,13 +113,17 @@ def _get_client():
 
 def _get_collection(create=False):
     """Return the ChromaDB collection, caching the client between calls."""
-    global _collection_cache
+    global _collection_cache, _metadata_cache, _metadata_cache_time
     try:
         client = _get_client()
         if create:
             _collection_cache = client.get_or_create_collection(_config.collection_name)
+            _metadata_cache = None
+            _metadata_cache_time = 0
         elif _collection_cache is None:
             _collection_cache = client.get_collection(_config.collection_name)
+            _metadata_cache = None
+            _metadata_cache_time = 0
         return _collection_cache
     except Exception:
         return None
@@ -131,6 +134,48 @@ def _no_palace():
         "error": "No palace found",
         "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
     }
+
+
+# ==================== HELPERS ====================
+
+
+def _fetch_all_metadata(col, where=None):
+    """Paginate col.get() to avoid the 10K silent truncation limit."""
+    total = col.count()
+    all_meta = []
+    offset = 0
+    while offset < total:
+        kwargs = {"include": ["metadatas"], "limit": 1000, "offset": offset}
+        if where:
+            kwargs["where"] = where
+        batch = col.get(**kwargs)
+        all_meta.extend(batch["metadatas"])
+        offset += len(batch["metadatas"])
+        if not batch["metadatas"]:
+            break
+    return all_meta
+
+
+_metadata_cache = None
+_metadata_cache_time = 0
+_METADATA_CACHE_TTL = 5.0  # seconds
+
+
+def _get_cached_metadata(col, where=None):
+    """Return cached metadata if fresh, else fetch and cache."""
+    global _metadata_cache, _metadata_cache_time
+    now = time.time()
+    if (
+        where is None
+        and _metadata_cache is not None
+        and (now - _metadata_cache_time) < _METADATA_CACHE_TTL
+    ):
+        return _metadata_cache
+    result = _fetch_all_metadata(col, where=where)
+    if where is None:
+        _metadata_cache = result
+        _metadata_cache_time = now
+    return result
 
 
 # ==================== READ TOOLS ====================
@@ -144,7 +189,7 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = _get_cached_metadata(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -201,7 +246,7 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = _get_cached_metadata(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -216,10 +261,8 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
-        if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
+        where = {"wing": wing} if wing else None
+        all_meta = _fetch_all_metadata(col, where=where)
         for m in all_meta:
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
@@ -234,7 +277,7 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = _get_cached_metadata(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -246,13 +289,17 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+def tool_search(
+    query: str, limit: int = 5, wing: str = None, room: str = None, min_similarity: float = 1.5
+):
+    limit = max(1, min(limit, 100))
     return search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
+        min_similarity=min_similarity,
     )
 
 
@@ -406,6 +453,136 @@ def tool_delete_drawer(drawer_id: str):
         col.delete(ids=[drawer_id])
         logger.info(f"Deleted drawer: {drawer_id}")
         return {"success": True, "drawer_id": drawer_id}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_get_drawer(drawer_id: str):
+    """Fetch a single drawer by ID. Returns full content and metadata."""
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+    try:
+        result = col.get(ids=[drawer_id], include=["documents", "metadatas"])
+        if not result["ids"]:
+            return {"error": f"Drawer not found: {drawer_id}"}
+        meta = result["metadatas"][0]
+        doc = result["documents"][0]
+        return {
+            "drawer_id": drawer_id,
+            "content": doc,
+            "wing": meta.get("wing", ""),
+            "room": meta.get("room", ""),
+            "metadata": meta,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offset: int = 0):
+    """List drawers with pagination. Optional wing/room filter."""
+    limit = max(1, min(limit, 100))
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+    try:
+        where = None
+        conditions = []
+        if wing:
+            conditions.append({"wing": wing})
+        if room:
+            conditions.append({"room": room})
+        if len(conditions) == 1:
+            where = conditions[0]
+        elif len(conditions) > 1:
+            where = {"$and": conditions}
+
+        kwargs = {"include": ["documents", "metadatas"], "limit": limit, "offset": offset}
+        if where:
+            kwargs["where"] = where
+        result = col.get(**kwargs)
+
+        drawers = []
+        for i, did in enumerate(result["ids"]):
+            meta = result["metadatas"][i]
+            doc = result["documents"][i]
+            drawers.append(
+                {
+                    "drawer_id": did,
+                    "wing": meta.get("wing", ""),
+                    "room": meta.get("room", ""),
+                    "content_preview": doc[:200] + "..." if len(doc) > 200 else doc,
+                }
+            )
+        return {
+            "drawers": drawers,
+            "count": len(drawers),
+            "offset": offset,
+            "limit": limit,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, room: str = None):
+    """Update an existing drawer's content and/or metadata."""
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+    try:
+        existing = col.get(ids=[drawer_id], include=["documents", "metadatas"])
+        if not existing["ids"]:
+            return {"success": False, "error": f"Drawer not found: {drawer_id}"}
+
+        old_meta = existing["metadatas"][0]
+        old_doc = existing["documents"][0]
+
+        # Sanitize inputs
+        new_doc = old_doc
+        if content is not None:
+            try:
+                new_doc = sanitize_content(content)
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+
+        new_meta = dict(old_meta)
+        if wing is not None:
+            try:
+                new_meta["wing"] = sanitize_name(wing, "wing")
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+        if room is not None:
+            try:
+                new_meta["room"] = sanitize_name(room, "room")
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+
+        _wal_log(
+            "update_drawer",
+            {
+                "drawer_id": drawer_id,
+                "old_wing": old_meta.get("wing", ""),
+                "old_room": old_meta.get("room", ""),
+                "new_wing": new_meta.get("wing", ""),
+                "new_room": new_meta.get("room", ""),
+                "content_changed": content is not None,
+                "content_preview": new_doc[:200] if content is not None else None,
+            },
+        )
+
+        update_kwargs = {"ids": [drawer_id]}
+        if content is not None:
+            update_kwargs["documents"] = [new_doc]
+        update_kwargs["metadatas"] = [new_meta]
+        col.update(**update_kwargs)
+
+        logger.info(f"Updated drawer: {drawer_id}")
+        return {
+            "success": True,
+            "drawer_id": drawer_id,
+            "wing": new_meta.get("wing", ""),
+            "room": new_meta.get("room", ""),
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -734,7 +911,7 @@ TOOLS = {
         "handler": tool_graph_stats,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
+        "description": "Semantic search. Returns verbatim drawer content with similarity scores. Results with distance > min_similarity are filtered out (L2 distance: lower = more similar).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -742,6 +919,10 @@ TOOLS = {
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "min_similarity": {
+                    "type": "number",
+                    "description": "Max L2 distance threshold — results further than this are dropped. Lower = stricter. Default 1.5 filters clearly irrelevant results. Set to 0 to disable filtering.",
+                },
             },
             "required": ["query"],
         },
@@ -793,6 +974,59 @@ TOOLS = {
             "required": ["drawer_id"],
         },
         "handler": tool_delete_drawer,
+    },
+    "mempalace_get_drawer": {
+        "description": "Fetch a single drawer by ID — returns full content and metadata.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "drawer_id": {"type": "string", "description": "ID of the drawer to fetch"},
+            },
+            "required": ["drawer_id"],
+        },
+        "handler": tool_get_drawer,
+    },
+    "mempalace_list_drawers": {
+        "description": "List drawers with pagination. Optional wing/room filter. Returns IDs, wings, rooms, and content previews.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Filter by wing (optional)"},
+                "room": {"type": "string", "description": "Filter by room (optional)"},
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results per page (default 20, max 100)",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Offset for pagination (default 0)",
+                },
+            },
+        },
+        "handler": tool_list_drawers,
+    },
+    "mempalace_update_drawer": {
+        "description": "Update an existing drawer's content and/or metadata (wing, room). Fetches existing drawer first; returns error if not found.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "drawer_id": {"type": "string", "description": "ID of the drawer to update"},
+                "content": {
+                    "type": "string",
+                    "description": "New content (optional — omit to keep existing)",
+                },
+                "wing": {
+                    "type": "string",
+                    "description": "New wing (optional — omit to keep existing)",
+                },
+                "room": {
+                    "type": "string",
+                    "description": "New room (optional — omit to keep existing)",
+                },
+            },
+            "required": ["drawer_id"],
+        },
+        "handler": tool_update_drawer,
     },
     "mempalace_diary_write": {
         "description": "Write to your personal agent diary in AAAK format. Your observations, thoughts, what you worked on, what matters. Each agent has their own diary with full history. Write in AAAK for compression — e.g. 'SESSION:2026-04-04|built.palace.graph+diary.tools|ALC.req:agent.diaries.in.aaak|★★★'. Use entity codes from the AAAK spec.",

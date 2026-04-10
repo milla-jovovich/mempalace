@@ -95,6 +95,7 @@ def cmd_mine(args):
             dry_run=args.dry_run,
             respect_gitignore=not args.no_gitignore,
             include_ignored=include_ignored,
+            workers=args.workers,
         )
 
 
@@ -148,6 +149,23 @@ def cmd_split(args):
         split_main()
     finally:
         sys.argv = old_argv
+
+
+def cmd_export(args):
+    from .exporter import export_palace
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    output_dir = os.path.expanduser(args.output)
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Export")
+    print(f"{'=' * 55}\n")
+    print(f"  Palace: {palace_path}")
+    print(f"  Output: {output_dir}\n")
+
+    export_palace(palace_path=palace_path, output_dir=output_dir)
+
+    print(f"\n{'=' * 55}\n")
 
 
 def cmd_status(args):
@@ -442,6 +460,12 @@ def main():
         default="exchange",
         help="Extraction strategy for convos mode: 'exchange' (default) or 'general' (5 memory types)",
     )
+    p_mine.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="Parallel workers for file processing (default: min(8, cpu_count); 1 = sequential)",
+    )
 
     # search
     p_search = sub.add_parser("search", help="Find anything, exact words")
@@ -460,6 +484,15 @@ def main():
     )
     p_compress.add_argument(
         "--config", default=None, help="Entity config JSON (e.g. entities.json)"
+    )
+
+    # export
+    p_export = sub.add_parser("export", help="Export palace as browsable markdown files")
+    p_export.add_argument(
+        "--output",
+        "-o",
+        default="./palace-export",
+        help="Output directory (default: ./palace-export)",
     )
 
     # wake-up
@@ -561,6 +594,7 @@ def main():
         "mine": cmd_mine,
         "split": cmd_split,
         "search": cmd_search,
+        "export": cmd_export,
         "mcp": cmd_mcp,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,

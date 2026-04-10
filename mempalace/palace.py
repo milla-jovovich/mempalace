@@ -4,8 +4,12 @@ palace.py — Shared palace operations.
 Consolidates ChromaDB access patterns used by both miners and the MCP server.
 """
 
+import logging
 import os
+
 import chromadb
+
+logger = logging.getLogger(__name__)
 
 SKIP_DIRS = {
     ".git",
@@ -65,7 +69,36 @@ def file_already_mined(collection, source_file: str, check_mtime: bool = False) 
             if stored_mtime is None:
                 return False
             current_mtime = os.path.getmtime(source_file)
-            return float(stored_mtime) == current_mtime
+            return abs(float(stored_mtime) - current_mtime) < 0.01
         return True
     except Exception:
         return False
+
+
+def bulk_check_mined(collection) -> dict[str, float]:
+    """Pre-fetch source_file/source_mtime pairs for all documents in the collection.
+
+    Returns a dict mapping source_file -> source_mtime (as float) for every
+    document that has both fields.  Callers can check membership and compare
+    mtimes locally instead of issuing one ChromaDB query per file.
+
+    Fetches the full collection in paginated batches (like palace_graph.py)
+    since a WHERE-IN filter on thousands of paths is not supported by ChromaDB.
+    """
+    mined: dict[str, float] = {}
+    try:
+        total = collection.count()
+        offset = 0
+        while offset < total:
+            batch = collection.get(limit=1000, offset=offset, include=["metadatas"])
+            for meta in batch["metadatas"]:
+                src = meta.get("source_file")
+                mtime = meta.get("source_mtime")
+                if src and mtime is not None:
+                    mined[src] = float(mtime)
+            if not batch["ids"]:
+                break
+            offset += len(batch["ids"])
+    except Exception:
+        logger.warning("bulk_check_mined: partial fetch, %d files loaded", len(mined))
+    return mined

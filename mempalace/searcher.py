@@ -95,11 +95,27 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    min_similarity: float = 0.0,
 ) -> dict:
-    """
-    Programmatic search — returns a dict instead of printing.
+    """Programmatic search — returns a dict instead of printing.
+
     Used by the MCP server and other callers that need data.
+
+    Args:
+        query: Natural language search query.
+        palace_path: Path to the ChromaDB palace directory.
+        wing: Optional wing filter.
+        room: Optional room filter.
+        n_results: Max results to return.
+        min_similarity: Max L2 (Euclidean) distance threshold. ChromaDB uses
+            L2 distance by default — 0 = identical, larger = less similar.
+            Results with distance > this value are filtered out. A value of
+            0.0 disables filtering. Typical useful range: 0.5–1.5.
     """
     try:
         client = chromadb.PersistentClient(path=palace_path)
@@ -139,11 +155,19 @@ def search_memories(
                 "room": meta.get("room", "unknown"),
                 "source_file": Path(meta.get("source_file", "?")).name,
                 "similarity": round(1 - dist, 3),
+                "distance": round(dist, 4),
             }
         )
+
+    # Filter out results exceeding the distance threshold.
+    # ChromaDB default L2: lower distance = more similar.
+    # min_similarity=0.0 (default) disables filtering for backwards compat.
+    if min_similarity > 0.0:
+        hits = [h for h in hits if h["distance"] <= min_similarity]
 
     return {
         "query": query,
         "filters": {"wing": wing, "room": room},
+        "total_before_filter": len(docs),
         "results": hits,
     }
