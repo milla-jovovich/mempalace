@@ -144,7 +144,7 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=max(col.count(), 1))["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -201,7 +201,7 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=max(col.count(), 1))["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -216,7 +216,7 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
+        kwargs = {"include": ["metadatas"], "limit": max(col.count(), 1)}
         if wing:
             kwargs["where"] = {"wing": wing}
         all_meta = col.get(**kwargs)["metadatas"]
@@ -234,7 +234,7 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=max(col.count(), 1))["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -554,7 +554,7 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         results = col.get(
             where={"$and": [{"wing": wing}, {"room": "diary"}]},
             include=["documents", "metadatas"],
-            limit=10000,
+            limit=max(col.count(), 1),
         )
 
         if not results["ids"]:
