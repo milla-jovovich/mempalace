@@ -26,7 +26,7 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
-from .config import MempalaceConfig, sanitize_name, sanitize_content
+from .config import MempalaceConfig, sanitize_name, sanitize_content, sanitize_kg_object
 from .version import __version__
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
@@ -426,7 +426,7 @@ def tool_kg_add(
     try:
         subject = sanitize_name(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
-        object = sanitize_name(object, "object")
+        object = sanitize_kg_object(object, "object")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 

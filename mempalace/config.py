@@ -47,6 +47,34 @@ def sanitize_name(value: str, field_name: str = "name") -> str:
     return value
 
 
+MAX_KG_OBJECT_LENGTH = 256
+
+
+def sanitize_kg_object(value: str, field_name: str = "object") -> str:
+    """Validate a KG object field — allows descriptive text with punctuation.
+
+    More permissive than sanitize_name (which is for entity IDs / predicates)
+    but still blocks null bytes, path traversal, and excessively long strings.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+
+    value = value.strip()
+
+    if len(value) > MAX_KG_OBJECT_LENGTH:
+        raise ValueError(
+            f"{field_name} exceeds maximum length of {MAX_KG_OBJECT_LENGTH} characters"
+        )
+
+    if ".." in value or "/" in value or "\\" in value:
+        raise ValueError(f"{field_name} contains invalid path characters")
+
+    if "\x00" in value:
+        raise ValueError(f"{field_name} contains null bytes")
+
+    return value
+
+
 def sanitize_content(value: str, max_length: int = 100_000) -> str:
     """Validate drawer/diary content length."""
     if not isinstance(value, str) or not value.strip():
