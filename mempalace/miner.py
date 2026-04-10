@@ -383,6 +383,7 @@ def add_drawer(
             "chunk_index": chunk_index,
             "added_by": agent,
             "filed_at": datetime.now().isoformat(),
+            "synapse_mark": "new",
         }
         # Store file mtime so we can detect modifications later.
         try:
