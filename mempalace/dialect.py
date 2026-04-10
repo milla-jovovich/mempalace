@@ -993,10 +993,11 @@ class Dialect:
                 elif field in _REVERSE_EMOTIONS:
                     parts.append(_REVERSE_EMOTIONS[field])
 
-                # Combined emotions (e.g. "determ+hope")
-                elif "+" in field and all(
-                    f.strip() in _REVERSE_EMOTIONS or f.strip().isupper()
-                    for f in field.split("+")
+                # Combined emotions/flags (e.g. "determ+hope", "DECISION+PIVOT")
+                # Require at least one known emotion code to avoid misclassifying
+                # topics like "TCP+UDP" as emotions.
+                elif "+" in field and any(
+                    f.strip() in _REVERSE_EMOTIONS for f in field.split("+")
                 ):
                     for f in field.split("+"):
                         f = f.strip()

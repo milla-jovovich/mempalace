@@ -512,11 +512,11 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         # while preserving the original compressed form in metadata.
         from mempalace.dialect import Dialect
 
-        _dialect = Dialect()
         embed_text = entry
         meta_extra = {}
-        if _dialect.looks_like_aaak(entry):
-            embed_text = _dialect.expand(entry)
+        if Dialect.looks_like_aaak(entry):
+            _expand_dialect = Dialect()
+            embed_text = _expand_dialect.expand(entry)
             meta_extra["aaak_compressed"] = entry
 
         col.add(

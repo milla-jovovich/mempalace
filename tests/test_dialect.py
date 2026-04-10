@@ -190,6 +190,14 @@ class TestExpand:
         expanded = d.expand("")
         assert isinstance(expanded, str)
 
+    def test_expand_uppercase_topic_not_treated_as_emotion(self):
+        """Topics like TCP+UDP should not be misclassified as combined emotions."""
+        d = Dialect()
+        aaak = '001|SRV|2025-01-01|networking\n001:SRV|TCP+UDP|"packet routing"'
+        expanded = d.expand(aaak)
+        # TCP+UDP should be treated as topic, not emotions
+        assert "tcp" in expanded.lower() or "udp" in expanded.lower()
+
     def test_expand_roundtrip_from_compress(self):
         """Compress text then expand — key terms should survive."""
         d = Dialect(entities={"Alice": "ALC"})
