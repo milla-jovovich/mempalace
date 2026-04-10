@@ -100,10 +100,6 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
-_client_cache = None
-_collection_cache = None
-
-
 def _get_client():
     """Return a singleton ChromaDB PersistentClient."""
     global _client_cache
@@ -133,6 +129,26 @@ def _no_palace():
     }
 
 
+# ==================== HELPERS ====================
+
+
+def _fetch_all_metadata(col, where=None):
+    """Paginate col.get() to avoid the 10K silent truncation limit."""
+    total = col.count()
+    all_meta = []
+    offset = 0
+    while offset < total:
+        kwargs = {"include": ["metadatas"], "limit": 1000, "offset": offset}
+        if where:
+            kwargs["where"] = where
+        batch = col.get(**kwargs)
+        all_meta.extend(batch["metadatas"])
+        offset += len(batch["metadatas"])
+        if not batch["metadatas"]:
+            break
+    return all_meta
+
+
 # ==================== READ TOOLS ====================
 
 
@@ -144,7 +160,7 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = _fetch_all_metadata(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -201,7 +217,7 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = _fetch_all_metadata(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -216,10 +232,8 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
-        if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
+        where = {"wing": wing} if wing else None
+        all_meta = _fetch_all_metadata(col, where=where)
         for m in all_meta:
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
@@ -234,7 +248,7 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = _fetch_all_metadata(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -246,13 +260,17 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+def tool_search(
+    query: str, limit: int = 5, wing: str = None, room: str = None, min_similarity: float = 1.5
+):
+    limit = max(1, min(limit, 100))
     return search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
+        min_similarity=min_similarity,
     )
 
 
@@ -734,7 +752,7 @@ TOOLS = {
         "handler": tool_graph_stats,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
+        "description": "Semantic search. Returns verbatim drawer content with similarity scores. Results with distance > min_similarity are filtered out (L2 distance: lower = more similar).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -742,6 +760,10 @@ TOOLS = {
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "min_similarity": {
+                    "type": "number",
+                    "description": "Max L2 distance threshold — results further than this are dropped. Lower = stricter. Default 1.5 filters clearly irrelevant results. Set to 0 to disable filtering.",
+                },
             },
             "required": ["query"],
         },
