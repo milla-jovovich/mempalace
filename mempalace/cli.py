@@ -14,6 +14,7 @@ Commands:
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
     mempalace search "query"              Find anything, exact words
+    mempalace mcp                         Show MCP setup command
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
     mempalace status                      Show what's been filed
@@ -28,6 +29,7 @@ Examples:
 
 import os
 import sys
+import shlex
 import argparse
 from pathlib import Path
 
@@ -202,6 +204,7 @@ def cmd_repair(args):
     print(f"  Extracted {len(all_ids)} drawers")
 
     # Backup and rebuild
+    palace_path = palace_path.rstrip(os.sep)
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
         shutil.rmtree(backup_path)
@@ -238,6 +241,27 @@ def cmd_instructions(args):
     from .instructions_cli import run_instructions
 
     run_instructions(name=args.name)
+
+
+def cmd_mcp(args):
+    """Show how to wire MemPalace into MCP-capable hosts."""
+    base_server_cmd = "python -m mempalace.mcp_server"
+
+    if args.palace:
+        resolved_palace = str(Path(args.palace).expanduser())
+        server_cmd = f"{base_server_cmd} --palace {shlex.quote(resolved_palace)}"
+    else:
+        server_cmd = base_server_cmd
+
+    print("MemPalace MCP quick setup:")
+    print(f"  claude mcp add mempalace -- {server_cmd}")
+    print("\nRun the server directly:")
+    print(f"  {server_cmd}")
+
+    if not args.palace:
+        print("\nOptional custom palace:")
+        print(f"  claude mcp add mempalace -- {base_server_cmd} --palace /path/to/palace")
+        print(f"  {base_server_cmd} --palace /path/to/palace")
 
 
 def cmd_compress(args):
@@ -500,6 +524,12 @@ def main():
         help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
     )
 
+    # mcp
+    sub.add_parser(
+        "mcp",
+        help="Show MCP setup command for connecting MemPalace to your AI client",
+    )
+
     # status
     sub.add_parser("status", help="Show what's been filed")
 
@@ -531,6 +561,7 @@ def main():
         "mine": cmd_mine,
         "split": cmd_split,
         "search": cmd_search,
+        "mcp": cmd_mcp,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,

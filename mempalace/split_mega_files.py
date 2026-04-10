@@ -182,6 +182,10 @@ def split_file(filepath, output_dir, dry_run=False):
     Returns list of output paths written (or would be written if dry_run).
     """
     path = Path(filepath)
+    max_size = 500 * 1024 * 1024  # 500 MB safety limit
+    if path.stat().st_size > max_size:
+        print(f"  SKIP: {path.name} exceeds {max_size // (1024*1024)} MB limit")
+        return []
     lines = path.read_text(errors="replace").splitlines(keepends=True)
 
     boundaries = find_session_boundaries(lines)
@@ -266,7 +270,11 @@ def main():
         files = sorted(src_dir.glob("*.txt"))
 
     mega_files = []
+    max_scan_size = 500 * 1024 * 1024  # 500 MB
     for f in files:
+        if f.stat().st_size > max_scan_size:
+            print(f"  SKIP: {f.name} exceeds {max_scan_size // (1024*1024)} MB limit")
+            continue
         lines = f.read_text(errors="replace").splitlines(keepends=True)
         boundaries = find_session_boundaries(lines)
         if len(boundaries) >= args.min_sessions:
