@@ -179,12 +179,12 @@ def _try_cursor_jsonl(content: str) -> Optional[str]:
         if not isinstance(message, dict):
             continue
         raw_content = message.get("content")
-        if isinstance(raw_content, list):
-            has_cursor_structure = True
 
         text = _extract_content(raw_content)
         if not text:
             continue
+        if isinstance(raw_content, list):
+            has_cursor_structure = True
         messages.append((role, text))
 
     if len(messages) >= 2 and has_cursor_structure:

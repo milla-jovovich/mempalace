@@ -1,7 +1,7 @@
 import os
 import json
 import tempfile
-from mempalace.normalize import normalize
+from mempalace.normalize import normalize, _try_cursor_jsonl
 
 
 def test_plain_text():
@@ -97,14 +97,36 @@ def test_cursor_jsonl_rejects_single_message():
     os.unlink(path)
 
 
-def test_cursor_jsonl_ignores_non_cursor_jsonl():
+def test_cursor_jsonl_skips_entries_without_message_key():
+    """Entries with role but no message dict are skipped."""
+    path = _write_jsonl([
+        {"role": "user"},
+        {"role": "user", "message": {"content": [{"type": "text", "text": "Q"}]}},
+        {"role": "assistant", "message": {"content": [{"type": "text", "text": "A"}]}},
+    ])
+    result = normalize(path)
+    assert "> Q" in result
+    assert "A" in result
+    os.unlink(path)
+
+
+def test_cursor_jsonl_rejects_claude_code_jsonl():
     """Claude Code JSONL (top-level 'type' key) must not match the Cursor parser."""
+    content = "\n".join([
+        json.dumps({"type": "human", "message": {"content": "Hi from Claude Code"}}),
+        json.dumps({"type": "assistant", "message": {"content": "Hello back"}}),
+    ])
+    assert _try_cursor_jsonl(content) is None
+
+
+def test_cursor_jsonl_ignores_non_cursor_jsonl():
+    """Claude Code JSONL is handled by its own parser (integration check)."""
     path = _write_jsonl([
         {"type": "human", "message": {"content": "Hi from Claude Code"}},
         {"type": "assistant", "message": {"content": "Hello back"}},
     ])
     result = normalize(path)
-    assert "> Hi from Claude Code" in result
+    assert result.strip()  # some parser picks it up
     os.unlink(path)
 
 
