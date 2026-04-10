@@ -207,6 +207,31 @@ compatible.  Configure both machines with the same `embedder` in
 
 ---
 
+## 4. Unified Knowledge Graph (Phase 5)
+
+The knowledge graph (entities + triples) has moved from a separate SQLite
+file into LanceDB tables inside the palace directory.  One data directory,
+one format, one sync unit.
+
+### What changed
+
+- **Before:** `~/.mempalace/knowledge_graph.sqlite3` (separate file)
+- **After:** `kg_entities` and `kg_triples` tables inside `<palace>/` (LanceDB)
+
+Existing SQLite knowledge graphs still work — if you pass a `.sqlite3` path
+the old backend is used.  The MCP server now defaults to the LanceDB backend.
+
+### How-to
+
+No action needed for new installs.  The knowledge graph is created inside
+the palace directory automatically.
+
+For existing installs, the MCP server will start using a fresh LanceDB KG
+in the palace directory.  To preserve your old SQLite KG data, re-add the
+triples via the MCP tools or seed from entity facts.
+
+---
+
 ## New CLI Commands (summary)
 
 | Command | Description |
