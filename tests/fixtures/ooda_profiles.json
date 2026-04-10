@@ -15,18 +15,21 @@
     "association_enabled": false
   },
   "decide": {
-    "description": "Action selection — short half-life, recency-prioritized",
-    "half_life_days": 30,
-    "ltp_enabled": true,
-    "ltp_max_boost": 1.5,
-    "ltp_window_days": 14,
-    "tagging_enabled": true
+    "description": "Action selection — short half-life, recency-prioritized, exploit mode",
+    "half_life_days": 7,
+    "ltp_enabled": false,
+    "tagging_enabled": true,
+    "tagging_max_boost": 1.5,
+    "association_enabled": false
   },
   "act": {
-    "description": "Execution context — recent procedural memory, no association",
-    "axes_enabled": ["similarity", "recency"],
+    "description": "Execution context — recent procedural memory, tagging enabled for rapid reinforcement",
+    "axes_enabled": ["similarity", "recency", "ltp", "tagging"],
     "half_life_days": 14,
-    "ltp_enabled": false,
+    "ltp_enabled": true,
+    "ltp_max_boost": 1.5,
+    "tagging_enabled": true,
+    "tagging_max_boost": 1.3,
     "association_enabled": false
   }
 }

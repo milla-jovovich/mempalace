@@ -351,11 +351,10 @@ def test_ooda_decide_profile(ooda_palace_dir):
     pm = ProfileManager(ooda_palace_dir)
     p = pm.resolve("decide")
     assert p.name == "decide"
-    assert p.half_life_days == 30
-    assert p.ltp_enabled is True
-    assert p.ltp_max_boost == 1.5
-    assert p.ltp_window_days == 14
+    assert p.half_life_days == 7
+    assert p.ltp_enabled is False
     assert p.tagging_enabled is True
+    assert p.association_enabled is False
 
 
 def test_ooda_act_profile(ooda_palace_dir):
@@ -363,8 +362,81 @@ def test_ooda_act_profile(ooda_palace_dir):
     p = pm.resolve("act")
     assert p.name == "act"
     assert p.half_life_days == 14
-    assert p.ltp_enabled is False
+    assert p.ltp_enabled is True
+    assert p.ltp_max_boost == 1.5
+    assert p.tagging_enabled is True
+    assert p.tagging_max_boost == 1.3
     assert p.association_enabled is False
+
+
+# --- web3guru888 suggested additional fixture tests ---
+
+
+def test_ooda_decide_exploit_mode(ooda_palace_dir):
+    """Decide profile: short half-life, no LTP, tagging on — exploit mode"""
+    pm = ProfileManager(ooda_palace_dir)
+    p = pm.resolve("decide")
+    assert p.name == "decide"
+    assert p.half_life_days == 7
+    assert p.ltp_enabled is False
+    assert p.tagging_enabled is True
+    assert p.association_enabled is False
+
+
+def test_ooda_act_moderate_with_tagging(ooda_palace_dir):
+    """Act profile: all axes moderate, tagging enabled for rapid reinforcement"""
+    pm = ProfileManager(ooda_palace_dir)
+    p = pm.resolve("act")
+    assert p.name == "act"
+    assert p.half_life_days == 14
+    assert p.ltp_enabled is True
+    assert p.ltp_max_boost == 1.5
+    assert p.tagging_enabled is True
+    assert p.tagging_max_boost == 1.3
+    assert p.association_enabled is False
+
+
+def test_cross_profile_isolation_orient_to_decide(ooda_palace_dir):
+    """Switching from orient to decide doesn't bleed LTP settings"""
+    pm = ProfileManager(ooda_palace_dir)
+    orient = pm.resolve("orient")
+    decide = pm.resolve("decide")
+
+    # orient has LTP on with high boost and long window
+    assert orient.ltp_enabled is True
+    assert orient.ltp_max_boost == 2.0
+    assert orient.ltp_window_days == 60
+
+    # decide has LTP off — orient's values must not leak
+    assert decide.ltp_enabled is False
+
+    # resolve orient again — still the same, not contaminated by decide
+    orient_again = pm.resolve("orient")
+    assert orient_again.ltp_enabled is True
+    assert orient_again.ltp_max_boost == 2.0
+    assert orient_again.ltp_window_days == 60
+
+
+def test_cross_profile_isolation_observe_to_act(ooda_palace_dir):
+    """Switching from observe (all off) to act (moderate) — no state leakage"""
+    pm = ProfileManager(ooda_palace_dir)
+    observe = pm.resolve("observe")
+    act = pm.resolve("act")
+
+    # observe: everything off
+    assert observe.ltp_enabled is False
+    assert observe.tagging_enabled is False
+    assert observe.association_enabled is False
+
+    # act: LTP and tagging on
+    assert act.ltp_enabled is True
+    assert act.tagging_enabled is True
+
+    # observe again — still all off
+    observe_again = pm.resolve("observe")
+    assert observe_again.ltp_enabled is False
+    assert observe_again.tagging_enabled is False
+    assert observe_again.association_enabled is False
 
 
 def test_description_in_annotated_dict(ooda_palace_dir):
