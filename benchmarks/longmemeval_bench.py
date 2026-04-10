@@ -2926,34 +2926,31 @@ def _load_or_create_split(split_file: str, data: list, dev_size: int = 50, seed:
 
 def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=50):
     """
-    NLP-enriched mode: uses NLP providers for entity extraction, sentence
-    splitting, and classification — no regex or hardcoded word lists.
+    NLP-enriched mode: uses mempalace NLP providers for entity extraction,
+    sentence splitting, classification, and temporal detection.
 
     Strategy:
-    1. Use NLP registry to extract entities from documents → enrich indexed text
-    2. Use NLP registry to extract entities from question → entity-based re-ranking
-    3. Use NLP registry to detect date entities → temporal boosting
-    4. Use NLP registry to classify question intent → assistant-reference detection
+    1. extract_candidates() for NLP entity detection → enrich indexed text
+    2. Entity-based overlap scoring for re-ranking (no stop-word lists)
+    3. NLP registry for date entity detection → temporal boosting
+    4. NLP registry for intent classification → assistant-reference detection
     """
     from datetime import datetime, timedelta
 
+    from mempalace.entity_detector import extract_candidates
     from mempalace.nlp_providers.registry import get_registry
 
     registry = get_registry()
 
-    def nlp_entity_names(text):
-        """Extract entity text strings via NLP provider."""
-        return [e["text"] for e in registry.extract_entities(text)]
-
     def enrich_text(text):
         """Append NLP-detected entity names for better embedding signal."""
-        names = nlp_entity_names(text)
-        if names:
-            return f"{text}\n{' '.join(names)}"
+        entities = extract_candidates(text)
+        if entities:
+            return f"{text}\n{' '.join(entities.keys())}"
         return text
 
     def entity_overlap(query_entities, doc_text):
-        """Score overlap using NLP-extracted entities instead of keyword regex."""
+        """Score overlap using NLP-extracted entities."""
         if not query_entities:
             return 0.0
         doc_lower = doc_text.lower()
@@ -2972,10 +2969,7 @@ def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=5
         date_entities = [e for e in entities if e.get("label", "").lower() == "date"]
         if not date_entities:
             return None
-        # Use the first date entity text to estimate offset
         date_text = date_entities[0]["text"].lower()
-        # Map common date expressions to (days_back, tolerance)
-        # NLP gives us the entity; we interpret the temporal semantics
         for word, val in [
             ("yesterday", (1, 1)),
             ("last week", (7, 3)),
@@ -2985,7 +2979,6 @@ def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=5
         ]:
             if word in date_text:
                 return val
-        # Try to extract numeric patterns from the date entity text
         import re as _re
 
         m = _re.search(r"(\d+)\s*(day|week|month|year)", date_text)
@@ -3005,9 +2998,7 @@ def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=5
         )
         if result and result.get("label") == "asking_about_assistant_response":
             return result.get("confidence", 0) > 0.5
-        # Lightweight fallback: check for "you" + past-tense verb pattern
-        q = question.lower()
-        return any(p in q for p in ["you suggested", "you told me", "you said", "what did you"])
+        return False
 
     sessions = entry["haystack_sessions"]
     session_ids = entry["haystack_session_ids"]
@@ -3016,7 +3007,7 @@ def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=5
     question_date = parse_question_date(entry.get("question_date", ""))
 
     # NLP entity extraction from question
-    query_entities = nlp_entity_names(question)
+    query_entities = list(extract_candidates(question).keys())
 
     corpus_user = []
     corpus_enriched = []
@@ -3154,24 +3145,19 @@ def build_palace_and_retrieve_nlp_hybrid(
     entry, granularity="session", n_results=50, hybrid_weight=0.30
 ):
     """
-    NLP-enhanced hybrid mode: uses NLP providers for all intelligence —
-    entity extraction, temporal detection, intent classification.
-    No regex patterns or hardcoded word lists.
+    NLP-enhanced hybrid mode: uses mempalace NLP providers for entity
+    extraction, temporal detection, and intent classification.
 
-    1. NLP entity extraction for query and document matching
-    2. NLP date entity detection for temporal boosting
-    3. NLP classification for assistant-reference detection
-    4. NLP sentence splitting for per-sentence entity enrichment
+    1. extract_candidates() for NLP entity extraction (query + doc matching)
+    2. NLP registry for date entity detection → temporal boosting
+    3. NLP registry for intent classification → assistant-reference detection
     """
     from datetime import datetime, timedelta
 
+    from mempalace.entity_detector import extract_candidates
     from mempalace.nlp_providers.registry import get_registry
 
     registry = get_registry()
-
-    def nlp_entity_names(text):
-        """Extract entity text strings via NLP provider."""
-        return [e["text"] for e in registry.extract_entities(text)]
 
     def entity_overlap(query_entities, doc_text):
         """Score overlap using NLP-extracted entities."""
@@ -3222,8 +3208,7 @@ def build_palace_and_retrieve_nlp_hybrid(
         )
         if result and result.get("label") == "asking_about_assistant_response":
             return result.get("confidence", 0) > 0.5
-        q = question.lower()
-        return any(p in q for p in ["you suggested", "you told me", "you said", "what did you"])
+        return False
 
     sessions = entry["haystack_sessions"]
     session_ids = entry["haystack_session_ids"]
@@ -3232,7 +3217,7 @@ def build_palace_and_retrieve_nlp_hybrid(
     question_date = parse_question_date(entry.get("question_date", ""))
 
     # NLP entity extraction from question
-    query_entities = nlp_entity_names(question)
+    query_entities = list(extract_candidates(question).keys())
 
     corpus_user = []
     corpus_full = []
