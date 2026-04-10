@@ -244,10 +244,10 @@ def cmd_instructions(args):
 
 
 def cmd_nlp(args):
-    """Dispatch NLP subcommands: status, install, remove, verify."""
+    """Dispatch NLP subcommands: status, install, remove, verify, prefetch."""
     action = getattr(args, "nlp_action", None)
     if not action:
-        print("Usage: mempalace nlp {status|install|remove|verify}")
+        print("Usage: mempalace nlp {status|install|remove|verify|prefetch}")
         return
 
     if action == "status":
@@ -258,6 +258,8 @@ def cmd_nlp(args):
         _nlp_remove(args)
     elif action == "verify":
         _nlp_verify()
+    elif action == "prefetch":
+        _nlp_prefetch(args)
 
 
 def _nlp_status():
@@ -331,6 +333,71 @@ def _nlp_verify():
     for model_id, info in all_status.items():
         status = info["status"].value
         print(f"  {model_id}: {status}")
+
+
+def _nlp_prefetch(args):
+    """Pre-download all NLP and embedding models for offline/CI use.
+
+    Downloads:
+    - All NLP models for the specified backend level (spaCy, GLiNER, wtpsplit)
+    - spaCy language model (xx_ent_wiki_sm)
+    - ChromaDB's ONNX embedding model (triggered by creating a temporary collection)
+
+    Intended for Docker builds, CI pipelines, and air-gapped environments.
+    """
+    import os
+    import tempfile
+
+    from .nlp_providers.model_manager import ModelManager
+
+    backend = getattr(args, "backend", None) or "full"
+    print(f"\n  Prefetching models for backend level: {backend}")
+    print(f"  {'─' * 50}")
+
+    # 1. NLP models via ModelManager
+    os.environ["MEMPALACE_AUTO_DOWNLOAD"] = "1"
+    mm = ModelManager.get()
+    results = mm.install_for_backend(backend, prompt_user=False)
+    for model_id, success in results.items():
+        status = "OK" if success else "skipped (deps missing or download not implemented)"
+        print(f"  NLP model {model_id}: {status}")
+
+    # 2. spaCy language model
+    print(f"\n  {'─' * 50}")
+    print("  spaCy language model:")
+    try:
+        import spacy
+
+        try:
+            spacy.load("xx_ent_wiki_sm")
+            print("  xx_ent_wiki_sm: already installed")
+        except OSError:
+            print("  xx_ent_wiki_sm: downloading...")
+            from spacy.cli import download as spacy_download
+
+            spacy_download("xx_ent_wiki_sm")
+            print("  xx_ent_wiki_sm: OK")
+    except ImportError:
+        print("  spacy not installed — skipping")
+
+    # 3. ChromaDB embedding model (ONNX)
+    print(f"\n  {'─' * 50}")
+    print("  ChromaDB embedding model:")
+    try:
+        import chromadb
+
+        client = chromadb.EphemeralClient()
+        col = client.get_or_create_collection("prefetch-warmup")
+        col.add(documents=["warmup"], ids=["warmup"])
+        col.query(query_texts=["warmup"], n_results=1)
+        print("  ONNX embedding model: OK (cached)")
+    except ImportError:
+        print("  chromadb not installed — skipping")
+    except Exception as e:
+        print(f"  ONNX embedding model: failed ({e})")
+
+    print(f"\n  {'─' * 50}")
+    print("  Prefetch complete. All available models are cached locally.\n")
 
 
 def cmd_mcp(args):
@@ -628,6 +695,16 @@ def main():
     p_nlp_remove = nlp_sub.add_parser("remove", help="Remove a downloaded model")
     p_nlp_remove.add_argument("model_id", nargs="?", help="Model ID to remove")
     nlp_sub.add_parser("verify", help="Verify all downloaded models")
+    p_nlp_prefetch = nlp_sub.add_parser(
+        "prefetch",
+        help="Pre-download all NLP + embedding models (for Docker/CI/air-gapped)",
+    )
+    p_nlp_prefetch.add_argument(
+        "backend",
+        nargs="?",
+        default="full",
+        help="Backend level to prefetch models for (default: full)",
+    )
 
     # repair
     sub.add_parser(
