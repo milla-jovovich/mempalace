@@ -1,5 +1,0 @@
-{
-  "buildCommand": "bundle install && bundle exec jekyll build",
-  "outputDirectory": "_site",
-  "cleanUrls": true
-}
