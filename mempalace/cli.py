@@ -722,6 +722,10 @@ def main():
 
     args = parser.parse_args()
 
+    # Wire up --nlp-backend so NLPConfig.resolve() picks it up everywhere
+    if getattr(args, "nlp_backend", None):
+        os.environ["MEMPALACE_NLP_BACKEND"] = args.nlp_backend
+
     if not args.command:
         parser.print_help()
         return
