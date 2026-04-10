@@ -16,6 +16,11 @@ kramdown:
   input: GFM
   hard_wrap: false
 
+theme: null
+
+plugins:
+  - jekyll-seo-tag
+
 exclude:
   - Gemfile
   - Gemfile.lock
