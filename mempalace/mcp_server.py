@@ -30,6 +30,7 @@ from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
+from .palace import get_all_metadatas
 import chromadb
 
 from .knowledge_graph import KnowledgeGraph
@@ -132,19 +133,7 @@ def _no_palace():
 # ==================== READ TOOLS ====================
 
 
-def _get_all_metadatas(col, **extra_kwargs):
-    """Paginate through all metadatas in a collection to avoid the 10K truncation bug."""
-    all_meta = []
-    offset = 0
-    while True:
-        kwargs = {"include": ["metadatas"], "limit": 1000, "offset": offset}
-        kwargs.update(extra_kwargs)
-        batch = col.get(**kwargs)
-        all_meta.extend(batch["metadatas"])
-        if not batch["ids"] or len(batch["ids"]) < 1000:
-            break
-        offset += len(batch["ids"])
-    return all_meta
+# get_all_metadatas moved to palace.py as get_all_metadatas
 
 
 def tool_status():
@@ -155,7 +144,7 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = _get_all_metadatas(col)
+        all_meta = get_all_metadatas(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -212,7 +201,7 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = _get_all_metadatas(col)
+        all_meta = get_all_metadatas(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -230,7 +219,7 @@ def tool_list_rooms(wing: str = None):
         extra = {}
         if wing:
             extra["where"] = {"wing": wing}
-        all_meta = _get_all_metadatas(col, **extra)
+        all_meta = get_all_metadatas(col, **extra)
         for m in all_meta:
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
@@ -245,7 +234,7 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = _get_all_metadatas(col)
+        all_meta = get_all_metadatas(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -751,7 +740,7 @@ TOOLS = {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "What to search for"},
-                "limit": {"type": "integer", "description": "Max results (default 5)"},
+                "limit": {"type": "integer", "description": "Max results, 1-100 (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
             },

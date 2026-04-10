@@ -412,8 +412,8 @@ STOPWORDS = {
     "builder",
     "factory",
     "one",
-    "azure",
-    "notion",
+    "azure_functions",
+    "notion_api",
 }
 
 # For entity detection — prose only, no code files

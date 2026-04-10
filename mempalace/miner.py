@@ -17,7 +17,7 @@ from collections import defaultdict
 
 import chromadb
 
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS, get_collection, file_already_mined, get_all_metadatas
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -633,14 +633,7 @@ def status(palace_path: str):
         return
 
     # Count by wing and room — paginate to avoid truncation on large palaces
-    metas = []
-    offset = 0
-    while True:
-        batch = col.get(limit=1000, offset=offset, include=["metadatas"])
-        metas.extend(batch["metadatas"])
-        if not batch["ids"] or len(batch["ids"]) < 1000:
-            break
-        offset += len(batch["ids"])
+    metas = get_all_metadatas(col)
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:
