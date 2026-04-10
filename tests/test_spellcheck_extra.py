@@ -12,9 +12,9 @@ class TestLoadKnownNames:
     def test_returns_names_from_registry(self):
         mock_reg = MagicMock()
         mock_reg._data = {
-            "entities": {
-                "e1": {"canonical": "Alice", "aliases": ["ali"]},
-                "e2": {"canonical": "Bob", "aliases": []},
+            "people": {
+                "Alice": {"source": "onboarding", "aliases": ["ali"]},
+                "Bob": {"source": "onboarding", "aliases": []},
             }
         }
         with patch("mempalace.entity_registry.EntityRegistry") as MockER:

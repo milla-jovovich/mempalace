@@ -89,6 +89,15 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         "result": result,
     }
     try:
+        # Rotate WAL at 10 MB to prevent unbounded growth
+        _WAL_MAX_BYTES = 10 * 1024 * 1024
+        if _WAL_FILE.exists() and _WAL_FILE.stat().st_size > _WAL_MAX_BYTES:
+            backup = _WAL_FILE.with_suffix(".jsonl.1")
+            try:
+                _WAL_FILE.replace(backup)
+                backup.chmod(0o600)
+            except OSError:
+                pass
         created = not _WAL_FILE.exists()
         with open(_WAL_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, default=str) + "\n")
@@ -129,7 +138,9 @@ def _get_collection(create=False):
     try:
         client = _get_client()
         if create:
-            _collection_cache = client.get_or_create_collection(_config.collection_name)
+            _collection_cache = client.get_or_create_collection(
+                _config.collection_name, metadata={"hnsw:space": "cosine"}
+            )
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
@@ -1253,6 +1264,9 @@ def handle_request(request):
         # MCP JSON transport may deliver integers as floats or strings;
         # ChromaDB and Python slicing require native int.
         schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
+        # Filter to declared params only — clients may send extras (e.g. top_k)
+        valid_keys = set(schema_props.keys())
+        tool_args = {k: v for k, v in tool_args.items() if k in valid_keys}
         for key, value in list(tool_args.items()):
             prop_schema = schema_props.get(key, {})
             declared_type = prop_schema.get("type")
