@@ -645,14 +645,13 @@ def mine(
         completed = 0
         skipped_small = 0
 
-        def flush_batch():
-            if batch_ids:
-                collection.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
-                batch_ids.clear()
-                batch_docs.clear()
-                batch_metas.clear()
+        def flush_batch(ids, docs, metas):
+            if ids:
+                collection.upsert(documents=docs, ids=ids, metadatas=metas)
+                ids.clear()
+                docs.clear()
+                metas.clear()
 
-        # flush_batch() runs even if a future raises
         try:
             with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 futures = {
@@ -671,12 +670,12 @@ def mine(
                         batch_docs.append(chunk_content)
                         batch_metas.append(meta)
                         if len(batch_ids) >= BATCH_SIZE:
-                            flush_batch()
+                            flush_batch(batch_ids, batch_docs, batch_metas)
                     total_drawers += len(records)
                     room_counts[room] += 1
                     print(f"  ✓ [{completed:4}/{len(pending)}] {Path(source_file).name[:50]:50} +{len(records)}")
         finally:
-            flush_batch()
+            flush_batch(batch_ids, batch_docs, batch_metas)
 
         files_skipped = already_mined + skipped_small
 

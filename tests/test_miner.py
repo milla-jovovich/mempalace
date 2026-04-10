@@ -329,11 +329,19 @@ def test_mine_parallel_produces_same_result_as_serial():
 
         client = chromadb.PersistentClient(path=str(palace_path))
         col = client.get_collection("mempalace_drawers")
-        assert col.count() > 0
+        first_count = col.count()
+        assert first_count > 0
 
         results = col.get(where={"wing": "test_parallel"})
         source_files = {m["source_file"] for m in results["metadatas"]}
         assert len(source_files) == 5
+        del col, client
+
+        # Re-mine: idempotent — count must not change
+        mine(str(project_root), str(palace_path))
+        client = chromadb.PersistentClient(path=str(palace_path))
+        col = client.get_collection("mempalace_drawers")
+        assert col.count() == first_count
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
