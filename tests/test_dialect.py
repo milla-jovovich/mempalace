@@ -198,6 +198,23 @@ class TestExpand:
         # TCP+UDP should be treated as topic, not emotions
         assert "tcp" in expanded.lower() or "udp" in expanded.lower()
 
+    def test_expand_protocol_names_with_plus(self):
+        """Common tech protocol names with + should not be misclassified.
+
+        Regression test suggested by @web3guru888 — protocol names like
+        HTTPS+REST and TCP+UDP are common in tech docs and must not be
+        treated as combined emotion codes.
+        """
+        d = Dialect()
+        for protocol in ("HTTPS+REST", "TCP+UDP", "HTTP+JSON", "GRPC+PROTOBUF"):
+            aaak = f'001|API|2025-01-01|stack\n001:API|{protocol}|"design notes"'
+            expanded = d.expand(aaak)
+            # Each protocol part should appear in the expanded output
+            for part in protocol.split("+"):
+                assert part.lower() in expanded.lower(), (
+                    f"Protocol part {part!r} missing from expansion of {protocol!r}: {expanded!r}"
+                )
+
     def test_expand_roundtrip_from_compress(self):
         """Compress text then expand — key terms should survive."""
         d = Dialect(entities={"Alice": "ALC"})
