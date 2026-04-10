@@ -3,10 +3,12 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use mempalace_server::convo_miner::{ConvoMiner, ExtractMode};
 use mempalace_server::hooks::{SaveHook, SaveRequest};
 use mempalace_server::ingest::{Miner, MinerOptions};
 use mempalace_server::mcp::McpServer;
@@ -14,7 +16,8 @@ use mempalace_server::onboarding::WingConfig;
 use mempalace_server::searcher::{format_human, search_memories, SearchQuery};
 use mempalace_store::knowledge_graph::KnowledgeGraph;
 use mempalace_store::layers::MemoryStack;
-use mempalace_store::palace::{InMemoryPalace, Palace};
+use mempalace_store::palace::{DrawerRecord, InMemoryPalace, Palace, SearchFilter};
+use mempalace_text::dialect::Dialect;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
@@ -55,13 +58,17 @@ enum Command {
         project: Vec<String>,
     },
 
-    #[command(about = "Mine a directory of project files into the palace")]
+    #[command(about = "Mine a directory into the palace (project files or conversations)")]
     Mine {
         dir: PathBuf,
         #[arg(long)]
         wing: Option<String>,
         #[arg(long, default_value = "general")]
         room: String,
+        #[arg(long, default_value = "projects", value_parser = ["projects", "convos"])]
+        mode: String,
+        #[arg(long, default_value = "exchange", value_parser = ["exchange", "general"])]
+        extract: String,
     },
 
     #[command(about = "Wake-up text: L0 identity + L1 essential story")]
@@ -94,6 +101,14 @@ enum Command {
     #[command(about = "Run MCP server over stdio (for Claude / ChatGPT / Cursor)")]
     McpServe,
 
+    #[command(about = "Compress palace drawers to AAAK Dialect for token savings")]
+    Compress {
+        #[arg(long, help = "Only compress drawers from this wing")]
+        wing: Option<String>,
+        #[arg(long, help = "Show stats without writing compressed records")]
+        dry_run: bool,
+    },
+
     #[command(about = "Print version and build info")]
     Instructions,
 }
@@ -120,7 +135,13 @@ fn main() -> Result<()> {
             n,
         } => cmd_search(palace.as_ref(), &query.join(" "), wing, room, n),
         Command::Init { person, project } => cmd_init(&person, &project),
-        Command::Mine { dir, wing, room } => cmd_mine(palace.as_mut(), &dir, wing, room),
+        Command::Mine {
+            dir,
+            wing,
+            room,
+            mode,
+            extract,
+        } => cmd_mine(palace.as_mut(), &dir, wing, room, &mode, &extract),
         Command::WakeUp { wing } => cmd_wake_up(palace.as_ref(), wing.as_deref()),
         Command::Split { dir, dry_run } => cmd_split(&dir, dry_run),
         Command::Mcp => cmd_mcp(),
@@ -131,6 +152,7 @@ fn main() -> Result<()> {
             source,
             content,
         } => cmd_hook_save(palace.as_mut(), wing, room, source, content),
+        Command::Compress { wing, dry_run } => cmd_compress(palace.as_mut(), wing, dry_run),
         Command::Instructions => cmd_instructions(),
     }
 }
@@ -183,16 +205,36 @@ fn cmd_mine(
     dir: &std::path::Path,
     wing: Option<String>,
     room: String,
+    mode: &str,
+    extract: &str,
 ) -> Result<()> {
-    let miner = Miner::new(MinerOptions {
-        wing,
-        default_room: room,
-        ..MinerOptions::default()
-    });
-    let stats = miner
-        .mine(dir, palace)
-        .with_context(|| format!("mining {}", dir.display()))?;
-    println!("{stats:#?}");
+    match mode {
+        "projects" => {
+            let miner = Miner::new(MinerOptions {
+                wing,
+                default_room: room,
+                ..MinerOptions::default()
+            });
+            let stats = miner
+                .mine(dir, palace)
+                .with_context(|| format!("mining {}", dir.display()))?;
+            println!("{stats:#?}");
+        }
+        "convos" => {
+            let extract_mode = match extract {
+                "general" => ExtractMode::General,
+                _ => ExtractMode::Exchange,
+            };
+            let mut miner = ConvoMiner::new();
+            miner.wing = wing;
+            miner.extract_mode = extract_mode;
+            let stats = miner
+                .mine(dir, palace)
+                .with_context(|| format!("mining conversations from {}", dir.display()))?;
+            println!("{stats:#?}");
+        }
+        _ => unreachable!("clap value_parser restricts to projects|convos"),
+    }
     Ok(())
 }
 
@@ -270,6 +312,88 @@ fn cmd_mcp_serve() -> Result<()> {
 
     let rt = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
     rt.block_on(mempalace_server::serve_stdio(server))
+}
+
+fn cmd_compress(palace: &mut dyn Palace, wing: Option<String>, dry_run: bool) -> Result<()> {
+    let filter = SearchFilter { wing, room: None };
+    let drawers = palace
+        .list_filtered(&filter, usize::MAX)
+        .context("failed to list palace drawers")?;
+
+    if drawers.is_empty() {
+        println!("No drawers to compress.");
+        return Ok(());
+    }
+
+    let dialect = Dialect::new(HashMap::new(), vec![]);
+    let mut total_original_chars: usize = 0;
+    let mut total_compressed_chars: usize = 0;
+    let mut total_drawers: usize = 0;
+
+    for drawer in &drawers {
+        // Skip already-compressed drawers
+        if drawer.id.starts_with("compressed_") {
+            continue;
+        }
+
+        let mut meta_map = HashMap::new();
+        if let Some(ref w) = drawer.metadata.wing {
+            meta_map.insert("wing".to_string(), w.clone());
+        }
+        if let Some(ref r) = drawer.metadata.room {
+            meta_map.insert("room".to_string(), r.clone());
+        }
+        if let Some(ref d) = drawer.metadata.date {
+            meta_map.insert("date".to_string(), d.clone());
+        }
+        if let Some(ref s) = drawer.metadata.source_file {
+            meta_map.insert("source_file".to_string(), s.clone());
+        }
+
+        let compressed = dialect.compress(&drawer.content, Some(&meta_map));
+        let stats = dialect.compression_stats(&drawer.content, &compressed);
+
+        total_original_chars += stats.original_chars;
+        total_compressed_chars += stats.summary_chars;
+        total_drawers += 1;
+
+        if dry_run {
+            println!(
+                "  {} — {} chars → {} chars (ratio {:.1}x)",
+                drawer.id, stats.original_chars, stats.summary_chars, stats.size_ratio
+            );
+        } else {
+            let compressed_id = format!("compressed_{}", drawer.id);
+            let mut metadata = drawer.metadata.clone();
+            metadata.extra.insert(
+                "compression_ratio".to_string(),
+                serde_json::Value::from(stats.size_ratio),
+            );
+            let record = DrawerRecord {
+                id: compressed_id,
+                content: compressed,
+                metadata,
+            };
+            palace
+                .add(record)
+                .context("failed to add compressed drawer")?;
+        }
+    }
+
+    let overall_ratio = if total_compressed_chars > 0 {
+        total_original_chars as f64 / total_compressed_chars as f64
+    } else {
+        0.0
+    };
+
+    println!();
+    if dry_run {
+        println!("DRY RUN — no records written");
+    }
+    println!(
+        "Summary: {total_drawers} drawers, {total_original_chars} → {total_compressed_chars} chars ({overall_ratio:.1}x)"
+    );
+    Ok(())
 }
 
 fn cmd_instructions() -> Result<()> {

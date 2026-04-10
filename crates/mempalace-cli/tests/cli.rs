@@ -119,3 +119,32 @@ fn split_handles_empty_directory() {
         .assert()
         .success();
 }
+
+#[test]
+fn test_mine_help_shows_mode_flag() {
+    bin()
+        .args(["mine", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--mode"))
+        .stdout(predicate::str::contains("--extract"));
+}
+
+#[test]
+fn test_compress_help() {
+    bin()
+        .args(["compress", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--wing"))
+        .stdout(predicate::str::contains("--dry-run"));
+}
+
+#[test]
+fn compress_dry_run_on_empty_palace() {
+    bin()
+        .args(["compress", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No drawers to compress"));
+}
