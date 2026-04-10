@@ -34,6 +34,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .palace import get_collection
 
 
 def cmd_init(args):
@@ -158,9 +159,9 @@ def cmd_status(args):
 
 
 def cmd_repair(args):
-    """Rebuild palace vector index from SQLite metadata."""
-    import chromadb
+    """Rebuild palace vector index from stored data."""
     import shutil
+    from .db import detect_backend
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
@@ -172,11 +173,11 @@ def cmd_repair(args):
     print("  MemPalace Repair")
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
+    print(f"  Backend: {detect_backend(palace_path)}")
 
     # Try to read existing drawers
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_collection(palace_path)
         total = col.count()
         print(f"  Drawers found: {total}")
     except Exception as e:
@@ -211,22 +212,272 @@ def cmd_repair(args):
     print(f"  Backing up to {backup_path}...")
     shutil.copytree(palace_path, backup_path)
 
-    print("  Rebuilding collection...")
-    client.delete_collection("mempalace_drawers")
-    new_col = client.create_collection("mempalace_drawers")
+    print("  Rebuilding — re-mining into fresh palace...")
+    shutil.rmtree(palace_path)
+    new_col = get_collection(palace_path)
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
         batch_ids = all_ids[i : i + batch_size]
         batch_docs = all_docs[i : i + batch_size]
         batch_metas = all_metas[i : i + batch_size]
-        new_col.add(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
+        new_col.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
         filed += len(batch_ids)
         print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print(f"  Backup saved at {backup_path}")
     print(f"\n{'=' * 55}\n")
+
+
+def cmd_reindex(args):
+    """Re-embed all drawers with the current (or specified) embedder."""
+    from .embeddings import get_embedder, resolve_model_name
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    config = MempalaceConfig()
+
+    if not os.path.isdir(palace_path):
+        print(f"\n  No palace found at {palace_path}")
+        return
+
+    # Determine target embedder
+    if args.embedder:
+        embedder_config = {
+            "embedder": args.embedder,
+            "embedder_options": {"device": args.device or "cpu"},
+        }
+        if args.embedder == "ollama":
+            opts = embedder_config["embedder_options"]
+            opts["model"] = args.ollama_model or "nomic-embed-text"
+            if args.ollama_url:
+                opts["base_url"] = args.ollama_url
+    else:
+        embedder_config = config.embedder_config
+
+    resolved_name = resolve_model_name(embedder_config.get("embedder", "all-MiniLM-L6-v2"))
+    if embedder_config.get("embedder") == "ollama":
+        display_name = f"ollama/{embedder_config['embedder_options'].get('model', 'nomic-embed-text')}"
+    else:
+        display_name = resolved_name
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Reindex")
+    print(f"{'=' * 55}\n")
+    print(f"  Palace:   {palace_path}")
+    print(f"  Embedder: {display_name}")
+
+    embedder = get_embedder(embedder_config)
+    print(f"  Dimension: {embedder.dimension}")
+
+    # Read all existing records
+    from .db import open_collection
+    col = open_collection(palace_path, embedder=embedder)
+    total = col.count()
+
+    if total == 0:
+        print("  Nothing to reindex.")
+        return
+
+    print(f"  Drawers:  {total}")
+
+    if args.dry_run:
+        print("\n  DRY RUN — nothing will be changed.")
+        # Show current model distribution
+        batch = col.get(limit=min(total, 100), include=["metadatas"])
+        models = {}
+        for m in batch.get("metadatas", []):
+            em = m.get("embedding_model", "unknown")
+            models[em] = models.get(em, 0) + 1
+        print("\n  Current embedding models (sample):")
+        for model, count in sorted(models.items(), key=lambda x: -x[1]):
+            print(f"    {model}: {count} drawers")
+        print(f"\n{'=' * 55}\n")
+        return
+
+    print(f"\n  Re-embedding {total} drawers...")
+
+    batch_size = 100
+    offset = 0
+    processed = 0
+
+    while offset < total:
+        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        batch_ids = batch["ids"]
+        batch_docs = batch["documents"]
+        batch_metas = batch["metadatas"]
+
+        if not batch_ids:
+            break
+
+        # Re-embed
+        new_embeddings = embedder.embed(batch_docs)
+
+        # Update metadata with new model name
+        updated_metas = []
+        for m in batch_metas:
+            m2 = dict(m)
+            m2["embedding_model"] = embedder.model_name
+            updated_metas.append(m2)
+
+        # Write back with new embeddings
+        col.upsert(
+            documents=batch_docs,
+            ids=batch_ids,
+            metadatas=updated_metas,
+            embeddings=new_embeddings,
+        )
+
+        processed += len(batch_ids)
+        print(f"  Re-embedded {processed}/{total} drawers...")
+        offset += len(batch_ids)
+
+    print(f"\n{'=' * 55}")
+    print(f"  Reindex complete. {processed} drawers re-embedded with {display_name}.")
+    print(f"{'=' * 55}\n")
+
+
+def cmd_embedders(args):
+    """List available embedding models."""
+    from .embeddings import list_embedders
+
+    config = MempalaceConfig()
+    current = config.embedder_config.get("embedder", "all-MiniLM-L6-v2")
+
+    print(f"\n{'=' * 70}")
+    print("  Available Embedding Models")
+    print(f"{'=' * 70}\n")
+
+    for e in list_embedders():
+        marker = " ◄ active" if e["name"] == current or e["alias"] == current else ""
+        dim_str = str(e['dim']).rjust(4)
+        print(f"  {e['alias']:12s}  {dim_str}d  {e['name']}")
+        print(f"               {e['notes']}{marker}")
+        print()
+
+    print(f"  Configure in ~/.mempalace/config.json:")
+    print(f'    {{"embedder": "bge-small", "embedder_options": {{"device": "cpu"}}}}')
+    print()
+    print(f"  For Ollama (GPU server):")
+    print(f'    {{"embedder": "ollama", "embedder_options": {{"model": "nomic-embed-text", "base_url": "http://server:11434"}}}}')
+    print(f"\n  After changing embedder, run: mempalace reindex")
+    print(f"{'=' * 70}\n")
+
+
+def cmd_migrate(args):
+    """Migrate palace from ChromaDB to LanceDB."""
+    import shutil
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+
+    if not os.path.isdir(palace_path):
+        print(f"\n  No palace found at {palace_path}")
+        return
+
+    from .db import detect_backend
+    current = detect_backend(palace_path)
+
+    if current == "lance":
+        print(f"\n  Palace at {palace_path} is already using LanceDB.")
+        return
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Migrate: ChromaDB → LanceDB")
+    print(f"{'=' * 55}\n")
+    print(f"  Palace: {palace_path}")
+
+    # Read all data from ChromaDB
+    try:
+        import chromadb
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection("mempalace_drawers")
+        total = col.count()
+        print(f"  Drawers found: {total}")
+    except Exception as e:
+        print(f"  Error reading ChromaDB palace: {e}")
+        return
+
+    if total == 0:
+        print("  Nothing to migrate.")
+        return
+
+    # Extract all data including embeddings
+    print("\n  Extracting drawers from ChromaDB...")
+    batch_size = 5000
+    all_ids, all_docs, all_metas, all_embeddings = [], [], [], []
+    offset = 0
+    while offset < total:
+        batch = col.get(
+            limit=batch_size, offset=offset,
+            include=["documents", "metadatas", "embeddings"]
+        )
+        all_ids.extend(batch["ids"])
+        all_docs.extend(batch["documents"])
+        all_metas.extend(batch["metadatas"])
+        all_embeddings.extend(batch.get("embeddings", []))
+        offset += batch_size
+    print(f"  Extracted {len(all_ids)} drawers")
+
+    has_embeddings = all_embeddings and all_embeddings[0] is not None
+
+    # Backup ChromaDB data
+    palace_path_clean = palace_path.rstrip(os.sep)
+    backup_path = palace_path_clean + ".chroma-backup"
+    if os.path.exists(backup_path):
+        shutil.rmtree(backup_path)
+    print(f"  Backing up ChromaDB to {backup_path}...")
+    shutil.copytree(palace_path, backup_path)
+
+    # Remove ChromaDB files, create fresh LanceDB palace
+    shutil.rmtree(palace_path)
+
+    from .db import open_collection
+    if has_embeddings:
+        print("  Transferring with original embeddings (no re-embedding needed)...")
+    else:
+        print("  Re-embedding all drawers (ChromaDB embeddings not available)...")
+
+    lance_col = open_collection(palace_path, backend="lance")
+
+    filed = 0
+    for i in range(0, len(all_ids), batch_size):
+        batch_ids = all_ids[i : i + batch_size]
+        batch_docs = all_docs[i : i + batch_size]
+        batch_metas = all_metas[i : i + batch_size]
+        batch_embs = all_embeddings[i : i + batch_size] if has_embeddings else None
+        lance_col.upsert(
+            documents=batch_docs, ids=batch_ids,
+            metadatas=batch_metas, embeddings=batch_embs
+        )
+        filed += len(batch_ids)
+        print(f"  Migrated {filed}/{len(all_ids)} drawers...")
+
+    # Also migrate compressed collection if it exists
+    try:
+        client2 = chromadb.PersistentClient(path=backup_path)
+        comp_col = client2.get_collection("mempalace_compressed")
+        comp_total = comp_col.count()
+        if comp_total > 0:
+            print(f"\n  Migrating {comp_total} compressed drawers...")
+            comp_data = comp_col.get(
+                limit=comp_total,
+                include=["documents", "metadatas", "embeddings"]
+            )
+            comp_lance = open_collection(palace_path, "mempalace_compressed", backend="lance")
+            comp_embs = comp_data.get("embeddings") if comp_data.get("embeddings") and comp_data["embeddings"][0] is not None else None
+            comp_lance.upsert(
+                documents=comp_data["documents"], ids=comp_data["ids"],
+                metadatas=comp_data["metadatas"], embeddings=comp_embs
+            )
+            print(f"  Migrated {comp_total} compressed drawers.")
+    except Exception:
+        pass
+
+    print(f"\n{'=' * 55}")
+    print(f"  Migration complete. {filed} drawers moved to LanceDB.")
+    print(f"  ChromaDB backup at: {backup_path}")
+    print(f"  To verify: mempalace status")
+    print(f"{'=' * 55}\n")
 
 
 def cmd_hook(args):
@@ -266,7 +517,6 @@ def cmd_mcp(args):
 
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
-    import chromadb
     from .dialect import Dialect
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
@@ -287,14 +537,15 @@ def cmd_compress(args):
 
     # Connect to palace
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_collection(palace_path)
+        if col.count() == 0:
+            raise Exception("Empty palace")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         sys.exit(1)
 
-    # Query drawers in batches to avoid SQLite variable limit (~999)
+    # Query drawers in batches
     where = {"wing": args.wing} if args.wing else None
     _BATCH = 500
     docs, metas, ids = [], [], []
@@ -359,7 +610,7 @@ def cmd_compress(args):
     # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
-            comp_col = client.get_or_create_collection("mempalace_compressed")
+            comp_col = get_collection(palace_path, "mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
                 comp_meta["compression_ratio"] = round(stats["ratio"], 1)
@@ -524,6 +775,49 @@ def main():
         help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
     )
 
+    # migrate
+    sub.add_parser(
+        "migrate",
+        help="Migrate palace from ChromaDB to LanceDB",
+    )
+
+    # reindex
+    p_reindex = sub.add_parser(
+        "reindex",
+        help="Re-embed all drawers with a different embedding model",
+    )
+    p_reindex.add_argument(
+        "--embedder",
+        default=None,
+        help="Embedder name or alias (e.g. bge-small, ollama). Default: from config.",
+    )
+    p_reindex.add_argument(
+        "--device",
+        default=None,
+        help="Device for sentence-transformers (cpu, cuda, mps)",
+    )
+    p_reindex.add_argument(
+        "--ollama-model",
+        default=None,
+        help="Ollama model name (when --embedder=ollama)",
+    )
+    p_reindex.add_argument(
+        "--ollama-url",
+        default=None,
+        help="Ollama server URL (when --embedder=ollama)",
+    )
+    p_reindex.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show current embedding model distribution without changing anything",
+    )
+
+    # embedders
+    sub.add_parser(
+        "embedders",
+        help="List available embedding models",
+    )
+
     # mcp
     sub.add_parser(
         "mcp",
@@ -565,6 +859,9 @@ def main():
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
+        "migrate": cmd_migrate,
+        "reindex": cmd_reindex,
+        "embedders": cmd_embedders,
         "status": cmd_status,
     }
     dispatch[args.command](args)

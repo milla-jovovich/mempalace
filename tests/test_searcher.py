@@ -55,11 +55,10 @@ class TestSearchMemories:
     def test_search_memories_query_error(self):
         """search_memories returns error dict when query raises."""
         mock_col = MagicMock()
+        mock_col.count.return_value = 1
         mock_col.query.side_effect = RuntimeError("query failed")
-        mock_client = MagicMock()
-        mock_client.get_collection.return_value = mock_col
 
-        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
             result = search_memories("test", "/fake/path")
         assert "error" in result
         assert "query failed" in result["error"]
@@ -100,21 +99,17 @@ class TestSearchCLI:
             search("anything", str(tmp_path / "missing"))
 
     def test_search_no_results(self, palace_path, collection, capsys):
-        """Empty collection returns no results message."""
-        # collection is empty (no seeded data)
-        result = search("xyzzy_nonexistent_query", palace_path, n_results=1)
-        captured = capsys.readouterr()
-        # Either prints "No results" or returns None
-        assert result is None or "No results" in captured.out
+        """Empty collection raises SearchError (no data to search)."""
+        with pytest.raises(SearchError):
+            search("xyzzy_nonexistent_query", palace_path, n_results=1)
 
     def test_search_query_error_raises(self):
         """search raises SearchError when query fails."""
         mock_col = MagicMock()
+        mock_col.count.return_value = 1
         mock_col.query.side_effect = RuntimeError("boom")
-        mock_client = MagicMock()
-        mock_client.get_collection.return_value = mock_col
 
-        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
             with pytest.raises(SearchError, match="Search error"):
                 search("test", "/fake/path")
 
