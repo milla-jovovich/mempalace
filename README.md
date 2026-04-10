@@ -138,6 +138,42 @@ Claude calls `mempalace_search` automatically, gets verbatim results, and answer
 
 MemPalace also works natively with **Gemini CLI** (which handles the server and save hooks automatically) — see the [Gemini CLI Integration Guide](examples/gemini_cli_setup.md).
 
+### With LM Studio
+
+LM Studio works as an MCP client. Edit `%USERPROFILE%\.lmstudio\mcp.json` (or use the **Developer** tab → "Edit mcp.json" in LM Studio):
+
+```json
+{
+  "mcpServers": {
+    "mempalace": {
+      "command": "python",
+      "args": ["-m", "mempalace.mcp_server"]
+    }
+  }
+}
+```
+
+LM Studio auto-loads the server on save — no restart needed. A `mempalace` entry then appears in the per-chat tools sidebar.
+
+Or via `uvx` (no install required):
+
+```json
+{
+  "mcpServers": {
+    "mempalace": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/milla-jovovich/mempalace.git", "python", "-m", "mempalace.mcp_server"]
+    }
+  }
+}
+```
+
+> **Tips:**
+> - Tool-call reliability depends on the model. Qwen 3 14B+ works well; smaller models may struggle.
+> - Default context length (4K) fills up fast with tool results — bump to 8K–16K with Flash Attention on.
+
+> **Note (Claude Desktop via Microsoft Store):** The config file lives at `C:\Users\<user>\AppData\Local\Packages\Claude_<id>\LocalCache\Roaming\Claude\claude_desktop_config.json` rather than the usual `%APPDATA%\Claude`.
+
 ### With local models (Llama, Mistral, or any offline LLM)
 
 Local models generally don't speak MCP yet. Two approaches:
