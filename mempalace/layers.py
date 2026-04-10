@@ -136,8 +136,8 @@ class Layer1:
                     break
             scored.append((importance, meta, doc))
 
-        # Sort by importance descending, take top N
-        scored.sort(key=lambda x: x[0], reverse=True)
+        # Sort by importance descending, then by most-recent filing
+        scored.sort(key=lambda x: (x[0], x[1].get("filed_at", "")), reverse=True)
         top = scored[: self.MAX_DRAWERS]
 
         # Group by room for readability
