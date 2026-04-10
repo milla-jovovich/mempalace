@@ -268,8 +268,6 @@ def main():
     if args.file:
         files = [Path(args.file)]
     else:
-            out_path.write_text("".join(chunk), encoding="utf-8")
-            print(f"  {_CHECKMARK} {name}  ({len(chunk)} lines)")
         files = sorted(src_dir.glob("*.txt"))
 
     mega_files = []
@@ -306,16 +304,12 @@ def main():
             f.rename(backup)
             print(f"  → Original renamed to {backup.name}\n")
         else:
-            out_path.write_text("".join(chunk), encoding="utf-8")
-            print(f"  {_CHECKMARK} {name}  ({len(chunk)} lines)")
             print()
 
     print(f"{'─' * 60}")
     if args.dry_run:
         print(f"  DRY RUN — would create {total_written} files from {len(mega_files)} mega-files")
     else:
-            out_path.write_text("".join(chunk), encoding="utf-8")
-            print(f"  {_CHECKMARK} {name}  ({len(chunk)} lines)")
         print(f"  Done — created {total_written} files from {len(mega_files)} mega-files")
     print()
 
