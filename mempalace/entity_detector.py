@@ -393,6 +393,27 @@ STOPWORDS = {
     "networks",
     "training",
     "inference",
+    # Common technical documentation terms that appear capitalized but aren't entities
+    "handler",
+    "node",
+    "service",
+    "manager",
+    "client",
+    "server",
+    "worker",
+    "plugin",
+    "module",
+    "interface",
+    "event",
+    "request",
+    "response",
+    "update",
+    "config",
+    "builder",
+    "factory",
+    "one",
+    "azure",
+    "notion",
 }
 
 # For entity detection — prose only, no code files

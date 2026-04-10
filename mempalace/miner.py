@@ -632,9 +632,15 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
-    metas = r["metadatas"]
+    # Count by wing and room — paginate to avoid truncation on large palaces
+    metas = []
+    offset = 0
+    while True:
+        batch = col.get(limit=1000, offset=offset, include=["metadatas"])
+        metas.extend(batch["metadatas"])
+        if not batch["ids"] or len(batch["ids"]) < 1000:
+            break
+        offset += len(batch["ids"])
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:
