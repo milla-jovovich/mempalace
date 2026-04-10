@@ -436,21 +436,39 @@ def process_file(
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
         return len(chunks), room
 
-    drawers_added = 0
-    for chunk in chunks:
-        added = add_drawer(
-            collection=collection,
-            wing=wing,
-            room=room,
-            content=chunk["content"],
-            source_file=source_file,
-            chunk_index=chunk["chunk_index"],
-            agent=agent,
-        )
-        if added:
-            drawers_added += 1
+    # Batch all chunks into a single upsert call per file
+    batch_docs = []
+    batch_ids = []
+    batch_metas = []
+    try:
+        file_mtime = os.path.getmtime(source_file)
+    except OSError:
+        file_mtime = None
 
-    return drawers_added, room
+    for chunk in chunks:
+        drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
+        metadata = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file,
+            "chunk_index": chunk["chunk_index"],
+            "added_by": agent,
+            "filed_at": datetime.now().isoformat(),
+        }
+        if file_mtime is not None:
+            metadata["source_mtime"] = file_mtime
+        batch_docs.append(chunk["content"])
+        batch_ids.append(drawer_id)
+        batch_metas.append(metadata)
+
+    if batch_docs:
+        collection.upsert(
+            documents=batch_docs,
+            ids=batch_ids,
+            metadatas=batch_metas,
+        )
+
+    return len(batch_docs), room
 
 
 # =============================================================================
