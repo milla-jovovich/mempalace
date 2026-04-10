@@ -414,7 +414,7 @@ def process_file_cpu(
     rooms: list,
     agent: str,
 ) -> "tuple | None":
-    """Read, chunk, and route a file without touching ChromaDB. Safe to run in threads."""
+    """Read, chunk, and route a file. Thread-safe, no ChromaDB calls."""
     source_file = str(filepath)
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
@@ -504,11 +504,7 @@ def process_file(
 
 
 def build_mined_cache(collection) -> dict:
-    """Fetch all mined file mtimes in one query.
-
-    Returns {source_file: mtime_float} where mtime is None if not stored.
-    Replaces per-file file_already_mined() calls during the pre-filter scan.
-    """
+    """Fetch all mined file mtimes in one query. Returns {source_file: mtime}."""
     try:
         results = collection.get(include=["metadatas"])
     except Exception:

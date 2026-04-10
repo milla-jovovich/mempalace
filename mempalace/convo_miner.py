@@ -238,12 +238,7 @@ def process_convo_file_cpu(
     agent: str,
     extract_mode: str,
 ) -> "tuple | None":
-    """
-    Pure CPU worker: normalize, chunk, detect room, build drawer records.
-    Thread-safe — no ChromaDB calls, no shared state.
-
-    Returns (source_file, room, records, room_counts_delta) or None if skipped.
-    """
+    """Normalize, chunk, and build drawer records. Thread-safe, no ChromaDB calls."""
     source_file = str(filepath)
 
     try:
