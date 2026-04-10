@@ -7,7 +7,7 @@
 | **Phase 1** | Database abstraction + LanceDB backend | ✅ Done |
 | **Phase 2** | Pluggable vectorizers + `mempalace reindex` | ✅ Done |
 | **Phase 3** | Sync metadata in all writes (`node_id`, `seq`, `updated_at`) | ✅ Done |
-| **Phase 4** | Sync engine + server + `mempalace serve/sync` CLI | Planned |
+| **Phase 4** | Sync engine + server + `mempalace serve/sync` CLI | ✅ Done |
 | **Phase 5** | Unify knowledge graph into LanceDB tables | Planned |
 | **Phase 6** | Benchmarks — re-run LongMemEval with new vectorizers | Planned |
 
@@ -120,7 +120,11 @@ write operation:
 
 ---
 
-## Phase 4 — Sync Engine + Server
+## Phase 4 — Sync Engine + Server ✅
+
+**Completed.** Full bidirectional sync with version vectors, last-writer-wins
+conflict resolution, FastAPI server, urllib-based client, and CLI commands
+(`mempalace serve`, `mempalace sync --server URL [--auto]`).  588 tests pass.
 
 ### Architecture
 

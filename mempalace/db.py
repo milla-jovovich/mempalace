@@ -148,9 +148,14 @@ class LanceCollection:
         from .sync_meta import inject_sync_meta
         return inject_sync_meta(metadatas, self._sync_identity)
 
-    def upsert(self, documents, ids, metadatas, embeddings=None):
-        """Insert or update records. Computes embeddings automatically."""
-        metadatas = self._inject_sync(metadatas)
+    def upsert(self, documents, ids, metadatas, embeddings=None, _raw=False):
+        """Insert or update records. Computes embeddings automatically.
+
+        Args:
+            _raw: If True, skip sync metadata injection (used by sync apply).
+        """
+        if not _raw:
+            metadatas = self._inject_sync(metadatas)
         records = self._to_records(documents, ids, metadatas, embeddings)
 
         if self._table is None:
