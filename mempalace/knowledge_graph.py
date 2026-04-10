@@ -57,6 +57,7 @@ class KnowledgeGraph:
         conn = self._conn()
         conn.executescript("""
             PRAGMA journal_mode=WAL;
+            PRAGMA foreign_keys=ON;
 
             CREATE TABLE IF NOT EXISTS entities (
                 id TEXT PRIMARY KEY,
@@ -92,6 +93,7 @@ class KnowledgeGraph:
         if self._connection is None:
             self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
             self._connection.execute("PRAGMA journal_mode=WAL")
+            self._connection.execute("PRAGMA foreign_keys=ON")
             self._connection.row_factory = sqlite3.Row
         return self._connection
 
@@ -291,7 +293,7 @@ class KnowledgeGraph:
                 JOIN entities s ON t.subject = s.id
                 JOIN entities o ON t.object = o.id
                 WHERE (t.subject = ? OR t.object = ?)
-                ORDER BY t.valid_from ASC NULLS LAST
+                ORDER BY CASE WHEN t.valid_from IS NULL THEN 1 ELSE 0 END, t.valid_from ASC
                 LIMIT 100
             """,
                 (eid, eid),
@@ -302,7 +304,7 @@ class KnowledgeGraph:
                 FROM triples t
                 JOIN entities s ON t.subject = s.id
                 JOIN entities o ON t.object = o.id
-                ORDER BY t.valid_from ASC NULLS LAST
+                ORDER BY CASE WHEN t.valid_from IS NULL THEN 1 ELSE 0 END, t.valid_from ASC
                 LIMIT 100
             """).fetchall()
 

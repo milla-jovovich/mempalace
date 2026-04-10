@@ -100,10 +100,6 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
-_client_cache = None
-_collection_cache = None
-
-
 def _get_client():
     """Return a singleton ChromaDB PersistentClient."""
     global _client_cache
@@ -448,6 +444,12 @@ def tool_kg_add(
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
     """Mark a fact as no longer true (set end date)."""
+    try:
+        subject = sanitize_name(subject, "subject")
+        predicate = sanitize_name(predicate, "predicate")
+        object = sanitize_name(object, "object")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
     _wal_log(
         "kg_invalidate",
         {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
@@ -545,6 +547,10 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
     Read an agent's recent diary entries. Returns the last N entries
     in chronological order — the agent's personal journal.
     """
+    try:
+        agent_name = sanitize_name(agent_name, "agent_name")
+    except ValueError as e:
+        return {"error": str(e)}
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     col = _get_collection()
     if not col:

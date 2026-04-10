@@ -375,28 +375,25 @@ def add_drawer(
 ):
     """Add one drawer to the palace."""
     drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
+    metadata = {
+        "wing": wing,
+        "room": room,
+        "source_file": source_file,
+        "chunk_index": chunk_index,
+        "added_by": agent,
+        "filed_at": datetime.now().isoformat(),
+    }
+    # Store file mtime so we can detect modifications later.
     try:
-        metadata = {
-            "wing": wing,
-            "room": room,
-            "source_file": source_file,
-            "chunk_index": chunk_index,
-            "added_by": agent,
-            "filed_at": datetime.now().isoformat(),
-        }
-        # Store file mtime so we can detect modifications later.
-        try:
-            metadata["source_mtime"] = os.path.getmtime(source_file)
-        except OSError:
-            pass
-        collection.upsert(
-            documents=[content],
-            ids=[drawer_id],
-            metadatas=[metadata],
-        )
-        return True
-    except Exception:
-        raise
+        metadata["source_mtime"] = os.path.getmtime(source_file)
+    except OSError:
+        pass
+    collection.upsert(
+        documents=[content],
+        ids=[drawer_id],
+        metadatas=[metadata],
+    )
+    return True
 
 
 # =============================================================================

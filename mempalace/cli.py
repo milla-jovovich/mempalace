@@ -452,7 +452,7 @@ def main():
 
     # compress
     p_compress = sub.add_parser(
-        "compress", help="Compress drawers using AAAK Dialect (~30x reduction)"
+        "compress", help="Compress drawers using AAAK Dialect"
     )
     p_compress.add_argument("--wing", default=None, help="Wing to compress (default: all wings)")
     p_compress.add_argument(
