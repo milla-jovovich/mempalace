@@ -343,7 +343,9 @@ def hook_stop(data: dict, harness: str):
             else:
                 _output({})
         else:
-            # Legacy: block and ask Claude to save via MCP tools
+            # Legacy: block and ask Claude to save via MCP tools.
+            # Marker advances before confirmed save — best-effort; if Claude
+            # fails to save, the checkpoint is lost but won't retry endlessly.
             try:
                 last_save_file.write_text(str(exchange_count), encoding="utf-8")
             except OSError:

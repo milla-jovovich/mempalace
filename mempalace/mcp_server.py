@@ -827,17 +827,20 @@ def tool_memories_filed_away():
     state_dir = Path.home() / ".mempalace" / "hook_state"
     ack_file = state_dir / "last_checkpoint"
     if not ack_file.is_file():
-        return {"palace": "quiet", "message": "No recent journal entry"}
+        return {"status": "quiet", "message": "No recent journal entry", "count": 0, "timestamp": None}
     try:
         data = json.loads(ack_file.read_text(encoding="utf-8"))
         ack_file.unlink(missing_ok=True)
-        msgs = data.get("msgs", "?")
+        msgs = data.get("msgs", 0)
         return {
+            "status": "ok",
             "message": f"\u2726 {msgs} messages tucked into drawers",
-            "timestamp": data.get("ts", ""),
+            "count": msgs,
+            "timestamp": data.get("ts", None),
         }
     except (json.JSONDecodeError, OSError):
-        return {"message": "\u2726 Journal entry filed in the palace"}
+        ack_file.unlink(missing_ok=True)
+        return {"status": "error", "message": "\u2726 Journal entry filed in the palace", "count": 0, "timestamp": None}
 
 
 # ==================== MCP PROTOCOL ====================
@@ -1170,7 +1173,7 @@ TOOLS = {
         },
         "handler": tool_hook_settings,
     },
-    "memories_filed_away": {
+    "mempalace_memories_filed_away": {
         "description": "Check if a recent palace checkpoint was saved. Returns message count and timestamp.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_memories_filed_away,
@@ -1187,7 +1190,7 @@ SUPPORTED_PROTOCOL_VERSIONS = [
 
 
 def handle_request(request):
-    method = request.get("method", "")
+    method = request.get("method") or ""
     params = request.get("params", {})
     req_id = request.get("id")
 

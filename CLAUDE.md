@@ -20,7 +20,7 @@ JP's fork of [milla-jovovich/mempalace](https://github.com/milla-jovovich/mempal
 
 ```bash
 source venv/bin/activate
-python -m pytest tests/ -x -q           # run tests (576 expected)
+python -m pytest tests/ -x -q           # run tests (580 expected)
 mempalace status                         # check palace state
 mempalace search "query"                 # test search
 python -m mempalace.mcp_server           # run MCP server standalone
@@ -35,7 +35,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 3. **fix: MCP server** — search limit capped [1,100], status/taxonomy tools paginated past 10K, duplicate cache decls removed
 4. **perf: batch ChromaDB writes** — one upsert per file instead of per chunk in both miners
 5. **fix: entity detector STOPWORDS** — 73 technical terms added (Handler, Node, Service, etc.)
-6. **feat: similarity threshold** — `min_similarity` parameter in search, default 1.5 L2 distance in MCP
+6. **feat: similarity threshold** — `max_distance` parameter in search (renamed from `min_similarity`), default 1.5 L2 distance in MCP
 7. **feat: hooks_cli** — stop hook saves directly via Python API with systemMessage notification, precompact blocks for AI-driven save, auto-ingest transcripts
 
 ## Upstream PRs
