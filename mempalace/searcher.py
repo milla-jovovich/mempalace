@@ -100,7 +100,7 @@ def search_memories(
     wing: str = None,
     room: str = None,
     n_results: int = 5,
-    min_similarity: float = 0.0,
+    max_distance: float = 0.0,
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
 
@@ -112,7 +112,7 @@ def search_memories(
         wing: Optional wing filter.
         room: Optional room filter.
         n_results: Max results to return.
-        min_similarity: Max L2 (Euclidean) distance threshold. ChromaDB uses
+        max_distance: Max L2 (Euclidean) distance threshold. ChromaDB uses
             L2 distance by default — 0 = identical, larger = less similar.
             Results with distance > this value are filtered out. A value of
             0.0 disables filtering. Typical useful range: 0.5–1.5.
@@ -149,7 +149,7 @@ def search_memories(
     hits = []
     for doc, meta, dist in zip(docs, metas, dists):
         # Filter on raw distance before rounding to avoid precision loss
-        if min_similarity > 0.0 and dist > min_similarity:
+        if max_distance > 0.0 and dist > max_distance:
             continue
         hits.append(
             {

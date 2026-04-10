@@ -138,6 +138,26 @@ class TestHandleRequest:
         resp = handle_request({"method": "unknown/method", "id": 4, "params": {}})
         assert resp["error"]["code"] == -32601
 
+    def test_any_notification_returns_none(self):
+        """All notifications/* methods should return None (no response)."""
+        from mempalace.mcp_server import handle_request
+
+        for method in [
+            "notifications/initialized",
+            "notifications/cancelled",
+            "notifications/progress",
+            "notifications/roots/list_changed",
+        ]:
+            resp = handle_request({"method": method, "params": {}})
+            assert resp is None, f"{method} should return None"
+
+    def test_unknown_method_no_id_returns_none(self):
+        """Messages without id (notifications) must never get a response."""
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request({"method": "unknown/thing", "params": {}})
+        assert resp is None
+
     def test_tools_call_dispatches(self, monkeypatch, config, palace_path, seeded_kg):
         _patch_mcp_server(monkeypatch, config, seeded_kg)
         from mempalace.mcp_server import handle_request

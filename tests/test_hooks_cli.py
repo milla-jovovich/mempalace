@@ -8,9 +8,9 @@ import pytest
 
 from mempalace.hooks_cli import (
     SAVE_INTERVAL,
-    STOP_BLOCK_REASON,
     PRECOMPACT_BLOCK_REASON,
     _count_human_messages,
+    _extract_recent_messages,
     _log,
     _maybe_auto_ingest,
     _parse_harness_input,
@@ -105,6 +105,40 @@ def test_count_malformed_json_lines(tmp_path):
     assert _count_human_messages(str(transcript)) == 1
 
 
+# --- _extract_recent_messages ---
+
+
+def test_extract_recent_messages_basic(tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(5)],
+    )
+    msgs = _extract_recent_messages(str(transcript), count=3)
+    assert len(msgs) == 3
+    assert msgs[0] == "msg 2"
+    assert msgs[2] == "msg 4"
+
+
+def test_extract_recent_messages_skips_commands(tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [
+            {"message": {"role": "user", "content": "real msg"}},
+            {"message": {"role": "user", "content": "<command-message>status</command-message>"}},
+            {"message": {"role": "user", "content": "<system-reminder>hook</system-reminder>"}},
+        ],
+    )
+    msgs = _extract_recent_messages(str(transcript))
+    assert len(msgs) == 1
+    assert msgs[0] == "real msg"
+
+
+def test_extract_recent_messages_missing_file():
+    assert _extract_recent_messages("/nonexistent.jsonl") == []
+
+
 # --- hook_stop ---
 
 
@@ -157,19 +191,23 @@ def test_stop_hook_passthrough_below_interval(tmp_path):
     assert result == {}
 
 
-def test_stop_hook_blocks_at_interval(tmp_path):
+def test_stop_hook_saves_silently_at_interval(tmp_path):
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
         transcript,
         [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
-    result = _capture_hook_output(
-        hook_stop,
-        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
-        state_dir=tmp_path,
-    )
-    assert result["decision"] == "block"
-    assert result["reason"] == STOP_BLOCK_REASON
+    save_result = {"count": 15, "themes": ["hooks", "notifications"]}
+    with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result) as mock_save:
+        result = _capture_hook_output(
+            hook_stop,
+            {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+            state_dir=tmp_path,
+        )
+    # Saves silently — systemMessage notification with themes, no block
+    assert result["systemMessage"].startswith("\u2726 15 memories woven into the palace")
+    assert "hooks" in result["systemMessage"]
+    mock_save.assert_called_once_with(str(transcript), "test", toast=False)
 
 
 def test_stop_hook_tracks_save_point(tmp_path):
@@ -180,13 +218,17 @@ def test_stop_hook_tracks_save_point(tmp_path):
     )
     data = {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)}
 
-    # First call blocks
-    result = _capture_hook_output(hook_stop, data, state_dir=tmp_path)
-    assert result["decision"] == "block"
+    # First call saves silently with systemMessage notification
+    save_result = {"count": 15, "themes": ["hooks"]}
+    with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result):
+        result = _capture_hook_output(hook_stop, data, state_dir=tmp_path)
+    assert "systemMessage" in result
 
     # Second call with same count passes through (already saved)
-    result = _capture_hook_output(hook_stop, data, state_dir=tmp_path)
+    with patch("mempalace.hooks_cli._save_diary_direct") as mock_save:
+        result = _capture_hook_output(hook_stop, data, state_dir=tmp_path)
     assert result == {}
+    mock_save.assert_not_called()
 
 
 # --- hook_session_start ---
@@ -295,12 +337,15 @@ def test_stop_hook_oserror_on_last_save_read(tmp_path):
     )
     # Write invalid content to last save file
     (tmp_path / "test_last_save").write_text("not_a_number")
-    result = _capture_hook_output(
-        hook_stop,
-        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
-        state_dir=tmp_path,
-    )
-    assert result["decision"] == "block"
+    save_result = {"count": 15, "themes": ["testing"]}
+    with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result):
+        result = _capture_hook_output(
+            hook_stop,
+            {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+            state_dir=tmp_path,
+        )
+    assert "systemMessage" in result
+    assert "15 memories" in result["systemMessage"]
 
 
 def test_stop_hook_oserror_on_write(tmp_path):
@@ -314,18 +359,20 @@ def test_stop_hook_oserror_on_write(tmp_path):
     def bad_write_text(*args, **kwargs):
         raise OSError("disk full")
 
+    save_result = {"count": 15, "themes": []}
     with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
-        with patch.object(Path, "write_text", bad_write_text):
-            result = _capture_hook_output(
-                hook_stop,
-                {
-                    "session_id": "test",
-                    "stop_hook_active": False,
-                    "transcript_path": str(transcript),
-                },
-                state_dir=tmp_path,
-            )
-    assert result["decision"] == "block"
+        with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result):
+            with patch.object(Path, "write_text", bad_write_text):
+                result = _capture_hook_output(
+                    hook_stop,
+                    {
+                        "session_id": "test",
+                        "stop_hook_active": False,
+                        "transcript_path": str(transcript),
+                    },
+                    state_dir=tmp_path,
+                )
+    assert "systemMessage" in result
 
 
 # --- hook_precompact with MEMPAL_DIR ---
