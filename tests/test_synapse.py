@@ -26,6 +26,8 @@ def _synapse_cfg(**overrides):
         synapse_ltp_max_boost=2.0,
         synapse_tagging_window_hours=24,
         synapse_tagging_max_boost=1.5,
+        synapse_association_max_boost=1.5,
+        synapse_association_coefficient=0.15,
         synapse_log_retrievals=False,
     )
     base.update(overrides)
@@ -298,3 +300,57 @@ def test_log_cleanup_removes_old_entries(tmp_palace):
     finally:
         conn.close()
     assert [r[0] for r in rows] == ["b"]
+
+
+# --- Phase 2: co_retrieval & association ---
+
+
+def test_co_retrieval_pairs_increment_on_log(tmp_palace):
+    db = SynapseDB(tmp_palace)
+    db.log_retrieval(["a", "b", "c"], "q", "s1")
+    conn = sqlite3.connect(db.db_path)
+    try:
+        n = conn.execute("SELECT COUNT(*) FROM co_retrieval").fetchone()[0]
+    finally:
+        conn.close()
+    assert n == 3
+
+
+def test_association_scores_from_co_retrieval(tmp_palace):
+    db = SynapseDB(tmp_palace)
+    db.log_retrieval(["a", "b"], "q", "s1")
+    db.log_retrieval(["a", "b"], "q", "s2")
+    scores = db.get_association_scores_batch(["a", "b"], max_boost=2.0, coefficient=0.3)
+    assert scores["a"] > 1.0
+    assert scores["b"] > 1.0
+
+
+def test_rebuild_co_retrieval_matches_incremental(tmp_palace):
+    db = SynapseDB(tmp_palace)
+    db.log_retrieval(["x", "y"], "q", "sess")
+    conn = sqlite3.connect(db.db_path)
+    try:
+        n1 = conn.execute(
+            "SELECT co_count FROM co_retrieval WHERE drawer_a='x' AND drawer_b='y'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    db.rebuild_co_retrieval_from_log()
+    conn = sqlite3.connect(db.db_path)
+    try:
+        n2 = conn.execute(
+            "SELECT co_count FROM co_retrieval WHERE drawer_a='x' AND drawer_b='y'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert n1 == n2 == 1
+
+
+def test_co_occurrence_clusters_merge(tmp_palace):
+    db = SynapseDB(tmp_palace)
+    db.log_retrieval(["a", "b"], "q", "s1")
+    db.log_retrieval(["b", "c"], "q", "s2")
+    db.log_retrieval(["a", "c"], "q", "s3")
+    clusters = db.get_co_occurrence_clusters(10, 5)
+    assert any(len(c["drawers"]) >= 2 for c in clusters)
+    assert any("a" in c["drawers"] and "b" in c["drawers"] for c in clusters)

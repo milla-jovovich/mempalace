@@ -141,6 +141,14 @@ class MempalaceConfig:
         return self._file_config.get("synapse_association_enabled", False)
 
     @property
+    def synapse_association_max_boost(self):
+        return self._file_config.get("synapse_association_max_boost", 1.5)
+
+    @property
+    def synapse_association_coefficient(self):
+        return self._file_config.get("synapse_association_coefficient", 0.15)
+
+    @property
     def synapse_ltp_window_days(self):
         return self._file_config.get("synapse_ltp_window_days", 30)
 

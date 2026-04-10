@@ -185,6 +185,14 @@ def search_memories(
                     max_boost=cfg.synapse_ltp_max_boost,
                 )
 
+            assoc_scores = {}
+            if cfg.synapse_association_enabled and hit_drawer_ids:
+                assoc_scores = synapse_db.get_association_scores_batch(
+                    hit_drawer_ids,
+                    max_boost=cfg.synapse_association_max_boost,
+                    coefficient=cfg.synapse_association_coefficient,
+                )
+
             for hit in result["hits"]:
                 drawer_id = hit.get("metadata", {}).get("drawer_id", hit.get("id", ""))
                 filed_at = hit.get("metadata", {}).get("filed_at", None)
@@ -201,7 +209,11 @@ def search_memories(
                     if cfg.synapse_tagging_enabled
                     else 1.0
                 )
-                association = 1.0  # Phase 2: cfg.synapse_association_enabled
+                association = (
+                    assoc_scores.get(drawer_id, 1.0)
+                    if cfg.synapse_association_enabled
+                    else 1.0
+                )
 
                 final_score = similarity * decay * ltp * association * tagging
 

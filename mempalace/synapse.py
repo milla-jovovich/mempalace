@@ -12,7 +12,13 @@ DEFAULT_LTP_MAX_BOOST = 2.0
 DEFAULT_LTP_COEFFICIENT = 0.3
 DEFAULT_TAGGING_WINDOW_HOURS = 24
 DEFAULT_TAGGING_MAX_BOOST = 1.5
+DEFAULT_ASSOCIATION_MAX_BOOST = 1.5
+DEFAULT_ASSOCIATION_COEFFICIENT = 0.15
 SYNAPSE_DB_NAME = "synapse.sqlite3"
+
+
+def _canonical_pair(a: str, b: str) -> tuple[str, str]:
+    return (a, b) if a < b else (b, a)
 
 
 def _utc_now_iso() -> str:
@@ -67,6 +73,11 @@ class SynapseDB:
                     PRIMARY KEY (drawer_a, drawer_b)
                 );
 
+                CREATE INDEX IF NOT EXISTS idx_co_retrieval_drawer_a
+                    ON co_retrieval(drawer_a);
+                CREATE INDEX IF NOT EXISTS idx_co_retrieval_drawer_b
+                    ON co_retrieval(drawer_b);
+
                 CREATE TABLE IF NOT EXISTS synapse_stats (
                     drawer_id TEXT PRIMARY KEY,
                     total_retrievals INTEGER NOT NULL DEFAULT 0,
@@ -103,6 +114,176 @@ class SynapseDB:
                 conn.close()
         except Exception as e:
             logger.warning("log_retrieval failed: %s", e)
+        else:
+            try:
+                self._record_co_retrieval_pairs(drawer_ids, retrieved_at)
+            except Exception as e:
+                logger.warning("co_retrieval pair update failed: %s", e)
+
+    def _record_co_retrieval_pairs(self, drawer_ids: list[str], retrieved_at: str) -> None:
+        """同一検索結果内の drawer ペアごとに co_count を増分する。"""
+        uniq = sorted(set(drawer_ids))
+        if len(uniq) < 2:
+            return
+        conn = sqlite3.connect(self.db_path)
+        try:
+            for i in range(len(uniq)):
+                for j in range(i + 1, len(uniq)):
+                    a, b = _canonical_pair(uniq[i], uniq[j])
+                    conn.execute(
+                        """
+                        INSERT INTO co_retrieval (drawer_a, drawer_b, co_count, last_co_retrieved)
+                        VALUES (?, ?, 1, ?)
+                        ON CONFLICT(drawer_a, drawer_b) DO UPDATE SET
+                            co_count = co_count + 1,
+                            last_co_retrieved = excluded.last_co_retrieved
+                        """,
+                        (a, b, retrieved_at),
+                    )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def rebuild_co_retrieval_from_log(self) -> int:
+        """
+        retrieval_log を集計して co_retrieval を一括再構築する。
+        ログ削除後や整合性修復用。挿入した行数を返す。
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("DELETE FROM co_retrieval")
+            conn.execute(
+                """
+                INSERT INTO co_retrieval (drawer_a, drawer_b, co_count, last_co_retrieved)
+                SELECT
+                    d1.drawer_id AS drawer_a,
+                    d2.drawer_id AS drawer_b,
+                    COUNT(DISTINCT d1.session_id) AS co_count,
+                    MAX(d1.retrieved_at) AS last_co_retrieved
+                FROM retrieval_log d1
+                INNER JOIN retrieval_log d2
+                    ON d1.session_id = d2.session_id
+                    AND d1.drawer_id < d2.drawer_id
+                GROUP BY d1.drawer_id, d2.drawer_id
+                """
+            )
+            conn.commit()
+            cur = conn.execute("SELECT COUNT(*) FROM co_retrieval")
+            n = int(cur.fetchone()[0])
+            return n
+        finally:
+            conn.close()
+
+    def get_association_scores_batch(
+        self,
+        drawer_ids: list[str],
+        max_boost: float = DEFAULT_ASSOCIATION_MAX_BOOST,
+        coefficient: float = DEFAULT_ASSOCIATION_COEFFICIENT,
+    ) -> dict[str, float]:
+        """
+        同一検索結果の drawer 集合について、co_retrieval の共起強度から association を計算する。
+        各 drawer について、ヒット集合内の他 drawer との co_count 合計を用いる。
+        """
+        uniq = list(dict.fromkeys([d for d in drawer_ids if d]))
+        out: dict[str, float] = {d: 1.0 for d in uniq}
+        if len(uniq) < 2:
+            return out
+        conn = sqlite3.connect(self.db_path)
+        try:
+            ph = ",".join("?" * len(uniq))
+            cur = conn.execute(
+                f"SELECT drawer_a, drawer_b, co_count FROM co_retrieval "
+                f"WHERE drawer_a IN ({ph}) AND drawer_b IN ({ph})",
+                (*uniq, *uniq),
+            )
+            edge: dict[tuple[str, str], int] = {}
+            for a, b, c in cur.fetchall():
+                edge[(a, b)] = int(c)
+        finally:
+            conn.close()
+        for d in uniq:
+            total = 0
+            for o in uniq:
+                if o == d:
+                    continue
+                ca, cb = _canonical_pair(d, o)
+                total += edge.get((ca, cb), 0)
+            if total == 0:
+                out[d] = 1.0
+            else:
+                raw = 1.0 + math.log(1 + total) * coefficient
+                out[d] = _clamp(raw, 1.0, max_boost)
+        return out
+
+    def get_top_co_pairs(self, limit: int = 20) -> list[dict[str, Any]]:
+        """共起回数の多いペアを返す。"""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cur = conn.execute(
+                "SELECT drawer_a, drawer_b, co_count, last_co_retrieved FROM co_retrieval "
+                "ORDER BY co_count DESC, last_co_retrieved DESC LIMIT ?",
+                (limit,),
+            )
+            return [
+                {
+                    "drawer_a": r[0],
+                    "drawer_b": r[1],
+                    "co_count": int(r[2]),
+                    "last_co_retrieved": r[3],
+                }
+                for r in cur.fetchall()
+            ]
+        finally:
+            conn.close()
+
+    def get_co_occurrence_clusters(
+        self, max_edges: int = 40, max_clusters: int = 12
+    ) -> list[dict[str, Any]]:
+        """
+        強い共起ペアから無向グラフを張り、連結成分をクラスタとして返す。
+        """
+        top = self.get_top_co_pairs(max_edges)
+        if not top:
+            return []
+
+        parent: dict[str, str] = {}
+
+        def find(x: str) -> str:
+            if x not in parent:
+                parent[x] = x
+            if parent[x] != x:
+                parent[x] = find(parent[x])
+            return parent[x]
+
+        def union(x: str, y: str) -> None:
+            rx, ry = find(x), find(y)
+            if rx != ry:
+                parent[rx] = ry
+
+        for p in top:
+            union(p["drawer_a"], p["drawer_b"])
+
+        root_nodes: dict[str, set[str]] = {}
+        for p in top:
+            for n in (p["drawer_a"], p["drawer_b"]):
+                r = find(n)
+                root_nodes.setdefault(r, set()).add(n)
+
+        clusters: list[dict[str, Any]] = []
+        for r, drawers in root_nodes.items():
+            if len(drawers) < 2:
+                continue
+            tw = sum(int(p["co_count"]) for p in top if find(p["drawer_a"]) == r)
+            clusters.append(
+                {
+                    "drawers": sorted(drawers),
+                    "total_co_weight": tw,
+                    "size": len(drawers),
+                }
+            )
+
+        clusters.sort(key=lambda c: (-c["total_co_weight"], -c["size"]))
+        return clusters[:max_clusters]
 
     def get_ltp_score(
         self,
@@ -216,11 +397,11 @@ class SynapseDB:
         ltp_max_boost: float = DEFAULT_LTP_MAX_BOOST,
         tagging_window_hours: int = DEFAULT_TAGGING_WINDOW_HOURS,
         tagging_max_boost: float = DEFAULT_TAGGING_MAX_BOOST,
+        association_scores: Optional[dict[str, float]] = None,
     ) -> dict[str, Any]:
         """
         最終スコアを計算して返す。
-        final_score = similarity * decay * ltp * tagging
-        (Phase 1 では association は 1.0 固定)
+        final_score = similarity * decay * ltp * association * tagging
 
         戻り値:
         {
@@ -228,7 +409,7 @@ class SynapseDB:
             "similarity": float,
             "decay": float,
             "ltp": float,
-            "association": 1.0,
+            "association": float,
             "tagging": float
         }
         """
@@ -241,7 +422,10 @@ class SynapseDB:
             window_hours=tagging_window_hours,
             max_boost=tagging_max_boost,
         )
-        association = 1.0
+        if association_scores is not None:
+            association = association_scores.get(drawer_id, 1.0)
+        else:
+            association = 1.0
         final_score = similarity * decay * ltp * tagging * association
         return {
             "final_score": final_score,
@@ -275,8 +459,15 @@ class SynapseDB:
         except Exception as e:
             logger.warning("VACUUM failed: %s", e)
         if deleted is None or deleted < 0:
-            return 0
-        return int(deleted)
+            deleted = 0
+        else:
+            deleted = int(deleted)
+        if deleted > 0:
+            try:
+                self.rebuild_co_retrieval_from_log()
+            except Exception as e:
+                logger.warning("rebuild_co_retrieval_from_log after cleanup failed: %s", e)
+        return deleted
 
     def get_log_stats(self) -> dict[str, Any]:
         """ログの統計情報を返す。"""

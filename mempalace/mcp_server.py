@@ -100,10 +100,14 @@ def tool_status():
             )
             candidates = synapse_db.get_consolidation_candidates(inactive_days=180)
             log_stats = synapse_db.get_log_stats()
+            co_pairs = synapse_db.get_top_co_pairs(15)
+            co_clusters = synapse_db.get_co_occurrence_clusters(40, 10)
             status_dict["synapse"] = {
                 "ltp_enabled": cfg.synapse_ltp_enabled,
                 "tagging_enabled": cfg.synapse_tagging_enabled,
                 "association_enabled": cfg.synapse_association_enabled,
+                "association_max_boost": cfg.synapse_association_max_boost,
+                "association_coefficient": cfg.synapse_association_coefficient,
                 "log_retrievals": cfg.synapse_log_retrievals,
                 "ltp_window_days": cfg.synapse_ltp_window_days,
                 "ltp_max_boost": cfg.synapse_ltp_max_boost,
@@ -111,6 +115,8 @@ def tool_status():
                 "tagging_max_boost": cfg.synapse_tagging_max_boost,
                 "log_retention_days": cfg.synapse_log_retention_days,
                 "log_stats": log_stats,
+                "co_retrieval_top_pairs": co_pairs,
+                "co_occurrence_clusters": co_clusters,
                 "consolidation_candidates": len(candidates),
                 "consolidation_details": candidates[:10],
             }
