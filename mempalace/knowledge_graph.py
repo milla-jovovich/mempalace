@@ -106,7 +106,7 @@ class KnowledgeGraph:
 
     # ── Write operations ──────────────────────────────────────────────────
 
-    def add_entity(self, name: str, entity_type: str = "unknown", properties: dict = None):
+    def add_entity(self, name: str, entity_type: str = "unknown", properties: dict = None) -> str:
         """Add or update an entity node."""
         eid = self._entity_id(name)
         props = json.dumps(properties or {})
@@ -279,7 +279,7 @@ class KnowledgeGraph:
             )
         return results
 
-    def timeline(self, entity_name: str = None):
+    def timeline(self, entity_name: str = None) -> list:
         """Get all facts in chronological order, optionally filtered by entity."""
         conn = self._conn()
         if entity_name:
@@ -320,7 +320,8 @@ class KnowledgeGraph:
 
     # ── Stats ─────────────────────────────────────────────────────────────
 
-    def stats(self):
+    def stats(self) -> dict:
+        """Return summary statistics for the knowledge graph."""
         conn = self._conn()
         entities = conn.execute("SELECT COUNT(*) as cnt FROM entities").fetchone()["cnt"]
         triples = conn.execute("SELECT COUNT(*) as cnt FROM triples").fetchone()["cnt"]
