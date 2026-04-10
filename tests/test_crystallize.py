@@ -104,3 +104,28 @@ def test_find_room_diamonds_percentage():
     diamonds, noise = find_room_diamonds(mock_col, "ideas", top_k=0.2)
     assert len(diamonds) == 2
     assert len(noise) == 8
+
+
+def test_crystallize_idempotency():
+    from unittest.mock import MagicMock
+
+    mock_col = MagicMock()
+
+    # 2 documents (surviving diamonds from previous crystallization)
+    ids = ["diamond1", "diamond2"]
+    mock_col.get.return_value = {
+        "ids": ids,
+        "documents": ["Idea 1", "Idea 2"],
+        "metadatas": [{"room": "ideas"}] * 2,
+    }
+
+    # Second pass: ask for top 5, but we only have 2 left.
+    # It should return the 2 diamonds and 0 noise.
+    diamonds, noise = find_room_diamonds(mock_col, "ideas", top_k=5)
+
+    assert len(diamonds) == 2
+    assert set(diamonds) == {"diamond1", "diamond2"}
+    assert len(noise) == 0
+
+    # Query shouldn't be called because of early return
+    mock_col.query.assert_not_called()
