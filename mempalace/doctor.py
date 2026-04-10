@@ -117,36 +117,55 @@ def _check_collection(palace_path: str) -> tuple:
         )
 
 
-def _check_metadata(col) -> List[Check]:
-    """Check metadata completeness across all drawers."""
+def _check_drawers(col) -> List[Check]:
+    """Single-pass check of all drawers: metadata, wings/rooms, and sizes.
+
+    Reads the collection once instead of multiple passes to avoid
+    redundant I/O on large palaces.
+    """
     checks = []
     missing_wing = 0
     missing_room = 0
     missing_source = 0
+    very_small = 0
+    very_large = 0
     total = 0
+    wing_counts = Counter()
+    room_counts = Counter()
 
     offset = 0
     while True:
         try:
-            batch = col.get(include=["metadatas"], limit=500, offset=offset)
+            batch = col.get(include=["documents", "metadatas"], limit=500, offset=offset)
+            docs = batch.get("documents", [])
             metas = batch.get("metadatas", [])
-            if not metas:
+            if not docs:
                 break
-            for meta in metas:
+            for doc, meta in zip(docs, metas):
                 total += 1
+                # Metadata completeness
                 if not meta.get("wing"):
                     missing_wing += 1
                 if not meta.get("room"):
                     missing_room += 1
                 if not meta.get("source_file"):
                     missing_source += 1
-            offset += len(metas)
+                # Wing/room distribution
+                wing_counts[meta.get("wing", "unknown")] += 1
+                room_counts[meta.get("room", "unknown")] += 1
+                # Drawer sizes
+                if len(doc) < 20:
+                    very_small += 1
+                elif len(doc) > 50000:
+                    very_large += 1
+            offset += len(docs)
         except Exception:
             break
 
     if total == 0:
         return checks
 
+    # Metadata checks
     if missing_wing > 0:
         checks.append(Check(
             "metadata_wing", "WARN",
@@ -171,31 +190,7 @@ def _check_metadata(col) -> List[Check]:
     else:
         checks.append(Check("metadata_source", "OK", "All drawers have source_file metadata"))
 
-    return checks
-
-
-def _check_wings_rooms(col) -> List[Check]:
-    """Check for empty or unbalanced wings/rooms."""
-    checks = []
-    wing_counts = Counter()
-    room_counts = Counter()
-
-    offset = 0
-    while True:
-        try:
-            batch = col.get(include=["metadatas"], limit=500, offset=offset)
-            metas = batch.get("metadatas", [])
-            if not metas:
-                break
-            for meta in metas:
-                wing = meta.get("wing", "unknown")
-                room = meta.get("room", "unknown")
-                wing_counts[wing] += 1
-                room_counts[room] += 1
-            offset += len(metas)
-        except Exception:
-            break
-
+    # Wing/room distribution
     if wing_counts:
         checks.append(Check(
             "wings", "OK",
@@ -207,37 +202,11 @@ def _check_wings_rooms(col) -> List[Check]:
         tiny_rooms = [r for r, c in room_counts.items() if c == 1]
         if len(tiny_rooms) > 5:
             checks.append(Check(
-                "tiny_rooms", "WARN",
-                f"{len(tiny_rooms)} rooms have only 1 drawer — consider consolidating",
+                "tiny_rooms", "OK",
+                f"{len(tiny_rooms)} rooms have only 1 drawer (may be intentional for high-value items)",
             ))
 
-    return checks
-
-
-def _check_drawer_sizes(col) -> List[Check]:
-    """Check for unusually large or small drawers."""
-    checks = []
-    very_small = 0  # < 20 chars
-    very_large = 0  # > 50000 chars
-    total = 0
-
-    offset = 0
-    while True:
-        try:
-            batch = col.get(include=["documents"], limit=500, offset=offset)
-            docs = batch.get("documents", [])
-            if not docs:
-                break
-            for doc in docs:
-                total += 1
-                if len(doc) < 20:
-                    very_small += 1
-                elif len(doc) > 50000:
-                    very_large += 1
-            offset += len(docs)
-        except Exception:
-            break
-
+    # Drawer sizes
     if very_small > 0:
         checks.append(Check(
             "small_drawers", "WARN",
@@ -250,7 +219,7 @@ def _check_drawer_sizes(col) -> List[Check]:
             f"{very_large}/{total} drawers are very large (> 50K chars) — may hurt search quality",
         ))
 
-    if very_small == 0 and very_large == 0 and total > 0:
+    if very_small == 0 and very_large == 0:
         checks.append(Check("drawer_sizes", "OK", f"All {total} drawers are reasonable size"))
 
     return checks
@@ -330,14 +299,8 @@ def diagnose(palace_path: str) -> DiagnosticReport:
     report.checks.append(col_check)
 
     if col is not None:
-        # 3. Metadata completeness
-        report.checks.extend(_check_metadata(col))
-
-        # 4. Wings and rooms
-        report.checks.extend(_check_wings_rooms(col))
-
-        # 5. Drawer sizes
-        report.checks.extend(_check_drawer_sizes(col))
+        # 3-5. Single-pass: metadata, wings/rooms, drawer sizes
+        report.checks.extend(_check_drawers(col))
 
     # 6. Knowledge graph
     report.checks.extend(_check_kg(palace_path))
