@@ -17,7 +17,7 @@ from collections import defaultdict
 
 import chromadb
 
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS, get_collection, file_already_mined, iter_metadatas
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -633,28 +633,11 @@ def status(palace_path: str):
         return
 
     # Count by wing and room — paginate to avoid the 10k ChromaDB cap (#171)
-    _PAGE = 500
     wing_rooms = defaultdict(lambda: defaultdict(int))
     total = 0
-    offset = 0
-    while True:
-        try:
-            batch = col.get(limit=_PAGE, offset=offset, include=["metadatas"])
-        except Exception as exc:
-            import logging
-            logging.getLogger("mempalace_miner").warning(
-                "status: ChromaDB error at offset %d: %s", offset, exc
-            )
-            break
-        metas = batch.get("metadatas") or []
-        if not metas:
-            break
-        for m in metas:
-            wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
-        total += len(metas)
-        offset += len(metas)
-        if len(metas) < _PAGE:
-            break
+    for m in iter_metadatas(col):
+        wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+        total += 1
 
     print(f"\n{'=' * 55}")
     print(f"  MemPalace Status — {total} drawers")
