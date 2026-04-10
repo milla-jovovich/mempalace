@@ -159,6 +159,7 @@ def _fetch_all_metadata(col, where=None):
 _metadata_cache = None
 _metadata_cache_time = 0
 _METADATA_CACHE_TTL = 5.0  # seconds
+_MAX_RESULTS = 100  # upper bound for search/list limit params
 
 
 def _get_cached_metadata(col, where=None):
@@ -292,7 +293,7 @@ def tool_get_taxonomy():
 def tool_search(
     query: str, limit: int = 5, wing: str = None, room: str = None, min_similarity: float = 1.5
 ):
-    limit = max(1, min(limit, 100))
+    limit = max(1, min(limit, _MAX_RESULTS))
     return search_memories(
         query,
         palace_path=_config.palace_path,
@@ -481,7 +482,7 @@ def tool_get_drawer(drawer_id: str):
 
 def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offset: int = 0):
     """List drawers with pagination. Optional wing/room filter."""
-    limit = max(1, min(limit, 100))
+    limit = max(1, min(limit, _MAX_RESULTS))
     offset = max(0, offset)
     col = _get_collection()
     if not col:
