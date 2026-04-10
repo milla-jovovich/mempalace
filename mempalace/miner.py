@@ -632,16 +632,32 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
-    metas = r["metadatas"]
-
+    # Count by wing and room — paginate to avoid the 10k ChromaDB cap (#171)
+    _PAGE = 500
     wing_rooms = defaultdict(lambda: defaultdict(int))
-    for m in metas:
-        wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+    total = 0
+    offset = 0
+    while True:
+        try:
+            batch = col.get(limit=_PAGE, offset=offset, include=["metadatas"])
+        except Exception as exc:
+            import logging
+            logging.getLogger("mempalace_miner").warning(
+                "status: ChromaDB error at offset %d: %s", offset, exc
+            )
+            break
+        metas = batch.get("metadatas") or []
+        if not metas:
+            break
+        for m in metas:
+            wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+        total += len(metas)
+        offset += len(metas)
+        if len(metas) < _PAGE:
+            break
 
     print(f"\n{'=' * 55}")
-    print(f"  MemPalace Status — {len(metas)} drawers")
+    print(f"  MemPalace Status — {total} drawers")
     print(f"{'=' * 55}\n")
     for wing, rooms in sorted(wing_rooms.items()):
         print(f"  WING: {wing}")

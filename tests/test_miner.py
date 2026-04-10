@@ -260,3 +260,34 @@ def test_file_already_mined_check_mtime():
         # Release ChromaDB file handles before cleanup (required on Windows)
         del col, client
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_status_paginates_beyond_single_page(monkeypatch, capsys):
+    """status() must page through all drawers, not stop at the first batch."""
+    from unittest.mock import MagicMock, call
+    from mempalace import miner
+
+    # Build two full pages (500 each) + one partial page (100) = 1100 total drawers
+    _PAGE = 500
+    page1 = {"metadatas": [{"wing": "alpha", "room": "api"}] * _PAGE}
+    page2 = {"metadatas": [{"wing": "alpha", "room": "api"}] * _PAGE}
+    page3 = {"metadatas": [{"wing": "beta", "room": "db"}] * 100}
+    fake_col = MagicMock()
+    fake_col.get.side_effect = [page1, page2, page3]
+
+    fake_client = MagicMock()
+    fake_client.get_collection.return_value = fake_col
+
+    monkeypatch.setattr(miner.chromadb, "PersistentClient", lambda path: fake_client)
+
+    miner.status("/fake/path")
+    captured = capsys.readouterr()
+
+    assert "1100 drawers" in captured.out
+    assert "alpha" in captured.out
+    assert "beta" in captured.out
+    # Pagination happened — one call per page, stops early when page is partial
+    assert fake_col.get.call_count == 3
+    # Offsets advanced correctly
+    offsets = [c.kwargs["offset"] for c in fake_col.get.call_args_list]
+    assert offsets == [0, 500, 1000]
