@@ -436,11 +436,10 @@ def process_file(
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
         return len(chunks), room
 
-    # Purge stale drawers for this file before re-inserting the fresh chunks.
-    # Converts modified-file re-mines from upsert-over-existing-IDs (which hits
-    # hnswlib's thread-unsafe updatePoint path and can segfault on macOS ARM
-    # with chromadb 0.6.3) into a clean delete+insert, bypassing the update
-    # path entirely.
+    # Fix #521: delete stale drawers before re-inserting to avoid hnswlib
+    # updatePoint race (SIGSEGV in repairConnectionsForUpdate on macOS ARM64).
+    # Converts modified-file re-mines from upsert-over-existing-IDs into clean
+    # delete+insert, bypassing the unsafe update path entirely.
     try:
         collection.delete(where={"source_file": source_file})
     except Exception:
@@ -632,9 +631,17 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
-    metas = r["metadatas"]
+    # Count by wing and room — paginate to handle palaces with >10K drawers (#478)
+    metas = []
+    offset = 0
+    batch_size = 1000
+    total = col.count()
+    while offset < total:
+        batch = col.get(limit=batch_size, offset=offset, include=["metadatas"])
+        metas.extend(batch["metadatas"])
+        if len(batch["metadatas"]) < batch_size:
+            break
+        offset += batch_size
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:

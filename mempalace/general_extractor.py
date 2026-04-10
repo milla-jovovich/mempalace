@@ -157,7 +157,6 @@ EMOTION_MARKERS = [
     r"i need",
     r"never told anyone",
     r"nobody knows",
-    r"\*[^*]+\*",
 ]
 
 ALL_MARKERS = {

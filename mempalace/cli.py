@@ -33,6 +33,11 @@ import shlex
 import argparse
 from pathlib import Path
 
+# Fix #535: Windows consoles (cp1251/cp1252) crash on non-ASCII output (✓, CJK, etc.)
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from .config import MempalaceConfig
 
 
