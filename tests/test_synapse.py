@@ -2,6 +2,7 @@
 Tests for mempalace.synapse — SynapseDB retrieval logging and scoring.
 """
 
+import math
 import os
 import shutil
 import sqlite3
@@ -14,6 +15,7 @@ import pytest
 
 from mempalace.searcher import search_memories
 from mempalace.synapse import (
+    DEFAULT_LTP_COEFFICIENT,
     DEFAULT_LTP_WINDOW_DAYS,
     SYNAPSE_MARK_NEW,
     build_soft_archive_proposal,
@@ -258,13 +260,52 @@ def test_consolidation_candidates_excludes_active(tmp_palace):
     assert "active" not in ids
 
 
+def test_consolidation_candidates_wing_filter(tmp_palace):
+    db = SynapseDB(tmp_palace)
+    old = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat()
+    conn = sqlite3.connect(db.db_path)
+    try:
+        conn.executemany(
+            "INSERT INTO retrieval_log (drawer_id, retrieved_at, query_hash, session_id) VALUES (?,?,?,?)",
+            [
+                ("drawer_astrophysics_room_x", old, "q", "s"),
+                ("drawer_economics_room_y", old, "q", "s"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    astro = db.get_consolidation_candidates(inactive_days=180, wing="astrophysics")
+    ids = {c["drawer_id"] for c in astro}
+    assert "drawer_astrophysics_room_x" in ids
+    assert "drawer_economics_room_y" not in ids
+
+
+def test_vacuum_skipped_under_threshold(tmp_palace):
+    db = SynapseDB(tmp_palace)
+    old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+    conn = sqlite3.connect(db.db_path)
+    try:
+        for i in range(10):
+            conn.execute(
+                "INSERT INTO retrieval_log (drawer_id, retrieved_at, query_hash, session_id) VALUES (?,?,?,?)",
+                (f"d{i}", old, "q", "s"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    with patch.object(SynapseDB, "_vacuum_database") as vac:
+        db.cleanup_old_logs(retention_days=30)
+    vac.assert_not_called()
+
+
 # --- Config axis switches (search_memories integration) ---
 
 
 def test_ltp_disabled_returns_neutral(palace_path, seeded_collection):
     cfg = _synapse_cfg(synapse_ltp_enabled=False)
 
-    def fake_batch(self, drawer_ids, window_days=30, max_boost=2.0):
+    def fake_batch(self, drawer_ids, window_days=30, max_boost=2.0, conn=None):
         return {d: 2.0 for d in drawer_ids}
 
     with patch("mempalace.config.MempalaceConfig", return_value=cfg):
@@ -282,6 +323,102 @@ def test_tagging_disabled_returns_neutral(palace_path, seeded_collection):
     assert result.get("synapse_enabled") is True
     for hit in result["hits"]:
         assert hit["synapse_factors"]["tagging"] == 1.0
+
+
+def test_per_query_ltp_override_true(palace_path, seeded_collection):
+    drawer_id = "drawer_proj_backend_aaa"
+    db = SynapseDB(palace_path)
+    for _ in range(6):
+        db.log_retrieval([drawer_id], "q", "s")
+    cfg = _synapse_cfg(
+        synapse_ltp_enabled=False,
+        synapse_log_retrievals=False,
+    )
+    with patch("mempalace.config.MempalaceConfig", return_value=cfg):
+        result = search_memories(
+            "JWT authentication", palace_path, synapse_ltp_enabled=True
+        )
+    assert result.get("synapse_enabled") is True
+    hit = next(h for h in result["hits"] if h.get("id") == drawer_id)
+    assert hit["synapse_factors"]["ltp"] > 1.0
+
+
+def test_per_query_ltp_override_false(palace_path, seeded_collection):
+    def fake_batch(self, drawer_ids, window_days=30, max_boost=2.0, conn=None):
+        return {d: 2.0 for d in drawer_ids}
+
+    cfg = _synapse_cfg(
+        synapse_ltp_enabled=True,
+        synapse_log_retrievals=False,
+    )
+    with patch("mempalace.config.MempalaceConfig", return_value=cfg):
+        with patch.object(SynapseDB, "get_ltp_scores_batch", fake_batch):
+            result = search_memories(
+                "JWT authentication", palace_path, synapse_ltp_enabled=False
+            )
+    assert result.get("synapse_enabled") is True
+    for hit in result["hits"]:
+        assert hit["synapse_factors"]["ltp"] == 1.0
+
+
+def test_per_query_tagging_override(palace_path, seeded_collection):
+    drawer_id = "drawer_proj_backend_aaa"
+    now = datetime.now(timezone.utc).isoformat()
+    got = seeded_collection.get(ids=[drawer_id], include=["metadatas"])
+    meta = dict(got["metadatas"][0])
+    meta["filed_at"] = now
+    seeded_collection.update(ids=[drawer_id], metadatas=[meta])
+
+    cfg_on = _synapse_cfg(
+        synapse_tagging_enabled=True,
+        synapse_log_retrievals=False,
+    )
+    with patch("mempalace.config.MempalaceConfig", return_value=cfg_on):
+        r_on = search_memories("JWT authentication", palace_path)
+    hit_on = next(h for h in r_on["hits"] if h.get("id") == drawer_id)
+    assert hit_on["synapse_factors"]["tagging"] > 1.01
+
+    cfg_off = _synapse_cfg(
+        synapse_tagging_enabled=True,
+        synapse_log_retrievals=False,
+    )
+    with patch("mempalace.config.MempalaceConfig", return_value=cfg_off):
+        r_off = search_memories(
+            "JWT authentication", palace_path, synapse_tagging_enabled=False
+        )
+    hit_off = next(h for h in r_off["hits"] if h.get("id") == drawer_id)
+    assert hit_off["synapse_factors"]["tagging"] == 1.0
+
+
+def test_ltp_and_tagging_composition(palace_path, seeded_collection):
+    drawer_id = "drawer_proj_backend_aaa"
+    db = SynapseDB(palace_path)
+    for _ in range(8):
+        db.log_retrieval([drawer_id], "qh", "sess")
+
+    now = datetime.now(timezone.utc).isoformat()
+    got = seeded_collection.get(ids=[drawer_id], include=["metadatas"])
+    meta = dict(got["metadatas"][0])
+    meta["filed_at"] = now
+    seeded_collection.update(ids=[drawer_id], metadatas=[meta])
+
+    cfg = _synapse_cfg(
+        synapse_association_enabled=False,
+        synapse_log_retrievals=False,
+    )
+    with patch("mempalace.config.MempalaceConfig", return_value=cfg):
+        result = search_memories("JWT authentication", palace_path)
+
+    hit = next(h for h in result["hits"] if h.get("id") == drawer_id)
+    ltp_expected = min(
+        2.0,
+        1.0 + math.log(1 + 8) * DEFAULT_LTP_COEFFICIENT,
+    )
+    tagging_expected = SynapseDB.calculate_tagging_boost(now)
+    assert abs(hit["synapse_factors"]["ltp"] - ltp_expected) < 1e-5
+    assert hit["synapse_factors"]["tagging"] > 1.0
+    expected = hit["similarity"] * ltp_expected * tagging_expected
+    assert abs(hit["synapse_score"] - expected) < 1e-4
 
 
 # --- Log cleanup ---

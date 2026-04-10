@@ -2,6 +2,7 @@ import logging
 import math
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -120,7 +121,28 @@ class SynapseDB:
         finally:
             conn.close()
 
-    def log_retrieval(self, drawer_ids: list[str], query_hash: str, session_id: str):
+    @contextmanager
+    def connection(self):
+        """Single search/request: reuse one SQLite connection (WAL, busy timeout)."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA busy_timeout=5000;")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def log_retrieval(
+        self,
+        drawer_ids: list[str],
+        query_hash: str,
+        session_id: str,
+        conn: Optional[sqlite3.Connection] = None,
+    ):
         """
         検索結果に含まれた drawer_id のリストを retrieval_log に記録する。
         - retrieved_at: UTC ISO 8601 形式
@@ -131,35 +153,43 @@ class SynapseDB:
         try:
             retrieved_at = _utc_now_iso()
             rows = [(did, retrieved_at, query_hash, session_id) for did in drawer_ids]
-            conn = sqlite3.connect(self.db_path)
-            try:
+            if conn is not None:
                 conn.executemany(
                     "INSERT INTO retrieval_log (drawer_id, retrieved_at, query_hash, session_id) "
                     "VALUES (?, ?, ?, ?)",
                     rows,
                 )
-                conn.commit()
-            finally:
-                conn.close()
+            else:
+                with self.connection() as c:
+                    c.executemany(
+                        "INSERT INTO retrieval_log (drawer_id, retrieved_at, query_hash, session_id) "
+                        "VALUES (?, ?, ?, ?)",
+                        rows,
+                    )
         except Exception as e:
             logger.warning("log_retrieval failed: %s", e)
         else:
             try:
-                self._record_co_retrieval_pairs(drawer_ids, retrieved_at)
+                self._record_co_retrieval_pairs(drawer_ids, retrieved_at, conn=conn)
             except Exception as e:
                 logger.warning("co_retrieval pair update failed: %s", e)
 
-    def _record_co_retrieval_pairs(self, drawer_ids: list[str], retrieved_at: str) -> None:
+    def _record_co_retrieval_pairs(
+        self,
+        drawer_ids: list[str],
+        retrieved_at: str,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> None:
         """同一検索結果内の drawer ペアごとに co_count を増分する。"""
         uniq = sorted(set(drawer_ids))
         if len(uniq) < 2:
             return
-        conn = sqlite3.connect(self.db_path)
-        try:
+
+        def _run(c: sqlite3.Connection) -> None:
             for i in range(len(uniq)):
                 for j in range(i + 1, len(uniq)):
                     a, b = _canonical_pair(uniq[i], uniq[j])
-                    conn.execute(
+                    c.execute(
                         """
                         INSERT INTO co_retrieval (drawer_a, drawer_b, co_count, last_co_retrieved)
                         VALUES (?, ?, 1, ?)
@@ -169,9 +199,12 @@ class SynapseDB:
                         """,
                         (a, b, retrieved_at),
                     )
-            conn.commit()
-        finally:
-            conn.close()
+
+        if conn is not None:
+            _run(conn)
+        else:
+            with self.connection() as c:
+                _run(c)
 
     def rebuild_co_retrieval_from_log(self) -> int:
         """
@@ -208,6 +241,7 @@ class SynapseDB:
         drawer_ids: list[str],
         max_boost: float = DEFAULT_ASSOCIATION_MAX_BOOST,
         coefficient: float = DEFAULT_ASSOCIATION_COEFFICIENT,
+        conn: Optional[sqlite3.Connection] = None,
     ) -> dict[str, float]:
         """
         同一検索結果の drawer 集合について、co_retrieval の共起強度から association を計算する。
@@ -217,7 +251,10 @@ class SynapseDB:
         out: dict[str, float] = {d: 1.0 for d in uniq}
         if len(uniq) < 2:
             return out
-        conn = sqlite3.connect(self.db_path)
+        own = False
+        if conn is None:
+            conn = sqlite3.connect(self.db_path)
+            own = True
         try:
             ph = ",".join("?" * len(uniq))
             cur = conn.execute(
@@ -229,7 +266,8 @@ class SynapseDB:
             for a, b, c in cur.fetchall():
                 edge[(a, b)] = int(c)
         finally:
-            conn.close()
+            if own:
+                conn.close()
         for d in uniq:
             total = 0
             for o in uniq:
@@ -349,6 +387,7 @@ class SynapseDB:
         drawer_ids: list[str],
         window_days: int = DEFAULT_LTP_WINDOW_DAYS,
         max_boost: float = DEFAULT_LTP_MAX_BOOST,
+        conn: Optional[sqlite3.Connection] = None,
     ) -> dict[str, float]:
         """
         複数の drawer_id に対する LTP スコアを一括取得する。
@@ -365,7 +404,10 @@ class SynapseDB:
             f"SELECT drawer_id, COUNT(*) as cnt FROM retrieval_log "
             f"WHERE drawer_id IN ({placeholders}) AND retrieved_at >= ? GROUP BY drawer_id"
         )
-        conn = sqlite3.connect(self.db_path)
+        own = False
+        if conn is None:
+            conn = sqlite3.connect(self.db_path)
+            own = True
         try:
             cur = conn.execute(sql, (*drawer_ids, cutoff))
             for drawer_id, cnt in cur.fetchall():
@@ -376,7 +418,8 @@ class SynapseDB:
                     raw = 1.0 + math.log(1 + recent_count) * DEFAULT_LTP_COEFFICIENT
                     out[drawer_id] = _clamp(raw, 1.0, max_boost)
         finally:
-            conn.close()
+            if own:
+                conn.close()
         return out
 
     @staticmethod
@@ -471,13 +514,22 @@ class SynapseDB:
         削除件数を返す。
         """
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
-        conn = sqlite3.connect(self.db_path)
-        try:
+        deleted = 0
+        with self.connection() as conn:
             cur = conn.execute("DELETE FROM retrieval_log WHERE retrieved_at < ?", (cutoff,))
-            deleted = cur.rowcount
-            conn.commit()
-        finally:
-            conn.close()
+            rc = cur.rowcount
+            if rc is not None and rc >= 0:
+                deleted = int(rc)
+        if deleted > 1000:
+            self._vacuum_database()
+        if deleted > 0:
+            try:
+                self.rebuild_co_retrieval_from_log()
+            except Exception as e:
+                logger.warning("rebuild_co_retrieval_from_log after cleanup failed: %s", e)
+        return deleted
+
+    def _vacuum_database(self) -> None:
         try:
             vacuum_conn = sqlite3.connect(self.db_path)
             try:
@@ -487,16 +539,6 @@ class SynapseDB:
                 vacuum_conn.close()
         except Exception as e:
             logger.warning("VACUUM failed: %s", e)
-        if deleted is None or deleted < 0:
-            deleted = 0
-        else:
-            deleted = int(deleted)
-        if deleted > 0:
-            try:
-                self.rebuild_co_retrieval_from_log()
-            except Exception as e:
-                logger.warning("rebuild_co_retrieval_from_log after cleanup failed: %s", e)
-        return deleted
 
     def get_log_stats(self) -> dict[str, Any]:
         """ログの統計情報を返す。"""
@@ -564,20 +606,32 @@ class SynapseDB:
         finally:
             conn.close()
 
-    def get_consolidation_candidates(self, inactive_days: int = 180) -> list[dict]:
+    def get_consolidation_candidates(
+        self, inactive_days: int = 180, wing: Optional[str] = None
+    ) -> list[dict]:
         """
         inactive_days 以上検索されていない drawer_id のリストを返す。
+        wing が指定されていれば drawer_id に部分一致する行に限定する。
         戻り値: [{"drawer_id": str, "last_retrieved_at": str, "days_inactive": int}]
         """
         now = datetime.now(timezone.utc)
         cutoff = (now - timedelta(days=inactive_days)).isoformat()
+        if wing:
+            sql = (
+                "SELECT drawer_id, MAX(retrieved_at) AS last_at FROM retrieval_log "
+                "WHERE drawer_id LIKE ? "
+                "GROUP BY drawer_id HAVING MAX(retrieved_at) < ?"
+            )
+            params = (f"%{wing}%", cutoff)
+        else:
+            sql = (
+                "SELECT drawer_id, MAX(retrieved_at) AS last_at FROM retrieval_log "
+                "GROUP BY drawer_id HAVING MAX(retrieved_at) < ?"
+            )
+            params = (cutoff,)
         conn = sqlite3.connect(self.db_path)
         try:
-            cur = conn.execute(
-                "SELECT drawer_id, MAX(retrieved_at) AS last_at FROM retrieval_log "
-                "GROUP BY drawer_id HAVING MAX(retrieved_at) < ?",
-                (cutoff,),
-            )
+            cur = conn.execute(sql, params)
             rows = cur.fetchall()
         finally:
             conn.close()

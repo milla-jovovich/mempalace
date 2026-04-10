@@ -25,6 +25,7 @@ import logging
 import hashlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
@@ -205,7 +206,7 @@ def _enrich_consolidation_candidates(col, candidates: list, cfg) -> list:
     return out
 
 
-def tool_status():
+def tool_status(consolidation_wing: str = None):
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -245,7 +246,9 @@ def tool_status():
                 ltp_max_boost=cfg.synapse_ltp_max_boost,
             )
             inactive = cfg.synapse_consolidation_inactive_days
-            candidates = synapse_db.get_consolidation_candidates(inactive_days=inactive)
+            candidates = synapse_db.get_consolidation_candidates(
+                inactive_days=inactive, wing=consolidation_wing
+            )
             enriched = _enrich_consolidation_candidates(col, candidates, cfg)
             log_stats = synapse_db.get_log_stats()
             co_pairs = synapse_db.get_top_co_pairs(15)
@@ -371,13 +374,22 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+def tool_search(
+    query: str,
+    limit: int = 5,
+    wing: str = None,
+    room: str = None,
+    synapse_ltp_enabled: Optional[bool] = None,
+    synapse_tagging_enabled: Optional[bool] = None,
+):
     return search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
+        synapse_ltp_enabled=synapse_ltp_enabled,
+        synapse_tagging_enabled=synapse_tagging_enabled,
     )
 
 
@@ -716,7 +728,15 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
 TOOLS = {
     "mempalace_status": {
         "description": "Palace overview — total drawers, wing and room counts",
-        "input_schema": {"type": "object", "properties": {}},
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "consolidation_wing": {
+                    "type": "string",
+                    "description": "If set, limit Synapse consolidation candidates to drawer_ids containing this substring (optional)",
+                },
+            },
+        },
         "handler": tool_status,
     },
     "mempalace_list_wings": {
@@ -868,6 +888,14 @@ TOOLS = {
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "synapse_ltp_enabled": {
+                    "type": "boolean",
+                    "description": "Override LTP axis for this search only (omit = use config default)",
+                },
+                "synapse_tagging_enabled": {
+                    "type": "boolean",
+                    "description": "Override tagging axis for this search only (omit = use config default)",
+                },
             },
             "required": ["query"],
         },
