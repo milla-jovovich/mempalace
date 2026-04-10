@@ -1,5 +1,11 @@
 # MemPalace Upgrade Plan
 
+## Rules
+
+- Every phase MUST update `UPGRADE.md` with user-facing changes and a compact how-to.
+- Every phase MUST update this status table and mark its section done.
+- Commit message must list files changed, test count, and what's new.
+
 ## Status
 
 | Phase | Description | Status |
