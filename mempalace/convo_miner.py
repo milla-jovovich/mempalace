@@ -14,6 +14,7 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .normalize import normalize
 from .palace import SKIP_DIRS, get_collection, file_already_mined
@@ -28,6 +29,8 @@ CONVO_EXTENSIONS = {
 }
 
 MIN_CHUNK_SIZE = 30
+BATCH_SIZE = 128  # chunks per upsert call (matches miner.py)
+MAX_WORKERS = min(32, (os.cpu_count() or 4) * 2)
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
 
 
@@ -229,6 +232,76 @@ def scan_convos(convo_dir: str) -> list:
 # =============================================================================
 
 
+def process_convo_file_cpu(
+    filepath: Path,
+    wing: str,
+    agent: str,
+    extract_mode: str,
+) -> "tuple | None":
+    """
+    Pure CPU worker: normalize, chunk, detect room, build drawer records.
+    Thread-safe — no ChromaDB calls, no shared state.
+
+    Returns (source_file, room, records, room_counts_delta) or None if skipped.
+    """
+    source_file = str(filepath)
+
+    try:
+        content = normalize(source_file)
+    except (OSError, ValueError):
+        return None
+
+    if not content or len(content.strip()) < MIN_CHUNK_SIZE:
+        return None
+
+    if extract_mode == "general":
+        from .general_extractor import extract_memories
+
+        chunks = extract_memories(content)
+    else:
+        chunks = chunk_exchanges(content)
+
+    if not chunks:
+        return None
+
+    if extract_mode != "general":
+        room = detect_convo_room(content)
+    else:
+        room = None
+
+    now = datetime.now().isoformat()
+    records = []
+    room_counts_delta = defaultdict(int)
+
+    if extract_mode != "general":
+        room_counts_delta[room] = 1
+
+    for chunk in chunks:
+        chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
+        if extract_mode == "general":
+            room_counts_delta[chunk_room] += 1
+
+        drawer_id = (
+            f"drawer_{wing}_{chunk_room}_"
+            + hashlib.sha256(
+                (source_file + str(chunk["chunk_index"])).encode()
+            ).hexdigest()[:24]
+        )
+        meta = {
+            "wing": wing,
+            "room": chunk_room,
+            "source_file": source_file,
+            "chunk_index": chunk["chunk_index"],
+            "added_by": agent,
+            "filed_at": now,
+            "ingest_mode": "convos",
+            "extract_mode": extract_mode,
+        }
+        records.append((drawer_id, chunk["content"], meta))
+
+    return source_file, room, records, dict(room_counts_delta)
+
+
 def mine_convos(
     convo_dir: str,
     palace_path: str,
@@ -270,93 +343,84 @@ def mine_convos(
     files_skipped = 0
     room_counts = defaultdict(int)
 
-    for i, filepath in enumerate(files, 1):
-        source_file = str(filepath)
-
-        # Skip if already filed
-        if not dry_run and file_already_mined(collection, source_file):
-            files_skipped += 1
-            continue
-
-        # Normalize format
-        try:
-            content = normalize(str(filepath))
-        except (OSError, ValueError):
-            continue
-
-        if not content or len(content.strip()) < MIN_CHUNK_SIZE:
-            continue
-
-        # Chunk — either exchange pairs or general extraction
-        if extract_mode == "general":
-            from .general_extractor import extract_memories
-
-            chunks = extract_memories(content)
-            # Each chunk already has memory_type; use it as the room name
-        else:
-            chunks = chunk_exchanges(content)
-
-        if not chunks:
-            continue
-
-        # Detect room from content (general mode uses memory_type instead)
-        if extract_mode != "general":
-            room = detect_convo_room(content)
-        else:
-            room = None  # set per-chunk below
-
-        if dry_run:
+    # ------------------------------------------------------------------
+    # DRY RUN: sequential, no writes
+    # ------------------------------------------------------------------
+    if dry_run:
+        for i, filepath in enumerate(files, 1):
+            result = process_convo_file_cpu(filepath, wing, agent, extract_mode)
+            if result is None:
+                continue
+            _, room, records, room_counts_delta = result
             if extract_mode == "general":
                 from collections import Counter
 
-                type_counts = Counter(c.get("memory_type", "general") for c in chunks)
+                type_counts = Counter(meta["room"] for (_, _, meta) in records)
                 types_str = ", ".join(f"{t}:{n}" for t, n in type_counts.most_common())
-                print(f"    [DRY RUN] {filepath.name} → {len(chunks)} memories ({types_str})")
+                print(f"    [DRY RUN] {filepath.name} → {len(records)} memories ({types_str})")
             else:
-                print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
-            total_drawers += len(chunks)
-            # Track room counts
-            if extract_mode == "general":
-                for c in chunks:
-                    room_counts[c.get("memory_type", "general")] += 1
-            else:
-                room_counts[room] += 1
-            continue
+                print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(records)} drawers)")
+            total_drawers += len(records)
+            for r, c in room_counts_delta.items():
+                room_counts[r] += c
 
-        if extract_mode != "general":
-            room_counts[room] += 1
+    # ------------------------------------------------------------------
+    # REAL MINE: parallel file processing + batched upserts
+    # ------------------------------------------------------------------
+    else:
+        print(f"  Checking {len(files)} files for changes...")
+        pending = [fp for fp in files if not file_already_mined(collection, str(fp))]
+        already_mined = len(files) - len(pending)
 
-        # File each chunk
-        drawers_added = 0
-        for chunk in chunks:
-            chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
-            if extract_mode == "general":
-                room_counts[chunk_room] += 1
-            drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
-            try:
-                collection.add(
-                    documents=[chunk["content"]],
-                    ids=[drawer_id],
-                    metadatas=[
-                        {
-                            "wing": wing,
-                            "room": chunk_room,
-                            "source_file": source_file,
-                            "chunk_index": chunk["chunk_index"],
-                            "added_by": agent,
-                            "filed_at": datetime.now().isoformat(),
-                            "ingest_mode": "convos",
-                            "extract_mode": extract_mode,
-                        }
-                    ],
-                )
-                drawers_added += 1
-            except Exception as e:
-                if "already exists" not in str(e).lower():
-                    raise
+        batch_ids, batch_docs, batch_metas = [], [], []
+        completed = 0
+        skipped_small = 0
 
-        total_drawers += drawers_added
-        print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
+        def flush_batch(ids, docs, metas):
+            if ids:
+                collection.upsert(documents=docs, ids=ids, metadatas=metas)
+                ids.clear()
+                docs.clear()
+                metas.clear()
+
+        try:
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                futures = {
+                    executor.submit(
+                        process_convo_file_cpu, fp, wing, agent, extract_mode
+                    ): fp
+                    for fp in pending
+                }
+                for future in as_completed(futures):
+                    filepath = futures[future]
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        print(f"  ! [ERROR] {filepath.name}: {e}")
+                        completed += 1
+                        continue
+                    completed += 1
+                    if result is None:
+                        skipped_small += 1
+                        continue
+                    source_file, room, records, room_counts_delta = result
+                    for drawer_id, chunk_content, meta in records:
+                        batch_ids.append(drawer_id)
+                        batch_docs.append(chunk_content)
+                        batch_metas.append(meta)
+                        if len(batch_ids) >= BATCH_SIZE:
+                            flush_batch(batch_ids, batch_docs, batch_metas)
+                    total_drawers += len(records)
+                    for r, c in room_counts_delta.items():
+                        room_counts[r] += c
+                    print(
+                        f"  ✓ [{completed:4}/{len(pending)}] "
+                        f"{Path(source_file).name[:50]:50} +{len(records)}"
+                    )
+        finally:
+            flush_batch(batch_ids, batch_docs, batch_metas)
+
+        files_skipped = already_mined + skipped_small
 
     print(f"\n{'=' * 55}")
     print("  Done.")
