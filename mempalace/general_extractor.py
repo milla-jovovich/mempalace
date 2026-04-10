@@ -157,7 +157,7 @@ EMOTION_MARKERS = [
     r"i need",
     r"never told anyone",
     r"nobody knows",
-    r"\*[^*]+\*",
+    r"(?<!\*)\*([a-z][a-z ]{0,20})\*(?!\*)",  # *sighs*, *hugs* — single-word/phrase emotes only
 ]
 
 ALL_MARKERS = {
@@ -320,8 +320,27 @@ def _is_code_line(line: str) -> bool:
     return False
 
 
+def _strip_markdown(text: str) -> str:
+    """Strip Markdown formatting so it doesn't trigger false positives.
+
+    Removes headings, bold, italic, bold-italic, inline code, and link
+    syntax.  This prevents Markdown emphasis from matching emotion markers
+    or other patterns that use asterisks.
+
+    Stripping order matters: headings first, then triple-asterisk
+    (bold-italic), then double (bold), then single (italic).
+    """
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)  # ## Heading → Heading
+    text = re.sub(r"\*{3}([^*]+)\*{3}", r"\1", text)  # ***bold-italic*** → text
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)    # **bold** → bold
+    text = re.sub(r"\*([^*]+)\*", r"\1", text)         # *italic* → italic
+    text = re.sub(r"`([^`]+)`", r"\1", text)           # `code` → code
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)  # [text](url) → text
+    return text
+
+
 def _extract_prose(text: str) -> str:
-    """Extract only prose lines (skip code) for classification scoring."""
+    """Extract only prose lines (skip code) and strip Markdown for scoring."""
     lines = text.split("\n")
     prose = []
     in_code = False
@@ -334,6 +353,7 @@ def _extract_prose(text: str) -> str:
         if not _is_code_line(line):
             prose.append(line)
     result = "\n".join(prose).strip()
+    result = _strip_markdown(result)
     return result if result else text
 
 
