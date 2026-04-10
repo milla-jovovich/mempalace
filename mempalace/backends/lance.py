@@ -124,6 +124,24 @@ class LanceCollection(BaseCollection):
                 f"Run 'mempalace reindex' to re-embed with the new model."
             )
 
+    def _check_dimension(self):
+        """Verify the embedder dimension matches the existing table's vector column."""
+        import pyarrow as pa
+
+        schema = self._table.schema
+        vec_field = schema.field("vector")
+        if not pa.types.is_fixed_size_list(vec_field.type):
+            return
+        stored_dim = vec_field.type.list_size
+        expected_dim = self._embedder.dimension
+        if stored_dim != expected_dim:
+            raise RuntimeError(
+                f"Embedder dimension mismatch: table '{self._table_name}' has "
+                f"{stored_dim}d vectors but the active embedder "
+                f"('{self._embedder.model_name}') produces {expected_dim}d. "
+                f"Run 'mempalace reindex' to re-embed with the new model."
+            )
+
     def _to_records(self, documents, ids, metadatas, embeddings=None):
         if embeddings is None:
             embeddings = self._embedder.embed(documents)
