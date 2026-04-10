@@ -18,9 +18,6 @@ kramdown:
 
 theme: null
 
-plugins:
-  - jekyll-seo-tag
-
 exclude:
   - Gemfile
   - Gemfile.lock
