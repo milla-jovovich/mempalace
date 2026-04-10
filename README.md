@@ -490,8 +490,7 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 
 The AI learns AAAK and the memory protocol automatically from the `mempalace_status` response. No manual configuration.
 
-For a practical Cursor workflow (memory-first when needed, token-aware defaults, and chat storage
-patterns), see [examples/mcp_setup.md](examples/mcp_setup.md).
+For a practical Cursor workflow (memory-first when needed, token-aware defaults, and chat storage patterns), see [examples/mcp_setup.md](examples/mcp_setup.md).
 
 ---
 

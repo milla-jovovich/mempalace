@@ -1,6 +1,8 @@
-# MCP Integration — Claude Code
+# MCP Integration
 
-## Setup
+Claude Code setup below; see [Cursor Memory-First Workflow](#cursor-memory-first-workflow-token-aware) for Cursor.
+
+## Setup (Claude Code)
 
 Run the MCP server:
 
@@ -40,9 +42,10 @@ tool: mempalace_add_drawer
 wing: cursor
 room: technical | decisions | problems | general
 content: full user/assistant snippet (verbatim)
-source_file: chat-YYYY-MM-DD-topic
-added_by: cursor-agent
+source_file: cursor-agent/chat-YYYY-MM-DD-topic
 ```
+
+(`mempalace_add_drawer` checks for near-duplicates before filing; you do not need to call `mempalace_check_duplicate` first.)
 
 Also save a compact timeline note:
 
@@ -54,6 +57,8 @@ entry: SESSION:YYYY-MM-DD|TOPIC:...|DECISION:...|NEXT:...|★★★
 ```
 
 ### 2) Query policy (reduce wasted tokens)
+
+The same pattern applies in any MCP-capable editor, not only Cursor.
 
 Use **memory-first** only when the user asks about prior context:
 
@@ -75,6 +80,8 @@ Skip memory lookup for generic one-off questions (for example, "what is nginx?")
 ```
 
 ### 4) Suggested room mapping for chat memory
+
+These names are a **convention for chat memory** you choose when filing drawers; they are separate from rooms MemPalace may infer from project structure elsewhere.
 
 - `technical` - tooling, infra, implementation notes
 - `decisions` - architectural/product decisions
