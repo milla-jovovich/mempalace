@@ -66,6 +66,7 @@ else:
 
 _client_cache = None
 _collection_cache = None
+_palace_db_inode = 0  # inode of chroma.sqlite3 at cache time
 
 
 # ==================== WRITE-AHEAD LOG ====================
@@ -104,10 +105,24 @@ def _wal_log(operation: str, params: dict, result: dict = None):
 
 
 def _get_client():
-    """Return a singleton ChromaDB PersistentClient."""
-    global _client_cache
-    if _client_cache is None:
+    """Return a ChromaDB PersistentClient, reconnecting if the database changed on disk.
+
+    Detects palace rebuilds (repair/nuke) by checking the inode of
+    chroma.sqlite3.  A full rebuild replaces the file, changing the inode.
+    """
+    global _client_cache, _collection_cache, _palace_db_inode, _metadata_cache, _metadata_cache_time
+    db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
+    try:
+        current_inode = os.stat(db_path).st_ino
+    except OSError:
+        current_inode = 0
+
+    if _client_cache is None or (current_inode and current_inode != _palace_db_inode):
         _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+        _collection_cache = None
+        _metadata_cache = None
+        _metadata_cache_time = 0
+        _palace_db_inode = current_inode
     return _client_cache
 
 

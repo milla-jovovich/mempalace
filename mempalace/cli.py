@@ -247,7 +247,14 @@ def cmd_status(args):
 
 
 def cmd_repair(args):
-    """Rebuild palace vector index from SQLite metadata."""
+    """Rebuild palace vector index by nuking and recreating the database.
+
+    ChromaDB's HNSW index can become corrupted after bulk deletes (ghost
+    entries cause segfaults on query).  A same-process delete_collection +
+    create_collection is NOT sufficient — the PersistentClient reuses
+    corrupted state.  This command extracts all drawers, deletes the entire
+    palace directory, creates a fresh PersistentClient, and re-inserts.
+    """
     import chromadb
     import shutil
 
@@ -286,13 +293,18 @@ def cmd_repair(args):
     offset = 0
     while offset < total:
         batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        if not batch["ids"]:
+            break
         all_ids.extend(batch["ids"])
         all_docs.extend(batch["documents"])
         all_metas.extend(batch["metadatas"])
-        offset += batch_size
+        offset += len(batch["ids"])
     print(f"  Extracted {len(all_ids)} drawers")
 
-    # Backup and rebuild
+    # Release the old client before nuking the directory
+    del col, client
+
+    # Backup the entire palace directory
     palace_path = palace_path.rstrip(os.sep)
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
@@ -300,18 +312,32 @@ def cmd_repair(args):
     print(f"  Backing up to {backup_path}...")
     shutil.copytree(palace_path, backup_path)
 
-    print("  Rebuilding collection...")
-    client.delete_collection("mempalace_drawers")
-    new_col = client.create_collection("mempalace_drawers")
+    # Nuke and recreate — fresh PersistentClient gets a clean HNSW index
+    print("  Rebuilding from scratch...")
+    shutil.rmtree(palace_path)
+    os.makedirs(palace_path, mode=0o700)
+
+    new_client = chromadb.PersistentClient(path=palace_path)
+    new_col = new_client.create_collection("mempalace_drawers")
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
-        batch_ids = all_ids[i : i + batch_size]
-        batch_docs = all_docs[i : i + batch_size]
-        batch_metas = all_metas[i : i + batch_size]
-        new_col.add(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
-        filed += len(batch_ids)
+        end = min(i + batch_size, len(all_ids))
+        new_col.add(
+            documents=all_docs[i:end],
+            ids=all_ids[i:end],
+            metadatas=all_metas[i:end],
+        )
+        filed += end - i
         print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
+
+    # Verify the new index works
+    try:
+        new_col.query(query_texts=["test"], n_results=1, include=["documents"])
+        print("  Index verification: OK")
+    except Exception as e:
+        print(f"  Index verification FAILED: {e}")
+        print(f"  Restore from backup: mv {backup_path} {palace_path}")
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print(f"  Backup saved at {backup_path}")
