@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 mempal.yaml
+.a5c/
 
 # Jekyll (docs site)
 _site/

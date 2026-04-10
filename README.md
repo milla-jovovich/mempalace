@@ -29,7 +29,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 
 <br>
 
-[Quick Start](#quick-start) · [The Palace](#the-palace) · [AAAK Dialect](#aaak-compression) · [Benchmarks](#benchmarks) · [MCP Tools](#mcp-server)
+[Quick Start](#quick-start) · [The Palace](#the-palace) · [AAAK Dialect](#aaak-dialect-experimental) · [Benchmarks](#benchmarks) · [MCP Tools](#mcp-server)
 
 <br>
 
@@ -112,7 +112,18 @@ Three mining modes: **projects** (code and docs), **convos** (conversation expor
 
 After the one-time setup (install → init → mine), you don't run MemPalace commands manually. Your AI uses it for you. There are two ways, depending on which AI you use.
 
-### With Claude, ChatGPT, Cursor (MCP-compatible tools)
+### With Claude Code (recommended)
+
+Native marketplace install:
+
+```bash
+claude plugin marketplace add milla-jovovich/mempalace
+claude plugin install --scope user mempalace
+```
+
+Restart Claude Code, then type `/skills` to verify "mempalace" appears.
+
+### With Claude, ChatGPT, Cursor, Gemini (MCP-compatible tools)
 
 ```bash
 # Connect MemPalace once
@@ -124,6 +135,8 @@ Now your AI has 19 tools available through MCP. Ask it anything:
 > *"What did we decide about auth last month?"*
 
 Claude calls `mempalace_search` automatically, gets verbatim results, and answers you. You never type `mempalace search` again. The AI handles it.
+
+MemPalace also works natively with **Gemini CLI** (which handles the server and save hooks automatically) — see the [Gemini CLI Integration Guide](examples/gemini_cli_setup.md).
 
 ### With local models (Llama, Mistral, or any offline LLM)
 
@@ -437,6 +450,11 @@ Letta charges $20–200/mo for agent-managed memory. MemPalace does it with a wi
 ## MCP Server
 
 ```bash
+# Via plugin (recommended)
+claude plugin marketplace add milla-jovovich/mempalace
+claude plugin install --scope user mempalace
+
+# Or manually
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
@@ -507,6 +525,8 @@ Two hooks for Claude Code that automatically save memories during work:
 }
 ```
 
+**Optional auto-ingest:** Set the `MEMPAL_DIR` environment variable to a directory path and the hooks will automatically run `mempalace mine` on that directory during each save trigger (background on stop, synchronous on precompact).
+
 ---
 
 ## Benchmarks
@@ -565,6 +585,9 @@ mempalace compress --wing myapp                   # AAAK compress
 
 # Status
 mempalace status                                  # palace overview
+
+# MCP
+mempalace mcp                                     # show MCP setup command
 ```
 
 All commands accept `--palace <path>` to override the default location.
@@ -687,7 +710,7 @@ PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
 MIT — see [LICENSE](LICENSE).
 
 <!-- Link Definitions -->
-[version-shield]: https://img.shields.io/badge/version-3.0.0-4dc9f6?style=flat-square&labelColor=0a0e14
+[version-shield]: https://img.shields.io/badge/version-3.1.0-4dc9f6?style=flat-square&labelColor=0a0e14
 [release-link]: https://github.com/milla-jovovich/mempalace/releases
 [python-shield]: https://img.shields.io/badge/python-3.9+-7dd8f8?style=flat-square&labelColor=0a0e14&logo=python&logoColor=7dd8f8
 [python-link]: https://www.python.org/

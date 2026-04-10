@@ -6,7 +6,57 @@ Priority: env vars > config file (~/.mempalace/config.json) > defaults
 
 import json
 import os
+import re
 from pathlib import Path
+
+
+# ── Input validation ──────────────────────────────────────────────────────────
+# Shared sanitizers for wing/room/entity names. Prevents path traversal,
+# excessively long strings, and special characters that could cause issues
+# in file paths, SQLite, or ChromaDB metadata.
+
+MAX_NAME_LENGTH = 128
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_ .'-]{0,126}[a-zA-Z0-9]?$")
+
+
+def sanitize_name(value: str, field_name: str = "name") -> str:
+    """Validate and sanitize a wing/room/entity name.
+
+    Raises ValueError if the name is invalid.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+
+    value = value.strip()
+
+    if len(value) > MAX_NAME_LENGTH:
+        raise ValueError(f"{field_name} exceeds maximum length of {MAX_NAME_LENGTH} characters")
+
+    # Block path traversal
+    if ".." in value or "/" in value or "\\" in value:
+        raise ValueError(f"{field_name} contains invalid path characters")
+
+    # Block null bytes
+    if "\x00" in value:
+        raise ValueError(f"{field_name} contains null bytes")
+
+    # Enforce safe character set
+    if not _SAFE_NAME_RE.match(value):
+        raise ValueError(f"{field_name} contains invalid characters")
+
+    return value
+
+
+def sanitize_content(value: str, max_length: int = 100_000) -> str:
+    """Validate drawer/diary content length."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("content must be a non-empty string")
+    if len(value) > max_length:
+        raise ValueError(f"content exceeds maximum length of {max_length} characters")
+    if "\x00" in value:
+        raise ValueError("content contains null bytes")
+    return value
+
 
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
@@ -126,6 +176,11 @@ class MempalaceConfig:
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
+        # Restrict directory permissions to owner only (Unix)
+        try:
+            self._config_dir.chmod(0o700)
+        except (OSError, NotImplementedError):
+            pass  # Windows doesn't support Unix permissions
         if not self._config_file.exists():
             default_config = {
                 "palace_path": DEFAULT_PALACE_PATH,
@@ -135,6 +190,11 @@ class MempalaceConfig:
             }
             with open(self._config_file, "w") as f:
                 json.dump(default_config, f, indent=2)
+            # Restrict config file to owner read/write only
+            try:
+                self._config_file.chmod(0o600)
+            except (OSError, NotImplementedError):
+                pass
         return self._config_file
 
     def save_people_map(self, people_map):
