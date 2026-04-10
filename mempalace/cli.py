@@ -369,6 +369,95 @@ def cmd_embedders(args):
     print(f"{'=' * 70}\n")
 
 
+def cmd_serve(args):
+    """Start the MemPalace sync server."""
+    try:
+        import uvicorn
+    except ImportError:
+        print("uvicorn is required.  Install with: pip install 'mempalace[server]'")
+        sys.exit(1)
+
+    from .sync_server import create_app
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    os.environ["MEMPALACE_PALACE_PATH"] = palace_path
+
+    host = args.host
+    port = args.port
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Sync Server")
+    print(f"{'=' * 55}")
+    print(f"  Palace: {palace_path}")
+    print(f"  Listen: {host}:{port}")
+    print(f"{'=' * 55}\n")
+
+    app = create_app()
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def cmd_sync(args):
+    """Sync local palace with a remote server."""
+    from .sync import SyncEngine
+    from .sync_client import SyncClient
+    from .sync_meta import NodeIdentity
+    from .db import open_collection
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    server_url = args.server
+
+    col = open_collection(palace_path)
+    identity = NodeIdentity()
+    vv_path = os.path.join(palace_path, "version_vector.json")
+    engine = SyncEngine(col, identity=identity, vv_path=vv_path)
+    client = SyncClient(server_url, timeout=args.timeout)
+
+    if not client.is_reachable():
+        print(f"\n  Cannot reach server at {server_url}")
+        print("  Is it running?  mempalace serve --host 0.0.0.0 --port 7433")
+        sys.exit(1)
+
+    import time
+
+    def run_once():
+        print(f"\n{'=' * 55}")
+        print("  MemPalace Sync")
+        print(f"{'=' * 55}")
+        print(f"  Palace: {palace_path}")
+        print(f"  Server: {server_url}")
+        print(f"  Node:   {identity.node_id}")
+
+        result = client.sync(engine)
+
+        push = result["push"]
+        pull = result["pull"]
+        print(
+            f"\n  Push: {push['sent']} sent, {push['accepted']} accepted, {push['rejected']} conflicts"
+        )
+        print(
+            f"  Pull: {pull['received']} received, {pull['accepted']} accepted, {pull['rejected']} conflicts"
+        )
+        print(f"  Version vector: {result['local_vv']}")
+        print(f"{'=' * 55}\n")
+
+    if args.auto:
+        interval = args.interval
+        print(f"  Auto-sync every {interval}s (Ctrl+C to stop)")
+        while True:
+            try:
+                run_once()
+                time.sleep(interval)
+            except KeyboardInterrupt:
+                print("\n  Stopped.")
+                break
+            except Exception as e:
+                print(f"  Sync error: {e}")
+                print(f"  Retrying in {interval}s...")
+                time.sleep(interval)
+    else:
+        run_once()
+
+
 def cmd_migrate(args):
     """Migrate palace from ChromaDB to LanceDB."""
     import shutil
@@ -837,6 +926,28 @@ def main():
         help="List available embedding models",
     )
 
+    # serve
+    p_serve = sub.add_parser(
+        "serve",
+        help="Start the sync server (run on your home machine)",
+    )
+    p_serve.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    p_serve.add_argument("--port", type=int, default=7433, help="Port (default: 7433)")
+
+    # sync
+    p_sync = sub.add_parser(
+        "sync",
+        help="Sync local palace with a remote server",
+    )
+    p_sync.add_argument("--server", required=True, help="Server URL (e.g. http://homeserver:7433)")
+    p_sync.add_argument("--auto", action="store_true", help="Repeat sync every --interval seconds")
+    p_sync.add_argument(
+        "--interval", type=int, default=300, help="Seconds between auto-syncs (default: 300)"
+    )
+    p_sync.add_argument(
+        "--timeout", type=float, default=30.0, help="HTTP timeout in seconds (default: 30)"
+    )
+
     # mcp
     sub.add_parser(
         "mcp",
@@ -881,6 +992,8 @@ def main():
         "migrate": cmd_migrate,
         "reindex": cmd_reindex,
         "embedders": cmd_embedders,
+        "serve": cmd_serve,
+        "sync": cmd_sync,
         "status": cmd_status,
     }
     dispatch[args.command](args)
