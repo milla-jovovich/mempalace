@@ -14,15 +14,17 @@ def test_eigen_thoughts():
     # C is the broker (structural hole filler)
     assert holes[0] == "C"
 
+
 def test_find_structural_holes_with_duplicates():
     from mempalace.topology import find_structural_holes
+
     # B is the broker. We add duplicate A-B and B-C edges to simulate multiple wormholes.
     nodes = ["A", "B", "C", "D"]
     edges = [("A", "B"), ("A", "B"), ("B", "C"), ("B", "C"), ("C", "D")]
-    
+
     holes = find_structural_holes(nodes, edges)
-    
-    # If not deduplicated, B's score inflates incorrectly. 
+
+    # If not deduplicated, B's score inflates incorrectly.
     # With deduplication, B is still the top broker but calculation doesn't crash or skew.
     assert holes[0] == "B"
     # Also verify that it doesn't fail on deduplication

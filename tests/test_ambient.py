@@ -30,17 +30,18 @@ def test_socratic_question():
             q = get_socratic_question()
             assert "B" in q
 
+
 @patch("mempalace.ambient.get_collection")
 def test_ambient_whisper_threshold(mock_get_col):
     mock_col = MagicMock()
     mock_get_col.return_value = mock_col
-    
+
     # Distance 0.5 is > 0.3 threshold, should be ignored
     mock_col.query.return_value = {
         "documents": [["Historical wisdom"]],
         "metadatas": [[{"room": "wisdom", "wing": "past"}]],
-        "distances": [[0.5]]
+        "distances": [[0.5]],
     }
-    
+
     res = get_whisper("I am coding something")
     assert "Historical wisdom" not in res

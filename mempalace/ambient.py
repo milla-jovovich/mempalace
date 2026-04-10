@@ -23,7 +23,12 @@ def get_whisper(context: str, palace_path: str = None, threshold: float = 0.3) -
             dist = res["distances"][0][0]
             if dist < threshold:
                 doc = res["documents"][0][0]
-                room = res["metadatas"][0][0].get("room", "unknown")
+
+                # Safe metadata extraction
+                metas = res.get("metadatas", [[{}]])[0] or []
+                meta = metas[0] if len(metas) > 0 and metas[0] else {}
+                room = meta.get("room", "unknown")
+
                 return f"[Whisper from {room}]: {doc[:200]}..."
     except Exception as e:
         logging.error(f"Whisper error: {e}")
