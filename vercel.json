@@ -1,4 +1,5 @@
 {
-  "cleanUrls": true,
-  "outputDirectory": "docs/_site"
+  "buildCommand": "cd docs && bundle install && bundle exec jekyll build",
+  "outputDirectory": "docs/_site",
+  "cleanUrls": true
 }
