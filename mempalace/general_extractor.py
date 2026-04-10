@@ -157,7 +157,11 @@ EMOTION_MARKERS = [
     r"i need",
     r"never told anyone",
     r"nobody knows",
-    r"(?<!\*)\*([a-z][a-z ]{0,20})\*(?!\*)",  # *sighs*, *hugs* — single-word/phrase emotes only
+    # Matches roleplay emotes like *sighs*, *hugs* — lowercase only.
+    # Uppercase start (*Sighs*) is excluded intentionally: widening to [a-zA-Z]
+    # would false-positive on Markdown italic around proper nouns (*React*, *Docker*).
+    # In the DevOps corpus from #536, zero emotes started with uppercase.
+    r"(?<!\*)\*([a-z][a-z ]{0,20})\*(?!\*)",
 ]
 
 ALL_MARKERS = {
