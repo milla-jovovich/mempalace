@@ -239,7 +239,7 @@ You say what you're looking for and boom, it already knows which wing to go to. 
 **Rooms** — specific topics within a wing. Auth, billing, deploy — endless rooms.
 **Halls** — connections between related rooms *within* the same wing. If Room A (auth) and Room B (security) are related, a hall links them.
 **Tunnels** — connections *between* wings. When Person A and a Project both have a room about "auth," a tunnel cross-references them automatically.
-**Closets** — summaries that point to the original content. (In v3.0.0 these are plain-text summaries; AAAK-encoded closets are coming in a future update — see [Task #30](https://github.com/milla-jovovich/mempalace/issues/30).)
+**Closets** — summaries that point to the original content. (In v3.1.0 these are plain-text summaries; AAAK-encoded closets are coming in a future update — see [Task #30](https://github.com/milla-jovovich/mempalace/issues/30).)
 **Drawers** — the original verbatim files. The exact words, never summarized.
 
 **Halls** are memory types — the same in every wing, acting as corridors:
@@ -682,7 +682,7 @@ mempalace/
 │   └── mcp_setup.md
 ├── tests/                     ← test suite (README)
 ├── assets/                    ← logo + brand assets
-└── pyproject.toml             ← package config (v3.0.0)
+└── pyproject.toml             ← package config (v3.1.0)
 ```
 
 ---
