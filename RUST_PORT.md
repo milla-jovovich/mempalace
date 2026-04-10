@@ -93,6 +93,71 @@ backend in a follow-up). The previously untested
 - `cargo audit` is not installed in the CI image yet — planned to be
   added alongside the lancedb production backend in a follow-up.
 
+## R6 security audit (2026-04-09)
+
+### `cargo audit` results
+
+Zero vulnerabilities. Five warnings (all in transitive dependencies, not actionable):
+
+| Crate | Advisory | Severity | Via |
+|---|---|---|---|
+| `number_prefix` 0.4.0 | RUSTSEC-2025-0119 | unmaintained | indicatif -> hf-hub -> fastembed |
+| `paste` 1.0.15 | RUSTSEC-2024-0436 | unmaintained | tokenizers -> fastembed |
+| `libyml` 0.0.5 | RUSTSEC-2025-0067 | unsound | serde_yml |
+| `serde_yml` 0.0.12 | RUSTSEC-2025-0068 | unsound | direct dep (mempalace-core, mempalace-text) |
+| `lru` 0.12.5 | RUSTSEC-2026-0002 | unsound | tantivy -> lance-index -> lancedb |
+
+None are exploitable in our usage (we do not iterate `lru` mutably, and
+`serde_yml`/`libyml` unsoundness requires adversarial YAML input which
+we never accept from untrusted sources). Will track upstream fixes.
+
+### `unsafe` code
+
+`grep -rn "unsafe" crates/` — zero production hits. Only matches are
+`#![forbid(unsafe_code)]` directives themselves (4 `lib.rs` + 1
+`main.rs` + 1 test file).
+
+### Shell spawns
+
+`grep -rn "Command::new" crates/` — two hits, both in test code only
+(`crates/mempalace-cli/tests/mcp_serve.rs:24` and
+`crates/mempalace-cli/tests/e2e.rs:345`). Zero production shell-outs.
+
+### `#![forbid(unsafe_code)]` coverage
+
+Present on all 4 crate `lib.rs` files (`mempalace-core`, `mempalace-text`,
+`mempalace-store`, `mempalace-server`) and `mempalace-cli/src/main.rs`.
+
+### SQL parameterization
+
+- **`knowledge_graph.rs`**: All 12 SQL statements use `params![]` bindings.
+  Zero raw string interpolation. SQL strings are static string literals
+  with `?` placeholders only.
+- **`lancedb_backend.rs`**: `build_where_clause` constructs filter strings
+  for LanceDB's query API. Values pass through `escape_sql_literal` which
+  rejects control characters (`\x00..=\x1f`, `\x7f`) and doubles single
+  quotes. Test coverage confirms escaping (e.g., `o'reilly`).
+
+### File safety
+
+- **`convo_miner.rs`**: Uses `symlink_metadata` to skip symlinks
+  (line 322) and enforces `MAX_FILE_SIZE` of 10 MB (line 326).
+- **`ingest.rs`**: Uses `symlink_metadata` to skip symlinks (line 143),
+  enforces configurable `max_file_size` defaulting to 10 MB (line 148),
+  and tracks skip counts in stats.
+- **`normalize.rs`**: Enforces 500 MB hard limit (line 40).
+- **`split_mega_files.rs`**: Enforces `MAX_FILE_SIZE` of 500 MB (line 296).
+
+### Secret/credential scan
+
+`grep -rni "password\|secret\|token\|api_key" crates/` — all hits are
+innocuous (e.g., `token` in "tokenizer", test fixture strings like
+"top secret data", `count_tokens` function). No credentials in source.
+
+### `cargo-deny`
+
+Added `deny.toml` at workspace root for license and advisory policy.
+
 ## Why Rust?
 
 Memory safety, single static binary, faster cold start for the MCP server, no Python runtime required, and a cleaner story for "local, offline, no subscription." The Python implementation remains in `legacy/` for reference.

@@ -1,0 +1,10 @@
+[advisories]
+vulnerability = "deny"
+unmaintained = "warn"
+
+[licenses]
+unlicensed = "deny"
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "Unicode-DFS-2016", "OpenSSL", "BSL-1.0"]
+
+[bans]
+multiple-versions = "warn"

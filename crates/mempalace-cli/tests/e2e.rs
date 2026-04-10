@@ -3,7 +3,11 @@
 //! Tests full-stack flows at the library level since the CLI uses
 //! in-memory state per process (no persistence across invocations).
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::uninlined_format_args)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::uninlined_format_args
+)]
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -11,10 +15,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use mempalace_server::ingest::MinerOptions;
-use mempalace_server::{
-    ConvoMiner, ExtractMode, McpServer, Miner, SearchQuery,
-    search_memories,
-};
+use mempalace_server::{search_memories, ConvoMiner, ExtractMode, McpServer, Miner, SearchQuery};
 use mempalace_store::palace::{DrawerMetadata, DrawerRecord, InMemoryPalace, Palace};
 use mempalace_store::KnowledgeGraph;
 use mempalace_text::dialect::Dialect;
@@ -124,11 +125,7 @@ With structured storage and retrieval mechanisms for knowledge. We use indexing 
     assert_eq!(stats.files_processed, 1);
 
     let count = palace.count().unwrap();
-    assert!(
-        count >= 2,
-        "palace should have >= 2 drawers, got {}",
-        count
-    );
+    assert!(count >= 2, "palace should have >= 2 drawers, got {}", count);
 
     let resp = search_memories(
         &palace,
@@ -161,7 +158,11 @@ fn test_kg_add_query_traverse() {
 
     // Query entity "Rust"
     let triples = kg
-        .query_entity("Rust", None, mempalace_store::knowledge_graph::Direction::Both)
+        .query_entity(
+            "Rust",
+            None,
+            mempalace_store::knowledge_graph::Direction::Both,
+        )
         .unwrap();
     assert!(
         triples.len() >= 2,
@@ -251,10 +252,7 @@ fn test_mcp_server_tool_call() {
 
     // list_wings
     let wings = server.list_wings().unwrap();
-    assert!(
-        !wings.is_empty(),
-        "should have at least one wing"
-    );
+    assert!(!wings.is_empty(), "should have at least one wing");
     let wing_names: Vec<&str> = wings.iter().map(|w| w.name.as_str()).collect();
     assert!(
         wing_names.contains(&"projects"),
@@ -263,11 +261,12 @@ fn test_mcp_server_tool_call() {
 
     // get_taxonomy
     let taxonomy = server.get_taxonomy().unwrap();
-    assert!(
-        !taxonomy.wings.is_empty(),
-        "taxonomy should have wings"
-    );
-    let tax_wing = taxonomy.wings.iter().find(|w| w.name == "projects").unwrap();
+    assert!(!taxonomy.wings.is_empty(), "taxonomy should have wings");
+    let tax_wing = taxonomy
+        .wings
+        .iter()
+        .find(|w| w.name == "projects")
+        .unwrap();
     assert_eq!(tax_wing.drawer_count, 2);
     assert!(tax_wing.rooms.len() >= 2);
 
@@ -319,10 +318,7 @@ fn test_compress_roundtrip() {
             stats.original_tokens_est > 0,
             "original tokens should be > 0"
         );
-        assert!(
-            stats.summary_tokens_est > 0,
-            "summary tokens should be > 0"
-        );
+        assert!(stats.summary_tokens_est > 0, "summary tokens should be > 0");
         assert!(
             stats.size_ratio >= 1.0,
             "size ratio should be >= 1.0, got {}",
@@ -336,8 +332,7 @@ fn test_compress_roundtrip() {
 #[test]
 fn test_mcp_serve_tools_list() {
     let initialize_req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"e2e-test","version":"0"}}}"#;
-    let initialized_notif =
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#;
+    let initialized_notif = r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#;
     let list_tools_req = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#;
 
     let bin = assert_cmd::cargo::cargo_bin("mempalace");
