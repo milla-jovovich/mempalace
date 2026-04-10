@@ -750,13 +750,13 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
 
 
 def tool_kg_add(
-    subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
+    subject: str, predicate: str, obj: str, valid_from: str = None, source_closet: str = None
 ):
     """Add a relationship to the knowledge graph."""
     try:
         subject = sanitize_name(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
-        object = sanitize_name(object, "object")
+        obj = sanitize_name(obj, "object")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -765,33 +765,33 @@ def tool_kg_add(
         {
             "subject": subject,
             "predicate": predicate,
-            "object": object,
+            "object": obj,
             "valid_from": valid_from,
             "source_closet": source_closet,
         },
     )
     triple_id = _kg.add_triple(
-        subject, predicate, object, valid_from=valid_from, source_closet=source_closet
+        subject, predicate, obj, valid_from=valid_from, source_closet=source_closet
     )
-    return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {object}"}
+    return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {obj}"}
 
 
-def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
+def tool_kg_invalidate(subject: str, predicate: str, obj: str, ended: str = None):
     """Mark a fact as no longer true (set end date)."""
     try:
         subject = sanitize_name(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
-        object = sanitize_name(object, "object")
+        obj = sanitize_name(obj, "object")
     except ValueError as e:
         return {"success": False, "error": str(e)}
     _wal_log(
         "kg_invalidate",
-        {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
+        {"subject": subject, "predicate": predicate, "object": obj, "ended": ended},
     )
-    _kg.invalidate(subject, predicate, object, ended=ended)
+    _kg.invalidate(subject, predicate, obj, ended=ended)
     return {
         "success": True,
-        "fact": f"{subject} → {predicate} → {object}",
+        "fact": f"{subject} → {predicate} → {obj}",
         "ended": ended or "today",
     }
 
@@ -1485,6 +1485,13 @@ def handle_request(request):
                 }
         try:
             tool_args.pop("wait_for_previous", None)
+            # Remap "object" → "obj" so Python functions don't shadow the builtin.
+            # The external MCP schema keeps "object" as the JSON property name.
+            if "object" in tool_args and tool_name in (
+                "mempalace_kg_add",
+                "mempalace_kg_invalidate",
+            ):
+                tool_args["obj"] = tool_args.pop("object")
             result = TOOLS[tool_name]["handler"](**tool_args)
             return {
                 "jsonrpc": "2.0",
