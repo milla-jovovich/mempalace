@@ -84,7 +84,7 @@ def test_ollama_embedder_properties():
 
 def test_ollama_embedder_connection_error():
     """OllamaEmbedder raises ConnectionError when server unreachable."""
-    e = OllamaEmbedder(base_url="http://localhost:99999", timeout=1.0)
+    e = OllamaEmbedder(base_url="http://127.0.0.1:9", timeout=1.0)
     with pytest.raises(ConnectionError, match="Cannot reach Ollama"):
         e.embed(["test"])
 
@@ -276,3 +276,28 @@ def test_embedding_model_stored_in_metadata(tmp_path):
     assert "embedding_model" in meta
     # Default embedder is now OnnxEmbedder, same model name
     assert meta["embedding_model"] == "all-MiniLM-L6-v2"
+
+
+def test_lance_dimension_mismatch_guard(tmp_path):
+    """Reopening a LanceDB collection with a different embedder dimension must fail."""
+    from mempalace.db import open_collection
+
+    class FakeEmbedder384:
+        model_name = "fake-384"
+        dimension = 384
+        def embed(self, texts):
+            return [[0.0] * 384 for _ in texts]
+
+    class FakeEmbedder768:
+        model_name = "fake-768"
+        dimension = 768
+        def embed(self, texts):
+            return [[0.0] * 768 for _ in texts]
+
+    palace = str(tmp_path / "palace")
+    col = open_collection(palace, backend="lance", embedder=FakeEmbedder384())
+    col.upsert(documents=["seed"], ids=["s1"], metadatas=[{"wing": "t", "room": "r", "source_file": ""}])
+    assert col.count() == 1
+
+    with pytest.raises(RuntimeError, match="dimension"):
+        open_collection(palace, backend="lance", embedder=FakeEmbedder768())

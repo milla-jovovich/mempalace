@@ -66,12 +66,7 @@ def _make_lance_collection(embedder_name="all-MiniLM-L6-v2"):
     db = lancedb.connect(tmpdir)
     embedder = get_embedder({"embedder": embedder_name})
 
-    # Create a NodeIdentity that won't pollute the user's home dir
-    from mempalace.sync_meta import NodeIdentity
-
-    ni = NodeIdentity(config_dir=tempfile.mkdtemp())
-
-    return LanceCollection(db, "bench", embedder, sync_identity=ni)
+    return LanceCollection(db, "bench", embedder)
 
 
 def _make_chroma_collection():
