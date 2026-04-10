@@ -1519,6 +1519,13 @@ gpu = [
     { name = "sentence-transformers", version = "5.1.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "sentence-transformers", version = "5.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
+server = [
+    { name = "fastapi", version = "0.128.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "fastapi", version = "0.135.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "httpx" },
+    { name = "uvicorn", version = "0.39.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "uvicorn", version = "0.44.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+]
 spellcheck = [
     { name = "autocorrect" },
 ]
@@ -1536,6 +1543,8 @@ dev = [
 requires-dist = [
     { name = "autocorrect", marker = "extra == 'spellcheck'", specifier = ">=2.0" },
     { name = "chromadb", marker = "extra == 'chroma'", specifier = ">=0.5.0,<0.7" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100" },
+    { name = "httpx", marker = "extra == 'server'", specifier = ">=0.24" },
     { name = "lancedb", specifier = ">=0.14" },
     { name = "onnxruntime", specifier = ">=1.14" },
     { name = "psutil", marker = "extra == 'dev'", specifier = ">=5.9" },
@@ -1545,8 +1554,9 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
     { name = "sentence-transformers", marker = "extra == 'gpu'", specifier = ">=2.2.0" },
     { name = "tokenizers", specifier = ">=0.13" },
+    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.20" },
 ]
-provides-extras = ["dev", "spellcheck", "chroma", "gpu"]
+provides-extras = ["dev", "spellcheck", "chroma", "gpu", "server"]
 
 [package.metadata.requires-dev]
 dev = [

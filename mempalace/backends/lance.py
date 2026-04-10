@@ -91,10 +91,11 @@ class LanceCollection(BaseCollection):
         "node_id", "seq", "metadata_json",
     }
 
-    def __init__(self, db, table_name: str, embedder):
+    def __init__(self, db, table_name: str, embedder, sync_identity=None):
         self._db = db
         self._table_name = table_name
         self._embedder = embedder
+        self._sync_identity = sync_identity
         self._table = None
         if table_name in self._list_table_names():
             self._table = db.open_table(table_name)
@@ -152,11 +153,28 @@ class LanceCollection(BaseCollection):
         else:
             self._table = self._db.create_table(self._table_name, data=records)
 
+    def _inject_sync(self, metadatas: list) -> list:
+        """Inject sync metadata (node_id, seq, updated_at) into a write batch."""
+        if self._sync_identity is None:
+            from ..sync_meta import get_identity
+
+            self._sync_identity = get_identity()
+        from ..sync_meta import inject_sync_meta
+
+        return inject_sync_meta(metadatas, self._sync_identity)
+
     def add(self, *, documents, ids, metadatas=None, embeddings=None):
         self.upsert(documents=documents, ids=ids, metadatas=metadatas, embeddings=embeddings)
 
-    def upsert(self, *, documents, ids, metadatas=None, embeddings=None):
+    def upsert(self, *, documents, ids, metadatas=None, embeddings=None, _raw=False):
+        """Insert or update records. Computes embeddings automatically.
+
+        Args:
+            _raw: If True, skip sync metadata injection (used by sync apply).
+        """
         metadatas = metadatas or [{} for _ in ids]
+        if not _raw:
+            metadatas = self._inject_sync(metadatas)
         records = self._to_records(documents, ids, metadatas, embeddings)
 
         if self._table is None:
@@ -263,6 +281,11 @@ class LanceCollection(BaseCollection):
         }
 
     def delete(self, **kwargs: Any) -> None:
+        """Delete records by ID.
+
+        Performs a hard delete.  The sync layer (Phase 4) will convert
+        these into tombstoned upserts when sync is active.
+        """
         if self._table is None:
             return
         ids = kwargs.get("ids", [])
@@ -322,7 +345,8 @@ class LanceBackend:
     """Factory for the LanceDB backend."""
 
     def get_collection(
-        self, palace_path: str, collection_name: str, create: bool = True, embedder=None,
+        self, palace_path: str, collection_name: str, create: bool = True,
+        embedder=None, sync_identity=None,
     ):
         import lancedb
 
@@ -343,4 +367,4 @@ class LanceBackend:
             embedder = get_embedder(MempalaceConfig().embedder_config)
 
         db = lancedb.connect(palace_path)
-        return LanceCollection(db, collection_name, embedder)
+        return LanceCollection(db, collection_name, embedder, sync_identity=sync_identity)

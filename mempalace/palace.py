@@ -42,6 +42,7 @@ _chroma_backend = ChromaBackend()
 def get_collection(
     palace_path: str, collection_name: str = "mempalace_drawers",
     backend: str = None, embedder=None, create: bool = True,
+    sync_identity=None,
 ):
     """Get or create the palace collection.
 
@@ -59,7 +60,8 @@ def get_collection(
             palace_path, collection_name=collection_name, create=create,
         )
     return _lance_backend.get_collection(
-        palace_path, collection_name=collection_name, create=create, embedder=embedder,
+        palace_path, collection_name=collection_name, create=create,
+        embedder=embedder, sync_identity=sync_identity,
     )
 
 
