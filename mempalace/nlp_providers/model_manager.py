@@ -37,6 +37,7 @@ class ModelSpec:
     required_packages: list  # pip packages that must be importable
     description: str = ""
     optional: bool = False  # True for Phase 4 (Gemma)
+    hf_repo_id: str = ""  # HuggingFace repo for snapshot_download
 
 
 # -- Model catalog --
@@ -77,10 +78,11 @@ MODEL_CATALOG: Dict[str, ModelSpec] = {
         id="gemma-3-1b-onnx",
         display_name="Gemma 3 1B ONNX",
         phase=4,
-        size_mb=500,
+        size_mb=1100,
         required_packages=["onnxruntime_genai"],
         description="Small language model for complex extraction",
         optional=True,
+        hf_repo_id="MiCkSoftware/gemma-3-1b-it-abliterated-onnx-genai-int4-20260213-221858",
     ),
 }
 
@@ -289,8 +291,8 @@ class ModelManager:
             lock_file.write_text(f"pid={os.getpid()}")
 
             try:
-                # Placeholder: actual download logic is per-provider
-                # and will be implemented when each provider is added
+                if spec.hf_repo_id:
+                    return self._download_from_hf(spec, model_path, lock_file)
                 logger.info(f"Model download for {spec.display_name} not yet implemented")
                 lock_file.unlink(missing_ok=True)
                 return None
@@ -298,3 +300,27 @@ class ModelManager:
                 lock_file.unlink(missing_ok=True)
                 logger.error(f"Download error for {spec.display_name}: {e}")
                 return None
+
+    def _download_from_hf(
+        self, spec: ModelSpec, model_path: Path, lock_file: Path
+    ) -> Optional[Path]:
+        """Download a model from HuggingFace Hub using snapshot_download."""
+        try:
+            from huggingface_hub import snapshot_download
+
+            logger.info(f"Downloading {spec.display_name} from {spec.hf_repo_id}...")
+            snapshot_path = snapshot_download(
+                repo_id=spec.hf_repo_id,
+                local_dir=str(model_path),
+            )
+            lock_file.unlink(missing_ok=True)
+            logger.info(f"Downloaded {spec.display_name} to {snapshot_path}")
+            return model_path
+        except ImportError:
+            logger.error("huggingface_hub not installed — cannot download model")
+            lock_file.unlink(missing_ok=True)
+            return None
+        except Exception as e:
+            lock_file.unlink(missing_ok=True)
+            logger.error(f"HuggingFace download failed for {spec.display_name}: {e}")
+            return None
