@@ -12,6 +12,7 @@ AI memory system. Store everything, find anything. Local, free, no API key.
 | /mempalace:search    | Search your memories           |
 | /mempalace:mine      | Mine projects and conversations|
 | /mempalace:status    | Palace overview and stats      |
+| /mempalace:stats     | Compact palace counts          |
 | /mempalace:help      | This help message              |
 
 ---
@@ -59,6 +60,7 @@ AI memory system. Store everything, find anything. Local, free, no API key.
     mempalace wake-up                     Load palace into context
     mempalace compress                    Compress palace storage
     mempalace status                      Show palace status
+    mempalace stats                       Show wing, hall, room, and memory counts
     mempalace repair                      Rebuild vector index
     mempalace mcp                         Show MCP setup command
     mempalace hook run                    Run hook logic (for harness integration)

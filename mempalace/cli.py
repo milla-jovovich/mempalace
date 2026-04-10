@@ -17,7 +17,8 @@ Commands:
     mempalace mcp                         Show MCP setup command
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
-    mempalace status                      Show what's been filed
+    mempalace status                      Show palace structure and what's been filed
+    mempalace stats                       Show numeric counts for wings, halls, rooms, memories
 
 Examples:
     mempalace init ~/projects/my_app
@@ -155,6 +156,69 @@ def cmd_status(args):
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     status(palace_path=palace_path)
+
+
+def _palace_stats(col):
+    """Collect unique wing/hall/room counts and total memories from a collection."""
+    total = col.count()
+    wings = set()
+    halls = set()
+    rooms = set()
+    offset = 0
+    batch_size = 1000
+
+    while offset < total:
+        batch = col.get(limit=batch_size, offset=offset, include=["metadatas"])
+        metadatas = batch.get("metadatas", []) or []
+        for meta in metadatas:
+            if not meta:
+                continue
+
+            wing = meta.get("wing")
+            hall = meta.get("hall")
+            room = meta.get("room")
+
+            if wing:
+                wings.add(wing)
+            if hall:
+                halls.add(hall)
+            if room:
+                rooms.add(room)
+
+        ids = batch.get("ids", []) or []
+        if not ids:
+            break
+        offset += len(ids)
+
+    return {
+        "wings": len(wings),
+        "halls": len(halls),
+        "rooms": len(rooms),
+        "memories": total,
+    }
+
+
+def cmd_stats(args):
+    """Show palace statistics: wings, halls, rooms, memories."""
+    import chromadb
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+
+    try:
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection("mempalace_drawers")
+    except Exception:
+        print(f"\n  No palace found at {palace_path}")
+        print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        sys.exit(1)
+
+    stats = _palace_stats(col)
+    print("\nMemPalace stats")
+    print("=" * 40)
+    print(f"Wings: {stats['wings']:,}")
+    print(f"Halls: {stats['halls']:,}")
+    print(f"Rooms: {stats['rooms']:,}")
+    print(f"Memories: {stats['memories']:,}")
 
 
 def cmd_repair(args):
@@ -515,7 +579,7 @@ def main():
         help="Output skill instructions to stdout",
     )
     instructions_sub = p_instructions.add_subparsers(dest="instructions_name")
-    for instr_name in ["init", "search", "mine", "help", "status"]:
+    for instr_name in ["init", "search", "mine", "help", "status", "stats"]:
         instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
 
     # repair
@@ -531,7 +595,10 @@ def main():
     )
 
     # status
-    sub.add_parser("status", help="Show what's been filed")
+    sub.add_parser("status", help="Show palace structure and what's been filed")
+
+    # stats
+    sub.add_parser("stats", help="Show numeric counts for wings, halls, rooms, memories")
 
     args = parser.parse_args()
 
@@ -566,6 +633,7 @@ def main():
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
         "status": cmd_status,
+        "stats": cmd_stats,
     }
     dispatch[args.command](args)
 

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mempalace.cli import (
+    cmd_stats,
     cmd_compress,
     cmd_hook,
     cmd_init,
@@ -47,7 +48,85 @@ def test_cmd_status_custom_palace(mock_config_cls):
         mock_miner.status.assert_called_once_with(palace_path=expected)
 
 
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_stats_handles_missing_palace(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(palace=None)
+    mock_chromadb = MagicMock()
+    mock_chromadb.PersistentClient.return_value.get_collection.side_effect = Exception("missing")
+
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        with pytest.raises(SystemExit) as exc_info:
+            cmd_stats(args)
+
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert "No palace found" in out
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_stats_prints_summary(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(palace=None)
+    mock_col = MagicMock()
+    mock_col.count.return_value = 4
+    mock_col.get.side_effect = [
+        {
+            "ids": ["1", "2", "3", "4"],
+            "metadatas": [
+                {"wing": "alpha", "hall": "facts", "room": "auth"},
+                {"wing": "alpha", "hall": "events", "room": "billing"},
+                {"wing": "beta", "room": "auth"},
+                {"wing": "beta", "hall": "facts", "room": "deploy"},
+            ],
+        }
+    ]
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb = MagicMock()
+    mock_chromadb.PersistentClient.return_value = mock_client
+
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        cmd_stats(args)
+
+    out = capsys.readouterr().out
+    assert "Wings: 2" in out
+    assert "Halls: 2" in out
+    assert "Rooms: 3" in out
+    assert "Memories: 4" in out
+
+
 # ── cmd_search ─────────────────────────────────────────────────────────
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_stats_reports_zero_when_halls_metadata_is_missing(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(palace=None)
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.side_effect = [
+        {
+            "ids": ["1", "2"],
+            "metadatas": [
+                {"wing": "alpha", "room": "auth"},
+                {"wing": "beta", "room": "billing"},
+            ],
+        }
+    ]
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb = MagicMock()
+    mock_chromadb.PersistentClient.return_value = mock_client
+
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        cmd_stats(args)
+
+    out = capsys.readouterr().out
+    assert "Wings: 2" in out
+    assert "Halls: 0" in out
+    assert "Rooms: 2" in out
+    assert "Memories: 2" in out
 
 
 @patch("mempalace.cli.MempalaceConfig")
@@ -277,6 +356,15 @@ def test_main_status_dispatches():
     with (
         patch("sys.argv", ["mempalace", "status"]),
         patch("mempalace.cli.cmd_status") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+
+
+def test_main_stats_dispatches():
+    with (
+        patch("sys.argv", ["mempalace", "stats"]),
+        patch("mempalace.cli.cmd_stats") as mock_cmd,
     ):
         main()
         mock_cmd.assert_called_once()

@@ -585,6 +585,7 @@ mempalace compress --wing myapp                   # AAAK compress
 
 # Status
 mempalace status                                  # palace overview
+mempalace stats                                   # show wings, halls, rooms, memories
 
 # MCP
 mempalace mcp                                     # show MCP setup command
