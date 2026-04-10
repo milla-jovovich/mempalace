@@ -16,7 +16,7 @@
 > security audit.
 >
 > **Build:** `cargo build --release` → `target/release/mempalace`
-> **Tests:** `cargo test --workspace` (373 tests across 5 crates)
+> **Tests:** `cargo test --workspace` (403 tests across 5 crates)
 
 <br>
 

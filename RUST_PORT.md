@@ -3,7 +3,7 @@
 This repository is being converted from Python to pure Rust.
 
 - **Branch:** `feat/convert-to-rust`
-- **Status:** Phase 7 of 7 — Rust port complete. Python moved to `legacy/`. 373 tests passing.
+- **Status:** Phase 7 of 7 + R1–R7 remediation complete. Python moved to `legacy/`. 403 tests passing.
 - **Plan:** [`.sisyphus/plans/rust-port.md`](.sisyphus/plans/rust-port.md)
 - **Research:**
   - [`.sisyphus/research/01-rust-stack.md`](.sisyphus/research/01-rust-stack.md)
@@ -22,6 +22,18 @@ This repository is being converted from Python to pure Rust.
 | 6 | `mempalace-cli`: clap binary + end-to-end integration tests (13 tests) | **done** |
 | 7 | Security audit, move Python to `legacy/`, final polish | **done** |
 
+### Post-phase-7 remediation (R1–R7)
+
+| Phase | Scope | Status |
+|---|---|---|
+| R1 | `LanceDbPalace` backend: fastembed 5 + lancedb 0.27.2, 384-dim cosine ANN search (+5 tests) | **done** |
+| R2 | `rmcp` stdio MCP transport: real JSON-RPC server with 17 tools, `mcp-serve` CLI (+1 test) | **done** |
+| R3 | `convo_miner` port: 5 chat formats, exchange-pair chunking, topic room detection (+15 tests) | **done** |
+| R4 | CLI modes: `--mode convos`, `--extract general`, `compress` subcommand (+3 tests) | **done** |
+| R5 | End-to-end integration tests: mine→search, kg CRUD, MCP tool calls, compress (+6 tests) | **done** |
+| R6 | Security re-audit, `cargo-deny` config, RUST_PORT.md update (0 new tests) | **done** |
+| R7 | Final verification, docs cleanup, truth-in-advertising pass (0 new tests) | **done** |
+
 ## Workspace layout
 
 ```
@@ -34,9 +46,9 @@ mempalace/
 ├── crates/
 │   ├── mempalace-core/                 leaf types, config, sanitize (32 tests)
 │   ├── mempalace-text/                 dialect, normalize, entity_*, spellcheck (226 tests)
-│   ├── mempalace-store/                rusqlite KG + Palace trait + graph + layers (57 tests)
-│   ├── mempalace-server/               MCP server, ingest, searcher, hooks, onboarding (45 tests)
-│   └── mempalace-cli/                  `mempalace` binary (13 end-to-end tests)
+│   ├── mempalace-store/                rusqlite KG + Palace trait + LanceDb backend + graph + layers (62 tests)
+│   ├── mempalace-server/               MCP server, ingest, convo_miner, searcher, hooks, onboarding (60 tests)
+│   └── mempalace-cli/                  `mempalace` binary (23 end-to-end + integration tests)
 └── legacy/                             (Python reference implementation)
     ├── mempalace/                      old Python package
     ├── tests/                          old Python test suite
@@ -71,8 +83,8 @@ mempalace/
 ## Test strategy
 
 All 315 unit-test equivalents from Python are represented in the Rust
-workspace — 373 Rust tests total across 5 crates, exceeding the original
-count. The 68 `tests/benchmarks/` tests are excluded (they characterise
+workspace — 403 Rust tests total across 5 crates, exceeding the original
+count (373 after initial port, 403 after R1–R7 remediation). The 68 `tests/benchmarks/` tests are excluded (they characterise
 ChromaDB-exact numerics and will be re-baselined against the lancedb
 backend in a follow-up). The previously untested
 `mempalace_get_aaak_spec` MCP tool is now covered in
@@ -83,15 +95,14 @@ backend in a follow-up). The previously untested
 - `#![forbid(unsafe_code)]` present on every `lib.rs` and `main.rs`.
 - `cargo clippy --workspace --all-targets -- -D warnings` — clean.
 - `cargo fmt --check` — clean.
-- `cargo test --workspace` — 373 passed, 0 failed.
+- `cargo test --workspace` — 403 passed, 0 failed (373 at phase 7, 403 after R1–R7).
 - `grep -rn 'format!.*(SELECT|INSERT|UPDATE|DELETE)' crates/` — zero
   matches; all rusqlite call sites use `params!` bindings.
 - No shell invocations anywhere in `crates/` (checked by hand, no
   `std::process::Command::new("sh"|"bash")`).
 - Python implementation moved to `legacy/` for reference. The Rust
   workspace no longer depends on Python at runtime.
-- `cargo audit` is not installed in the CI image yet — planned to be
-  added alongside the lancedb production backend in a follow-up.
+- `cargo audit` is in CI via `rustsec/audit-check@v2` (added in R6).
 
 ## R6 security audit (2026-04-09)
 
