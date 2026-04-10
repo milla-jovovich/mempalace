@@ -13,7 +13,7 @@ A searchable memory palace for AI — mine projects and conversations, then sear
 Ensure `mempalace` is installed:
 
 ```bash
-mempalace --version
+mempalace status
 ```
 
 If not installed:
