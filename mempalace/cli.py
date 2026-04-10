@@ -96,6 +96,11 @@ def cmd_mine(args):
             respect_gitignore=not args.no_gitignore,
             include_ignored=include_ignored,
         )
+        
+    # Run REM cycle asynchronously after successful mine
+    if not args.dry_run:
+        from .hooks_cli import trigger_rem_cycle_async
+        trigger_rem_cycle_async()
 
 
 def cmd_search(args):

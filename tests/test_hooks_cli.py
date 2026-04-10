@@ -418,3 +418,13 @@ def test_run_hook_invalid_json(tmp_path):
             with patch("mempalace.hooks_cli._output") as mock_output:
                 run_hook("session-start", "claude-code")
     mock_output.assert_called_once_with({})
+
+from unittest.mock import patch
+from mempalace.hooks_cli import trigger_rem_cycle_async
+
+@patch("subprocess.Popen")
+def test_trigger_rem_cycle(mock_popen):
+    trigger_rem_cycle_async()
+    mock_popen.assert_called_once()
+    args = mock_popen.call_args[0][0]
+    assert "rem_cycle" in " ".join(args)

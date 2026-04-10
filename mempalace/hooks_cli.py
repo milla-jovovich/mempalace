@@ -212,6 +212,20 @@ def hook_precompact(data: dict, harness: str):
     _output({"decision": "block", "reason": PRECOMPACT_BLOCK_REASON})
 
 
+def trigger_rem_cycle_async():
+    """Spawn the REM cycle in the background without blocking."""
+    try:
+        # Run module as script in detached process
+        subprocess.Popen(
+            [sys.executable, "-m", "mempalace.rem_cycle"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True # Detach from parent (Unix) or use creationflags (Windows)
+        )
+    except Exception:
+        pass # Fail silently, it's a background optimization
+
+
 def run_hook(hook_name: str, harness: str):
     """Main entry point: read stdin JSON, dispatch to hook handler."""
     try:
