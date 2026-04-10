@@ -106,6 +106,8 @@ mempalace status
 
 Three mining modes: **projects** (code and docs), **convos** (conversation exports), and **general** (auto-classifies into decisions, preferences, milestones, problems, and emotional context). Everything stays on your machine.
 
+If you want to adopt MemPalace into your own private GitHub repository for personal use, see [examples/private_repo_setup.md](examples/private_repo_setup.md).
+
 ---
 
 ## How You Actually Use It

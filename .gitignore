@@ -6,3 +6,8 @@ __pycache__/
 .pytest_cache/
 mempal.yaml
 .a5c/
+.env
+.env.*
+!.env.example
+.venv/
+.mempalace/

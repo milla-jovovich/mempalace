@@ -30,7 +30,7 @@ python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_clean
 python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json --mode rooms
 
 # Quick test on 20 questions first
-python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json --limit 20
+python benchmarks/longmemeval_bench.py /tmp/glongmemeval-data/longmemeval_s_cleaned.json --limit 20
 
 # Turn-level granularity
 python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json --granularity turn
