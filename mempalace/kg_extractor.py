@@ -450,8 +450,19 @@ def extract_kg(
     result.entities_found = len(entities)
 
     # Write to KG
-    # Count triples once before the batch, not per-triple (avoids 2N SQLite queries)
-    triples_before = kg.stats()["triples"] if not dry_run else 0
+    # Pre-fetch existing triple keys once so we can detect duplicates without
+    # relying on stats() comparisons (which can be unreliable under concurrent
+    # writes per @web3guru888's review on PR #434).
+    existing_keys = set()
+    if not dry_run:
+        try:
+            conn = kg._conn()
+            for row in conn.execute(
+                "SELECT subject, predicate, object FROM triples WHERE valid_to IS NULL"
+            ).fetchall():
+                existing_keys.add((row["subject"], row["predicate"], row["object"]))
+        except Exception as e:
+            result.errors.append(f"Error pre-fetching existing triples: {e}")
 
     for t in all_triples:
         if dry_run:
@@ -472,25 +483,33 @@ def extract_kg(
                 if obj_type != "unknown":
                     kg.add_entity(t["object"], entity_type=obj_type)
 
+                # Compute the normalized key the same way KG does
+                sub_key = t["subject"].lower().replace(" ", "_").replace("'", "")
+                obj_key = t["object"].lower().replace(" ", "_").replace("'", "")
+                pred_key = t["predicate"].lower().replace(" ", "_")
+                triple_key = (sub_key, pred_key, obj_key)
+                is_new = triple_key not in existing_keys
+
                 triple_id = kg.add_triple(
                     t["subject"],
                     t["predicate"],
                     t["object"],
                     source_file=t["source"],
                 )
-                result.details.append({
-                    "subject": t["subject"],
-                    "predicate": t["predicate"],
-                    "object": t["object"],
-                    "source": t["source"],
-                    "triple_id": triple_id,
-                })
+
+                if is_new:
+                    result.triples_added += 1
+                    existing_keys.add(triple_key)
+                    result.details.append({
+                        "subject": t["subject"],
+                        "predicate": t["predicate"],
+                        "object": t["object"],
+                        "source": t["source"],
+                        "triple_id": triple_id,
+                    })
+                else:
+                    result.triples_skipped += 1
             except Exception as e:
                 result.errors.append(f"Error adding triple {t}: {e}")
-
-    if not dry_run:
-        triples_after = kg.stats()["triples"]
-        result.triples_added = triples_after - triples_before
-        result.triples_skipped = len(all_triples) - result.triples_added - len(result.errors)
 
     return result
