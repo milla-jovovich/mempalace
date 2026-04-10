@@ -156,13 +156,13 @@ def _try_claude_code_jsonl_streaming(filepath: str) -> Optional[str]:
 
 def _try_codex_jsonl_streaming(filepath: str) -> Optional[str]:
     """OpenAI Codex CLI sessions - streaming version for large files.
-    
+
     Uses only event_msg entries (user_message / agent_message) which represent
     the canonical conversation turns. response_item entries are skipped.
     """
     messages = []
     has_session_meta = False
-    
+
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             for line in f:

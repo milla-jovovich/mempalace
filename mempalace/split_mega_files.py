@@ -102,8 +102,8 @@ def count_sessions_streaming(filepath):
     """
     Stream through file to count true session starts without loading entire file.
     Returns the session count.
-    
-    A true session start is a 'Claude Code v' header NOT followed by 
+
+    A true session start is a 'Claude Code v' header NOT followed by
     'Ctrl+E'/'previous messages' within the next 6 lines.
     """
     count = 0
@@ -115,7 +115,7 @@ def count_sessions_streaming(filepath):
                     line = next(f)
                 except StopIteration:
                     break
-                    
+
                 if "Claude Code v" in line:
                     # Peek ahead: read next 5 lines to check for Ctrl+E context
                     context = [line]
@@ -124,7 +124,7 @@ def count_sessions_streaming(filepath):
                             context.append(next(f))
                         except StopIteration:
                             break
-                    
+
                     nearby = "".join(context)
                     if "Ctrl+E" not in nearby and "previous messages" not in nearby:
                         count += 1
@@ -233,20 +233,19 @@ def split_file(filepath, output_dir, dry_run=False, min_sessions=2):
     written = []
 
     current_session = []
-    buffer = []
     session_count = 0
 
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             pending_header = None  # Lines collected while checking for context restore
-            
+
             for line in f:
                 # If we have a pending header, we're checking if it's a context restore
                 if pending_header is not None:
                     pending_header.append(line)
                     # Check if this is a context restore (Ctrl+E in first 6 lines)
                     nearby = "".join(pending_header)
-                    
+
                     if len(pending_header) >= 6 or "Ctrl+E" in nearby or "previous messages" in nearby:
                         # We've collected enough context to decide
                         if "Ctrl+E" not in nearby and "previous messages" not in nearby:
@@ -265,7 +264,7 @@ def split_file(filepath, output_dir, dry_run=False, min_sessions=2):
                                 current_session = list(pending_header)
                         pending_header = None
                     continue
-                
+
                 # Check for new session header
                 if "Claude Code v" in line:
                     # Start collecting context to check for Ctrl+E
@@ -274,7 +273,7 @@ def split_file(filepath, output_dir, dry_run=False, min_sessions=2):
                     # Normal line - add to current session
                     if current_session:
                         current_session.append(line)
-            
+
             # Handle any pending header at end of file
             if pending_header is not None:
                 nearby = "".join(pending_header)
