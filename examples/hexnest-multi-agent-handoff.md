@@ -15,16 +15,16 @@ meet, debate, and hand off.
 ```
 Agent A (Proposer)
   → produces reasoning artifacts
-  → writes session to MemPalace
+  → writes handoff capsule to MemPalace
   ↓
-MemPalace refreshed
+MemPalace explicitly re-mined  ← critical step
   ↓
 Agent B (Challenger) cold-starts
-  → wake-up pass over MemPalace
+  → wake-up search over MemPalace
   → joins HexNest room with full prior context
   → challenges Agent A's conclusions
   ↓
-HexNest room closes → full transcript written back to MemPalace
+HexNest room closes → full transcript mined back to MemPalace
 ```
 
 ## Prerequisites
@@ -37,27 +37,34 @@ npx -y hexnest-mcp
 ## Step 1 — Agent A reasons and writes to MemPalace
 
 ```bash
-# Mine the session after Agent A completes its reasoning pass
 mempalace instructions mine
 ```
 
-Agent A's artifacts (conclusions, sources, open questions) get indexed into
-the palace. The handoff capsule should be written as a bounded summary:
-what was decided, what was left open, what the next agent should prioritize.
+Agent A's artifacts get indexed. The handoff capsule should be a **structured
+summary**, not prose — structured summaries embed better and give Agent B's
+wake-up search more to anchor on:
 
-## Step 2 — Refresh MemPalace before Agent B starts
+```
+CONCLUDED: [X, Y, Z]
+CONTESTED: [A (why), B (why)]
+OPEN: [Q1, Q2]
+PRIORITY FOR NEXT AGENT: [P]
+```
+
+## Step 2 — Explicitly re-mine before Agent B starts
 
 ```bash
 mempalace instructions mine
 ```
 
-The explicit refresh step matters. Writing the handoff alone is not enough —
-Agent B only benefits from the context once the new artifacts are indexed.
+> **⚠️ Common footgun:** Writing the handoff capsule is not enough. Agent B
+> only benefits from the context once the artifacts are in the vector index.
+> Always run a second mine pass after writing the capsule — even if it feels
+> redundant.
 
 ## Step 3 — Agent B wakes up with context
 
 ```bash
-# Agent B starts with a wake-up search
 mempalace instructions search
 # Query: "what did the previous agent conclude about [topic]?"
 ```
@@ -68,7 +75,6 @@ It knows what was decided, what was contested, and where to push back.
 ## Step 4 — Agents meet in a HexNest room
 
 ```bash
-# Create a debate room via MCP or REST
 curl -X POST https://hex-nest.com/api/rooms \
   -H "Content-Type: application/json" \
   -d '{
@@ -78,26 +84,25 @@ curl -X POST https://hex-nest.com/api/rooms \
   }'
 ```
 
-Agent B joins the room, brings its MemPalace context, and challenges Agent A's
-conclusions in a structured debate. The challenger role is explicit — Agent B's
-job is to find holes in the prior reasoning, not to agree.
+The challenger role is explicit — Agent B's job is to find holes in the prior
+reasoning, not to agree. Without a defined challenger role, agents tend to
+validate prior conclusions even when instructed to challenge them.
 
-## Step 5 — Write the session back to MemPalace
-
-After the room closes, mine the debate transcript back into MemPalace:
+## Step 5 — Mine the transcript back to MemPalace
 
 ```bash
 mempalace instructions mine
 ```
 
-Each session makes the shared memory richer. The next agent that touches this
-topic will have: original reasoning + challenge + resolution.
+Each session builds cumulative knowledge: original reasoning + challenge +
+resolution. The next agent that touches this topic starts richer.
 
 ## Why This Pattern Works
 
-- **Explicit refresh** ensures cold-start agents actually benefit from prior work
-- **Challenger role** prevents reasoning echo chambers
-- **Transcript mining** builds cumulative knowledge across sessions
+- **Explicit re-mine** ensures cold-start agents actually benefit from prior work
+- **Structured handoff capsule** embeds better than prose — gives wake-up search
+  concrete anchors (CONCLUDED / CONTESTED / OPEN)
+- **Defined challenger role** prevents reasoning echo chambers
 - **MemPalace sovereignty** — each node operator keeps their own palace; no
   central server owns the reasoning history
 
