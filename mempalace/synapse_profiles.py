@@ -73,9 +73,15 @@ def compute_decay(age_days: float, half_life_days: int) -> float:
 class RetrievalProfile:
     """Resolved Synapse profile with all values populated."""
 
-    def __init__(self, name: str, values: Dict[str, Any]):
+    def __init__(
+        self,
+        name: str,
+        values: Dict[str, Any],
+        sources: Optional[Dict[str, str]] = None,
+    ):
         self.name = name
         self._values = values
+        self._sources = sources or {}
 
     def __getattr__(self, key: str) -> Any:
         if key.startswith("_") or key == "name":
@@ -84,8 +90,18 @@ class RetrievalProfile:
             return self._values[key]
         raise AttributeError(f"RetrievalProfile has no key '{key}'")
 
+    def get_source(self, key: str) -> str:
+        return self._sources.get(key, "unknown")
+
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, **self._values}
+
+    def to_annotated_dict(self) -> Dict[str, Dict[str, Any]]:
+        """Each resolved value paired with the merge layer that last set it."""
+        return {
+            k: {"value": v, "source": self._sources.get(k, "unknown")}
+            for k, v in self._values.items()
+        }
 
 
 class ProfileManager:
@@ -159,42 +175,64 @@ class ProfileManager:
             )
             actual_name = "default"
 
-        merged: Dict[str, Any] = dict(HARDCODED_DEFAULTS)
+        merged: Dict[str, Any] = {}
+        sources: Dict[str, str] = {}
+
+        for k, v in HARDCODED_DEFAULTS.items():
+            merged[k] = v
+            sources[k] = "hardcoded"
+
         if global_merged:
-            merged.update(global_merged)
+            for k, v in global_merged.items():
+                if v is not None:
+                    merged[k] = v
+                    sources[k] = "global config.json"
 
         if "default" in self._config_profiles and isinstance(
             self._config_profiles["default"], dict
         ):
-            merged.update(self._config_profiles["default"])
+            for k, v in self._config_profiles["default"].items():
+                merged[k] = v
+                sources[k] = "default (config.json)"
 
         if "default" in self._file_profiles and isinstance(
             self._file_profiles["default"], dict
         ):
-            merged.update(self._file_profiles["default"])
+            for k, v in self._file_profiles["default"].items():
+                merged[k] = v
+                sources[k] = "default (synapse_profiles.json)"
 
         if actual_name != "default" and actual_name in self._config_profiles:
             layer = self._config_profiles[actual_name]
             if isinstance(layer, dict):
-                merged.update(layer)
+                for k, v in layer.items():
+                    merged[k] = v
+                    sources[k] = "profile (config.json)"
 
         if actual_name != "default" and actual_name in self._file_profiles:
             layer = self._file_profiles[actual_name]
             if isinstance(layer, dict):
-                merged.update(layer)
+                for k, v in layer.items():
+                    merged[k] = v
+                    sources[k] = "profile (synapse_profiles.json)"
 
         if per_query_overrides:
             for k, v in per_query_overrides.items():
                 if v is not None:
                     merged[k] = v
+                    sources[k] = "per-query override"
 
         axes = merged.get("axes_enabled", [])
         if isinstance(axes, list):
+            ax_src = sources.get("axes_enabled", "hardcoded")
             if "ltp" not in axes:
                 merged["ltp_enabled"] = False
+                sources["ltp_enabled"] = f"axes_enabled ({ax_src})"
             if "tagging" not in axes:
                 merged["tagging_enabled"] = False
+                sources["tagging_enabled"] = f"axes_enabled ({ax_src})"
             if "association" not in axes:
                 merged["association_enabled"] = False
+                sources["association_enabled"] = f"axes_enabled ({ax_src})"
 
-        return RetrievalProfile(actual_name, merged)
+        return RetrievalProfile(actual_name, merged, sources=sources)

@@ -159,8 +159,6 @@ def cmd_status(args):
 
 
 def cmd_synapse(args):
-    import json
-
     from .synapse_profiles import ProfileManager, global_merged_from_mempalace_config
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
@@ -171,7 +169,14 @@ def cmd_synapse(args):
             args.name,
             global_merged=global_merged_from_mempalace_config(cfg),
         )
-        print(json.dumps(profile.to_dict(), indent=2, ensure_ascii=False))
+        annotated = profile.to_annotated_dict()
+        print(f"[{profile.name}] effective config (resolved):")
+        max_key_len = max(len(k) for k in annotated)
+        for k in sorted(annotated):
+            info = annotated[k]
+            value = info["value"]
+            source = info["source"]
+            print(f"  {k:<{max_key_len}} : {value!s:<10} ← {source}")
 
 
 def cmd_repair(args):

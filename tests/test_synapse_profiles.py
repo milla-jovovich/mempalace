@@ -172,3 +172,36 @@ def test_malformed_profiles_json_handled(palace_dir):
 
 def test_hardcoded_defaults_association_off_matches_legacy():
     assert HARDCODED_DEFAULTS["association_enabled"] is False
+
+
+def test_sources_track_hardcoded(palace_dir):
+    pm = ProfileManager(palace_dir)
+    profile = pm.resolve()
+    assert profile.get_source("half_life_days") == "hardcoded"
+
+
+def test_sources_track_profile_override(palace_dir):
+    config = {"synapse_profiles": {"orient": {"half_life_days": 180}}}
+    with open(os.path.join(palace_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    pm = ProfileManager(palace_dir)
+    profile = pm.resolve("orient")
+    assert profile.get_source("half_life_days") == "profile (config.json)"
+    assert profile.get_source("ltp_max_boost") == "hardcoded"
+
+
+def test_sources_track_per_query(palace_dir):
+    pm = ProfileManager(palace_dir)
+    profile = pm.resolve("default", per_query_overrides={"half_life_days": 45})
+    assert profile.get_source("half_life_days") == "per-query override"
+
+
+def test_to_annotated_dict(palace_dir):
+    config = {"synapse_profiles": {"default": {"half_life_days": 120}}}
+    with open(os.path.join(palace_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    pm = ProfileManager(palace_dir)
+    profile = pm.resolve()
+    annotated = profile.to_annotated_dict()
+    assert annotated["half_life_days"]["value"] == 120
+    assert annotated["half_life_days"]["source"] == "default (config.json)"
