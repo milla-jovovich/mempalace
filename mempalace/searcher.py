@@ -4,10 +4,17 @@ searcher.py — Find anything. Exact words.
 
 Semantic search against the palace.
 Returns verbatim text — the actual words, never summaries.
+
+When ``cursor_source_filter`` is enabled, ``search_memories`` requests extra
+candidates from Chroma before post-filtering. Tune how many with the environment
+variable ``MEMPALACE_CURSOR_SEARCH_FETCH_MULTIPLIER`` (integer, default 12, max 48),
+or pass ``cursor_fetch_multiplier`` for programmatic overrides.
 """
 
 import logging
+import os
 from pathlib import Path
+from typing import Optional
 
 import chromadb
 
@@ -16,6 +23,27 @@ CHAT_SOURCE_MARKER = "/agent-transcripts/"
 SUBAGENT_SOURCE_MARKER = "/subagents/"
 MIN_SIMILARITY = 0.15
 FETCH_MULTIPLIER = 12
+_CURSOR_FETCH_MULTIPLIER_ENV = "MEMPALACE_CURSOR_SEARCH_FETCH_MULTIPLIER"
+_MAX_CURSOR_FETCH_MULTIPLIER = 48
+
+
+def _cursor_fetch_multiplier() -> int:
+    """Default multiplier when ``cursor_fetch_multiplier`` is not passed explicitly."""
+    raw = os.environ.get(_CURSOR_FETCH_MULTIPLIER_ENV, "").strip()
+    if not raw:
+        return FETCH_MULTIPLIER
+    try:
+        n = int(raw)
+    except ValueError:
+        return FETCH_MULTIPLIER
+    return max(1, min(n, _MAX_CURSOR_FETCH_MULTIPLIER))
+
+
+def _effective_cursor_fetch_multiplier(explicit: Optional[int]) -> int:
+    """Multiplier for Chroma fetch size when cursor post-filtering is on."""
+    if explicit is not None:
+        return max(1, min(int(explicit), _MAX_CURSOR_FETCH_MULTIPLIER))
+    return _cursor_fetch_multiplier()
 
 
 class SearchError(Exception):
@@ -47,8 +75,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     try:
         kwargs = {
             "query_texts": [query],
-            # Fetch more candidates so we can post-filter low quality hits.
-            "n_results": max(n_results * FETCH_MULTIPLIER, n_results),
+            "n_results": n_results,
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
@@ -102,10 +129,16 @@ def search_memories(
     room: str = None,
     n_results: int = 5,
     cursor_source_filter: bool = False,
+    cursor_fetch_multiplier: Optional[int] = None,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
     Used by the MCP server and other callers that need data.
+
+    If ``cursor_source_filter`` is True, Chroma is queried with
+    ``n_results * multiplier`` rows so weak or duplicate transcript chunks can be
+    dropped; ``multiplier`` comes from ``cursor_fetch_multiplier``, else from
+    ``MEMPALACE_CURSOR_SEARCH_FETCH_MULTIPLIER`` (default 12).
     """
     try:
         client = chromadb.PersistentClient(path=palace_path)
@@ -127,7 +160,11 @@ def search_memories(
         where = {"room": room}
 
     try:
-        fetch_n = max(n_results * FETCH_MULTIPLIER, n_results) if cursor_source_filter else n_results
+        if cursor_source_filter:
+            mult = _effective_cursor_fetch_multiplier(cursor_fetch_multiplier)
+            fetch_n = n_results * mult
+        else:
+            fetch_n = n_results
         kwargs = {
             "query_texts": [query],
             "n_results": fetch_n,

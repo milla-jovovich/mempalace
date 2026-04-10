@@ -4,7 +4,7 @@ test_searcher.py — Tests for the programmatic search_memories API.
 Tests the library-facing search interface (not the CLI print variant).
 """
 
-from mempalace.searcher import CHAT_SOURCE_MARKER, FETCH_MULTIPLIER, search_memories
+from mempalace.searcher import CHAT_SOURCE_MARKER, FETCH_MULTIPLIER, search, search_memories
 
 
 class TestSearchMemories:
@@ -138,9 +138,51 @@ class TestSearchMemories:
                 return FakeCollection()
 
         monkeypatch.setattr("mempalace.searcher.chromadb.PersistentClient", lambda path: FakeClient())
+        monkeypatch.delenv("MEMPALACE_CURSOR_SEARCH_FETCH_MULTIPLIER", raising=False)
 
         search_memories("query", "/tmp/palace", n_results=3, cursor_source_filter=True)
         assert captured["n_results"] == 3 * FETCH_MULTIPLIER
+
+    def test_expands_respects_env_fetch_multiplier(self, monkeypatch):
+        captured = {}
+
+        class FakeCollection:
+            def query(self, **kwargs):
+                captured.update(kwargs)
+                return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+        class FakeClient:
+            def get_collection(self, _name):
+                return FakeCollection()
+
+        monkeypatch.setattr("mempalace.searcher.chromadb.PersistentClient", lambda path: FakeClient())
+        monkeypatch.setenv("MEMPALACE_CURSOR_SEARCH_FETCH_MULTIPLIER", "4")
+
+        search_memories("query", "/tmp/palace", n_results=3, cursor_source_filter=True)
+        assert captured["n_results"] == 12
+
+    def test_expands_respects_explicit_fetch_multiplier(self, monkeypatch):
+        captured = {}
+
+        class FakeCollection:
+            def query(self, **kwargs):
+                captured.update(kwargs)
+                return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+        class FakeClient:
+            def get_collection(self, _name):
+                return FakeCollection()
+
+        monkeypatch.setattr("mempalace.searcher.chromadb.PersistentClient", lambda path: FakeClient())
+
+        search_memories(
+            "query",
+            "/tmp/palace",
+            n_results=3,
+            cursor_source_filter=True,
+            cursor_fetch_multiplier=6,
+        )
+        assert captured["n_results"] == 18
 
     def test_cursor_source_filter_returns_result_fields(self, monkeypatch):
         class FakeCollection:
@@ -165,3 +207,22 @@ class TestSearchMemories:
         assert "source_file" in hit
         assert "similarity" in hit
         assert isinstance(hit["similarity"], float)
+
+
+def test_cli_search_requests_exact_n_results(monkeypatch):
+    """CLI ``search()`` must not expand n_results; only search_memories post-filter path does."""
+    captured = {}
+
+    class FakeCollection:
+        def query(self, **kwargs):
+            captured.update(kwargs)
+            return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+    class FakeClient:
+        def get_collection(self, _name):
+            return FakeCollection()
+
+    monkeypatch.setattr("mempalace.searcher.chromadb.PersistentClient", lambda path: FakeClient())
+
+    search("q", "/tmp/palace", n_results=5)
+    assert captured["n_results"] == 5
