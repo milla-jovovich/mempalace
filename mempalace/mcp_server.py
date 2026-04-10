@@ -113,8 +113,10 @@ def _wal_log(operation: str, params: dict, result: dict = None):
 def _get_client():
     """Return a ChromaDB PersistentClient, reconnecting if the database changed on disk.
 
-    Detects palace rebuilds (repair/nuke) by checking the inode of
+    Detects palace rebuilds (repair/nuke/purge) by checking the inode of
     chroma.sqlite3.  A full rebuild replaces the file, changing the inode.
+    Note: FAT/exFAT may return 0 for st_ino — the ``current_inode != 0``
+    guard skips reconnect detection on those filesystems (safe fallback).
     """
     global _client_cache, _collection_cache, _palace_db_inode, _metadata_cache, _metadata_cache_time
     db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
