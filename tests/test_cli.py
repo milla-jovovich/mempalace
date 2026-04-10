@@ -546,10 +546,10 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -619,10 +619,10 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
