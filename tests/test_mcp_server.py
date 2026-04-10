@@ -272,7 +272,8 @@ class TestWriteTools:
         assert result["wing"] == "test_wing"
         assert result["room"] == "test_room"
         assert result["drawer_id"].startswith("drawer_test_wing_test_room_")
-        col = _get_collection(palace_path, create=False)
+        _client, col = _get_collection(palace_path, create=False)
+        del _client
         meta = col.get(ids=[result["drawer_id"]], include=["metadatas"])["metadatas"][0]
         assert meta.get("synapse_mark") == "new"
 
