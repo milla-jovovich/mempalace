@@ -23,8 +23,9 @@ import sys
 import json
 import logging
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
@@ -33,6 +34,11 @@ from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
 
 from .knowledge_graph import KnowledgeGraph
+from .synapse import (
+    SYNAPSE_MARK_METADATA_KEY,
+    SYNAPSE_MARK_NEW,
+    build_soft_archive_proposal,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
@@ -136,13 +142,78 @@ def _no_palace():
 # ==================== READ TOOLS ====================
 
 
-def tool_status():
+def _parse_iso_utc(s: str):
+    """Parse ISO8601 metadata timestamps to timezone-aware UTC."""
+    try:
+        t = s.strip()
+        if t.endswith("Z"):
+            t = t[:-1] + "+00:00"
+        dt = datetime.fromisoformat(t)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except (ValueError, TypeError, OSError, AttributeError):
+        return None
+
+
+def _count_synaptic_tagging_window_drawers(metas: list, window_hours: float) -> int:
+    """Drawers with synapse_mark=new still inside the tagging boost window (by filed_at)."""
+    now = datetime.now(timezone.utc)
+    n = 0
+    for m in metas:
+        if m.get(SYNAPSE_MARK_METADATA_KEY) != SYNAPSE_MARK_NEW:
+            continue
+        fa = m.get("filed_at")
+        if not fa:
+            continue
+        dt = _parse_iso_utc(fa)
+        if dt is None:
+            continue
+        hours = (now - dt).total_seconds() / 3600.0
+        if 0 <= hours < float(window_hours):
+            n += 1
+    return n
+
+
+def _enrich_consolidation_candidates(col, candidates: list, cfg) -> list:
+    """Add wing/room from Chroma and optional soft-archive proposals (#336)."""
+    if not col or not candidates:
+        return []
+    ids = [c["drawer_id"] for c in candidates[:50]]
+    idm = {}
+    try:
+        got = col.get(ids=ids, include=["metadatas"])
+        idm = dict(zip(got["ids"], got["metadatas"]))
+    except Exception:
+        pass
+    out = []
+    for c in candidates[:50]:
+        d = dict(c)
+        m = idm.get(c["drawer_id"]) or {}
+        w = m.get("wing", "unknown")
+        r = m.get("room", "unknown")
+        d["wing"] = w
+        d["room"] = r
+        d[SYNAPSE_MARK_METADATA_KEY] = m.get(SYNAPSE_MARK_METADATA_KEY)
+        if cfg.synapse_soft_archive_suggestions_enabled:
+            d["soft_archive_proposal"] = build_soft_archive_proposal(
+                w,
+                r,
+                target_wing=cfg.synapse_soft_archive_target_wing,
+                inactive_days=cfg.synapse_consolidation_inactive_days,
+            )
+        out.append(d)
+    return out
+
+
+def tool_status(consolidation_wing: str = None):
     col = _get_collection()
     if not col:
         return _no_palace()
     count = col.count()
     wings = {}
     rooms = {}
+    all_meta = []
     try:
         all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
         for m in all_meta:
@@ -151,8 +222,8 @@ def tool_status():
             wings[w] = wings.get(w, 0) + 1
             rooms[r] = rooms.get(r, 0) + 1
     except Exception:
-        pass
-    return {
+        all_meta = []
+    status_dict = {
         "total_drawers": count,
         "wings": wings,
         "rooms": rooms,
@@ -160,6 +231,63 @@ def tool_status():
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
     }
+    palace_path = _config.palace_path
+    # Synapse status
+    try:
+        cfg = MempalaceConfig()
+        status_dict["synapse_enabled"] = cfg.synapse_enabled
+        if cfg.synapse_enabled:
+            from .synapse import SynapseDB
+
+            synapse_db = SynapseDB(palace_path)
+            synapse_db.cleanup_old_logs(retention_days=cfg.synapse_log_retention_days)
+            synapse_db.refresh_stats(
+                window_days=cfg.synapse_ltp_window_days,
+                ltp_max_boost=cfg.synapse_ltp_max_boost,
+            )
+            inactive = cfg.synapse_consolidation_inactive_days
+            candidates = synapse_db.get_consolidation_candidates(
+                inactive_days=inactive, wing=consolidation_wing
+            )
+            enriched = _enrich_consolidation_candidates(col, candidates, cfg)
+            log_stats = synapse_db.get_log_stats()
+            co_pairs = synapse_db.get_top_co_pairs(15)
+            co_clusters = synapse_db.get_co_occurrence_clusters(40, 10)
+            tagging_window_n = _count_synaptic_tagging_window_drawers(
+                all_meta, cfg.synapse_tagging_window_hours
+            )
+            status_dict["synapse"] = {
+                "ltp_enabled": cfg.synapse_ltp_enabled,
+                "tagging_enabled": cfg.synapse_tagging_enabled,
+                "association_enabled": cfg.synapse_association_enabled,
+                "association_max_boost": cfg.synapse_association_max_boost,
+                "association_coefficient": cfg.synapse_association_coefficient,
+                "log_retrievals": cfg.synapse_log_retrievals,
+                "ltp_window_days": cfg.synapse_ltp_window_days,
+                "ltp_max_boost": cfg.synapse_ltp_max_boost,
+                "tagging_window_hours": cfg.synapse_tagging_window_hours,
+                "tagging_max_boost": cfg.synapse_tagging_max_boost,
+                "log_retention_days": cfg.synapse_log_retention_days,
+                "log_stats": log_stats,
+                "co_retrieval_top_pairs": co_pairs,
+                "co_occurrence_clusters": co_clusters,
+                "consolidation_inactive_days": inactive,
+                "consolidation_candidates": len(candidates),
+                "consolidation_details": enriched[:10],
+                "phase3": {
+                    "synaptic_mark_metadata_key": SYNAPSE_MARK_METADATA_KEY,
+                    "synaptic_mark_new_value": SYNAPSE_MARK_NEW,
+                    "drawers_in_synaptic_tagging_window": tagging_window_n,
+                    "soft_archive": {
+                        "suggestions_enabled": cfg.synapse_soft_archive_suggestions_enabled,
+                        "target_wing": cfg.synapse_soft_archive_target_wing,
+                        "related_issue": "#336",
+                    },
+                },
+            }
+    except Exception:
+        status_dict["synapse_enabled"] = False
+    return status_dict
 
 
 # ── AAAK Dialect Spec ─────────────────────────────────────────────────────────
@@ -246,13 +374,22 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+def tool_search(
+    query: str,
+    limit: int = 5,
+    wing: str = None,
+    room: str = None,
+    synapse_ltp_enabled: Optional[bool] = None,
+    synapse_tagging_enabled: Optional[bool] = None,
+):
     return search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
+        synapse_ltp_enabled=synapse_ltp_enabled,
+        synapse_tagging_enabled=synapse_tagging_enabled,
     )
 
 
@@ -372,6 +509,7 @@ def tool_add_drawer(
                     "chunk_index": 0,
                     "added_by": added_by,
                     "filed_at": datetime.now().isoformat(),
+                    SYNAPSE_MARK_METADATA_KEY: SYNAPSE_MARK_NEW,
                 }
             ],
         )
@@ -590,7 +728,15 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
 TOOLS = {
     "mempalace_status": {
         "description": "Palace overview — total drawers, wing and room counts",
-        "input_schema": {"type": "object", "properties": {}},
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "consolidation_wing": {
+                    "type": "string",
+                    "description": "If set, limit Synapse consolidation candidates to drawer_ids containing this substring (optional)",
+                },
+            },
+        },
         "handler": tool_status,
     },
     "mempalace_list_wings": {
@@ -742,6 +888,14 @@ TOOLS = {
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "synapse_ltp_enabled": {
+                    "type": "boolean",
+                    "description": "Override LTP axis for this search only (omit = use config default)",
+                },
+                "synapse_tagging_enabled": {
+                    "type": "boolean",
+                    "description": "Override tagging axis for this search only (omit = use config default)",
+                },
             },
             "required": ["query"],
         },
