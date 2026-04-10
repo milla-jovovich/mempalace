@@ -13,6 +13,7 @@ from mempalace.hooks_cli import (
     _extract_recent_messages,
     _log,
     _maybe_auto_ingest,
+    _mempalace_python,
     _parse_harness_input,
     _sanitize_session_id,
     hook_stop,
@@ -20,6 +21,21 @@ from mempalace.hooks_cli import (
     hook_precompact,
     run_hook,
 )
+
+
+# --- _mempalace_python ---
+
+
+def test_mempalace_python_returns_string():
+    result = _mempalace_python()
+    assert isinstance(result, str)
+    assert "python" in result
+
+
+def test_mempalace_python_finds_venv():
+    """Should resolve to a venv python, not bare sys.executable."""
+    result = _mempalace_python()
+    assert "venv" in result or "site-packages" in result or result.endswith("python")
 
 
 # --- _sanitize_session_id ---

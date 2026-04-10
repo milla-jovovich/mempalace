@@ -17,6 +17,26 @@ from pathlib import Path
 SAVE_INTERVAL = 15
 STATE_DIR = Path.home() / ".mempalace" / "hook_state"
 
+
+def _mempalace_python() -> str:
+    """Return the python interpreter that has mempalace installed.
+
+    When hooks are invoked by Claude Code, sys.executable may be the system
+    python which lacks chromadb and other deps.  Walk up from this file to
+    find the venv's python, falling back to sys.executable.
+    """
+    # This file lives at <venv>/lib/pythonX.Y/site-packages/mempalace/hooks_cli.py
+    # or <project>/mempalace/hooks_cli.py (editable install).
+    # In either case, the venv bin/python sits alongside the venv's lib/.
+    venv_bin = Path(__file__).resolve().parents[3] / "bin" / "python"
+    if venv_bin.is_file():
+        return str(venv_bin)
+    # Editable install: project root has venv/ dir
+    project_venv = Path(__file__).resolve().parents[1] / "venv" / "bin" / "python"
+    if project_venv.is_file():
+        return str(project_venv)
+    return sys.executable
+
 _RECENT_MSG_COUNT = 30  # how many recent user messages to summarize
 
 STOP_BLOCK_REASON = (
@@ -114,7 +134,7 @@ def _maybe_auto_ingest():
             log_path = STATE_DIR / "hook.log"
             with open(log_path, "a") as log_f:
                 subprocess.Popen(
-                    [sys.executable, "-m", "mempalace", "mine", mempal_dir],
+                    [_mempalace_python(), "-m", "mempalace", "mine", mempal_dir],
                     stdout=log_f,
                     stderr=log_f,
                 )
@@ -249,7 +269,7 @@ def _ingest_transcript(transcript_path: str):
         with open(log_path, "a") as log_f:
             subprocess.Popen(
                 [
-                    sys.executable, "-m", "mempalace", "mine",
+                    _mempalace_python(), "-m", "mempalace", "mine",
                     str(path.parent), "--mode", "convos",
                     "--wing", "sessions",
                 ],
@@ -392,7 +412,7 @@ def hook_precompact(data: dict, harness: str):
             log_path = STATE_DIR / "hook.log"
             with open(log_path, "a") as log_f:
                 subprocess.run(
-                    [sys.executable, "-m", "mempalace", "mine", mempal_dir],
+                    [_mempalace_python(), "-m", "mempalace", "mine", mempal_dir],
                     stdout=log_f,
                     stderr=log_f,
                     timeout=60,
