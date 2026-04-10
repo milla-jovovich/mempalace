@@ -698,7 +698,13 @@ def mine(
                     for fp in pending
                 }
                 for future in as_completed(futures):
-                    result = future.result()
+                    fp = futures[future]
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        print(f"  ! [ERROR] {fp.name}: {e}")
+                        completed += 1
+                        continue
                     completed += 1
                     if result is None:
                         skipped_small += 1
