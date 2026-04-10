@@ -9,11 +9,14 @@ Two ways to define rooms without calling any AI:
 No internet. No API key. Your files stay on your machine.
 """
 
+import logging
 import os
 import sys
 import yaml
 from pathlib import Path
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 # Common room patterns — detected from folder names and filenames
 # Format: {folder_keyword: room_name}
@@ -118,7 +121,12 @@ def detect_rooms_from_folders(project_dir: str) -> list:
 
     # Check top-level directories first (most reliable signal)
     for item in project_path.iterdir():
-        if item.is_dir() and item.name not in SKIP_DIRS:
+        try:
+            is_dir = item.is_dir()  # WinError 448 — reparse point / untrusted mount point
+        except OSError as exc:
+            logger.debug("Skipping %s: %s", item, exc)
+            continue
+        if is_dir and item.name not in SKIP_DIRS:
             name_lower = item.name.lower().replace("-", "_")
             if name_lower in FOLDER_ROOM_MAP:
                 room_name = FOLDER_ROOM_MAP[name_lower]
@@ -132,9 +140,28 @@ def detect_rooms_from_folders(project_dir: str) -> list:
 
     # Walk one level deeper for nested patterns
     for item in project_path.iterdir():
-        if item.is_dir() and item.name not in SKIP_DIRS:
-            for subitem in item.iterdir():
-                if subitem.is_dir() and subitem.name not in SKIP_DIRS:
+        try:
+            item_is_dir = item.is_dir()  # WinError 448 — reparse point / untrusted mount point
+        except OSError as exc:
+            logger.debug("Skipping %s: %s", item, exc)
+            continue
+        if item_is_dir and item.name not in SKIP_DIRS:
+            try:
+                subitems = list(
+                    item.iterdir()
+                )  # WinError 448 — iterdir can also fail on some reparse points
+            except OSError as exc:
+                logger.debug("Skipping contents of %s: %s", item, exc)
+                continue
+            for subitem in subitems:
+                try:
+                    subitem_is_dir = (
+                        subitem.is_dir()
+                    )  # WinError 448 — reparse point / untrusted mount point
+                except OSError as exc:
+                    logger.debug("Skipping %s: %s", subitem, exc)
+                    continue
+                if subitem_is_dir and subitem.name not in SKIP_DIRS:
                     name_lower = subitem.name.lower().replace("-", "_")
                     if name_lower in FOLDER_ROOM_MAP:
                         room_name = FOLDER_ROOM_MAP[name_lower]
