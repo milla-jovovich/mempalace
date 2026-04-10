@@ -354,16 +354,12 @@ def mine_convos(
         if batch_docs:
             for batch_start in range(0, len(batch_docs), _ADD_BATCH_SIZE):
                 batch_end = batch_start + _ADD_BATCH_SIZE
-                try:
-                    collection.add(
-                        documents=batch_docs[batch_start:batch_end],
-                        ids=batch_ids[batch_start:batch_end],
-                        metadatas=batch_metas[batch_start:batch_end],
-                    )
-                    drawers_added += len(batch_docs[batch_start:batch_end])
-                except Exception as e:
-                    if "already exists" not in str(e).lower():
-                        raise
+                collection.upsert(
+                    documents=batch_docs[batch_start:batch_end],
+                    ids=batch_ids[batch_start:batch_end],
+                    metadatas=batch_metas[batch_start:batch_end],
+                )
+                drawers_added += len(batch_docs[batch_start:batch_end])
 
         total_drawers += drawers_added
         print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
