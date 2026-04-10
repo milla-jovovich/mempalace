@@ -3,7 +3,7 @@ description: >-
   The highest-scoring AI memory system ever benchmarked. 96.6% LongMemEval R@5
   with zero API calls, 100% with optional rerank. Open source, local-first, free.
 url: https://milla-jovovich.github.io
-baseurl: /mempalace
+baseurl: ""
 
 permalink: /:basename.html
 
