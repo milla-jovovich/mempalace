@@ -111,13 +111,16 @@ class VersionVector:
             with open(self._path, "w") as f:
                 json.dump(self._vec, f)
 
+    def save(self):
+        """Persist current state to disk. Call after a batch of update() calls."""
+        self._save()
+
     def get(self, node_id: str) -> int:
         return self._vec.get(node_id, 0)
 
     def update(self, node_id: str, seq: int):
         if seq > self._vec.get(node_id, 0):
             self._vec[node_id] = seq
-            self._save()
 
     def update_from_records(self, records: list[SyncRecord]):
         """Advance the vector from a batch of records."""
