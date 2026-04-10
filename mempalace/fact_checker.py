@@ -139,6 +139,26 @@ _ATTRIBUTION_PREDICATES = {
 }
 
 
+# Negation words that invalidate a claim (suggested by @web3guru888)
+_NEGATION_WORDS = ("not ", "no longer ", "never ", "didn't ", "doesn't ", "isn't ", "wasn't ")
+
+
+def _is_negated(text: str, match_start: int, match_end: int = None) -> bool:
+    """Check if a regex match is negated.
+
+    Checks both the prefix (30 chars before the match) and the match span
+    itself, since negation words often appear between subject and verb
+    (e.g. "Soren did NOT finish...").
+    """
+    prefix = text[:match_start].lower()[-30:]
+    if any(neg in prefix for neg in _NEGATION_WORDS):
+        return True
+    if match_end is not None:
+        span = text[match_start:match_end].lower()
+        return any(neg in span for neg in _NEGATION_WORDS)
+    return False
+
+
 # ── Core checker ─────────────────────────────────────────────────────
 
 
@@ -147,6 +167,10 @@ def _check_attribution(text: str, kg) -> List[Conflict]:
     conflicts = []
     match = _ATTRIBUTION_PATTERN.search(text)
     if not match:
+        return conflicts
+
+    # Guard against negated claims (e.g. "Alice did NOT finish the migration")
+    if _is_negated(text, match.start(), match.end()):
         return conflicts
 
     claimed_person = match.group(1).strip()
@@ -230,6 +254,9 @@ def _check_role(text: str, kg) -> List[Conflict]:
     if not match:
         return conflicts
 
+    if _is_negated(text, match.start(), match.end()):
+        return conflicts
+
     claimed_person = match.group(1).strip()
     claimed_role = match.group(2).strip().lower()
 
@@ -260,6 +287,9 @@ def _check_relationship(text: str, kg) -> List[Conflict]:
     conflicts = []
     match = _RELATIONSHIP_PATTERN.search(text)
     if not match:
+        return conflicts
+
+    if _is_negated(text, match.start(), match.end()):
         return conflicts
 
     person_a = match.group(1).strip()

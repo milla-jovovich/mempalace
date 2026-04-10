@@ -35,6 +35,24 @@ class TestAttributionConflicts:
         assert result.severity == "GREEN"
         assert len(result.conflicts) == 0
 
+    def test_negated_attribution_is_green(self, kg):
+        """Negated claims should not trigger conflicts."""
+        kg.add_entity("Maya", entity_type="person")
+        kg.add_entity("auth migration", entity_type="project")
+        kg.add_triple("Maya", "assigned_to", "auth migration")
+
+        result = check_assertion("Soren did NOT finish the auth migration", kg)
+        assert result.severity == "GREEN"
+
+    def test_no_longer_negation(self, kg):
+        """'no longer' should be recognized as negation."""
+        kg.add_entity("Maya", entity_type="person")
+        kg.add_entity("auth migration", entity_type="project")
+        kg.add_triple("Maya", "assigned_to", "auth migration")
+
+        result = check_assertion("Soren no longer finished the auth migration", kg)
+        assert result.severity == "GREEN"
+
     def test_no_kg_data_is_green(self, kg):
         """If KG has no info about the task, no conflict can be detected."""
         result = check_assertion("Soren finished the auth migration", kg)
