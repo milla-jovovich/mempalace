@@ -67,6 +67,11 @@ class TestSearchMemoryProfile:
             "memory_search", "growth_per_100_calls_mb", round(growth / (n_calls / 100), 2)
         )
 
+        # Leak detection: fail if RSS grows more than 100 MB over 200 searches
+        assert growth < 100, (
+            f"Possible memory leak: RSS grew {growth:.1f} MB over {n_calls} search calls"
+        )
+
 
 @pytest.mark.benchmark
 class TestToolStatusMemoryProfile:
@@ -109,6 +114,11 @@ class TestToolStatusMemoryProfile:
         record_metric("memory_tool_status", "n_calls", n_calls)
         record_metric("memory_tool_status", "palace_size", 2_000)
 
+        # Leak detection: fail if RSS grows more than 150 MB over 50 tool_status calls
+        assert growth < 150, (
+            f"Possible memory leak: RSS grew {growth:.1f} MB over {n_calls} tool_status calls"
+        )
+
 
 @pytest.mark.benchmark
 class TestLayer1MemoryProfile:
@@ -142,6 +152,11 @@ class TestLayer1MemoryProfile:
         record_metric("memory_layer1", "rss_end_mb", round(end_rss, 2))
         record_metric("memory_layer1", "rss_growth_mb", round(growth, 2))
         record_metric("memory_layer1", "n_calls", n_calls)
+
+        # Leak detection: fail if RSS grows more than 100 MB over 30 Layer1 calls
+        assert growth < 100, (
+            f"Possible memory leak: RSS grew {growth:.1f} MB over {n_calls} Layer1.generate calls"
+        )
 
 
 @pytest.mark.benchmark

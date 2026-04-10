@@ -209,6 +209,12 @@ class TestConcurrentSearch:
         record_metric("concurrent_search", "total_queries", len(queries))
         record_metric("concurrent_search", "workers", 4)
 
+        # Threshold: no errors allowed in concurrent searches
+        assert errors == 0, f"Concurrent search produced {errors} errors out of {len(queries)} queries"
+        # Threshold: p95 should stay under 5 seconds even under concurrency
+        p95 = sorted_lat[int(n * 0.95)]
+        assert p95 < 5000, f"Concurrent search p95 latency {p95:.0f}ms exceeds 5s threshold"
+
 
 @pytest.mark.benchmark
 class TestSearchNResultsScaling:

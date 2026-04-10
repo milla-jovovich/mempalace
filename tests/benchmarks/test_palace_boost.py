@@ -76,6 +76,14 @@ class TestFilteredVsUnfilteredRecall:
         record_metric("palace_boost", f"wing_boost_at_{n_drawers}", round(boost_wing, 3))
         record_metric("palace_boost", f"room_boost_at_{n_drawers}", round(boost_room, 3))
 
+        # Filtering should not make recall worse (boost >= 0)
+        assert boost_wing >= -0.1, (
+            f"Wing filtering degraded recall by {-boost_wing:.1%} at {n_drawers} drawers"
+        )
+        assert boost_room >= -0.1, (
+            f"Room filtering degraded recall by {-boost_room:.1%} at {n_drawers} drawers"
+        )
+
 
 @pytest.mark.benchmark
 class TestFilterLatencyBenefit:

@@ -155,6 +155,12 @@ class TestBulkInsertPerformance:
         assert col_seq.count() == n_docs
         assert col_batch.count() == n_docs
 
+        # Batched should be faster than sequential
+        assert speedup > 1.0, (
+            f"Batched insertion was not faster: speedup={speedup:.2f}x "
+            f"(seq={sequential_ms:.0f}ms, batch={batched_ms:.0f}ms)"
+        )
+
         record_metric("chromadb_insert", "sequential_ms", round(sequential_ms, 1))
         record_metric("chromadb_insert", "batched_ms", round(batched_ms, 1))
         record_metric("chromadb_insert", "speedup_ratio", round(speedup, 2))

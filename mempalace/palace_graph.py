@@ -18,32 +18,60 @@ No external graph DB needed — built from ChromaDB metadata.
 from collections import defaultdict, Counter
 from .config import MempalaceConfig
 
+import time
 import chromadb
+
+# ==================== GRAPH CACHE ====================
+# Avoids O(N) full metadata scan on every graph operation.
+# Invalidates when the collection count changes or TTL expires.
+
+_graph_cache = {"nodes": None, "edges": None, "count": None, "ts": 0}
+_GRAPH_TTL_SECONDS = 30
+
+_pg_client_cache = {}  # keyed by palace_path
 
 
 def _get_collection(config=None):
     config = config or MempalaceConfig()
+    path = config.palace_path
     try:
-        client = chromadb.PersistentClient(path=config.palace_path)
-        return client.get_collection(config.collection_name)
+        if path not in _pg_client_cache:
+            _pg_client_cache[path] = chromadb.PersistentClient(path=path)
+        return _pg_client_cache[path].get_collection(config.collection_name)
     except Exception:
         return None
 
 
-def build_graph(col=None, config=None):
+def build_graph(col=None, config=None, force=False):
     """
     Build the palace graph from ChromaDB metadata.
+    Uses a TTL + count-based cache to avoid O(N) rescan on every call.
 
     Returns:
-        nodes: dict of {room: {wings: set, halls: set, count: int}}
-        edges: list of {room, wing_a, wing_b, hall} — one per tunnel crossing
+        nodes: dict of {room: {wings: list, halls: list, count: int, dates: list}}
+        edges: list of {room, wing_a, wing_b, hall, count}
     """
+    global _graph_cache
+
+    col_was_provided = col is not None
     if col is None:
         col = _get_collection(config)
     if not col:
         return {}, []
 
     total = col.count()
+    now = time.monotonic()
+
+    # Serve from cache if count unchanged, TTL not expired, and no explicit col override
+    if (
+        not force
+        and not col_was_provided
+        and _graph_cache["nodes"] is not None
+        and _graph_cache["count"] == total
+        and (now - _graph_cache["ts"]) < _GRAPH_TTL_SECONDS
+    ):
+        return _graph_cache["nodes"], _graph_cache["edges"]
+
     room_data = defaultdict(lambda: {"wings": set(), "halls": set(), "count": 0, "dates": set()})
 
     offset = 0
@@ -92,6 +120,12 @@ def build_graph(col=None, config=None):
             "count": data["count"],
             "dates": sorted(data["dates"])[-5:] if data["dates"] else [],
         }
+
+    # Update cache
+    _graph_cache["nodes"] = nodes
+    _graph_cache["edges"] = edges
+    _graph_cache["count"] = total
+    _graph_cache["ts"] = now
 
     return nodes, edges
 

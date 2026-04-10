@@ -39,6 +39,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import threading
 from datetime import date, datetime
 from pathlib import Path
 
@@ -51,6 +52,7 @@ class KnowledgeGraph:
         self.db_path = db_path or DEFAULT_KG_PATH
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._connection = None
+        self._lock = threading.Lock()
         self._init_db()
 
     def _init_db(self):
@@ -89,11 +91,27 @@ class KnowledgeGraph:
         conn.commit()
 
     def _conn(self):
-        if self._connection is None:
-            self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
-            self._connection.execute("PRAGMA journal_mode=WAL")
-            self._connection.row_factory = sqlite3.Row
-        return self._connection
+        with self._lock:
+            if self._connection is None:
+                self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
+                self._connection.execute("PRAGMA journal_mode=WAL")
+                self._connection.row_factory = sqlite3.Row
+            return self._connection
+
+    def _execute(self, sql, params=()):
+        """Thread-safe execute wrapper."""
+        with self._lock:
+            return self._conn().execute(sql, params)
+
+    def _executemany(self, sql, params_list):
+        """Thread-safe executemany wrapper."""
+        with self._lock:
+            return self._conn().executemany(sql, params_list)
+
+    def _commit(self):
+        """Thread-safe commit wrapper."""
+        with self._lock:
+            self._conn().commit()
 
     def close(self):
         """Close the database connection."""
@@ -346,7 +364,7 @@ class KnowledgeGraph:
 
     def seed_from_entity_facts(self, entity_facts: dict):
         """
-        Seed the knowledge graph from fact_checker.py ENTITY_FACTS.
+        Seed the knowledge graph from an entity_facts dictionary.
         This bootstraps the graph with known ground truth.
         """
         for key, facts in entity_facts.items():

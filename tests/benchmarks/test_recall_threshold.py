@@ -150,6 +150,13 @@ class TestRecallThresholdSingleRoom:
         record_metric("single_room_recall", f"recall_at_5_at_{n_drawers}", round(recall_5, 3))
         record_metric("single_room_recall", f"recall_at_10_at_{n_drawers}", round(recall_10, 3))
 
+        # At small scales (<=1000), recall@10 should be at least 50%
+        if n_drawers <= 1_000:
+            assert recall_10 >= 0.5, (
+                f"Recall@10 too low ({recall_10:.1%}) at {n_drawers} drawers — "
+                f"embedding model may be degraded"
+            )
+
     @pytest.mark.parametrize("n_drawers", SIZES)
     def test_single_room_no_filter_recall(self, n_drawers, tmp_path):
         """Same test but WITHOUT wing/room filter — pure unfiltered search."""
