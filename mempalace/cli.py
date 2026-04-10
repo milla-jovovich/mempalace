@@ -204,7 +204,9 @@ def cmd_repair(args):
     print(f"  Extracted {len(all_ids)} drawers")
 
     # Backup and rebuild
-    palace_path = palace_path.rstrip(os.sep)
+    # Normalize path to strip trailing slashes and resolve symlinks
+    # Prevents infinite recursion when backup_path ends up inside palace_path
+    palace_path = str(Path(palace_path).resolve())
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
         shutil.rmtree(backup_path)
