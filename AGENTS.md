@@ -31,19 +31,38 @@ ruff format --check .
 
 ```
 mempalace/
-├── mcp_server.py        # MCP server — all read/write tools
-├── miner.py             # Project file miner
-├── convo_miner.py       # Conversation transcript miner
-├── searcher.py          # Semantic search
-├── knowledge_graph.py   # Temporal entity-relationship graph (SQLite)
-├── palace.py            # Shared palace operations (ChromaDB access)
-├── config.py            # Configuration + input validation
-├── normalize.py         # Transcript format detection + normalization
 ├── cli.py               # CLI dispatcher
+├── config.py            # Configuration + input validation
+├── convo_miner.py       # Conversation transcript miner
+├── dedup.py             # Duplicate drawer detection and removal
 ├── dialect.py           # AAAK compression dialect
-├── palace_graph.py      # Room traversal + cross-wing tunnels
+├── entity_detector.py   # Auto-detect people, projects, pets from text
+├── entity_registry.py   # Persistent entity registry (onboarding, learned, wiki)
+├── general_extractor.py # General-purpose content extraction
 ├── hooks_cli.py         # Hook system for auto-save
+├── instructions_cli.py  # MCP instruction generator
+├── knowledge_graph.py   # Temporal entity-relationship graph (SQLite)
+├── layers.py            # 4-layer memory stack (L0–L3)
+├── mcp_server.py        # MCP server — all read/write tools
+├── migrate.py           # Palace migration across ChromaDB versions
+├── miner.py             # Project file miner
+├── normalize.py         # Transcript format detection + normalization
+├── onboarding.py        # Guided palace setup and entity detection
+├── palace.py            # Shared palace operations (ChromaDB access)
+├── palace_graph.py      # Room traversal + cross-wing tunnels
+├── repair.py            # Index rebuild from metadata
+├── room_detector_local.py # Room detection from folder structure
+├── searcher.py          # Semantic search
+├── spellcheck.py        # Spellcheck with entity name protection
+├── split_mega_files.py  # Split large transcript files
 └── version.py           # Single source of truth for version
+
+benchmarks/              # Reproducible benchmark runners
+docs/                    # Additional documentation
+examples/                # Usage examples
+hooks/                   # Claude Code auto-save hooks
+integrations/            # Third-party integration configs
+tests/                   # Test suite
 ```
 
 ## Conventions
@@ -53,7 +72,7 @@ mempalace/
 - **Formatter**: ruff format, double quotes
 - **Commits**: conventional commits (`fix:`, `feat:`, `test:`, `docs:`, `ci:`)
 - **Tests**: `tests/test_*.py`, fixtures in `tests/conftest.py`
-- **Coverage**: 85% threshold (80% on Windows due to ChromaDB file lock cleanup)
+- **Coverage**: 80% threshold on all platforms
 
 ## Architecture
 
@@ -75,4 +94,7 @@ Knowledge Graph:
 - **Changing search**: `mempalace/searcher.py`
 - **Modifying mining**: `mempalace/miner.py` (project files) or `mempalace/convo_miner.py` (transcripts)
 - **Input validation**: `mempalace/config.py` — `sanitize_name()` / `sanitize_content()`
+- **Entity detection**: `mempalace/entity_detector.py` + `mempalace/entity_registry.py`
+- **Memory layers**: `mempalace/layers.py` — L0 (identity), L1 (essential), L2 (on-demand), L3 (deep search)
+- **Palace maintenance**: `mempalace/repair.py` (rebuild index), `mempalace/dedup.py` (remove duplicates), `mempalace/migrate.py` (version migration)
 - **Tests**: mirror source structure in `tests/test_<module>.py`
