@@ -57,6 +57,7 @@ def backup_palace(palace_path: str, zip_mode: bool = False, max_backups: int = 5
         pattern = "palace-backup-*.zip" if zip_mode else "palace-backup-*"
         existing = sorted(parent.glob(pattern))
         if not zip_mode:
+            # Filter to directories only — prevents matching zip files without extension
             existing = [p for p in existing if p.is_dir()]
         if len(existing) > max_backups:
             to_remove = existing[: len(existing) - max_backups]
@@ -89,7 +90,7 @@ def export_palace(palace_path: str, output_dir: str):
     print(f"  Exporting {total} drawers from {palace_path}")
 
     # Fetch all drawers in batches
-    batch_size = 5000
+    batch_size = 500
     all_docs = []
     all_metas = []
     all_ids = []
@@ -128,6 +129,7 @@ def export_palace(palace_path: str, output_dir: str):
         print(f"  {wing}/{room}.jsonl — {len(drawers)} drawers")
 
     print(f"\n  Exported to {output_dir}")
+    print(f"  Note: embeddings are not included. Import will re-embed using the configured model.")
     print(f"  {total_files} files, {len(all_ids)} drawers total")
 
 
@@ -180,7 +182,7 @@ def import_palace(palace_path: str, input_dir: str):
         skipped = len(drawers) - len(new_drawers)
 
         if new_drawers:
-            batch_size = 5000
+            batch_size = 500
             for i in range(0, len(new_drawers), batch_size):
                 batch = new_drawers[i : i + batch_size]
                 col.add(
