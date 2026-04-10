@@ -546,10 +546,11 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
+        "note": "Estimates only.",
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -619,10 +620,11 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
+        "note": "Estimates only.",
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -637,6 +639,23 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
     out = capsys.readouterr().out
     assert "Stored" in out
     mock_comp_col.upsert.assert_called_once()
+
+
+def test_compression_stats_keys_match_dialect():
+    """Verify cmd_compress uses the same keys that Dialect.compression_stats() returns."""
+    from mempalace.dialect import Dialect
+
+    d = Dialect()
+    stats = d.compression_stats("hello world this is a test", "HW:test")
+    expected_keys = {
+        "original_chars",
+        "summary_chars",
+        "original_tokens_est",
+        "summary_tokens_est",
+        "size_ratio",
+        "note",
+    }
+    assert set(stats.keys()) == expected_keys
 
 
 def test_cmd_repair_trailing_slash_does_not_recurse():
