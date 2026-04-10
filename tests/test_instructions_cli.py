@@ -43,3 +43,17 @@ def test_run_instructions_missing_md_file(capsys, tmp_path):
             assert exc_info.value.code == 1
             captured = capsys.readouterr()
             assert "Instructions file not found" in captured.err
+
+
+def test_init_instructions_use_yes_flag():
+    """init instructions must tell agents to use --yes to avoid EOFError."""
+    content = (INSTRUCTIONS_DIR / "init.md").read_text()
+    assert "--yes" in content
+    assert "mempalace init --yes" in content
+
+
+def test_mine_instructions_mention_init_prerequisite():
+    """mine instructions must mention that init is required first."""
+    content = (INSTRUCTIONS_DIR / "mine.md").read_text()
+    assert "mempalace init" in content
+    assert "mempalace.yaml" in content

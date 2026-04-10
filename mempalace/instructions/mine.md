@@ -2,6 +2,18 @@
 
 When the user invokes this skill, follow these steps:
 
+## 0. Ensure the palace is initialized
+
+Before mining, the target directory must be initialized with `mempalace init --yes <dir>`.
+Check if a `mempalace.yaml` file exists in the target directory. If not, run init first:
+
+```bash
+mempalace init --yes <dir>
+```
+
+Without this, `mempalace mine` will fail with:
+`ERROR: No mempalace.yaml found in <dir>`
+
 ## 1. Ask what to mine
 
 Ask the user what they want to mine and where the source data is located.

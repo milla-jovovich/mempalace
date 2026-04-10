@@ -34,6 +34,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .version import __version__
 
 
 def cmd_init(args):
@@ -398,6 +399,9 @@ def main():
         description="MemPalace — Give your AI a memory. No API key required.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"mempalace {__version__}"
     )
     parser.add_argument(
         "--palace",
