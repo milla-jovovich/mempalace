@@ -211,10 +211,40 @@ class KnowledgeGraph:
             ended = datetime.now().isoformat()
             conn.execute("UPDATE triples SET valid_to=? WHERE id=?", (ended, old_triple_id))
 
-            # Create meta-entity for triples to link them
+            # Look up original subject/object for human-readable metadata
+            old_row = conn.execute(
+                "SELECT t.*, s.name as sub_name, o.name as obj_name "
+                "FROM triples t JOIN entities s ON t.subject = s.id "
+                "JOIN entities o ON t.object = o.id WHERE t.id = ?",
+                (old_triple_id,),
+            ).fetchone()
+            new_row = conn.execute(
+                "SELECT t.*, s.name as sub_name, o.name as obj_name "
+                "FROM triples t JOIN entities s ON t.subject = s.id "
+                "JOIN entities o ON t.object = o.id WHERE t.id = ?",
+                (new_triple_id,),
+            ).fetchone()
+
+            old_label = (
+                f"{old_row['sub_name']} {old_row['predicate']} {old_row['obj_name']}"
+                if old_row
+                else old_triple_id
+            )
+            new_label = (
+                f"{new_row['sub_name']} {new_row['predicate']} {new_row['obj_name']}"
+                if new_row
+                else new_triple_id
+            )
+
+            # Create meta-entity for triples with human-readable metadata
             self.add_entity(old_triple_id, "fact")
             self.add_entity(new_triple_id, "fact")
-            self.add_triple(old_triple_id, "evolved_into", new_triple_id, source_file=reason)
+            self.add_triple(
+                old_triple_id,
+                "evolved_into",
+                new_triple_id,
+                source_file=f"{old_label} → {new_label}; {reason}",
+            )
 
     # ── Query operations ──────────────────────────────────────────────────
 
@@ -294,6 +324,7 @@ class KnowledgeGraph:
         for row in conn.execute(query, params).fetchall():
             results.append(
                 {
+                    "id": row["id"],
                     "subject": row["sub_name"],
                     "predicate": pred,
                     "object": row["obj_name"],
