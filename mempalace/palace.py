@@ -65,7 +65,26 @@ def file_already_mined(collection, source_file: str, check_mtime: bool = False) 
             if stored_mtime is None:
                 return False
             current_mtime = os.path.getmtime(source_file)
-            return float(stored_mtime) == current_mtime
+            return abs(float(stored_mtime) - current_mtime) < 0.01
         return True
     except Exception:
         return False
+
+
+# Shared pagination constant — used by mcp_server and miner
+METADATA_PAGE_SIZE = 1000
+
+
+def get_all_metadatas(col, **extra_kwargs):
+    """Paginate through all metadatas in a collection to avoid the 10K truncation bug."""
+    all_meta = []
+    offset = 0
+    while True:
+        kwargs = {"include": ["metadatas"], "limit": METADATA_PAGE_SIZE, "offset": offset}
+        kwargs.update(extra_kwargs)
+        batch = col.get(**kwargs)
+        all_meta.extend(batch["metadatas"])
+        if not batch["ids"] or len(batch["ids"]) < METADATA_PAGE_SIZE:
+            break
+        offset += len(batch["ids"])
+    return all_meta

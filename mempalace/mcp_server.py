@@ -30,6 +30,7 @@ from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
+from .palace import get_all_metadatas
 import chromadb
 
 from .knowledge_graph import KnowledgeGraph
@@ -100,10 +101,6 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
-_client_cache = None
-_collection_cache = None
-
-
 def _get_client():
     """Return a singleton ChromaDB PersistentClient."""
     global _client_cache
@@ -136,6 +133,9 @@ def _no_palace():
 # ==================== READ TOOLS ====================
 
 
+# get_all_metadatas moved to palace.py as get_all_metadatas
+
+
 def tool_status():
     col = _get_collection()
     if not col:
@@ -144,7 +144,7 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = get_all_metadatas(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -201,7 +201,7 @@ def tool_list_wings():
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = get_all_metadatas(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -216,10 +216,10 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
+        extra = {}
         if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
+            extra["where"] = {"wing": wing}
+        all_meta = get_all_metadatas(col, **extra)
         for m in all_meta:
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
@@ -234,7 +234,7 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = get_all_metadatas(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -247,6 +247,7 @@ def tool_get_taxonomy():
 
 
 def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+    limit = max(1, min(limit, 100))
     return search_memories(
         query,
         palace_path=_config.palace_path,
@@ -739,7 +740,7 @@ TOOLS = {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "What to search for"},
-                "limit": {"type": "integer", "description": "Max results (default 5)"},
+                "limit": {"type": "integer", "description": "Max results, 1-100 (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
             },
@@ -922,6 +923,13 @@ def handle_request(request):
 
 
 def main():
+    import io
+    # Force UTF-8 on Windows where default codepage (cp936/cp1252) breaks CJK content.
+    # stdin: surrogateescape to round-trip lone surrogates from the OS pipe.
+    # stdout: replace to prevent surrogates from corrupting JSON-RPC responses.
+    if sys.platform == "win32":
+        sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="surrogateescape")
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     logger.info("MemPalace MCP Server starting...")
     while True:
         try:
