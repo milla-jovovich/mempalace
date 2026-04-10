@@ -68,6 +68,7 @@ def cmd_mine(args):
     include_ignored = []
     for raw in args.include_ignored or []:
         include_ignored.extend(part.strip() for part in raw.split(",") if part.strip())
+    wing_aware_dedup = not args.global_dedup
 
     if args.mode == "convos":
         from .convo_miner import mine_convos
@@ -80,6 +81,7 @@ def cmd_mine(args):
             limit=args.limit,
             dry_run=args.dry_run,
             extract_mode=args.extract,
+            wing_aware_dedup=wing_aware_dedup,
         )
     else:
         from .miner import mine
@@ -93,6 +95,7 @@ def cmd_mine(args):
             dry_run=args.dry_run,
             respect_gitignore=not args.no_gitignore,
             include_ignored=include_ignored,
+            wing_aware_dedup=wing_aware_dedup,
         )
 
 
@@ -388,6 +391,11 @@ def main():
         action="append",
         default=[],
         help="Always scan these project-relative paths even if ignored; repeat or pass comma-separated paths",
+    )
+    p_mine.add_argument(
+        "--global-dedup",
+        action="store_true",
+        help="Deduplicate mined files across all wings instead of within the current wing only",
     )
     p_mine.add_argument(
         "--agent",

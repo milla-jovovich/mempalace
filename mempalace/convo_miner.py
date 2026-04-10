@@ -220,9 +220,13 @@ def get_collection(palace_path: str):
         return client.create_collection("mempalace_drawers")
 
 
-def file_already_mined(collection, source_file: str) -> bool:
+def file_already_mined(collection, source_file: str, wing: str, wing_aware: bool = True) -> bool:
     try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
+        if wing_aware:
+            where = {"$and": [{"source_file": source_file}, {"wing": wing}]}
+        else:
+            where = {"source_file": source_file}
+        results = collection.get(where=where, limit=1)
         return len(results.get("ids", [])) > 0
     except Exception:
         return False
@@ -261,6 +265,7 @@ def mine_convos(
     limit: int = 0,
     dry_run: bool = False,
     extract_mode: str = "exchange",
+    wing_aware_dedup: bool = True,
 ):
     """Mine a directory of conversation files into the palace.
 
@@ -285,7 +290,8 @@ def mine_convos(
     print(f"  Files:   {len(files)}")
     print(f"  Palace:  {palace_path}")
     if dry_run:
-        print("  DRY RUN — nothing will be filed")
+        print("  DRY RUN - nothing will be filed")
+    print(f"  Dedup:   {'wing-aware' if wing_aware_dedup else 'global'}")
     print(f"{'-' * 55}\n")
 
     collection = get_collection(palace_path) if not dry_run else None
@@ -298,7 +304,9 @@ def mine_convos(
         source_file = str(filepath)
 
         # Skip if already filed
-        if not dry_run and file_already_mined(collection, source_file):
+        if not dry_run and file_already_mined(
+            collection, source_file, wing=wing, wing_aware=wing_aware_dedup
+        ):
             files_skipped += 1
             continue
 
@@ -335,9 +343,9 @@ def mine_convos(
 
                 type_counts = Counter(c.get("memory_type", "general") for c in chunks)
                 types_str = ", ".join(f"{t}:{n}" for t, n in type_counts.most_common())
-                print(f"    [DRY RUN] {filepath.name} → {len(chunks)} memories ({types_str})")
+                print(f"    [DRY RUN] {filepath.name} -> {len(chunks)} memories ({types_str})")
             else:
-                print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
+                print(f"    [DRY RUN] {filepath.name} -> room:{room} ({len(chunks)} drawers)")
             total_drawers += len(chunks)
             # Track room counts
             if extract_mode == "general":
@@ -380,7 +388,7 @@ def mine_convos(
                     raise
 
         total_drawers += drawers_added
-        print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
+        print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
 
     print(f"\n{'=' * 55}")
     print("  Done.")

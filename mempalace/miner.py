@@ -38,6 +38,9 @@ READABLE_EXTENSIONS = {
     ".csv",
     ".sql",
     ".toml",
+    ".al",
+    ".xlf",
+    ".ps1",
 }
 
 SKIP_DIRS = {
@@ -293,6 +296,21 @@ def load_config(project_dir: str) -> dict:
         return yaml.safe_load(f)
 
 
+def get_mining_config(config: dict) -> dict:
+    """Return normalized mining settings from mempalace.yaml."""
+    mining = config.get("mining") or {}
+    extensions = {
+        ext if str(ext).startswith(".") else f".{ext}"
+        for ext in mining.get("extensions", [])
+        if str(ext).strip()
+    }
+    extra_skip_files = [str(pattern).strip() for pattern in mining.get("extra_skip_files", [])]
+    return {
+        "extensions": READABLE_EXTENSIONS | {ext.lower() for ext in extensions},
+        "extra_skip_files": [pattern for pattern in extra_skip_files if pattern],
+    }
+
+
 # =============================================================================
 # FILE ROUTING — which room does this file belong to?
 # =============================================================================
@@ -402,10 +420,14 @@ def get_collection(palace_path: str):
         return client.create_collection("mempalace_drawers")
 
 
-def file_already_mined(collection, source_file: str) -> bool:
+def file_already_mined(collection, source_file: str, wing: str, wing_aware: bool = True) -> bool:
     """Fast check: has this file been filed before?"""
     try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
+        if wing_aware:
+            where = {"$and": [{"source_file": source_file}, {"wing": wing}]}
+        else:
+            where = {"source_file": source_file}
+        results = collection.get(where=where, limit=1)
         return len(results.get("ids", [])) > 0
     except Exception:
         return False
@@ -451,12 +473,15 @@ def process_file(
     rooms: list,
     agent: str,
     dry_run: bool,
+    wing_aware_dedup: bool = True,
 ) -> int:
     """Read, chunk, route, and file one file. Returns drawer count."""
 
     # Skip if already filed
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file):
+    if not dry_run and file_already_mined(
+        collection, source_file, wing=wing, wing_aware=wing_aware_dedup
+    ):
         return 0
 
     try:
@@ -472,7 +497,7 @@ def process_file(
     chunks = chunk_text(content, source_file)
 
     if dry_run:
-        print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
+        print(f"    [DRY RUN] {filepath.name} -> room:{room} ({len(chunks)} drawers)")
         return len(chunks)
 
     drawers_added = 0
@@ -499,6 +524,8 @@ def process_file(
 
 def scan_project(
     project_dir: str,
+    readable_extensions: set = None,
+    extra_skip_files: list = None,
     respect_gitignore: bool = True,
     include_ignored: list = None,
 ) -> list:
@@ -508,6 +535,8 @@ def scan_project(
     active_matchers = []
     matcher_cache = {}
     include_paths = normalize_include_paths(include_ignored)
+    readable_extensions = readable_extensions or READABLE_EXTENSIONS
+    extra_skip_files = extra_skip_files or []
 
     for root, dirs, filenames in os.walk(project_path):
         root_path = Path(root)
@@ -540,10 +569,16 @@ def scan_project(
             filepath = root_path / filename
             force_include = is_force_included(filepath, project_path, include_paths)
             exact_force_include = is_exact_force_include(filepath, project_path, include_paths)
+            relative_path = filepath.relative_to(project_path).as_posix()
 
             if not force_include and filename in SKIP_FILENAMES:
                 continue
-            if filepath.suffix.lower() not in READABLE_EXTENSIONS and not exact_force_include:
+            if not force_include and any(
+                fnmatch.fnmatch(relative_path, pattern) or fnmatch.fnmatch(filename, pattern)
+                for pattern in extra_skip_files
+            ):
+                continue
+            if filepath.suffix.lower() not in readable_extensions and not exact_force_include:
                 continue
             if respect_gitignore and active_matchers and not force_include:
                 if is_gitignored(filepath, active_matchers, is_dir=False):
@@ -566,17 +601,21 @@ def mine(
     dry_run: bool = False,
     respect_gitignore: bool = True,
     include_ignored: list = None,
+    wing_aware_dedup: bool = True,
 ):
     """Mine a project directory into the palace."""
 
     project_path = Path(project_dir).expanduser().resolve()
     config = load_config(project_dir)
+    mining_config = get_mining_config(config)
 
     wing = wing_override or config["wing"]
     rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
 
     files = scan_project(
         project_dir,
+        readable_extensions=mining_config["extensions"],
+        extra_skip_files=mining_config["extra_skip_files"],
         respect_gitignore=respect_gitignore,
         include_ignored=include_ignored,
     )
@@ -591,12 +630,17 @@ def mine(
     print(f"  Files:   {len(files)}")
     print(f"  Palace:  {palace_path}")
     if dry_run:
-        print("  DRY RUN — nothing will be filed")
+        print("  DRY RUN - nothing will be filed")
     if not respect_gitignore:
         print("  .gitignore: DISABLED")
     if include_ignored:
         print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
-    print(f"{'─' * 55}\n")
+    print(f"  Dedup:   {'wing-aware' if wing_aware_dedup else 'global'}")
+    if config.get("mining", {}).get("extensions"):
+        print(f"  Extra extensions: {', '.join(sorted(config['mining']['extensions']))}")
+    if mining_config["extra_skip_files"]:
+        print(f"  Extra skips: {', '.join(mining_config['extra_skip_files'])}")
+    print(f"{'-' * 55}\n")
 
     if not dry_run:
         collection = get_collection(palace_path)
@@ -616,6 +660,7 @@ def mine(
             rooms=rooms,
             agent=agent,
             dry_run=dry_run,
+            wing_aware_dedup=wing_aware_dedup,
         )
         if drawers == 0 and not dry_run:
             files_skipped += 1
@@ -624,7 +669,7 @@ def mine(
             room = detect_room(filepath, "", rooms, project_path)
             room_counts[room] += 1
             if not dry_run:
-                print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+                print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
 
     print(f"\n{'=' * 55}")
     print("  Done.")
