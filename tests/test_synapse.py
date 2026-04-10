@@ -21,6 +21,7 @@ from mempalace.synapse import (
     build_soft_archive_proposal,
     SynapseDB,
 )
+from mempalace.synapse_profiles import compute_decay, hit_filed_age_days
 
 
 def _synapse_cfg(**overrides):
@@ -415,9 +416,10 @@ def test_ltp_and_tagging_composition(palace_path, seeded_collection):
         1.0 + math.log(1 + 8) * DEFAULT_LTP_COEFFICIENT,
     )
     tagging_expected = SynapseDB.calculate_tagging_boost(now)
+    decay_expected = compute_decay(hit_filed_age_days(now), 90)
     assert abs(hit["synapse_factors"]["ltp"] - ltp_expected) < 1e-5
     assert hit["synapse_factors"]["tagging"] > 1.0
-    expected = hit["similarity"] * ltp_expected * tagging_expected
+    expected = hit["similarity"] * decay_expected * ltp_expected * tagging_expected
     assert abs(hit["synapse_score"] - expected) < 1e-4
 
 

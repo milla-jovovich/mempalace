@@ -10,7 +10,7 @@ import hashlib
 import logging
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import chromadb
 
@@ -108,6 +108,10 @@ def search_memories(
     synapse_ltp_max_boost: Optional[float] = None,
     synapse_tagging_window_hours: Optional[int] = None,
     synapse_tagging_max_boost: Optional[float] = None,
+    synapse_profile: Optional[str] = None,
+    synapse_half_life_days: Optional[int] = None,
+    synapse_association_max_boost: Optional[float] = None,
+    synapse_association_coefficient: Optional[float] = None,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
@@ -191,41 +195,40 @@ def search_memories(
     try:
         if cfg.synapse_enabled:
             from .synapse import SynapseDB
+            from .synapse_profiles import (
+                ProfileManager,
+                compute_decay,
+                global_merged_from_mempalace_config,
+                hit_filed_age_days,
+            )
 
-            _ltp_enabled = (
-                synapse_ltp_enabled
-                if synapse_ltp_enabled is not None
-                else cfg.synapse_ltp_enabled
-            )
-            _tagging_enabled = (
-                synapse_tagging_enabled
-                if synapse_tagging_enabled is not None
-                else cfg.synapse_tagging_enabled
-            )
-            _association_enabled = (
-                synapse_association_enabled
-                if synapse_association_enabled is not None
-                else cfg.synapse_association_enabled
-            )
-            _ltp_window_days = (
-                synapse_ltp_window_days
-                if synapse_ltp_window_days is not None
-                else cfg.synapse_ltp_window_days
-            )
-            _ltp_max_boost = (
-                synapse_ltp_max_boost
-                if synapse_ltp_max_boost is not None
-                else cfg.synapse_ltp_max_boost
-            )
-            _tagging_window_hours = (
-                synapse_tagging_window_hours
-                if synapse_tagging_window_hours is not None
-                else cfg.synapse_tagging_window_hours
-            )
-            _tagging_max_boost = (
-                synapse_tagging_max_boost
-                if synapse_tagging_max_boost is not None
-                else cfg.synapse_tagging_max_boost
+            pm = ProfileManager(palace_path)
+            per_query: dict[str, Any] = {}
+            if synapse_half_life_days is not None:
+                per_query["half_life_days"] = synapse_half_life_days
+            if synapse_ltp_enabled is not None:
+                per_query["ltp_enabled"] = synapse_ltp_enabled
+            if synapse_ltp_window_days is not None:
+                per_query["ltp_window_days"] = synapse_ltp_window_days
+            if synapse_ltp_max_boost is not None:
+                per_query["ltp_max_boost"] = synapse_ltp_max_boost
+            if synapse_tagging_enabled is not None:
+                per_query["tagging_enabled"] = synapse_tagging_enabled
+            if synapse_tagging_window_hours is not None:
+                per_query["tagging_window_hours"] = synapse_tagging_window_hours
+            if synapse_tagging_max_boost is not None:
+                per_query["tagging_max_boost"] = synapse_tagging_max_boost
+            if synapse_association_enabled is not None:
+                per_query["association_enabled"] = synapse_association_enabled
+            if synapse_association_max_boost is not None:
+                per_query["association_max_boost"] = synapse_association_max_boost
+            if synapse_association_coefficient is not None:
+                per_query["association_coefficient"] = synapse_association_coefficient
+
+            profile = pm.resolve(
+                synapse_profile,
+                per_query_overrides=per_query or None,
+                global_merged=global_merged_from_mempalace_config(cfg),
             )
 
             synapse_db = SynapseDB(palace_path)
@@ -239,43 +242,50 @@ def search_memories(
                     hit_drawer_ids.append(drawer_id)
 
             with synapse_db.connection() as conn:
-                ltp_scores = {}
-                if _ltp_enabled and hit_drawer_ids:
+                ltp_scores: dict[str, float] = {}
+                if profile.ltp_enabled and hit_drawer_ids:
                     ltp_scores = synapse_db.get_ltp_scores_batch(
                         hit_drawer_ids,
-                        window_days=_ltp_window_days,
-                        max_boost=_ltp_max_boost,
+                        window_days=profile.ltp_window_days,
+                        max_boost=profile.ltp_max_boost,
                         conn=conn,
                     )
 
-                assoc_scores = {}
-                if _association_enabled and hit_drawer_ids:
+                assoc_scores: dict[str, float] = {}
+                if profile.association_enabled and hit_drawer_ids:
                     assoc_scores = synapse_db.get_association_scores_batch(
                         hit_drawer_ids,
-                        max_boost=cfg.synapse_association_max_boost,
-                        coefficient=cfg.synapse_association_coefficient,
+                        max_boost=profile.association_max_boost,
+                        coefficient=profile.association_coefficient,
                         conn=conn,
                     )
 
                 for hit in result["hits"]:
                     drawer_id = hit.get("metadata", {}).get("drawer_id", hit.get("id", ""))
                     filed_at = hit.get("metadata", {}).get("filed_at", None)
-                    similarity = hit.get("original_similarity", hit.get("similarity", 0.0))
-                    decay = 1.0 if not time_decay else hit.get("decay", 1.0)
+                    similarity = float(
+                        hit.get("original_similarity", hit.get("similarity", 0.0))
+                    )
+                    age_days = hit_filed_age_days(filed_at)
+                    decay = (
+                        compute_decay(age_days, int(profile.half_life_days))
+                        if time_decay
+                        else 1.0
+                    )
 
-                    ltp = ltp_scores.get(drawer_id, 1.0) if _ltp_enabled else 1.0
+                    ltp = ltp_scores.get(drawer_id, 1.0) if profile.ltp_enabled else 1.0
                     tagging = (
                         SynapseDB.calculate_tagging_boost(
                             filed_at,
-                            window_hours=_tagging_window_hours,
-                            max_boost=_tagging_max_boost,
+                            window_hours=profile.tagging_window_hours,
+                            max_boost=profile.tagging_max_boost,
                         )
-                        if _tagging_enabled
+                        if profile.tagging_enabled
                         else 1.0
                     )
                     association = (
                         assoc_scores.get(drawer_id, 1.0)
-                        if _association_enabled
+                        if profile.association_enabled
                         else 1.0
                     )
 
@@ -283,15 +293,22 @@ def search_memories(
 
                     hit["synapse_score"] = final_score
                     hit["synapse_factors"] = {
+                        "similarity": similarity,
+                        "decay": decay,
                         "ltp": ltp,
                         "association": association,
                         "tagging": tagging,
                     }
+                    hit["synapse_profile"] = profile.name
 
                 result["hits"].sort(
-                    key=lambda h: h.get("synapse_score", 0.0), reverse=True
+                    key=lambda h: h.get(
+                        "synapse_score", h.get("similarity", 0.0)
+                    ),
+                    reverse=True,
                 )
                 result["synapse_enabled"] = True
+                result["synapse_profile"] = profile.to_dict()
 
                 if cfg.synapse_log_retrievals and hit_drawer_ids:
                     try:

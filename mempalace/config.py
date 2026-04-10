@@ -174,6 +174,12 @@ class MempalaceConfig:
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
     @property
+    def synapse_profiles(self) -> dict:
+        """Optional synapse_profiles block in ~/.mempalace/config.json (see also palace-level profiles)."""
+        raw = self._file_config.get("synapse_profiles", {})
+        return raw if isinstance(raw, dict) else {}
+
+    @property
     def synapse_enabled(self):
         """Synapse master switch — false disables scoring and retrieval logging."""
         return self._file_config.get("synapse_enabled", False)

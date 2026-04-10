@@ -256,6 +256,12 @@ def tool_status(consolidation_wing: str = None):
             tagging_window_n = _count_synaptic_tagging_window_drawers(
                 all_meta, cfg.synapse_tagging_window_hours
             )
+            from .synapse_profiles import ProfileManager, global_merged_from_mempalace_config
+
+            pm = ProfileManager(palace_path)
+            default_prof = pm.resolve(
+                "default", global_merged=global_merged_from_mempalace_config(cfg)
+            )
             status_dict["synapse"] = {
                 "ltp_enabled": cfg.synapse_ltp_enabled,
                 "tagging_enabled": cfg.synapse_tagging_enabled,
@@ -268,6 +274,8 @@ def tool_status(consolidation_wing: str = None):
                 "tagging_window_hours": cfg.synapse_tagging_window_hours,
                 "tagging_max_boost": cfg.synapse_tagging_max_boost,
                 "log_retention_days": cfg.synapse_log_retention_days,
+                "available_profiles": pm.get_known_profiles(),
+                "default_profile": default_prof.to_dict(),
                 "log_stats": log_stats,
                 "co_retrieval_top_pairs": co_pairs,
                 "co_occurrence_clusters": co_clusters,
@@ -381,6 +389,10 @@ def tool_search(
     room: str = None,
     synapse_ltp_enabled: Optional[bool] = None,
     synapse_tagging_enabled: Optional[bool] = None,
+    synapse_profile: Optional[str] = None,
+    synapse_half_life_days: Optional[int] = None,
+    synapse_ltp_window_days: Optional[int] = None,
+    synapse_ltp_max_boost: Optional[float] = None,
 ):
     return search_memories(
         query,
@@ -390,6 +402,10 @@ def tool_search(
         n_results=limit,
         synapse_ltp_enabled=synapse_ltp_enabled,
         synapse_tagging_enabled=synapse_tagging_enabled,
+        synapse_profile=synapse_profile,
+        synapse_half_life_days=synapse_half_life_days,
+        synapse_ltp_window_days=synapse_ltp_window_days,
+        synapse_ltp_max_boost=synapse_ltp_max_boost,
     )
 
 
@@ -725,6 +741,55 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
 
 # ==================== MCP PROTOCOL ====================
 
+
+def _mempalace_search_input_schema():
+    try:
+        from .synapse_profiles import ProfileManager
+
+        pm = ProfileManager(_config.palace_path)
+        known = ", ".join(pm.get_known_profiles())
+    except Exception:
+        known = "default"
+    return {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What to search for"},
+            "limit": {"type": "integer", "description": "Max results (default 5)"},
+            "wing": {"type": "string", "description": "Filter by wing (optional)"},
+            "room": {"type": "string", "description": "Filter by room (optional)"},
+            "synapse_profile": {
+                "type": "string",
+                "description": (
+                    "Named synapse profile to apply. Known profiles: "
+                    f"{known}. "
+                    "Custom profiles: palace config.json synapse_profiles or synapse_profiles.json."
+                ),
+            },
+            "synapse_half_life_days": {
+                "type": "integer",
+                "description": "Override half_life_days for this query (recency decay)",
+            },
+            "synapse_ltp_window_days": {
+                "type": "integer",
+                "description": "Override ltp_window_days for this query",
+            },
+            "synapse_ltp_max_boost": {
+                "type": "number",
+                "description": "Override ltp_max_boost for this query",
+            },
+            "synapse_ltp_enabled": {
+                "type": "boolean",
+                "description": "Override LTP axis for this search only (omit = use profile/config)",
+            },
+            "synapse_tagging_enabled": {
+                "type": "boolean",
+                "description": "Override tagging axis for this search only (omit = use profile/config)",
+            },
+        },
+        "required": ["query"],
+    }
+
+
 TOOLS = {
     "mempalace_status": {
         "description": "Palace overview — total drawers, wing and room counts",
@@ -881,24 +946,7 @@ TOOLS = {
     },
     "mempalace_search": {
         "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "What to search for"},
-                "limit": {"type": "integer", "description": "Max results (default 5)"},
-                "wing": {"type": "string", "description": "Filter by wing (optional)"},
-                "room": {"type": "string", "description": "Filter by room (optional)"},
-                "synapse_ltp_enabled": {
-                    "type": "boolean",
-                    "description": "Override LTP axis for this search only (omit = use config default)",
-                },
-                "synapse_tagging_enabled": {
-                    "type": "boolean",
-                    "description": "Override tagging axis for this search only (omit = use config default)",
-                },
-            },
-            "required": ["query"],
-        },
+        "input_schema": _mempalace_search_input_schema(),
         "handler": tool_search,
     },
     "mempalace_check_duplicate": {

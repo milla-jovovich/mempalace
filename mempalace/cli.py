@@ -18,6 +18,7 @@ Commands:
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
     mempalace status                      Show what's been filed
+    mempalace synapse show-profile [NAME] Print merged Synapse retrieval profile (JSON)
 
 Examples:
     mempalace init ~/projects/my_app
@@ -155,6 +156,22 @@ def cmd_status(args):
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     status(palace_path=palace_path)
+
+
+def cmd_synapse(args):
+    import json
+
+    from .synapse_profiles import ProfileManager, global_merged_from_mempalace_config
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    cfg = MempalaceConfig()
+    pm = ProfileManager(palace_path)
+    if args.synapse_cmd == "show-profile":
+        profile = pm.resolve(
+            args.name,
+            global_merged=global_merged_from_mempalace_config(cfg),
+        )
+        print(json.dumps(profile.to_dict(), indent=2, ensure_ascii=False))
 
 
 def cmd_repair(args):
@@ -533,6 +550,20 @@ def main():
     # status
     sub.add_parser("status", help="Show what's been filed")
 
+    # synapse
+    p_synapse = sub.add_parser("synapse", help="Synapse retrieval profiles")
+    synapse_sub = p_synapse.add_subparsers(dest="synapse_cmd", required=True)
+    p_show_prof = synapse_sub.add_parser(
+        "show-profile",
+        help="Print resolved merged profile as JSON",
+    )
+    p_show_prof.add_argument(
+        "name",
+        nargs="?",
+        default="default",
+        help="Profile name (default: default)",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -554,6 +585,10 @@ def main():
             return
         args.name = name
         cmd_instructions(args)
+        return
+
+    if args.command == "synapse":
+        cmd_synapse(args)
         return
 
     dispatch = {
