@@ -6,6 +6,7 @@ Consolidates ChromaDB access patterns used by both miners and the MCP server.
 
 import os
 import chromadb
+from mempalace.config import MempalaceConfig
 
 SKIP_DIRS = {
     ".git",
@@ -34,6 +35,34 @@ SKIP_DIRS = {
 }
 
 
+def _get_embedding_function():
+    """Return a ChromaDB embedding function based on config, or None for the default.
+
+    When ``embedding_model`` is set in ``~/.mempalace/config.json`` (or via the
+    ``MEMPALACE_EMBEDDING_MODEL`` env var), a ``SentenceTransformerEmbeddingFunction``
+    is returned so that any HuggingFace sentence-transformers model can be used.
+    This is useful for non-English content — for example::
+
+        # ~/.mempalace/config.json
+        {"embedding_model": "paraphrase-multilingual-MiniLM-L12-v2"}
+
+    Returns ``None`` to fall back to ChromaDB's built-in ONNX model
+    (``all-MiniLM-L6-v2``), which is the default behaviour and requires no
+    extra dependencies.
+    """
+    model_name = MempalaceConfig().embedding_model
+    if not model_name:
+        return None
+    try:
+        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+        return SentenceTransformerEmbeddingFunction(model_name=model_name)
+    except ImportError:
+        raise ImportError(
+            f"embedding_model is set to '{model_name}' but the 'sentence-transformers' "
+            "package is not installed. Run: pip install sentence-transformers"
+        )
+
+
 def get_collection(palace_path: str, collection_name: str = "mempalace_drawers"):
     """Get or create the palace ChromaDB collection."""
     os.makedirs(palace_path, exist_ok=True)
@@ -42,10 +71,12 @@ def get_collection(palace_path: str, collection_name: str = "mempalace_drawers")
     except (OSError, NotImplementedError):
         pass
     client = chromadb.PersistentClient(path=palace_path)
+    ef = _get_embedding_function()
+    kwargs = {"embedding_function": ef} if ef is not None else {}
     try:
-        return client.get_collection(collection_name)
+        return client.get_collection(collection_name, **kwargs)
     except Exception:
-        return client.create_collection(collection_name)
+        return client.create_collection(collection_name, **kwargs)
 
 
 def file_already_mined(collection, source_file: str, check_mtime: bool = False) -> bool:
