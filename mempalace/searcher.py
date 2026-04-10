@@ -18,6 +18,17 @@ class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
 
 
+def _build_where_filter(wing: str = None, room: str = None) -> dict:
+    """Build ChromaDB where filter for wing/room filtering."""
+    if wing and room:
+        return {"$and": [{"wing": wing}, {"room": room}]}
+    elif wing:
+        return {"wing": wing}
+    elif room:
+        return {"room": room}
+    return {}
+
+
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
     """
     Search the palace. Returns verbatim drawer content.
@@ -31,14 +42,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         raise SearchError(f"No palace found at {palace_path}")
 
-    # Build where filter
-    where = {}
-    if wing and room:
-        where = {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        where = {"wing": wing}
-    elif room:
-        where = {"room": room}
+    where = _build_where_filter(wing, room)
 
     try:
         kwargs = {
@@ -107,14 +111,7 @@ def search_memories(
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
         }
 
-    # Build where filter
-    where = {}
-    if wing and room:
-        where = {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        where = {"wing": wing}
-    elif room:
-        where = {"room": room}
+    where = _build_where_filter(wing, room)
 
     try:
         kwargs = {
