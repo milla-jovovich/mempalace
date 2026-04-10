@@ -549,11 +549,19 @@ def cmd_compress(args):
     # Connect to palace
     try:
         col = get_collection(palace_path)
-        if col.count() == 0:
-            raise Exception("Empty palace")
+    except ImportError:
+        print(f"\n  Palace at {palace_path} uses ChromaDB but 'chromadb' is not installed.")
+        print("  Install with: pip install 'mempalace[chroma]'")
+        print("  Or migrate:  mempalace migrate")
+        sys.exit(1)
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        sys.exit(1)
+
+    if col.count() == 0:
+        print(f"\n  Palace at {palace_path} exists but is empty.")
+        print("  Run: mempalace mine <dir>")
         sys.exit(1)
 
     # Query drawers in batches

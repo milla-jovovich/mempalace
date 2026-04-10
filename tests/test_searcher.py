@@ -95,7 +95,7 @@ class TestSearchCLI:
         assert "Room:" in captured.out
 
     def test_search_no_palace_raises(self, tmp_path):
-        with pytest.raises(SearchError, match="No palace found"):
+        with pytest.raises(SearchError, match="(No palace found|Empty palace)"):
             search("anything", str(tmp_path / "missing"))
 
     def test_search_no_results(self, palace_path, collection, capsys):

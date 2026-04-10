@@ -522,11 +522,11 @@ class KnowledgeGraph:
         if entity_name:
             eid = self._entity_id(entity_name)
             esc = eid.replace("'", "''")
-            rows_s = self._lance_get(self._triples_table, f"subject = '{esc}'", limit=100)
-            rows_o = self._lance_get(self._triples_table, f"object = '{esc}'", limit=100)
+            rows_s = self._lance_get(self._triples_table, f"subject = '{esc}'")
+            rows_o = self._lance_get(self._triples_table, f"object = '{esc}'")
             rows = rows_s + rows_o
         else:
-            rows = self._lance_get(self._triples_table, "id != ''", limit=100)
+            rows = self._lance_get(self._triples_table, "id != ''")
 
         results = []
         for r in rows:
@@ -551,7 +551,7 @@ class KnowledgeGraph:
             current = 0
             if self._triples_table:
                 self._lance_refresh(self._triples_table)
-                current = len(self._lance_get(self._triples_table, "valid_to = ''", limit=100_000))
+                current = self._triples_table.count_rows(filter="valid_to = ''")
             expired = tri_count - current
             preds = set()
             if self._triples_table:

@@ -71,6 +71,14 @@ def _chroma_where_to_sql(where: dict) -> Optional[str]:
                         conditions.append(f"{key} {sql_op} '{escaped}'")
                     else:
                         conditions.append(f"{key} {sql_op} {val}")
+                elif op == "$in" and isinstance(val, (list, tuple)):
+                    escaped = [str(v).replace("'", "''") for v in val]
+                    in_list = ", ".join(f"'{v}'" for v in escaped)
+                    conditions.append(f"{key} IN ({in_list})")
+                elif op == "$nin" and isinstance(val, (list, tuple)):
+                    escaped = [str(v).replace("'", "''") for v in val]
+                    in_list = ", ".join(f"'{v}'" for v in escaped)
+                    conditions.append(f"{key} NOT IN ({in_list})")
 
     return " AND ".join(conditions) if conditions else None
 
@@ -183,7 +191,7 @@ class LanceCollection:
                 .execute(records)
             )
         except Exception as e:
-            logger.debug("merge_insert failed (%s), falling back to delete+add", e)
+            logger.warning("merge_insert failed (%s), falling back to delete+add", e)
             for r in records:
                 escaped_id = r["id"].replace("'", "''")
                 try:
@@ -458,7 +466,14 @@ def _open_lance(palace_path, collection_name, embedder):
 
 def _open_chroma(palace_path, collection_name, create):
     """Open a ChromaDB-backed collection."""
-    import chromadb
+    try:
+        import chromadb
+    except ImportError:
+        raise ImportError(
+            "This palace uses the ChromaDB backend but 'chromadb' is not installed. "
+            "Install with: pip install 'mempalace[chroma]'  "
+            "Or migrate to LanceDB with: mempalace migrate"
+        )
 
     client = chromadb.PersistentClient(path=palace_path)
     try:
