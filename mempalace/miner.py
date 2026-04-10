@@ -350,6 +350,11 @@ def chunk_text(
     if min_chunk_size is None:
         min_chunk_size = MIN_CHUNK_SIZE
 
+    if chunk_overlap < 0 or chunk_overlap >= chunk_size:
+        raise ValueError(
+            f"chunk_overlap ({chunk_overlap}) must be >= 0 and < chunk_size ({chunk_size})"
+        )
+
     # Clean up
     content = content.strip()
     if not content:
@@ -632,17 +637,17 @@ def scan_project(
 def _is_already_mined(source_file: str, mined_map: dict) -> bool:
     """Check if a file is already mined using the bulk-fetched mined_map.
 
-    Compares stored mtime against current file mtime, matching the logic
-    in file_already_mined() but without per-file DB queries.
+    Compares stored mtime against current file mtime using epsilon tolerance,
+    matching the logic in file_already_mined() but without per-file DB queries.
     """
     stored_mtime = mined_map.get(source_file)
     if stored_mtime is None:
         return False
     try:
         current_mtime = os.path.getmtime(source_file)
-    except OSError:
+        return abs(float(stored_mtime) - current_mtime) < 0.01
+    except (OSError, TypeError, ValueError):
         return False
-    return abs(stored_mtime - current_mtime) < 0.01
 
 
 # Maximum documents per ChromaDB upsert call
@@ -772,7 +777,11 @@ def mine(
                 min_chunk_size=cfg_min_chunk_size,
             )
 
-        results = []
+        # Phase 1 read/chunk + Phase 2 write as futures complete (stream to DB)
+        pending_docs = []
+        pending_ids = []
+        pending_metas = []
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(prepare_one, fp): fp for fp in files_to_process}
             for future in concurrent.futures.as_completed(futures):
@@ -788,37 +797,30 @@ def mine(
                     with counter_lock:
                         files_skipped += 1
                     continue
-                results.append((filepath, batch_docs, batch_ids, batch_metas, room))
+
+                total_drawers += len(batch_docs)
+                room_counts[room] += 1
+                pending_docs.extend(batch_docs)
+                pending_ids.extend(batch_ids)
+                pending_metas.extend(batch_metas)
+
+                # Flush when batch is large enough
+                if len(pending_docs) >= _UPSERT_BATCH_SIZE:
+                    collection.upsert(
+                        documents=pending_docs,
+                        ids=pending_ids,
+                        metadatas=pending_metas,
+                    )
+                    pending_docs = []
+                    pending_ids = []
+                    pending_metas = []
+
                 with counter_lock:
                     processed_count += 1
                     print(
                         f"  \u2713 [{processed_count:4}/{len(files_to_process)}] "
                         f"{filepath.name[:50]:50} +{len(batch_docs)}"
                     )
-
-        # Phase 2: sequential ChromaDB writes, batched across files
-        pending_docs = []
-        pending_ids = []
-        pending_metas = []
-
-        for filepath, batch_docs, batch_ids, batch_metas, room in results:
-            total_drawers += len(batch_docs)
-            room_counts[room] += 1
-
-            pending_docs.extend(batch_docs)
-            pending_ids.extend(batch_ids)
-            pending_metas.extend(batch_metas)
-
-            # Flush when batch is large enough
-            if len(pending_docs) >= _UPSERT_BATCH_SIZE:
-                collection.upsert(
-                    documents=pending_docs,
-                    ids=pending_ids,
-                    metadatas=pending_metas,
-                )
-                pending_docs = []
-                pending_ids = []
-                pending_metas = []
 
         # Flush remainder
         if pending_docs:

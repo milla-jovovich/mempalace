@@ -117,7 +117,7 @@ def _ingest_transcript(transcript_path: str):
     from .config import MempalaceConfig
 
     try:
-        palace_path = MempalaceConfig().palace_path
+        MempalaceConfig()  # validate config loads
     except Exception:
         return
 

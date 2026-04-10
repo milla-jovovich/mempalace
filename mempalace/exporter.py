@@ -12,10 +12,18 @@ regardless of palace size.
 """
 
 import os
+import re
 from collections import defaultdict
 from datetime import datetime
 
 from .palace import get_collection
+
+
+def _safe_path_component(name: str) -> str:
+    """Sanitize a string for use as a directory/file name component."""
+    name = re.sub(r'[/\\:*?"<>|]', '_', name)
+    name = name.strip('. ')
+    return name or 'unknown'
 
 
 def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -> dict:
@@ -70,11 +78,13 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
 
         # Write/append each room file
         for wing, rooms in batch_grouped.items():
-            wing_dir = os.path.join(output_dir, wing)
+            safe_wing = _safe_path_component(wing)
+            wing_dir = os.path.join(output_dir, safe_wing)
             os.makedirs(wing_dir, exist_ok=True)
 
             for room, drawers in rooms.items():
-                room_path = os.path.join(wing_dir, f"{room}.md")
+                safe_room = _safe_path_component(room)
+                room_path = os.path.join(wing_dir, f"{safe_room}.md")
                 key = (wing, room)
                 is_new = key not in opened_rooms
 

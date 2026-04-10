@@ -18,7 +18,7 @@ class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
 
 
-def _build_where_filter(wing: str = None, room: str = None) -> dict:
+def build_where_filter(wing: str = None, room: str = None) -> dict:
     """Build ChromaDB where filter for wing/room filtering."""
     if wing and room:
         return {"$and": [{"wing": wing}, {"room": room}]}
@@ -42,7 +42,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         raise SearchError(f"No palace found at {palace_path}")
 
-    where = _build_where_filter(wing, room)
+    where = build_where_filter(wing, room)
 
     try:
         kwargs = {
@@ -127,7 +127,7 @@ def search_memories(
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
         }
 
-    where = _build_where_filter(wing, room)
+    where = build_where_filter(wing, room)
 
     try:
         kwargs = {
@@ -148,6 +148,9 @@ def search_memories(
 
     hits = []
     for doc, meta, dist in zip(docs, metas, dists):
+        # Filter on raw distance before rounding to avoid precision loss
+        if min_similarity > 0.0 and dist > min_similarity:
+            continue
         hits.append(
             {
                 "text": doc,
@@ -158,12 +161,6 @@ def search_memories(
                 "distance": round(dist, 4),
             }
         )
-
-    # Filter out results exceeding the distance threshold.
-    # ChromaDB default L2: lower distance = more similar.
-    # min_similarity=0.0 (default) disables filtering for backwards compat.
-    if min_similarity > 0.0:
-        hits = [h for h in hits if h["distance"] <= min_similarity]
 
     return {
         "query": query,

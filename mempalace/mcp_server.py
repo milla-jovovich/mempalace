@@ -482,6 +482,7 @@ def tool_get_drawer(drawer_id: str):
 def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offset: int = 0):
     """List drawers with pagination. Optional wing/room filter."""
     limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -526,6 +527,11 @@ def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offse
 
 def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, room: str = None):
     """Update an existing drawer's content and/or metadata."""
+    global _metadata_cache
+
+    if content is None and wing is None and room is None:
+        return {"success": True, "drawer_id": drawer_id, "noop": True}
+
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -575,6 +581,9 @@ def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, ro
             update_kwargs["documents"] = [new_doc]
         update_kwargs["metadatas"] = [new_meta]
         col.update(**update_kwargs)
+
+        # Invalidate metadata cache so status/taxonomy reflect changes
+        _metadata_cache = None
 
         logger.info(f"Updated drawer: {drawer_id}")
         return {
@@ -916,7 +925,7 @@ TOOLS = {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "What to search for"},
-                "limit": {"type": "integer", "description": "Max results (default 5)"},
+                "limit": {"type": "integer", "description": "Max results (default 5)", "minimum": 1, "maximum": 100},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
                 "min_similarity": {
@@ -996,10 +1005,13 @@ TOOLS = {
                 "limit": {
                     "type": "integer",
                     "description": "Max results per page (default 20, max 100)",
+                    "minimum": 1,
+                    "maximum": 100,
                 },
                 "offset": {
                     "type": "integer",
                     "description": "Offset for pagination (default 0)",
+                    "minimum": 0,
                 },
             },
         },

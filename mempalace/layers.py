@@ -24,7 +24,7 @@ from collections import defaultdict
 import chromadb
 
 from .config import MempalaceConfig
-from .searcher import _build_where_filter
+from .searcher import build_where_filter
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +203,7 @@ class Layer2:
         except Exception:
             return "No palace found."
 
-        where = _build_where_filter(wing, room)
+        where = build_where_filter(wing, room)
 
         kwargs = {"include": ["documents", "metadatas"], "limit": n_results}
         if where:
@@ -261,7 +261,7 @@ class Layer3:
         except Exception:
             return "No palace found."
 
-        where = _build_where_filter(wing, room)
+        where = build_where_filter(wing, room)
 
         kwargs = {
             "query_texts": [query],
@@ -311,7 +311,7 @@ class Layer3:
         except Exception:
             return []
 
-        where = _build_where_filter(wing, room)
+        where = build_where_filter(wing, room)
 
         kwargs = {
             "query_texts": [query],

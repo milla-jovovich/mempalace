@@ -450,14 +450,15 @@ def test_chunk_text_many_chunks():
 
 def test_chunk_text_preserves_content():
     """All original content is covered by the union of chunks (nothing lost)."""
-    # Use only non-whitespace so chunk stripping doesn't drop characters at boundaries
-    content = "abcdefghij" * (CHUNK_SIZE * 3 // 10)
+    # Use position-unique tokens so we can verify each segment appears in a chunk
+    tokens = [f"[T{i:04d}]" for i in range(300)]
+    content = " ".join(tokens)
     chunks = chunk_text(content, "/fake/file.py")
     assert len(chunks) >= 2
-    # Every character in the original must appear in at least one chunk
+    # Every unique token must appear in at least one chunk
     all_chunk_text = "".join(c["content"] for c in chunks)
-    for ch_pos, ch in enumerate(content):
-        assert ch in all_chunk_text, f"Character '{ch}' at position {ch_pos} not in any chunk"
-    # Stronger: the joined chunks should contain more characters than the original
-    # (due to overlap), confirming nothing is dropped
+    for token in tokens:
+        assert token in all_chunk_text, f"Token '{token}' not found in any chunk"
+    # The joined chunks should contain at least as many characters as the original
+    # (overlap means more, confirming nothing is dropped)
     assert len(all_chunk_text) >= len(content)

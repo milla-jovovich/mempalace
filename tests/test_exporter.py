@@ -3,7 +3,6 @@ import shutil
 import tempfile
 from pathlib import Path
 
-import chromadb
 import yaml
 
 from mempalace.miner import mine
