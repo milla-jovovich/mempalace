@@ -54,7 +54,7 @@ def test_cmd_status_custom_palace(mock_config_cls):
 def test_cmd_search_calls_search(mock_config_cls):
     mock_config_cls.return_value.palace_path = "/fake/palace"
     args = argparse.Namespace(
-        palace=None, query="test query", wing="mywing", room="myroom", results=3
+        palace=None, query="test query", wing="mywing", room="myroom", results=3, deep=False
     )
     with patch("mempalace.searcher.search") as mock_search:
         cmd_search(args)
@@ -64,13 +64,14 @@ def test_cmd_search_calls_search(mock_config_cls):
             wing="mywing",
             room="myroom",
             n_results=3,
+            deep=False,
         )
 
 
 @patch("mempalace.cli.MempalaceConfig")
 def test_cmd_search_error_exits(mock_config_cls):
     mock_config_cls.return_value.palace_path = "/fake/palace"
-    args = argparse.Namespace(palace=None, query="q", wing=None, room=None, results=5)
+    args = argparse.Namespace(palace=None, query="q", wing=None, room=None, results=5, deep=False)
     from mempalace.searcher import SearchError
 
     with patch("mempalace.searcher.search", side_effect=SearchError("fail")):
@@ -650,3 +651,57 @@ def test_cmd_repair_trailing_slash_does_not_recurse():
     palace_path = os.path.expanduser(args.palace).rstrip(os.sep)
     backup_path = palace_path + ".backup"
     assert not backup_path.startswith(palace_path + os.sep)
+
+
+# ── cmd_crystallize ────────────────────────────────────────────────────
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_crystallize_invalid_diamonds(mock_config_cls, capsys):
+    from mempalace.cli import main
+    import sys
+    from unittest.mock import patch, MagicMock
+    
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    
+    # Mock chromadb and kg to avoid early return
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+
+    mock_kg_cls = MagicMock()
+    mock_detect = MagicMock(return_value=["room1"])
+    mock_find = MagicMock(return_value=([], []))
+    mock_archive = MagicMock(return_value=0)
+    
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}), \
+         patch("mempalace.knowledge_graph.KnowledgeGraph", mock_kg_cls), \
+         patch("mempalace.entropy.detect_dense_rooms", mock_detect), \
+         patch("mempalace.crystallize.find_room_diamonds", mock_find), \
+         patch("mempalace.archive.archive_noise", mock_archive):
+
+        with patch.object(sys, "argv", ["mempalace", "crystallize", "--diamonds", "1.5"]):
+            try:
+                main()
+            except Exception as e:
+                pytest.fail(f"Failed with {e}")
+            captured = capsys.readouterr()
+            assert "Warning: Percentage must be between 0.0 and 1.0. Got 1.5. Falling back to 10." in captured.out
+
+        with patch.object(sys, "argv", ["mempalace", "crystallize", "--diamonds", "-5"]):
+            try:
+                main()
+            except Exception as e:
+                pytest.fail(f"Failed with {e}")
+            captured = capsys.readouterr()
+            assert "Warning: Absolute diamond count must be > 0. Got -5. Falling back to 10." in captured.out
+
+        with patch.object(sys, "argv", ["mempalace", "crystallize", "--diamonds", "abc"]):
+            try:
+                main()
+            except Exception as e:
+                pytest.fail(f"Failed with {e}")
+            captured = capsys.readouterr()
+            assert "Warning: Invalid diamonds value 'abc'. Falling back to 10." in captured.out

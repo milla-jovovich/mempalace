@@ -275,9 +275,16 @@ def cmd_crystallize(args):
     try:
         if "." in args.diamonds:
             diamonds_val = float(args.diamonds)
+            if not (0.0 < diamonds_val <= 1.0):
+                print(f"Warning: Percentage must be between 0.0 and 1.0. Got {diamonds_val}. Falling back to 10.")
+                diamonds_val = 10
         else:
             diamonds_val = int(args.diamonds)
+            if diamonds_val <= 0:
+                print(f"Warning: Absolute diamond count must be > 0. Got {diamonds_val}. Falling back to 10.")
+                diamonds_val = 10
     except ValueError:
+        print(f"Warning: Invalid diamonds value '{args.diamonds}'. Falling back to 10.")
         diamonds_val = 10
 
     for room in dense_rooms:
