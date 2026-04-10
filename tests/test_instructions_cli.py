@@ -53,7 +53,7 @@ def test_init_instructions_use_yes_flag():
 
 
 def test_mine_instructions_mention_init_prerequisite():
-    """mine instructions must mention that init is required first."""
+    """mine instructions must mention that init --yes is required first."""
     content = (INSTRUCTIONS_DIR / "mine.md").read_text()
-    assert "mempalace init" in content
+    assert "mempalace init --yes" in content
     assert "mempalace.yaml" in content
