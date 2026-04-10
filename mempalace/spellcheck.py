@@ -119,8 +119,8 @@ def _load_known_names() -> set:
 
         reg = EntityRegistry.load()
         names = set()
-        for entity in reg._data.get("entities", {}).values():
-            names.add(entity.get("canonical", "").lower())
+        for name, entity in reg._data.get("people", {}).items():
+            names.add(name.lower())
             for alias in entity.get("aliases", []):
                 names.add(alias.lower())
         return names
