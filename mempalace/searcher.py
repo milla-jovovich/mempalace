@@ -91,7 +91,12 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    min_similarity: float = 0.0,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
@@ -142,11 +147,19 @@ def search_memories(
                 "room": meta.get("room", "unknown"),
                 "source_file": Path(meta.get("source_file", "?")).name,
                 "similarity": round(1 - dist, 3),
+                "distance": round(dist, 4),
             }
         )
+
+    # Filter out results exceeding the distance threshold.
+    # ChromaDB default L2: lower distance = more similar.
+    # min_similarity=0.0 (default) disables filtering for backwards compat.
+    if min_similarity > 0.0:
+        hits = [h for h in hits if h["distance"] <= min_similarity]
 
     return {
         "query": query,
         "filters": {"wing": wing, "room": room},
+        "total_before_filter": len(docs),
         "results": hits,
     }
