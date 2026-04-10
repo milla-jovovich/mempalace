@@ -210,6 +210,15 @@ def tool_list_wings():
     return {"wings": wings}
 
 
+def tool_socratic_question():
+    from .ambient import get_socratic_question
+    return {"result": get_socratic_question()}
+
+def tool_eigen_thoughts():
+    from .ambient import get_eigen_thoughts
+    return {"result": json.dumps(get_eigen_thoughts(), indent=2)}
+
+
 def tool_list_rooms(wing: str = None):
     col = _get_collection()
     if not col:
@@ -588,6 +597,16 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
 # ==================== MCP PROTOCOL ====================
 
 TOOLS = {
+    "mempalace_socratic": {
+        "description": "Get a Socratic question based on your structural holes",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_socratic_question,
+    },
+    "mempalace_eigen_thoughts": {
+        "description": "Get your Top 5 Eigen-Thoughts (Core Pillars)",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_eigen_thoughts,
+    },
     "mempalace_status": {
         "description": "Palace overview — total drawers, wing and room counts",
         "input_schema": {"type": "object", "properties": {}},

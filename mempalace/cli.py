@@ -557,6 +557,12 @@ def main():
 
     sub.add_parser("status", help="Show what's been filed")
 
+    p_whisper = sub.add_parser("whisper", help="Get a relevant context whisper based on current text")
+    p_whisper.add_argument("text", nargs="+", help="Current text context")
+
+    sub.add_parser("socratic", help="Get a Socratic question based on your structural holes")
+    sub.add_parser("pillars", help="Get your Top 5 Eigen-Thoughts (Core Pillars)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -578,6 +584,23 @@ def main():
             return
         args.name = name
         cmd_instructions(args)
+        return
+
+    if args.command == "whisper":
+        from .ambient import get_whisper
+        print(get_whisper(" ".join(args.text)))
+        return
+
+    if args.command == "socratic":
+        from .ambient import get_socratic_question
+        print(get_socratic_question())
+        return
+
+    if args.command == "pillars":
+        from .ambient import get_eigen_thoughts
+        print("\nYour Eigen-Thoughts (Core Pillars):")
+        for i, t in enumerate(get_eigen_thoughts(), 1):
+            print(f"  {i}. {t}")
         return
 
     dispatch = {
