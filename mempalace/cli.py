@@ -115,6 +115,7 @@ def cmd_search(args):
             wing=args.wing,
             room=args.room,
             n_results=args.results,
+            deep=args.deep,
         )
     except SearchError:
         sys.exit(1)
@@ -241,6 +242,52 @@ def cmd_repair(args):
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print(f"  Backup saved at {backup_path}")
     print(f"\n{'=' * 55}\n")
+
+
+def cmd_crystallize(args):
+    import chromadb
+    from .entropy import detect_dense_rooms
+    from .crystallize import find_room_diamonds
+    from .archive import archive_noise
+    from .knowledge_graph import KnowledgeGraph
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+
+    try:
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection("mempalace_drawers")
+    except Exception:
+        print(f"\n  No palace found at {palace_path}")
+        return
+
+    kg = KnowledgeGraph(palace_path=palace_path)
+    kg.init_db()
+
+    print(f"\n  Detecting dense rooms (threshold={args.threshold})...")
+    dense_rooms = detect_dense_rooms(col, threshold=args.threshold)
+
+    if not dense_rooms:
+        print("  No dense rooms found.")
+        return
+
+    print(f"  Found {len(dense_rooms)} dense rooms: {', '.join(dense_rooms)}")
+
+    try:
+        if "." in args.diamonds:
+            diamonds_val = float(args.diamonds)
+        else:
+            diamonds_val = int(args.diamonds)
+    except ValueError:
+        diamonds_val = 10
+
+    for room in dense_rooms:
+        print(f"\n  Crystallizing room: {room}")
+        diamonds, noise = find_room_diamonds(col, room, top_k=diamonds_val)
+        print(f"    Found {len(diamonds)} diamonds and {len(noise)} noise chunks.")
+
+        archived_count = archive_noise(col, kg, room, noise)
+        print(f"    Archived {archived_count} chunks to 'archive' wing.")
+    print("\n  Crystallization complete.\n")
 
 
 def cmd_hook(args):
@@ -463,6 +510,7 @@ def main():
     p_search.add_argument("--wing", default=None, help="Limit to one project")
     p_search.add_argument("--room", default=None, help="Limit to one room")
     p_search.add_argument("--results", type=int, default=5, help="Number of results")
+    p_search.add_argument("--deep", action="store_true", help="Search deep (including archive)")
 
     # compress
     p_compress = sub.add_parser(
@@ -536,6 +584,20 @@ def main():
     sub.add_parser(
         "repair",
         help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
+    )
+
+    # crystallize
+    p_cryst = sub.add_parser(
+        "crystallize", help="Find important notes and archive noise in dense rooms"
+    )
+    p_cryst.add_argument(
+        "--threshold", type=int, default=100, help="Room chunk threshold (default: 100)"
+    )
+    p_cryst.add_argument(
+        "--diamonds",
+        type=str,
+        default="10",
+        help="Number of diamonds to keep, or percentage (e.g. 0.1 for 10%)",
     )
 
     # mcp
@@ -619,6 +681,7 @@ def main():
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
+        "crystallize": cmd_crystallize,
         "migrate": cmd_migrate,
         "status": cmd_status,
     }
