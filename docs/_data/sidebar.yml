@@ -14,6 +14,7 @@
     - { label: MCP Server,      href: /mcp }
     - { label: Auto-Save Hooks, href: /hooks }
     - { label: Specialist Agents, href: /agents }
+    - { label: Gemini CLI,      href: /gemini }
 
 - title: Reference
   items:

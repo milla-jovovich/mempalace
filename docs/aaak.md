@@ -1,10 +1,10 @@
 ---
 layout: docs
 title: AAAK Dialect
-description: A lossless shorthand for AI agents. 30x compression, zero information loss, no decoder required.
+description: An experimental lossy abbreviation dialect for AI agents. Packs repeated entities into fewer tokens at scale. No decoder required.
 eyebrow: Core Concepts
-heading: AAAK Dialect
-subtitle: A lossless shorthand designed for AI agents. Not meant to be read by humans — meant to be read by your AI, fast.
+heading: AAAK Dialect (Experimental)
+subtitle: A lossy abbreviation dialect for packing repeated entities into fewer tokens at scale. Not meant to be read by humans — meant to be read by your AI, fast.
 prev:
   href: /palace
   label: The Palace
@@ -20,15 +20,18 @@ toc:
 
 ## What is AAAK {#what}
 
-AAAK is a lossless shorthand dialect designed for AI agents. Not meant to be
-read by humans — meant to be read by your AI, fast.
+AAAK is a **lossy** abbreviation dialect designed for AI agents. It packs
+repeated entities into fewer tokens at scale — entity codes, sentence
+truncation, and structured shorthand. Not meant to be read by humans — meant
+to be read by your AI, fast.
 
-- **30x compression** over natural English
-- **Zero information loss** — every fact is preserved
+- **Lossy compression** — trades fidelity for token density at scale
 - **No decoder required** — it's just structured text with a universal grammar
 - **No fine-tuning required** — any text-reading model can parse it immediately
+- **Experimental** — on LongMemEval, AAAK scores **84.2% R@5** vs raw mode's **96.6%** (a 12.4-point regression)
 
-Nothing else like it exists.
+> **Important:** The 96.6% headline benchmark is from **raw verbatim mode**, not AAAK. AAAK is a separate compression layer that trades recall fidelity for token density. We're iterating on it. See the [honest status note]({{ site.github_url }}#a-note-from-milla--ben--april-7-2026) in the README.
+{: .callout .warning}
 
 ## English vs AAAK {#comparison}
 
@@ -66,9 +69,11 @@ DECISION: KAI.rec:clerk>auth0(pricing+dx) ★★★★
 
 </div>
 
-Same information. **8x fewer tokens.** And because AAAK is just structured
-text, your AI reads it as fast as any other text — faster, actually, because
-there's less to read.
+Fewer tokens at the cost of some fidelity. AAAK is designed for **repeated
+entities at scale** — the small example above doesn't fully demonstrate the
+compression benefit. At scale (hundreds of rooms, recurring entity names),
+the savings become significant. Because AAAK is just structured text, your AI
+reads it as fast as any other text.
 
 ## What it works with {#works-with}
 

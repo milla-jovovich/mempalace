@@ -75,9 +75,12 @@ Now:
 This matters for a memory system: you can look back at what the world looked
 like six months ago without corrupting the present.
 
-## Contradiction Detection {#contradictions}
+## Contradiction Detection (experimental) {#contradictions}
 
-MemPalace uses the knowledge graph to catch mistakes before they reach you:
+> **Status:** The contradiction checker exists as a separate utility (`fact_checker.py`) but is **not yet wired into the knowledge graph operations**. The examples below show the intended behavior once integrated. Track progress in [Issue #27]({{ site.github_url }}/issues/27).
+{: .callout .warning}
+
+When enabled, it checks assertions against entity facts in the graph:
 
 ```text
 Input:  "Soren finished the auth migration"
@@ -91,8 +94,7 @@ Output: 🟡 SPRINT: stale_date — current sprint ends Thursday (updated 2 days
 ```
 
 Facts are checked against the knowledge graph. Ages, dates, and tenures are
-calculated dynamically — not hardcoded. When you or your AI state something
-that contradicts a stored fact, MemPalace flags it.
+calculated dynamically — not hardcoded.
 
 Severity levels:
 

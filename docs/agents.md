@@ -9,8 +9,8 @@ prev:
   href: /hooks
   label: Auto-Save Hooks
 next:
-  href: /cli
-  label: CLI Commands
+  href: /gemini
+  label: Gemini CLI
 toc:
   - { id: idea,          label: The Idea }
   - { id: structure,     label: Structure }
@@ -69,8 +69,9 @@ and fast reading. A single session might be 5 tokens of AAAK:
 PR#42|auth.bypass.found|missing.middleware.check|pattern:3rd.time.this.quarter|★★★★
 ```
 
-Readable in milliseconds. Compressed to a fraction of the original text. And
-because AAAK is lossless, nothing is lost.
+Readable in milliseconds. Compressed to a fraction of the original text using
+AAAK's lossy abbreviation — key entities and patterns are preserved, though
+some fidelity is traded for token density.
 
 ## Example — Reviewer Agent {#example}
 

@@ -4,7 +4,7 @@ title: MCP Server
 description: 19 tools that expose the MemPalace palace, knowledge graph, and agent diary to any MCP-compatible AI.
 eyebrow: Integrations
 heading: MCP Server
-subtitle: Connect MemPalace to Claude Code, Claude Desktop, Cursor, ChatGPT Desktop, and any other MCP-compatible tool. 19 tools, zero configuration.
+subtitle: Connect MemPalace to Claude Code, Claude Desktop, Cursor, Gemini CLI, and any other MCP-compatible tool. 19 tools, zero configuration.
 prev:
   href: /knowledge-graph
   label: Knowledge Graph
@@ -23,11 +23,24 @@ toc:
 
 ## Install {#install}
 
-### Claude Code
+### Claude Code (recommended)
+
+**Via plugin (recommended):**
+
+```bash
+claude plugin marketplace add milla-jovovich/mempalace
+claude plugin install --scope user mempalace
+```
+
+Restart Claude Code, then type `/skills` to verify "mempalace" appears.
+
+**Or manually:**
 
 ```bash
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
+
+You can also run `mempalace mcp` to see the setup command.
 
 ### Claude Desktop
 
@@ -43,6 +56,18 @@ Add to `claude_desktop_config.json`:
   }
 }
 ```
+
+### Gemini CLI
+
+MemPalace works natively with Gemini CLI, which handles the MCP server and
+save hooks automatically:
+
+```bash
+gemini mcp add mempalace /path/to/venv/bin/python3 -m mempalace.mcp_server --scope user
+```
+
+See the full [Gemini CLI Integration Guide]({{ site.github_url }}/blob/main/examples/gemini_cli_setup.md)
+for virtual environment setup, hooks configuration, and verification steps.
 
 ### Cursor / other MCP clients
 

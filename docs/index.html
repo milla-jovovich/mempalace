@@ -136,17 +136,17 @@ description: "Open-source, local-first AI memory. 96.6% LongMemEval R@5 with zer
 <pre><span class="b-mute"># JSON &middot; 642 tokens</span>
 <span class="b-hi">{</span><span class="b-hi">"team"</span>:<span class="b-accent">"core"</span>,<span class="b-hi">"decided"</span>:<span class="b-accent">"oauth2"</span><span class="b-hi">}</span>
 
-<span class="b-arrow">          &darr;  30&times;</span>
+<span class="b-arrow">          &darr;  AAAK</span>
 
 <span class="b-good">team=core;decided=oauth2</span>
 <span class="b-mute"># AAAK &middot; 21 tokens</span></pre>
         </div>
         <div class="bento-body">
           <span class="icon-tag"><span class="icon-dot"></span>AAAK Dialect</span>
-          <h3>Lossless compression for AI.</h3>
+          <h3>Experimental compression for AI.</h3>
           <p>
-            <strong>30&times;</strong> compression, zero information loss, no decoder
-            required. Works with any text-reading model.
+            Lossy abbreviation dialect that packs repeated entities into fewer tokens
+            at scale. No decoder required. Works with any text-reading model.
           </p>
           <span class="learn">See the format <span class="arrow">&rarr;</span></span>
         </div>
@@ -240,10 +240,10 @@ description: "Open-source, local-first AI memory. 96.6% LongMemEval R@5 with zer
     <div class="dual-grid">
       <div class="dual-card">
         <span class="dual-eyebrow">Cloud agents</span>
-        <h3>Claude, ChatGPT, Cursor &mdash; via MCP</h3>
+        <h3>Claude Code, Gemini, Cursor &mdash; via MCP</h3>
         <p>
-          Connect MemPalace once. Your AI gets <strong>19 tools</strong> over MCP and
-          calls them automatically when you ask anything that needs memory.
+          Install the plugin or connect once via MCP. Your AI gets <strong>19 tools</strong>
+          and calls them automatically when you ask anything that needs memory.
         </p>
         <p class="quote">&ldquo;What did we decide about auth last month?&rdquo;</p>
         <div class="terminal">
@@ -254,13 +254,14 @@ description: "Open-source, local-first AI memory. 96.6% LongMemEval R@5 with zer
               <span class="term-dot g"></span>
             </span>
           </div>
-          <pre class="terminal-body"><code><span class="t-prompt">$</span> <span class="t-cmd">claude mcp add mempalace \</span>
-    <span class="t-cmd">-- python -m mempalace.mcp_server</span>
-<span class="t-result">&rarr; 19 tools registered</span>
+          <pre class="terminal-body"><code><span class="t-comment"># Plugin install (recommended)</span>
+<span class="t-prompt">$</span> <span class="t-cmd">claude plugin marketplace add \</span>
+    <span class="t-cmd">milla-jovovich/mempalace</span>
 
-<span class="t-comment"># Now Claude calls them automatically:</span>
-<span class="t-comment"># mempalace_search, mempalace_wake_up,</span>
-<span class="t-comment"># mempalace_palace, mempalace_facts, ...</span></code></pre>
+<span class="t-comment"># Or manual MCP</span>
+<span class="t-prompt">$</span> <span class="t-cmd">claude mcp add mempalace \</span>
+    <span class="t-cmd">-- python -m mempalace.mcp_server</span>
+<span class="t-result">&rarr; 19 tools registered</span></code></pre>
         </div>
       </div>
 

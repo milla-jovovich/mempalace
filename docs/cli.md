@@ -6,8 +6,8 @@ eyebrow: Reference
 heading: CLI Commands
 subtitle: Every command, every flag. All commands accept <code>--palace &lt;path&gt;</code> to override the default location.
 prev:
-  href: /agents
-  label: Specialist Agents
+  href: /gemini
+  label: Gemini CLI
 next:
   href: /benchmarks
   label: Benchmarks
@@ -20,6 +20,7 @@ toc:
   - { id: wake-up,       label: wake-up }
   - { id: compress,      label: compress }
   - { id: status,        label: status }
+  - { id: mcp-cmd,       label: mcp }
   - { id: config,        label: Configuration files }
 ---
 
@@ -44,7 +45,18 @@ generates the wing config.
 
 ```bash
 mempalace init <dir>
+
+# Non-interactive (skips room confirmation prompts)
+mempalace init <dir> --yes
 ```
+
+<div class="table-wrap" markdown="1">
+
+| Flag       | Description                                      |
+|------------|--------------------------------------------------|
+| `--yes`    | Skip room confirmation prompts (non-interactive) |
+
+</div>
 
 Produces `~/.mempalace/wing_config.json` and `~/.mempalace/identity.txt`. Run
 once per machine.
@@ -118,12 +130,12 @@ mempalace wake-up --wing driftwood                # project-specific
 mempalace wake-up > context.txt                   # save to file
 ```
 
-Output is AAAK-compressed by default — 8x fewer tokens than English. See
-[AAAK Dialect]({{ '/aaak' | relative_url }}).
+Output is AAAK-compressed by default — fewer tokens than English at the cost
+of some fidelity. See [AAAK Dialect]({{ '/aaak' | relative_url }}).
 
 ## compress {#compress}
 
-Compress a wing into AAAK — lossless, 30x smaller than English:
+Compress a wing into AAAK — lossy abbreviation that trades fidelity for token density:
 
 ```bash
 mempalace compress --wing myapp
@@ -136,6 +148,16 @@ Palace overview — wings, rooms, drawer counts, disk usage:
 ```bash
 mempalace status
 ```
+
+## mcp {#mcp-cmd}
+
+Show the MCP setup command for connecting MemPalace to your AI:
+
+```bash
+mempalace mcp
+```
+
+Outputs the `claude mcp add` command you need to run.
 
 ## Configuration files {#config}
 

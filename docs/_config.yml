@@ -29,7 +29,6 @@ discord_url: https://discord.com/invite/ycTQQCu6kn
 
 nav_links:
   - { label: Home,          href: / }
-  - { label: Architecture,  href: /architecture }
-  - { label: Integrations,  href: /integrations }
+  - { label: Docs,          href: /intro }
   - { label: Benchmarks,    href: /benchmarks }
   - { label: CLI,           href: /cli }

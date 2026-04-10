@@ -1,7 +1,7 @@
 ---
 layout: docs
 title: Auto-Save Hooks
-description: Automatic memory save for Claude Code and Codex CLI. No manual save commands.
+description: Automatic memory save for Claude Code, Codex CLI, and Gemini CLI. No manual save commands.
 eyebrow: Integrations
 heading: Auto-Save Hooks
 subtitle: Two hooks that automatically save memories during work. The AI knows what to save — the hooks just tell it when.
@@ -126,6 +126,11 @@ Edit `hooks/mempal_save_hook.sh` to change:
 | `MEMPAL_DIR`      | Optional. Auto-run `mempalace mine <dir>` on each save trigger.         |
 
 </div>
+
+**Optional auto-ingest:** Set the `MEMPAL_DIR` environment variable to a
+directory path and the hooks will automatically run `mempalace mine` on that
+directory during each save trigger (background on stop, synchronous on
+precompact).
 
 The hooks resolve the repo root automatically from their own path, so they
 work regardless of where you install the repo.

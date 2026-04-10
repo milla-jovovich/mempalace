@@ -65,14 +65,14 @@ finding.
 
 MemPalace is three ideas working together:
 
-1. **[The Palace]({{ '/palace' | relative_url }})** — conversations organized into wings, halls, rooms, closets, and drawers. A structure that boosts retrieval by **34%**.
-2. **[AAAK Dialect]({{ '/aaak' | relative_url }})** — a lossless shorthand designed for AI agents. 30x compression, readable by any text-reading LLM without a decoder.
+1. **[The Palace]({{ '/palace' | relative_url }})** — conversations organized into wings, halls, rooms, closets, and drawers. Metadata filtering boosts retrieval by **34%** over flat storage.
+2. **[AAAK Dialect]({{ '/aaak' | relative_url }})** (experimental) — a lossy abbreviation dialect that packs repeated entities into fewer tokens at scale. Readable by any text-reading LLM without a decoder. Currently scores **84.2% R@5** vs raw mode's **96.6%** — we're iterating.
 3. **[Knowledge Graph]({{ '/knowledge-graph' | relative_url }})** — temporal entity-relationship triples with validity windows. Like Zep's Graphiti, but local and free.
 
 Plus integrations to make your AI actually use them:
 
-- **[MCP Server]({{ '/mcp' | relative_url }})** — 19 tools that let Claude, Cursor, and any MCP-compatible AI read and write the palace automatically.
-- **[Auto-Save Hooks]({{ '/hooks' | relative_url }})** — for Claude Code and Codex CLI. No manual save commands.
+- **[MCP Server]({{ '/mcp' | relative_url }})** — 19 tools that let Claude Code, Cursor, Gemini CLI, and any MCP-compatible AI read and write the palace automatically. Also available as a native [Claude Code plugin]({{ '/mcp#install' | relative_url }}).
+- **[Auto-Save Hooks]({{ '/hooks' | relative_url }})** — for Claude Code, Codex CLI, and Gemini CLI. No manual save commands.
 - **[Specialist Agents]({{ '/agents' | relative_url }})** — focused lenses on your data, each with their own wing and diary.
 
 ## Results {#results}

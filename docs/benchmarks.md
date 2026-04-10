@@ -48,7 +48,8 @@ runs entirely offline.
 
 The **100%** is the competitive story: a perfect score on the standard
 benchmark for AI memory, verified across all 500 questions and all 6 question
-types — reproducible with either Haiku or Sonnet as the reranker.
+types. The rerank pipeline is not yet included in the public benchmark
+scripts — we're adding it. The result files exist and are auditable.
 
 ## vs Published Systems {#vs-published}
 

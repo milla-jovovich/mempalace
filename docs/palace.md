@@ -135,7 +135,7 @@ Tested on **22,000+ real conversation memories**:
 
 </div>
 
-> Wings and rooms aren't cosmetic. They're a **34% retrieval improvement**. The palace structure _is_ the product.
+> Wings and rooms aren't cosmetic. They're a **34% retrieval improvement** via wing+room metadata filtering — a standard ChromaDB feature applied to the palace structure. Real and useful, even if it's not a novel retrieval mechanism.
 {: .callout .success}
 
 ## The Memory Stack {#memory-stack}

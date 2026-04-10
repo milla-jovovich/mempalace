@@ -22,6 +22,18 @@ toc:
 
 ## Install {#install}
 
+### Claude Code plugin (recommended)
+
+```bash
+claude plugin marketplace add milla-jovovich/mempalace
+claude plugin install --scope user mempalace
+```
+
+Restart Claude Code, then type `/skills` to verify "mempalace" appears. This
+gives you MCP tools, auto-save hooks, and slash commands out of the box.
+
+### pip install
+
 ```bash
 pip install mempalace
 ```
@@ -71,7 +83,7 @@ mempalace mine ~/chats/ --mode convos --extract general
 The miner chunks by paragraph (projects) or by exchange pair (convos), detects
 rooms from content, and stores everything as verbatim drawers.
 
-> **Tip:** If you have transcript files that concatenate multiple sessions, run `mempalace split ~/chats/` first. See the [CLI reference]({{ '/cli#splitting' | relative_url }}) for options.
+> **Tip:** If you have transcript files that concatenate multiple sessions, run `mempalace split ~/chats/` first. See the [CLI reference]({{ '/cli#split' | relative_url }}) for options.
 {: .callout}
 
 ## Search {#search}
@@ -107,8 +119,9 @@ mempalace wake-up --wing driftwood > context.txt
 Paste `context.txt` into your AI's system prompt. Now it knows your team, your
 projects, your preferences, your decisions — all in ~170 tokens.
 
-For Claude Code, Cursor, and other MCP-compatible tools, you don't even need
-this — see [MCP Server]({{ '/mcp' | relative_url }}) for the automatic flow.
+For Claude Code, Cursor, Gemini CLI, and other MCP-compatible tools, you
+don't even need this — see [MCP Server]({{ '/mcp' | relative_url }}) for
+the automatic flow.
 
 ## Next steps {#next}
 
