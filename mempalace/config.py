@@ -125,9 +125,13 @@ class MempalaceConfig:
             config_dir: Override config directory (useful for testing).
                         Defaults to ~/.mempalace.
         """
-        self._config_dir = (
-            Path(config_dir) if config_dir else Path(os.path.expanduser("~/.mempalace"))
-        )
+        # Use an environment variable for testing/sandbox if provided
+        if config_dir:
+            self._config_dir = Path(config_dir)
+        elif "MEMPALACE_CONFIG_DIR" in os.environ:
+            self._config_dir = Path(os.environ["MEMPALACE_CONFIG_DIR"])
+        else:
+            self._config_dir = Path(os.path.expanduser("~/.mempalace"))
         self._config_file = self._config_dir / "config.json"
         self._people_map_file = self._config_dir / "people_map.json"
         self._file_config = {}

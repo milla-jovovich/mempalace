@@ -212,10 +212,13 @@ def tool_list_wings():
 
 def tool_socratic_question():
     from .ambient import get_socratic_question
+
     return {"result": get_socratic_question()}
+
 
 def tool_eigen_thoughts():
     from .ambient import get_eigen_thoughts
+
     return {"result": json.dumps(get_eigen_thoughts(), indent=2)}
 
 
