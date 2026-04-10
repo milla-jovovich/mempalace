@@ -54,7 +54,7 @@ You have access to a local memory palace via MCP tools. The palace stores verbat
   - `limit`: max results (default 5)
 - `mempalace_check_duplicate` — Check if content already exists before filing.
   - `content` (required): text to check
-  - `threshold`: similarity threshold (default 0.9)
+  - `threshold`: similarity threshold (default 0.9 — lowering to 0.85–0.87 often catches more near-duplicates without significant false positives)
 - `mempalace_status` — Palace overview: total drawers, wings, rooms, AAAK spec
 - `mempalace_list_wings` — All wings with drawer counts
 - `mempalace_list_rooms` — Rooms within a wing (optional wing filter)
