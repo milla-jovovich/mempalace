@@ -31,9 +31,15 @@ def _get_engine() -> SyncEngine:
         _config = MempalaceConfig()
         palace_path = _config.palace_path
 
-        from .db import open_collection
+        from .db import open_collection, detect_backend
 
-        col = open_collection(palace_path)
+        if detect_backend(palace_path) == "chroma":
+            raise RuntimeError(
+                f"Palace at {palace_path} uses ChromaDB. "
+                "Sync requires LanceDB. Run: mempalace migrate"
+            )
+
+        col = open_collection(palace_path, backend="lance")
 
         identity = NodeIdentity()
         vv_path = os.path.join(palace_path, "version_vector.json")

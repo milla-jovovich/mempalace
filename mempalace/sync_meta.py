@@ -70,14 +70,16 @@ class NodeIdentity:
         if _HAS_FCNTL:
             fcntl.flock(fd, fcntl.LOCK_EX)
         elif _HAS_MSVCRT:
-            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 4096)
 
     @staticmethod
     def _unlock(fd):
         if _HAS_FCNTL:
             fcntl.flock(fd, fcntl.LOCK_UN)
         elif _HAS_MSVCRT:
-            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 4096)
 
     def next_seq(self, count: int = 1) -> int:
         """Atomically increment and return the sequence counter.

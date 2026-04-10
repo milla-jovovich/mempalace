@@ -183,13 +183,15 @@ mempalace sync --server http://homeserver:7433 --auto --interval 60
 
 The laptop is fully self-sufficient between syncs:
 
-- Local LanceDB with a complete copy of all data
+- Local LanceDB with a copy of all synced drawer data
 - Local embedder runs on CPU (e.g. `bge-small`)
-- All MCP tools, mining, and search work identically
+- All MCP tools, mining, and search work against local drawers
 - Writes accumulate locally with the laptop's node ID
+- Sync replicates drawers only; knowledge graph tables are node-local
 
-When the laptop reconnects, `mempalace sync` pushes local changes and pulls
-remote changes.  After sync, both machines have identical data.
+When the laptop reconnects, `mempalace sync` pushes local drawer changes and
+pulls remote drawer changes.  After sync, both machines have identical
+drawer data.
 
 ### Embedding consistency
 
