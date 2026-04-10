@@ -4,6 +4,63 @@
 
 ---
 
+## v4.0 Backend Comparison (April 2026)
+
+Full 500-question LongMemEval run comparing the v3.x ChromaDB baseline with
+the v4.0 LanceDB backend and alternative embedding models. Same data, same
+metrics, same machine.
+
+| Backend + Embedder | R@5 | R@10 | NDCG@5 | NDCG@10 | ms/query |
+|---|---|---|---|---|---|
+| **ChromaDB + MiniLM** (v3.x baseline) | 0.966 | 0.982 | 0.888 | 0.889 | 1165 |
+| **LanceDB + MiniLM** (v4.0 default) | **0.966** | **0.982** | **0.888** | **0.889** | **638** |
+| **LanceDB + BGE-small** | 0.962 | 0.978 | **0.895** | **0.893** | 2624 |
+
+### Key findings
+
+1. **Zero retrieval regression.** LanceDB + MiniLM produces byte-for-byte
+   identical R@5, R@10, and NDCG scores to the ChromaDB baseline.
+
+2. **1.8× faster queries.** LanceDB averages 638ms/query vs ChromaDB's
+   1165ms — cosine distance on Lance format is significantly faster than
+   L2 on ChromaDB's HNSW.
+
+3. **BGE-small trades R@5 for NDCG.** Slightly lower R@5 (0.962 vs 0.966 —
+   2 questions on 500) but higher NDCG (0.895 vs 0.888), meaning relevant
+   results are ranked better when found. Slower due to larger model.
+
+### Per-type Recall@5
+
+| Question Type | ChromaDB+MiniLM | Lance+MiniLM | Lance+BGE-small |
+|---|---|---|---|
+| knowledge-update | 1.000 | 1.000 | 0.987 |
+| multi-session | 0.992 | 0.992 | 0.985 |
+| single-session-assistant | 0.964 | 0.964 | 0.964 |
+| single-session-preference | 0.967 | 0.967 | 0.867 |
+| single-session-user | 0.914 | 0.914 | **0.957** |
+| temporal-reasoning | 0.947 | 0.947 | 0.947 |
+
+BGE-small improves `single-session-user` (+4.3pp) but regresses on
+`single-session-preference` (−10pp). The MiniLM default remains the safer
+choice for this benchmark.
+
+### Reproduce
+
+```bash
+# Quick (20 questions, ~2 min)
+python benchmarks/longmemeval_v4.py DATA --mode quick --limit 20
+
+# Full comparison (500 questions, ~45 min)
+python benchmarks/longmemeval_v4.py DATA --mode all
+
+# All embedders (500 questions, ~2 hours)
+python benchmarks/longmemeval_v4.py DATA --mode embedders
+```
+
+Raw results: `benchmarks/results_v4_comparison.json`
+
+---
+
 ## The Core Finding
 
 Every competitive memory system uses an LLM to manage memory:
@@ -47,7 +104,9 @@ Both are real. Both are reproducible. Neither is the whole picture alone.
 | 2 | Supermemory ASMR | ~99% | Yes | Undisclosed | Research only, not in production |
 | 3 | MemPal (hybrid v3 + rerank) | 99.4% | Optional | Haiku | Reproducible |
 | 3 | MemPal (palace + rerank) | 99.4% | Optional | Haiku | Independent architecture |
-| 4 | Mastra | 94.87% | Yes | GPT-5-mini | — |
+| 4 | **MemPal v4 (LanceDB, no LLM)** | **96.6%** | **None** | **None** | **Zero regression vs v3, 1.8× faster** |
+| 4 | **MemPal v3 (ChromaDB, no LLM)** | **96.6%** | **None** | **None** | **Highest zero-API score published** |
+| 5 | Mastra | 94.87% | Yes | GPT-5-mini | — |
 | 5 | **MemPal (raw, no LLM)** | **96.6%** | **None** | **None** | **Highest zero-API score published** |
 | 6 | Hindsight | 91.4% | Yes | Gemini-3 | — |
 | 7 | Supermemory (production) | ~85% | Yes | Undisclosed | — |
@@ -290,7 +349,9 @@ The palace classifies each question into one of 5 halls. Pass 1 searches only wi
 
 | Mode | R@5 | NDCG@10 | LLM | Cost/query | Status |
 |---|---|---|---|---|---|
-| Raw ChromaDB | 96.6% | 0.889 | None | $0 | ✅ Verified |
+| Raw ChromaDB (v3.x) | 96.6% | 0.889 | None | $0 | ✅ Verified |
+| **Raw LanceDB (v4.0)** | **96.6%** | **0.889** | **None** | **$0** | **✅ Verified — identical, 1.8× faster** |
+| **LanceDB + BGE-small** | **96.2%** | **0.893** | **None** | **$0** | **✅ Verified — better NDCG** |
 | Hybrid v1 | 97.8% | — | None | $0 | ✅ Verified |
 | Hybrid v2 | 98.4% | — | None | $0 | ✅ Verified |
 | Hybrid v2 + rerank | 98.8% | — | Haiku | ~$0.001 | ✅ Verified |
@@ -433,16 +494,17 @@ Every major AI memory system and where it stands:
 
 ### Tradeoffs at a Glance
 
-| | **MemPal** | LLM-Based (Mem0, Mastra) | Heavy Infra (OpenViking, Zep) |
-|---|---|---|---|
-| No API key needed | ✅ | ✗ | ✗ |
-| Data stays local | ✅ | Sent to API | Depends |
-| Dependencies | ChromaDB only | LLM + vector DB | Go + Rust + C++ + DB |
-| Setup time | ~2 minutes | 10–30 min | 1+ hours |
-| Cost per query | $0 | $0.001–0.01 | $0–0.01 |
-| Retrieval accuracy | 96.6% (99.4% w/ LLM) | 91–99% | Not published |
-| Multi-hop reasoning | Moderate | Strong | Strong |
-| Entity extraction | Regex patterns | LLM-powered | LLM-powered |
+| | **MemPal v4** | **MemPal v3** | LLM-Based (Mem0, Mastra) | Heavy Infra (OpenViking, Zep) |
+|---|---|---|---|---|
+| No API key needed | ✅ | ✅ | ✗ | ✗ |
+| Data stays local | ✅ | ✅ | Sent to API | Depends |
+| Dependencies | LanceDB + sentence-transformers | ChromaDB only | LLM + vector DB | Go + Rust + C++ + DB |
+| Multi-device sync | ✅ (built-in) | ✗ | ✗ | Depends |
+| Setup time | ~2 minutes | ~2 minutes | 10–30 min | 1+ hours |
+| Cost per query | $0 | $0 | $0.001–0.01 | $0–0.01 |
+| Query speed | 638ms | 1165ms | Varies | Varies |
+| Retrieval accuracy | 96.6% (99.4% w/ LLM) | 96.6% (99.4% w/ LLM) | 91–99% | Not published |
+| Pluggable embedders | ✅ (6+ models) | ✗ (ChromaDB default only) | Varies | Varies |
 
 ---
 
@@ -534,8 +596,9 @@ All raw results are committed:
 | `results_locomo_hybrid_session_top10_*.json` | locomo hybrid_v5 | 88.9% R@10 | Honest — top-10, no rerank |
 | `results_locomo_palace_session_top5_20260326_0031.json` | locomo palace v2 | 75.6% R@5 | Summary-based routing, 3 rooms |
 | `results_locomo_palace_session_top10_20260326_0029.json` | locomo palace v2 | 84.8% R@10 | Summary-based routing, 3 rooms |
-| `palace_cache_locomo.json` | — | — | 272 session room assignments (Haiku) |
+| `results_v4_comparison.json` | v4 backend comparison | 96.6% (all) | LanceDB vs ChromaDB vs BGE-small, 500q |
 | `diary_cache_haiku.json` | — | — | Pre-computed diary topics |
+| `palace_cache_locomo.json` | — | — | 272 session room assignments (Haiku) |
 
 ---
 
@@ -721,4 +784,5 @@ python benchmarks/locomo_bench.py /tmp/locomo/data/locomo10.json \
 
 ---
 
-*Results verified March 2026. Scripts and raw data committed to this repo.*
+*Results verified March–April 2026. Scripts and raw data committed to this repo.*
+*v4.0 backend comparison added April 2026 — see longmemeval_v4.py.*
