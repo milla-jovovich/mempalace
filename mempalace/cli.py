@@ -66,6 +66,9 @@ def cmd_init(args):
 
 
 def cmd_mine(args):
+    from .embeddings import init as init_embeddings
+
+    init_embeddings(args.device)
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     include_ignored = []
     for raw in args.include_ignored or []:
@@ -441,6 +444,12 @@ def main():
         choices=["exchange", "general"],
         default="exchange",
         help="Extraction strategy for convos mode: 'exchange' (default) or 'general' (5 memory types)",
+    )
+    p_mine.add_argument(
+        "--device",
+        choices=["auto", "cuda", "rocm", "mps", "cpu"],
+        default="auto",
+        help="Embedding device: auto, cuda (NVIDIA), rocm (AMD), mps (Apple), cpu",
     )
 
     # search

@@ -15,8 +15,11 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
+import chromadb
+
 from .normalize import normalize
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS, file_already_mined
+from .embeddings import get_collection as _emb_get_collection, flush_batch, BATCH_SIZE
 
 
 # File types that might contain conversations
@@ -264,11 +267,17 @@ def mine_convos(
         print("  DRY RUN — nothing will be filed")
     print(f"{'-' * 55}\n")
 
-    collection = get_collection(palace_path) if not dry_run else None
+    if not dry_run:
+        os.makedirs(palace_path, exist_ok=True)
+        client = chromadb.PersistentClient(path=palace_path)
+        collection = _emb_get_collection(client, "mempalace_drawers", create=True)
+    else:
+        collection = None
 
     total_drawers = 0
     files_skipped = 0
     room_counts = defaultdict(int)
+    pending = []
 
     for i, filepath in enumerate(files, 1):
         source_file = str(filepath)
@@ -326,37 +335,37 @@ def mine_convos(
         if extract_mode != "general":
             room_counts[room] += 1
 
-        # File each chunk
-        drawers_added = 0
+        # Accumulate drawers for batch flush
         for chunk in chunks:
             chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
             if extract_mode == "general":
                 room_counts[chunk_room] += 1
             drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
-            try:
-                collection.add(
-                    documents=[chunk["content"]],
-                    ids=[drawer_id],
-                    metadatas=[
-                        {
-                            "wing": wing,
-                            "room": chunk_room,
-                            "source_file": source_file,
-                            "chunk_index": chunk["chunk_index"],
-                            "added_by": agent,
-                            "filed_at": datetime.now().isoformat(),
-                            "ingest_mode": "convos",
-                            "extract_mode": extract_mode,
-                        }
-                    ],
-                )
-                drawers_added += 1
-            except Exception as e:
-                if "already exists" not in str(e).lower():
-                    raise
+            pending.append(
+                {
+                    "id": drawer_id,
+                    "document": chunk["content"],
+                    "metadata": {
+                        "wing": wing,
+                        "room": chunk_room,
+                        "source_file": source_file,
+                        "chunk_index": chunk["chunk_index"],
+                        "added_by": agent,
+                        "filed_at": datetime.now().isoformat(),
+                        "ingest_mode": "convos",
+                        "extract_mode": extract_mode,
+                    },
+                }
+            )
 
-        total_drawers += drawers_added
-        print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
+        if len(pending) >= BATCH_SIZE:
+            total_drawers += flush_batch(collection, pending)
+            print(f"  Batch flushed — {len(pending)} drawers (file {i}/{len(files)})")
+            pending = []
+
+    if pending and not dry_run:
+        total_drawers += flush_batch(collection, pending)
+        print(f"  Final batch — {len(pending)} drawers")
 
     print(f"\n{'=' * 55}")
     print("  Done.")

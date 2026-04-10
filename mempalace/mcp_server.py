@@ -30,6 +30,7 @@ from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
+from .embeddings import get_collection as _emb_get_collection
 import chromadb
 
 from .knowledge_graph import KnowledgeGraph
@@ -113,14 +114,14 @@ def _get_client():
 
 
 def _get_collection(create=False):
-    """Return the ChromaDB collection, caching the client between calls."""
+    """Return the ChromaDB collection with shared embedding function, caching between calls."""
     global _collection_cache
     try:
         client = _get_client()
         if create:
-            _collection_cache = client.get_or_create_collection(_config.collection_name)
+            _collection_cache = _emb_get_collection(client, _config.collection_name, create=True)
         elif _collection_cache is None:
-            _collection_cache = client.get_collection(_config.collection_name)
+            _collection_cache = _emb_get_collection(client, _config.collection_name)
         return _collection_cache
     except Exception:
         return None
