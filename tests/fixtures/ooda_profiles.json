@@ -1,0 +1,32 @@
+{
+  "orient": {
+    "description": "Broad context gathering — association emphasis, long half-life",
+    "half_life_days": 180,
+    "ltp_enabled": true,
+    "ltp_max_boost": 2.0,
+    "ltp_window_days": 60,
+    "tagging_enabled": false
+  },
+  "observe": {
+    "description": "Raw evidence gathering — maximum similarity, all Synapse axes off",
+    "axes_enabled": [],
+    "ltp_enabled": false,
+    "tagging_enabled": false,
+    "association_enabled": false
+  },
+  "decide": {
+    "description": "Action selection — short half-life, recency-prioritized",
+    "half_life_days": 30,
+    "ltp_enabled": true,
+    "ltp_max_boost": 1.5,
+    "ltp_window_days": 14,
+    "tagging_enabled": true
+  },
+  "act": {
+    "description": "Execution context — recent procedural memory, no association",
+    "axes_enabled": ["similarity", "recency"],
+    "half_life_days": 14,
+    "ltp_enabled": false,
+    "association_enabled": false
+  }
+}

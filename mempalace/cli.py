@@ -171,9 +171,13 @@ def cmd_synapse(args):
         )
         annotated = profile.to_annotated_dict()
         print(f"[{profile.name}] effective config (resolved):")
+        if annotated.get("description", {}).get("value"):
+            print(f"  {annotated['description']['value']}")
+            print()
         max_key_len = max(len(k) for k in annotated)
-        for k in sorted(annotated):
-            info = annotated[k]
+        for k, info in sorted(annotated.items()):
+            if k == "description":
+                continue
             value = info["value"]
             source = info["source"]
             print(f"  {k:<{max_key_len}} : {value!s:<10} ← {source}")

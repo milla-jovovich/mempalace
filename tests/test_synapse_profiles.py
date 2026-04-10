@@ -4,10 +4,13 @@ Tests for mempalace.synapse_profiles — RetrievalProfile / ProfileManager.
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
 from mempalace.synapse_profiles import HARDCODED_DEFAULTS, ProfileManager
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -170,8 +173,8 @@ def test_malformed_profiles_json_handled(palace_dir):
     assert profile.half_life_days == 90
 
 
-def test_hardcoded_defaults_association_off_matches_legacy():
-    assert HARDCODED_DEFAULTS["association_enabled"] is False
+def test_hardcoded_defaults_association_on():
+    assert HARDCODED_DEFAULTS["association_enabled"] is True
 
 
 def test_sources_track_hardcoded(palace_dir):
@@ -310,3 +313,64 @@ def test_validate_rejects_low_ltp_max_boost(palace_dir):
     pm = ProfileManager(palace_dir)
     with pytest.raises(ValueError, match="ltp_max_boost must be >= 1.0"):
         pm.resolve("bad")
+
+
+@pytest.fixture
+def ooda_palace_dir(tmp_path):
+    """Palace dir with contributed OODA profiles loaded from fixture"""
+    fixture_path = FIXTURES_DIR / "ooda_profiles.json"
+    profiles = json.loads(fixture_path.read_text(encoding="utf-8"))
+    config = {"synapse_profiles": profiles}
+    with open(os.path.join(str(tmp_path), "config.json"), "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    return str(tmp_path)
+
+
+def test_ooda_orient_profile(ooda_palace_dir):
+    pm = ProfileManager(ooda_palace_dir)
+    p = pm.resolve("orient")
+    assert p.name == "orient"
+    assert p.description == "Broad context gathering — association emphasis, long half-life"
+    assert p.half_life_days == 180
+    assert p.ltp_enabled is True
+    assert p.ltp_max_boost == 2.0
+    assert p.ltp_window_days == 60
+    assert p.tagging_enabled is False
+
+
+def test_ooda_observe_profile(ooda_palace_dir):
+    pm = ProfileManager(ooda_palace_dir)
+    p = pm.resolve("observe")
+    assert p.name == "observe"
+    assert p.ltp_enabled is False
+    assert p.tagging_enabled is False
+    assert p.association_enabled is False
+
+
+def test_ooda_decide_profile(ooda_palace_dir):
+    pm = ProfileManager(ooda_palace_dir)
+    p = pm.resolve("decide")
+    assert p.name == "decide"
+    assert p.half_life_days == 30
+    assert p.ltp_enabled is True
+    assert p.ltp_max_boost == 1.5
+    assert p.ltp_window_days == 14
+    assert p.tagging_enabled is True
+
+
+def test_ooda_act_profile(ooda_palace_dir):
+    pm = ProfileManager(ooda_palace_dir)
+    p = pm.resolve("act")
+    assert p.name == "act"
+    assert p.half_life_days == 14
+    assert p.ltp_enabled is False
+    assert p.association_enabled is False
+
+
+def test_description_in_annotated_dict(ooda_palace_dir):
+    pm = ProfileManager(ooda_palace_dir)
+    p = pm.resolve("orient")
+    annotated = p.to_annotated_dict()
+    assert "description" in annotated
+    assert "Broad context" in annotated["description"]["value"]
+    assert annotated["description"]["source"] == "profile (config.json)"

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 VALID_AXES = frozenset({"ltp", "tagging", "association", "similarity", "decay", "recency"})
 
 HARDCODED_DEFAULTS: Dict[str, Any] = {
+    "description": "",
     "half_life_days": 90,
     "ltp_enabled": True,
     "ltp_window_days": 30,
@@ -23,9 +24,9 @@ HARDCODED_DEFAULTS: Dict[str, Any] = {
     "tagging_enabled": True,
     "tagging_window_hours": 24,
     "tagging_max_boost": 1.5,
-    "association_enabled": False,
-    "association_max_boost": 1.5,
-    "association_coefficient": 0.15,
+    "association_enabled": True,
+    "association_max_boost": 1.4,
+    "association_coefficient": 0.2,
     "axes_enabled": ["ltp", "tagging", "association"],
 }
 
