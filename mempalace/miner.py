@@ -369,6 +369,48 @@ def chunk_text(content: str, source_file: str) -> list:
 # PALACE — ChromaDB operations
 # =============================================================================
 
+# ChromaDB has an undocumented hard limit of ~5,461 items per add()/upsert()
+# call.  Keep a safe margin below that.
+_CHROMADB_BATCH_LIMIT = 5000
+
+
+def chunked_add(collection, *, documents, ids, metadatas=None, embeddings=None):
+    """Wrapper around collection.add() that chunks large batches.
+
+    ChromaDB's ``collection.add()`` silently fails or crashes when called
+    with more than ~5,461 items at once (undocumented hard limit).  This
+    helper splits any call that exceeds ``_CHROMADB_BATCH_LIMIT`` into
+    sequential sub-calls so callers don't need to worry about the cap.
+    """
+    total = len(ids)
+    for start in range(0, total, _CHROMADB_BATCH_LIMIT):
+        end = start + _CHROMADB_BATCH_LIMIT
+        kwargs = {
+            "documents": documents[start:end],
+            "ids": ids[start:end],
+        }
+        if metadatas is not None:
+            kwargs["metadatas"] = metadatas[start:end]
+        if embeddings is not None:
+            kwargs["embeddings"] = embeddings[start:end]
+        collection.add(**kwargs)
+
+
+def chunked_upsert(collection, *, documents, ids, metadatas=None, embeddings=None):
+    """Same as :func:`chunked_add` but for ``collection.upsert()``."""
+    total = len(ids)
+    for start in range(0, total, _CHROMADB_BATCH_LIMIT):
+        end = start + _CHROMADB_BATCH_LIMIT
+        kwargs = {
+            "documents": documents[start:end],
+            "ids": ids[start:end],
+        }
+        if metadatas is not None:
+            kwargs["metadatas"] = metadatas[start:end]
+        if embeddings is not None:
+            kwargs["embeddings"] = embeddings[start:end]
+        collection.upsert(**kwargs)
+
 
 def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
