@@ -12,7 +12,11 @@ logger = logging.getLogger("mempalace_rem")
 
 
 def run_rem_cycle(col=None, kg=None, limit: int = 50, threshold: float = 0.08) -> None:
-    """Scan recent entries and find deep semantic connections."""
+    """
+    Scan recent entries and find deep semantic connections.
+    Note: col.get() does not guarantee chronological insertion order.
+    This acts as a random/approximate sample of the collection for background processing.
+    """
     if col is None:
         config = MempalaceConfig()
         col = get_collection(config.palace_path, config.collection_name)
@@ -20,30 +24,43 @@ def run_rem_cycle(col=None, kg=None, limit: int = 50, threshold: float = 0.08) -
         kg = KnowledgeGraph()
 
     try:
-        # Get latest N drawers (ChromaDB doesn't sort by time natively without metadata,
-        # but we can get the tail or just sample. For now, get last N items)
         total = col.count()
         if total == 0:
             return
 
         offset = max(0, total - limit)
+        # Fetch IDs to prevent self-matching
         recent = col.get(limit=limit, offset=offset, include=["documents", "metadatas"])
+        recent_ids = recent.get("ids", [])
 
         for i, doc in enumerate(recent["documents"]):
-            meta = recent["metadatas"][i]
+            source_id = recent_ids[i] if i < len(recent_ids) else None
+
+            # Safe metadata extraction
+            metadatas = recent.get("metadatas") or []
+            meta = metadatas[i] if i < len(metadatas) and metadatas[i] else {}
             room_a = meta.get("room")
+
             if not room_a or room_a == "general":
                 continue
 
-            # Query for similar items
+            # Request n_results=4 to account for self-match
             results = col.query(
-                query_texts=[doc], n_results=3, include=["documents", "metadatas", "distances"]
+                query_texts=[doc], n_results=4, include=["documents", "metadatas", "distances"]
             )
 
             for j, dist in enumerate(results["distances"][0]):
+                # Skip self-match by comparing IDs
+                match_ids = results.get("ids", [[]])[0]
+                if source_id and j < len(match_ids) and match_ids[j] == source_id:
+                    continue
+
                 if dist < threshold:  # Distance < 0.08 means highly similar
-                    match_meta = results["metadatas"][0][j]
+                    # Safe match metadata extraction
+                    match_metas = results.get("metadatas", [[]])[0] or []
+                    match_meta = match_metas[j] if j < len(match_metas) and match_metas[j] else {}
                     room_b = match_meta.get("room")
+
                     if room_b and room_b != room_a and room_b != "general":
                         score = round(1 - dist, 3)
                         kg.add_bridge(room_a, room_b, score=score, reason=doc)
