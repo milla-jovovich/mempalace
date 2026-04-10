@@ -3,6 +3,7 @@ archive.py — Moves noise vectors to soft-archive wings to prevent hubness.
 """
 
 from typing import List, Any
+from datetime import datetime
 from .knowledge_graph import KnowledgeGraph
 
 
@@ -32,6 +33,7 @@ def archive_noise(col: Any, kg: KnowledgeGraph, room_name: str, noise_ids: List[
             new_meta["original_room"] = new_meta["room"]
 
         new_meta["wing"] = "archive"
+        new_meta["crystallized_at"] = datetime.now().isoformat()
         updated_metadatas.append(new_meta)
 
     col.update(ids=ids, metadatas=updated_metadatas)

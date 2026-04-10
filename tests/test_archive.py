@@ -34,10 +34,18 @@ class TestArchiveNoise(unittest.TestCase):
 
         self.assertEqual(result, 2)
         col.get.assert_called_once_with(ids=["id1", "id2"])
-        col.update.assert_called_once_with(
-            ids=["id1", "id2"],
-            metadatas=[{"wing": "archive", "original_wing": "main"}, {"wing": "archive"}],
-        )
+
+        # Check col.update call
+        col.update.assert_called_once()
+        update_kwargs = col.update.call_args[1]
+        self.assertEqual(update_kwargs["ids"], ["id1", "id2"])
+        metadatas = update_kwargs["metadatas"]
+        self.assertEqual(len(metadatas), 2)
+        self.assertEqual(metadatas[0]["wing"], "archive")
+        self.assertEqual(metadatas[0]["original_wing"], "main")
+        self.assertIn("crystallized_at", metadatas[0])
+        self.assertEqual(metadatas[1]["wing"], "archive")
+        self.assertIn("crystallized_at", metadatas[1])
 
         # Check KG updates
         self.assertEqual(kg.add_entity.call_count, 2)
@@ -64,6 +72,23 @@ class TestArchiveNoise(unittest.TestCase):
         self.assertEqual(meta["original_wing"], "work")
         self.assertEqual(meta["original_room"], "ideas")
         self.assertEqual(meta["extra"], "data")
+
+    def test_archive_adds_crystallized_at(self):
+        col = MagicMock()
+        kg = MagicMock(spec=KnowledgeGraph)
+
+        col.get.return_value = {
+            "ids": ["doc_1"],
+            "metadatas": [{"wing": "main", "room": "ideas"}],
+        }
+
+        archive_noise(col, kg, "ideas", ["doc_1"])
+
+        update_kwargs = col.update.call_args[1]
+        meta = update_kwargs["metadatas"][0]
+
+        self.assertIn("crystallized_at", meta)
+        self.assertIsInstance(meta["crystallized_at"], str)
 
 
 if __name__ == "__main__":
