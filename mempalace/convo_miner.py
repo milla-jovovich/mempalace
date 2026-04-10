@@ -17,7 +17,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .normalize import normalize
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS, get_collection
 
 
 # File types that might contain conversations
@@ -369,7 +369,9 @@ def mine_convos(
     # ------------------------------------------------------------------
     else:
         print(f"  Checking {len(files)} files for changes...")
-        pending = [fp for fp in files if not file_already_mined(collection, str(fp))]
+        from .miner import build_mined_cache
+        mined_cache = build_mined_cache(collection)
+        pending = [fp for fp in files if str(fp) not in mined_cache]
         already_mined = len(files) - len(pending)
 
         batch_ids, batch_docs, batch_metas = [], [], []

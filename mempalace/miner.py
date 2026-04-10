@@ -499,6 +499,44 @@ def process_file(
 
 
 # =============================================================================
+# MINED FILE CACHE
+# =============================================================================
+
+
+def build_mined_cache(collection) -> dict:
+    """Fetch all mined file mtimes in one query.
+
+    Returns {source_file: mtime_float} where mtime is None if not stored.
+    Replaces per-file file_already_mined() calls during the pre-filter scan.
+    """
+    try:
+        results = collection.get(include=["metadatas"])
+    except Exception:
+        return {}
+    cache = {}
+    for meta in results.get("metadatas") or []:
+        sf = meta.get("source_file")
+        if sf and sf not in cache:
+            mt = meta.get("source_mtime")
+            cache[sf] = float(mt) if mt is not None else None
+    return cache
+
+
+def is_stale(filepath: Path, mined_cache: dict) -> bool:
+    """Return True if the file needs to be (re-)mined."""
+    sf = str(filepath)
+    if sf not in mined_cache:
+        return True
+    mt = mined_cache[sf]
+    if mt is None:
+        return True
+    try:
+        return os.path.getmtime(sf) != mt
+    except OSError:
+        return True
+
+
+# =============================================================================
 # SCAN PROJECT
 # =============================================================================
 
@@ -638,7 +676,8 @@ def mine(
                 room_counts[room] += 1
     else:
         print(f"  Checking {len(files)} files for changes...")
-        pending = [fp for fp in files if not file_already_mined(collection, str(fp), check_mtime=True)]
+        mined_cache = build_mined_cache(collection)
+        pending = [fp for fp in files if is_stale(fp, mined_cache)]
         already_mined = len(files) - len(pending)
 
         batch_ids, batch_docs, batch_metas = [], [], []
