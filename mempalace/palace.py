@@ -45,7 +45,7 @@ def get_collection(palace_path: str, collection_name: str = "mempalace_drawers")
     try:
         return client.get_collection(collection_name)
     except Exception:
-        return client.create_collection(collection_name)
+        return client.create_collection(collection_name, metadata={"hnsw:space": "cosine"})
 
 
 def file_already_mined(collection, source_file: str, check_mtime: bool = False) -> bool:

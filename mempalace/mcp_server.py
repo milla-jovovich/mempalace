@@ -119,7 +119,9 @@ def _get_collection(create=False):
     try:
         client = _get_client()
         if create:
-            _collection_cache = client.get_or_create_collection(_config.collection_name)
+            _collection_cache = client.get_or_create_collection(
+                _config.collection_name, metadata={"hnsw:space": "cosine"}
+            )
         elif _collection_cache is None:
             _collection_cache = client.get_collection(_config.collection_name)
         return _collection_cache
@@ -347,7 +349,7 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
         if results["ids"] and results["ids"][0]:
             for i, drawer_id in enumerate(results["ids"][0]):
                 dist = results["distances"][0][i]
-                similarity = round(1 - dist, 3)
+                similarity = round(max(0, 1 - dist), 3)
                 if similarity >= threshold:
                     meta = results["metadatas"][0][i]
                     doc = results["documents"][0][i]
