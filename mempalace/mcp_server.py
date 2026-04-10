@@ -18,11 +18,12 @@ Tools (write):
 """
 
 import argparse
-import os
-import sys
+import hashlib
 import json
 import logging
-import hashlib
+import os
+import sys
+import time as _time
 from datetime import datetime
 from pathlib import Path
 
@@ -100,16 +101,40 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
-_client_cache = None
-_collection_cache = None
-
-
 def _get_client():
     """Return a singleton ChromaDB PersistentClient."""
     global _client_cache
     if _client_cache is None:
         _client_cache = chromadb.PersistentClient(path=_config.palace_path)
     return _client_cache
+
+
+# ── Metadata cache (avoids repeated full-collection scans) ──────────────
+_META_CACHE = None  # list of metadata dicts
+_META_CACHE_TIME = 0.0
+_META_CACHE_TTL = 2.0  # seconds — short enough to stay fresh, long enough
+                        # to coalesce multiple read-tool calls in one batch
+
+
+def _get_all_metadata(col):
+    """Return all metadata from the collection, using a short-lived cache."""
+    global _META_CACHE, _META_CACHE_TIME
+    now = _time.monotonic()
+    if _META_CACHE is not None and (now - _META_CACHE_TIME) < _META_CACHE_TTL:
+        return _META_CACHE
+    try:
+        _META_CACHE = col.get(include=["metadatas"], limit=10000)["metadatas"]
+    except Exception as e:
+        logger.error("Failed to retrieve metadata: %s", e)
+        _META_CACHE = []
+    _META_CACHE_TIME = now
+    return _META_CACHE
+
+
+def _invalidate_meta_cache():
+    """Clear metadata cache after writes."""
+    global _META_CACHE
+    _META_CACHE = None
 
 
 def _get_collection(create=False):
@@ -122,7 +147,8 @@ def _get_collection(create=False):
         elif _collection_cache is None:
             _collection_cache = client.get_collection(_config.collection_name)
         return _collection_cache
-    except Exception:
+    except Exception as e:
+        logger.error("Failed to get ChromaDB collection: %s", e)
         return None
 
 
@@ -143,15 +169,12 @@ def tool_status():
     count = col.count()
     wings = {}
     rooms = {}
-    try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-            rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
+    all_meta = _get_all_metadata(col)
+    for m in all_meta:
+        w = m.get("wing", "unknown")
+        r = m.get("room", "unknown")
+        wings[w] = wings.get(w, 0) + 1
+        rooms[r] = rooms.get(r, 0) + 1
     return {
         "total_drawers": count,
         "wings": wings,
@@ -200,13 +223,10 @@ def tool_list_wings():
     if not col:
         return _no_palace()
     wings = {}
-    try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-    except Exception:
-        pass
+    all_meta = _get_all_metadata(col)
+    for m in all_meta:
+        w = m.get("wing", "unknown")
+        wings[w] = wings.get(w, 0) + 1
     return {"wings": wings}
 
 
@@ -215,16 +235,12 @@ def tool_list_rooms(wing: str = None):
     if not col:
         return _no_palace()
     rooms = {}
-    try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
-        if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
-        for m in all_meta:
-            r = m.get("room", "unknown")
-            rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
+    all_meta = _get_all_metadata(col)
+    for m in all_meta:
+        if wing and m.get("wing") != wing:
+            continue
+        r = m.get("room", "unknown")
+        rooms[r] = rooms.get(r, 0) + 1
     return {"wing": wing or "all", "rooms": rooms}
 
 
@@ -233,26 +249,25 @@ def tool_get_taxonomy():
     if not col:
         return _no_palace()
     taxonomy = {}
-    try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            if w not in taxonomy:
-                taxonomy[w] = {}
-            taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
-    except Exception:
-        pass
+    all_meta = _get_all_metadata(col)
+    for m in all_meta:
+        w = m.get("wing", "unknown")
+        r = m.get("room", "unknown")
+        if w not in taxonomy:
+            taxonomy[w] = {}
+        taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
     return {"taxonomy": taxonomy}
 
 
 def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+    col = _get_collection()
     return search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
+        collection=col,
     )
 
 
@@ -288,7 +303,8 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
             "matches": duplicates,
         }
     except Exception as e:
-        return {"error": str(e)}
+        logger.error("Duplicate check failed: %s", e)
+        return {"error": "Duplicate check failed"}
 
 
 def tool_get_aaak_spec():
@@ -338,7 +354,7 @@ def tool_add_drawer(
     if not col:
         return _no_palace()
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content[:100]).encode()).hexdigest()[:24]}"
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content).encode()).hexdigest()[:24]}"
 
     _wal_log(
         "add_drawer",
@@ -348,7 +364,7 @@ def tool_add_drawer(
             "room": room,
             "added_by": added_by,
             "content_length": len(content),
-            "content_preview": content[:200],
+            "content_hash": hashlib.sha256(content.encode()).hexdigest(),
         },
     )
 
@@ -375,10 +391,12 @@ def tool_add_drawer(
                 }
             ],
         )
+        _invalidate_meta_cache()
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to file drawer %s: %s", drawer_id, e)
+        return {"success": False, "error": "Failed to file drawer"}
 
 
 def tool_delete_drawer(drawer_id: str):
@@ -398,25 +416,66 @@ def tool_delete_drawer(drawer_id: str):
         {
             "drawer_id": drawer_id,
             "deleted_meta": deleted_meta,
-            "content_preview": deleted_content[:200],
+            "content_hash": hashlib.sha256(deleted_content.encode()).hexdigest(),
         },
     )
 
     try:
         col.delete(ids=[drawer_id])
+        _invalidate_meta_cache()
         logger.info(f"Deleted drawer: {drawer_id}")
         return {"success": True, "drawer_id": drawer_id}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to delete drawer %s: %s", drawer_id, e)
+        return {"success": False, "error": "Failed to delete drawer"}
 
 
 # ==================== KNOWLEDGE GRAPH ====================
 
 
+_VALID_DIRECTIONS = {"outgoing", "incoming", "both"}
+
+
+def _validate_date(value: str, field_name: str = "date") -> str:
+    """Validate a YYYY-MM-DD date string. Returns the value if valid."""
+    if value is None:
+        return None
+    from datetime import datetime as _dt
+
+    try:
+        _dt.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError(f"{field_name} must be in YYYY-MM-DD format, got: {value}")
+    return value
+
+
 def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
     """Query the knowledge graph for an entity's relationships."""
+    try:
+        entity = sanitize_name(entity, "entity")
+        as_of = _validate_date(as_of, "as_of")
+    except ValueError as e:
+        return {"entity": entity, "error": str(e), "facts": [], "count": 0}
+    if direction not in _VALID_DIRECTIONS:
+        return {
+            "entity": entity,
+            "error": f"direction must be one of {sorted(_VALID_DIRECTIONS)}, got: {direction}",
+            "facts": [],
+            "count": 0,
+        }
     results = _kg.query_entity(entity, as_of=as_of, direction=direction)
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
+
+
+def tool_kg_query_relationship(predicate: str, as_of: str = None):
+    """Query the knowledge graph by relationship type. Returns all triples with this predicate."""
+    try:
+        predicate = sanitize_name(predicate, "predicate")
+        as_of = _validate_date(as_of, "as_of")
+    except ValueError as e:
+        return {"predicate": predicate, "error": str(e), "facts": [], "count": 0}
+    results = _kg.query_relationship(predicate, as_of=as_of)
+    return {"predicate": predicate, "as_of": as_of, "facts": results, "count": len(results)}
 
 
 def tool_kg_add(
@@ -427,6 +486,7 @@ def tool_kg_add(
         subject = sanitize_name(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
         object = sanitize_name(object, "object")
+        valid_from = _validate_date(valid_from, "valid_from")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -448,6 +508,13 @@ def tool_kg_add(
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
     """Mark a fact as no longer true (set end date)."""
+    try:
+        subject = sanitize_name(subject, "subject")
+        predicate = sanitize_name(predicate, "predicate")
+        object = sanitize_name(object, "object")
+        ended = _validate_date(ended, "ended")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
     _wal_log(
         "kg_invalidate",
         {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
@@ -462,6 +529,11 @@ def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = N
 
 def tool_kg_timeline(entity: str = None):
     """Get chronological timeline of facts, optionally for one entity."""
+    if entity:
+        try:
+            entity = sanitize_name(entity, "entity")
+        except ValueError as e:
+            return {"entity": entity, "error": str(e), "timeline": [], "count": 0}
     results = _kg.timeline(entity)
     return {"entity": entity or "all", "timeline": results, "count": len(results)}
 
@@ -503,7 +575,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
             "agent_name": agent_name,
             "topic": topic,
             "entry_id": entry_id,
-            "entry_preview": entry[:200],
+            "entry_hash": hashlib.sha256(entry[:200].encode()).hexdigest(),
         },
     )
 
@@ -528,6 +600,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
                 }
             ],
         )
+        _invalidate_meta_cache()
         logger.info(f"Diary entry: {entry_id} → {wing}/diary/{topic}")
         return {
             "success": True,
@@ -537,7 +610,8 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
             "timestamp": now.isoformat(),
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        logger.error("Failed to write diary entry: %s", e)
+        return {"success": False, "error": "Failed to write diary entry"}
 
 
 def tool_diary_read(agent_name: str, last_n: int = 10):
@@ -582,7 +656,8 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
             "showing": len(entries),
         }
     except Exception as e:
-        return {"error": str(e)}
+        logger.error("Failed to read diary for %s: %s", agent_name, e)
+        return {"error": "Failed to read diary entries"}
 
 
 # ==================== MCP PROTOCOL ====================
@@ -639,6 +714,24 @@ TOOLS = {
             "required": ["entity"],
         },
         "handler": tool_kg_query,
+    },
+    "mempalace_kg_query_relationship": {
+        "description": "Query the knowledge graph by relationship type. Returns all triples with this predicate. E.g. 'loves' → all entities that love something. Filter by date with as_of.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "predicate": {
+                    "type": "string",
+                    "description": "Relationship type to query (e.g. 'loves', 'works_on', 'child_of')",
+                },
+                "as_of": {
+                    "type": "string",
+                    "description": "Date filter — only facts valid at this date (YYYY-MM-DD, optional)",
+                },
+            },
+            "required": ["predicate"],
+        },
+        "handler": tool_kg_query_relationship,
     },
     "mempalace_kg_add": {
         "description": "Add a fact to the knowledge graph. Subject → predicate → object with optional time window. E.g. ('Max', 'started_school', 'Year 7', valid_from='2026-09-01').",
@@ -921,21 +1014,58 @@ def handle_request(request):
     }
 
 
+_use_framing = None  # auto-detect: None=unknown, True=Content-Length, False=newline-delimited
+
+
+def _read_message():
+    """Read a JSON-RPC message, auto-detecting transport format on first message."""
+    global _use_framing
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            return None  # EOF
+        line = line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("content-length:"):
+            _use_framing = True
+            content_length = int(line.split(":", 1)[1].strip())
+            # Skip remaining headers until blank line
+            while True:
+                h = sys.stdin.readline()
+                if not h or h.strip() == "":
+                    break
+            body = sys.stdin.read(content_length)
+            if not body:
+                return None
+            return json.loads(body)
+        else:
+            if _use_framing is None:
+                _use_framing = False
+            return json.loads(line)
+
+
+def _write_message(response):
+    """Write a JSON-RPC message matching the detected transport format."""
+    body = json.dumps(response)
+    if _use_framing:
+        sys.stdout.write(f"Content-Length: {len(body)}\r\n\r\n")
+    sys.stdout.write(body)
+    if not _use_framing:
+        sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
 def main():
     logger.info("MemPalace MCP Server starting...")
     while True:
         try:
-            line = sys.stdin.readline()
-            if not line:
+            request = _read_message()
+            if request is None:
                 break
-            line = line.strip()
-            if not line:
-                continue
-            request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
+                _write_message(response)
         except KeyboardInterrupt:
             break
         except Exception as e:

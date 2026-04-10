@@ -91,15 +91,26 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def search_memories(
-    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    collection=None,
 ) -> dict:
     """
     Programmatic search — returns a dict instead of printing.
     Used by the MCP server and other callers that need data.
+
+    If *collection* is provided, it is used directly instead of
+    opening a new PersistentClient (avoids redundant connections).
     """
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        if collection is not None:
+            col = collection
+        else:
+            client = chromadb.PersistentClient(path=palace_path)
+            col = client.get_collection("mempalace_drawers")
     except Exception as e:
         logger.error("No palace found at %s: %s", palace_path, e)
         return {
@@ -127,7 +138,8 @@ def search_memories(
 
         results = col.query(**kwargs)
     except Exception as e:
-        return {"error": f"Search error: {e}"}
+        logger.error("Search error: %s", e)
+        return {"error": "Search failed"}
 
     docs = results["documents"][0]
     metas = results["metadatas"][0]

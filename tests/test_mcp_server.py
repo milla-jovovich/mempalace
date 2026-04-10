@@ -403,3 +403,260 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+
+# ── Input Validation Tests ─────────────────────────────────────────────
+
+
+class TestInputValidation:
+    """Tests for input sanitization and validation across tools."""
+
+    def test_kg_query_rejects_path_traversal(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query
+
+        result = tool_kg_query(entity="../../etc/passwd")
+        assert "error" in result
+        assert result["count"] == 0
+
+    def test_kg_query_rejects_empty_entity(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query
+
+        result = tool_kg_query(entity="")
+        assert "error" in result
+        assert result["count"] == 0
+
+    def test_kg_query_rejects_invalid_direction(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query
+
+        result = tool_kg_query(entity="Max", direction="sideways")
+        assert "error" in result
+        assert "direction" in result["error"]
+
+    def test_kg_query_rejects_invalid_date(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query
+
+        result = tool_kg_query(entity="Max", as_of="not-a-date")
+        assert "error" in result
+        assert "YYYY-MM-DD" in result["error"]
+
+    def test_kg_query_accepts_valid_date(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query
+
+        result = tool_kg_query(entity="Max", as_of="2026-01-15")
+        assert "error" not in result
+        assert result["count"] >= 0
+
+    def test_kg_invalidate_sanitizes_inputs(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_invalidate
+
+        result = tool_kg_invalidate(
+            subject="../../evil", predicate="does", object="chess"
+        )
+        assert result["success"] is False
+        assert "error" in result
+
+    def test_kg_invalidate_validates_ended_date(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_invalidate
+
+        result = tool_kg_invalidate(
+            subject="Max", predicate="does", object="chess", ended="bad-date"
+        )
+        assert result["success"] is False
+        assert "YYYY-MM-DD" in result["error"]
+
+    def test_kg_add_validates_date(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_kg_add
+
+        result = tool_kg_add(
+            subject="Alice", predicate="likes", object="tea", valid_from="nope"
+        )
+        assert result["success"] is False
+        assert "YYYY-MM-DD" in result["error"]
+
+    def test_kg_timeline_validates_entity(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_timeline
+
+        result = tool_kg_timeline(entity="../../etc")
+        assert "error" in result
+        assert result["count"] == 0
+
+    def test_add_drawer_rejects_null_bytes(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer
+
+        result = tool_add_drawer(wing="test", room="test", content="hello\x00world")
+        assert result["success"] is False
+
+
+# ── Drawer ID Uniqueness Tests ─────────────────────────────────────────
+
+
+class TestDrawerIdUniqueness:
+    """Verify that drawers with different content get different IDs."""
+
+    def test_different_content_same_prefix_gets_different_id(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer
+
+        prefix = "A" * 200
+        r1 = tool_add_drawer(wing="w", room="r", content=prefix + " ENDING ONE")
+        r2 = tool_add_drawer(wing="w", room="r", content=prefix + " ENDING TWO")
+        assert r1["success"] is True
+        assert r2["success"] is True
+        assert r1["drawer_id"] != r2["drawer_id"]
+
+
+# ── Error Message Sanitization Tests ───────────────────────────────────
+
+
+class TestErrorSanitization:
+    """Verify that internal errors don't leak system information."""
+
+    def test_search_error_does_not_leak_path(self):
+        from mempalace.searcher import search_memories
+
+        # Trigger an error by pointing to a nonexistent palace
+        result = search_memories("test", "/nonexistent/path/palace")
+        assert "error" in result
+        # Should NOT contain the raw path in the error
+        assert "/nonexistent" not in result.get("error", "")
+
+    def test_add_drawer_error_is_generic(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_add_drawer
+
+        # Force _get_collection to return a broken mock
+        from unittest.mock import MagicMock
+
+        mock_col = MagicMock()
+        mock_col.get.return_value = {"ids": []}
+        mock_col.upsert.side_effect = RuntimeError("internal db corruption at /secret/path")
+        monkeypatch.setattr("mempalace.mcp_server._get_collection", lambda create=False: mock_col)
+
+        result = tool_add_drawer(wing="w", room="r", content="test content here")
+        assert result["success"] is False
+        assert "/secret/path" not in result["error"]
+        assert result["error"] == "Failed to file drawer"
+
+
+# ── WAL Content Hashing Tests ──────────────────────────────────────────
+
+
+class TestWALSecurity:
+    """Verify that WAL entries use content hashes instead of plaintext previews."""
+
+    def test_wal_uses_hash_not_preview(self, monkeypatch, config, palace_path, kg, tmp_dir):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+
+        import os
+        from pathlib import Path
+
+        wal_dir = Path(os.path.join(tmp_dir, "wal"))
+        wal_dir.mkdir(parents=True, exist_ok=True)
+        wal_file = wal_dir / "write_log.jsonl"
+        monkeypatch.setattr("mempalace.mcp_server._WAL_FILE", wal_file)
+        monkeypatch.setattr("mempalace.mcp_server._WAL_DIR", wal_dir)
+
+        from mempalace.mcp_server import tool_add_drawer
+
+        secret_content = "My SSN is 123-45-6789 and my password is hunter2"
+        tool_add_drawer(wing="secrets", room="test", content=secret_content)
+
+        wal_text = wal_file.read_text()
+        assert "123-45-6789" not in wal_text
+        assert "hunter2" not in wal_text
+        assert "content_hash" in wal_text
+        assert "content_preview" not in wal_text
+
+
+# ── KG Query Relationship Tool Tests ───────────────────────────────────
+
+
+class TestKGQueryRelationship:
+    """Tests for the new mempalace_kg_query_relationship tool."""
+
+    def test_query_relationship_basic(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query_relationship
+
+        result = tool_kg_query_relationship(predicate="does")
+        assert result["count"] >= 2  # Max does swimming and chess
+        assert all("predicate" in f for f in result["facts"])
+
+    def test_query_relationship_with_date_filter(
+        self, monkeypatch, config, palace_path, seeded_kg
+    ):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query_relationship
+
+        result = tool_kg_query_relationship(predicate="works_at", as_of="2025-06-01")
+        # Alice works_at NewCo from 2025-01-01 — should appear
+        assert result["count"] >= 1
+        assert any(f["subject"] == "Alice" for f in result["facts"])
+
+    def test_query_relationship_validates_predicate(
+        self, monkeypatch, config, palace_path, seeded_kg
+    ):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query_relationship
+
+        result = tool_kg_query_relationship(predicate="../../etc")
+        assert "error" in result
+        assert result["count"] == 0
+
+    def test_query_relationship_validates_date(
+        self, monkeypatch, config, palace_path, seeded_kg
+    ):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query_relationship
+
+        result = tool_kg_query_relationship(predicate="does", as_of="invalid")
+        assert "error" in result
+
+    def test_query_relationship_registered_in_tools(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request({"method": "tools/list", "id": 1, "params": {}})
+        names = {t["name"] for t in resp["result"]["tools"]}
+        assert "mempalace_kg_query_relationship" in names
+
+
+# ── Metadata Cache Tests ───────────────────────────────────────────────
+
+
+class TestMetadataCache:
+    """Verify metadata caching behavior."""
+
+    def test_cache_invalidated_on_write(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_status, tool_add_drawer
+
+        # First call caches metadata
+        result1 = tool_status()
+        assert result1["total_drawers"] == 4
+
+        # Add a drawer — should invalidate cache
+        tool_add_drawer(wing="new", room="room", content="New content for cache test")
+
+        result2 = tool_status()
+        assert result2["total_drawers"] == 5
+        assert "new" in result2["wings"]

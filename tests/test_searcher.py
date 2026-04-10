@@ -62,7 +62,7 @@ class TestSearchMemories:
         with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
             result = search_memories("test", "/fake/path")
         assert "error" in result
-        assert "query failed" in result["error"]
+        assert result["error"] == "Search failed"
 
     def test_search_memories_filters_in_result(self, palace_path, seeded_collection):
         result = search_memories("test", palace_path, wing="project", room="backend")
