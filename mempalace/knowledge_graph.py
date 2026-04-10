@@ -43,12 +43,15 @@ from datetime import date, datetime
 from pathlib import Path
 
 
-DEFAULT_KG_PATH = os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
+def get_default_kg_path():
+    if "MEMPALACE_CONFIG_DIR" in os.environ:
+        return os.path.join(os.environ["MEMPALACE_CONFIG_DIR"], "knowledge_graph.sqlite3")
+    return os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
 
 
 class KnowledgeGraph:
     def __init__(self, db_path: str = None):
-        self.db_path = db_path or DEFAULT_KG_PATH
+        self.db_path = db_path or get_default_kg_path()
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._connection = None
         self._init_db()
@@ -191,21 +194,23 @@ class KnowledgeGraph:
                 (ended, sub_id, pred, obj_id),
             )
 
-    def add_bridge(self, room_a: str, room_b: str, score: float, reason: str = ""):
+    def add_bridge(self, room_a: str, room_b: str, score: float, reason: str = "") -> str:
         """Create a semantic wormhole between two rooms."""
         self.add_entity(room_a, "room")
         self.add_entity(room_b, "room")
         # Store score as confidence
-        return self.add_triple(room_a, "semantically_bridges", room_b, confidence=score, source_file=reason)
+        return self.add_triple(
+            room_a, "semantically_bridges", room_b, confidence=score, source_file=reason
+        )
 
-    def evolve_fact(self, old_triple_id: str, new_triple_id: str, reason: str = ""):
+    def evolve_fact(self, old_triple_id: str, new_triple_id: str, reason: str = "") -> None:
         """Mark an old fact as evolved into a new fact."""
         conn = self._conn()
         with conn:
             # Invalidate old triple
             ended = datetime.now().isoformat()
             conn.execute("UPDATE triples SET valid_to=? WHERE id=?", (ended, old_triple_id))
-            
+
             # Create meta-entity for triples to link them
             self.add_entity(old_triple_id, "fact")
             self.add_entity(new_triple_id, "fact")
