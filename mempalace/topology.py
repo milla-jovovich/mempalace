@@ -15,6 +15,9 @@ def calculate_pagerank(
     if not nodes:
         return {}
 
+    # Deduplicate edges to prevent score inflation
+    edges = list(set(edges))
+
     adj = defaultdict(list)
     for u, v in edges:
         adj[u].append(v)
@@ -39,6 +42,10 @@ def calculate_pagerank(
 def find_structural_holes(nodes: List[str], edges: List[Tuple[str, str]]) -> List[str]:
     """Find brokers (nodes that bridge otherwise disconnected clusters).
     Using a simplified betweenness centrality approximation."""
+    
+    # Deduplicate edges to prevent score inflation
+    edges = list(set(edges))
+    
     adj = defaultdict(list)
     for u, v in edges:
         adj[u].append(v)
