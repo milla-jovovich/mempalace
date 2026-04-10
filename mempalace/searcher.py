@@ -294,9 +294,14 @@ def search_memories(
                 result["synapse_enabled"] = True
 
                 if cfg.synapse_log_retrievals and hit_drawer_ids:
-                    synapse_db.log_retrieval(
-                        hit_drawer_ids, query_hash, session_id, conn=conn
-                    )
+                    try:
+                        synapse_db.log_retrieval(
+                            hit_drawer_ids, query_hash, session_id, conn=conn
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Synapse log_retrieval failed (non-fatal): %s", e
+                        )
         else:
             result["synapse_enabled"] = False
     except Exception as e:

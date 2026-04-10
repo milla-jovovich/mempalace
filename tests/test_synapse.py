@@ -421,6 +421,19 @@ def test_ltp_and_tagging_composition(palace_path, seeded_collection):
     assert abs(hit["synapse_score"] - expected) < 1e-4
 
 
+def test_log_retrieval_failure_does_not_break_search(palace_path, seeded_collection):
+    """log_retrieval が例外を投げても検索は Synapse スコア付きで返る（接続は commit される）。"""
+    cfg = _synapse_cfg(synapse_log_retrievals=True)
+    with patch("mempalace.config.MempalaceConfig", return_value=cfg):
+        with patch.object(
+            SynapseDB, "log_retrieval", side_effect=RuntimeError("log failed")
+        ):
+            result = search_memories("JWT authentication", palace_path)
+    assert result.get("synapse_enabled") is True
+    assert len(result.get("hits", [])) >= 1
+    assert all("synapse_score" in h for h in result["hits"])
+
+
 # --- Log cleanup ---
 
 
