@@ -2,6 +2,10 @@
 
 When the user invokes this skill, follow these steps:
 
+**Prerequisite:** The palace must already be initialized. If `mempalace status`
+fails or reports no palace, run `mempalace init --yes <dir>` first (see
+/mempalace:init).
+
 ## 1. Ask what to mine
 
 Ask the user what they want to mine and where the source data is located.

@@ -41,7 +41,9 @@ before continuing.
 
 ## Step 5: Initialize the palace
 
-Run `mempalace init <dir>` where `<dir>` is the directory from Step 4.
+Run `mempalace init --yes <dir>` where `<dir>` is the directory from Step 4.
+The `--yes` flag skips interactive prompts, which is required when running
+from an agent context (no TTY).
 
 If this fails, report the error and stop.
 
