@@ -165,7 +165,7 @@ def hook_stop(data: dict, harness: str):
 
 
 def hook_session_start(data: dict, harness: str):
-    """Session start hook: initialize session tracking state."""
+    """Session start hook: auto-inject L0+L1 wake-up context."""
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
 
@@ -174,7 +174,25 @@ def hook_session_start(data: dict, harness: str):
     # Initialize session state directory
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Pass through — no blocking on session start
+    # Auto-inject wake-up context (L0 identity + L1 essential story)
+    try:
+        from .layers import MemoryStack
+
+        stack = MemoryStack()
+        wake_text = stack.wake_up()
+        if wake_text and wake_text.strip():
+            _log(f"Injecting wake-up context ({len(wake_text)} chars)")
+            _output(
+                {
+                    "decision": "block",
+                    "reason": f"[MemPalace Wake-Up Context]\n{wake_text}\n\nIMPORTANT: Before responding about any person, project, or past event, call mempalace_search or mempalace_kg_query FIRST. Before ending a session, call session_checkpoint.",
+                }
+            )
+            return
+    except Exception as e:
+        _log(f"Wake-up failed (non-fatal): {e}")
+
+    # Fallback: pass through if no palace or wake-up fails
     _output({})
 
 

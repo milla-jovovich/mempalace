@@ -14,6 +14,14 @@ import os
 import shutil
 import tempfile
 
+# ── Check for multilingual model availability ────────────────────────────
+try:
+    import sentence_transformers  # noqa: F401
+
+    HAS_MULTILINGUAL = True
+except ImportError:
+    HAS_MULTILINGUAL = False
+
 # ── Isolate HOME before any mempalace imports ──────────────────────────
 _original_env = {}
 _session_tmp = tempfile.mkdtemp(prefix="mempalace_session_")
@@ -100,8 +108,12 @@ def config(tmp_dir, palace_path):
 @pytest.fixture
 def collection(palace_path):
     """A ChromaDB collection pre-seeded in the temp palace."""
+    from mempalace.config import get_embedding_function
+
     client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
+    col = client.get_or_create_collection(
+        "mempalace_drawers", embedding_function=get_embedding_function()
+    )
     yield col
     client.delete_collection("mempalace_drawers")
     del client
@@ -186,4 +198,25 @@ def seeded_kg(kg):
     kg.add_triple("Alice", "works_at", "Acme Corp", valid_from="2020-01-01", valid_to="2024-12-31")
     kg.add_triple("Alice", "works_at", "NewCo", valid_from="2025-01-01")
 
+    return kg
+
+
+@pytest.fixture
+def graph_kg(tmp_path):
+    """KG with a richer graph for traversal tests."""
+    kg = KnowledgeGraph(db_path=str(tmp_path / "graph_test.sqlite3"))
+    # Create a multi-hop graph:
+    # Alice --works_at--> Acme --located_in--> NYC
+    # Alice --friends_with--> Bob --works_at--> Acme
+    # Bob --likes--> Chess
+    # Carol --works_at--> Acme
+    kg.add_triple("Alice", "works_at", "Acme")
+    kg.add_triple("Acme", "located_in", "NYC")
+    kg.add_triple("Alice", "friends_with", "Bob")
+    kg.add_triple("Bob", "works_at", "Acme")
+    kg.add_triple("Bob", "likes", "Chess")
+    kg.add_triple("Carol", "works_at", "Acme")
+    # Add a temporal triple (expired)
+    kg.add_triple("Alice", "works_at", "OldCorp", valid_from="2020-01-01")
+    kg.invalidate("Alice", "works_at", "OldCorp", ended="2023-06-01")
     return kg

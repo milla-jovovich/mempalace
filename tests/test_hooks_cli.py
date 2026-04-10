@@ -192,13 +192,16 @@ def test_stop_hook_tracks_save_point(tmp_path):
 # --- hook_session_start ---
 
 
-def test_session_start_passes_through(tmp_path):
+def test_session_start_injects_wakeup(tmp_path):
     result = _capture_hook_output(
         hook_session_start,
         {"session_id": "test"},
         state_dir=tmp_path,
     )
-    assert result == {}
+    # SessionStart now auto-injects L0+L1 wake-up context
+    assert result["decision"] == "block"
+    assert "MemPalace Wake-Up Context" in result["reason"]
+    assert "mempalace_search" in result["reason"]
 
 
 # --- hook_precompact ---
@@ -369,7 +372,8 @@ def test_run_hook_dispatches_session_start(tmp_path):
     with patch("sys.stdin", io.StringIO(stdin_data)):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
             with patch("mempalace.hooks_cli._output") as mock_output:
-                run_hook("session-start", "claude-code")
+                with patch.dict("sys.modules", {"mempalace.layers": None}):
+                    run_hook("session-start", "claude-code")
     mock_output.assert_called_once_with({})
 
 
@@ -416,5 +420,6 @@ def test_run_hook_invalid_json(tmp_path):
     with patch("sys.stdin", io.StringIO("not valid json")):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
             with patch("mempalace.hooks_cli._output") as mock_output:
-                run_hook("session-start", "claude-code")
+                with patch.dict("sys.modules", {"mempalace.layers": None}):
+                    run_hook("session-start", "claude-code")
     mock_output.assert_called_once_with({})

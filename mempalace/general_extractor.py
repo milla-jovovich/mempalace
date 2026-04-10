@@ -283,6 +283,25 @@ def _disambiguate(memory_type: str, text: str, scores: Dict[str, float]) -> str:
         if scores.get("emotional", 0) > 0:
             return "emotional"
 
+    # Milestone with strong emotional signals => emotional
+    if memory_type == "milestone" and sentiment == "positive":
+        emotional_score = scores.get("emotional", 0)
+        milestone_score = scores.get("milestone", 0)
+        if emotional_score > 0.15 and (milestone_score - emotional_score) < 0.15:
+            # Check for explicit emotional language
+            emotional_words = {
+                "feel",
+                "love",
+                "proud",
+                "grateful",
+                "happy",
+                "thankful",
+                "appreciate",
+            }
+            lower = text.lower()
+            if sum(1 for w in emotional_words if w in lower) >= 2:
+                return "emotional"
+
     return memory_type
 
 
@@ -360,9 +379,85 @@ def _score_markers(text: str, markers: List[str]) -> Tuple[float, List[str]]:
 # =============================================================================
 
 
+# =============================================================================
+# EMBEDDING-BASED CLASSIFICATION (language-agnostic)
+# =============================================================================
+
+# Memory type descriptions for semantic matching.
+# The embedding model maps any language to the same vector space,
+# so these English descriptions work for Chinese, French, German, etc.
+MEMORY_TYPE_DESCRIPTIONS = {
+    "decision": (
+        "making a choice, deciding between options, trade-offs, "
+        "weighing alternatives, selecting an approach or technology"
+    ),
+    "preference": (
+        "personal preference, coding style, always do X, never do Y, "
+        "habitual choices, conventions, rules to follow"
+    ),
+    "milestone": (
+        "breakthrough, finally working, shipped, launched, deployed, "
+        "first time achieved, discovered something new, proof of concept"
+    ),
+    "problem": (
+        "bug, error, crash, failure, root cause, something broken, "
+        "troubleshooting, workaround, debugging"
+    ),
+    "emotional": (
+        "feelings, emotions, love, fear, pride, gratitude, vulnerability, "
+        "personal sentiment, happy, sad, worried, scared, thankful, "
+        "I feel, deeply moved, touched, heartfelt, emotional expression"
+    ),
+}
+
+_memory_emb_cache = {}
+
+
+def _get_memory_embeddings(ef):
+    """Get or compute cached memory type description embeddings."""
+    global _memory_emb_cache
+    if not _memory_emb_cache:
+        descriptions = list(MEMORY_TYPE_DESCRIPTIONS.values())
+        types = list(MEMORY_TYPE_DESCRIPTIONS.keys())
+        embeddings = ef(descriptions)
+        _memory_emb_cache = dict(zip(types, embeddings))
+    return _memory_emb_cache
+
+
+def _cosine_similarity(a, b):
+    """Compute cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(x * x for x in b) ** 0.5
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _is_multilingual_available():
+    """Check if sentence-transformers is installed."""
+    try:
+        import sentence_transformers  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def _score_embedding(prose: str, ef) -> Dict[str, float]:
+    """Score prose against memory type descriptions using embedding similarity."""
+    mem_embs = _get_memory_embeddings(ef)
+    prose_emb = ef([prose[:500]])[0]
+    return {mem_type: _cosine_similarity(prose_emb, emb) for mem_type, emb in mem_embs.items()}
+
+
 def extract_memories(text: str, min_confidence: float = 0.3) -> List[Dict]:
     """
     Extract memories from a text string.
+
+    Uses embedding-based classification (language-agnostic) when available.
+    Falls back to regex markers (English only) when sentence-transformers
+    is not installed.
 
     Args:
         text: The text to extract from (any format).
@@ -371,6 +466,14 @@ def extract_memories(text: str, min_confidence: float = 0.3) -> List[Dict]:
     Returns:
         List of dicts: {"content": str, "memory_type": str, "chunk_index": int}
     """
+    # Determine classification method
+    use_embedding = _is_multilingual_available()
+    ef = None
+    if use_embedding:
+        from .config import get_embedding_function
+
+        ef = get_embedding_function()
+
     # Split into paragraphs (double newline or speaker-turn boundaries)
     paragraphs = _split_into_segments(text)
     memories = []
@@ -381,32 +484,42 @@ def extract_memories(text: str, min_confidence: float = 0.3) -> List[Dict]:
 
         prose = _extract_prose(para)
 
-        # Score against all types
-        scores = {}
-        for mem_type, markers in ALL_MARKERS.items():
-            score, _ = _score_markers(prose, markers)
-            if score > 0:
-                scores[mem_type] = score
+        if use_embedding and ef is not None:
+            # Embedding-based: language-agnostic, works for any language
+            scores = _score_embedding(prose, ef)
+            # Filter to scores above a minimum embedding threshold
+            scores = {k: v for k, v in scores.items() if v > 0.15}
+        else:
+            # Fallback: regex-based (English patterns only)
+            scores = {}
+            for mem_type, markers in ALL_MARKERS.items():
+                score, _ = _score_markers(prose, markers)
+                if score > 0:
+                    scores[mem_type] = score
 
         if not scores:
             continue
 
-        # Length bonus
-        if len(para) > 500:
-            length_bonus = 2
-        elif len(para) > 200:
-            length_bonus = 1
-        else:
-            length_bonus = 0
-
         max_type = max(scores, key=scores.get)
-        max_score = scores[max_type] + length_bonus
+        max_score = scores[max_type]
+
+        # Length bonus (regex mode only — embedding scores are already normalized)
+        if not use_embedding:
+            if len(para) > 500:
+                max_score += 2
+            elif len(para) > 200:
+                max_score += 1
 
         # Disambiguate
         max_type = _disambiguate(max_type, prose, scores)
 
         # Confidence
-        confidence = min(1.0, max_score / 5.0)
+        if use_embedding:
+            # Embedding scores are 0-1 cosine similarity
+            confidence = min(1.0, max_score * 3)  # scale: 0.33+ maps to 1.0
+        else:
+            confidence = min(1.0, max_score / 5.0)
+
         if confidence < min_confidence:
             continue
 

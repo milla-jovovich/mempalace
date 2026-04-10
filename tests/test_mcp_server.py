@@ -403,3 +403,70 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+
+# ── Storage Integrity Regression Tests ──────────────────────────────────
+
+
+class TestStorageIntegrity:
+    """Regression tests: verify write/read roundtrip preserves full content.
+
+    These protect against truncation bugs where storage tools silently
+    discard parts of the content (e.g., only storing first 200 chars).
+    """
+
+    def test_diary_roundtrip_preserves_full_content(self, monkeypatch, config, palace_path, kg):
+        """Diary write + read must return the complete entry, not a truncation."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_diary_write, tool_diary_read
+
+        long_entry = (
+            "We decided to migrate from PostgreSQL to CockroachDB for multi-region support. "
+            "The key tradeoff is higher write latency (cross-region consensus) in exchange for "
+            "automatic failover and horizontal scaling. Kai ran benchmarks showing 3x latency "
+            "on writes but 0.8x on reads due to follower reads. The team voted 4-1 in favor. "
+            "Alice dissented, preferring to shard PostgreSQL manually, but agreed to revisit "
+            "after 90 days of production data. Action items: Kai owns the migration plan, "
+            "deadline is end of Q3. Budget approved for 3 additional nodes."
+        )
+        w = tool_diary_write(agent_name="Architect", entry=long_entry, topic="decisions")
+        assert w["success"] is True
+
+        r = tool_diary_read(agent_name="Architect")
+        assert r["total"] == 1
+        retrieved = r["entries"][0]["content"]
+        assert retrieved == long_entry, (
+            f"Diary content was truncated: wrote {len(long_entry)} chars, "
+            f"got back {len(retrieved)} chars"
+        )
+
+    def test_drawer_roundtrip_preserves_full_content(self, monkeypatch, config, palace_path, kg):
+        """add_drawer + search must return the complete document."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer, tool_search
+
+        long_content = (
+            "Authentication module technical specification: JWT tokens with RS256 signing, "
+            "24-hour expiry, refresh tokens stored in HttpOnly secure cookies with SameSite=Strict. "
+            "Token rotation on every refresh to prevent replay attacks. Blacklist stored in Redis "
+            "with TTL matching token expiry. Rate limiting: 10 refresh attempts per minute per user. "
+            "Fallback: if Redis is unavailable, reject all refresh attempts (fail closed). "
+            "Monitoring: alert on >5% token blacklist hits in any 5-minute window."
+        )
+        tool_add_drawer(wing="project", room="auth", content=long_content)
+
+        results = tool_search(
+            query="JWT authentication token rotation",
+            wing="project",
+            snippet_len=0,
+        )
+        assert len(results.get("results", [])) > 0
+        found = results["results"][0]["text"]
+        assert found == long_content, (
+            f"Drawer content was truncated: wrote {len(long_content)} chars, "
+            f"got back {len(found)} chars"
+        )

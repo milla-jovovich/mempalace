@@ -5,16 +5,15 @@ MemPalace MCP Server — read/write palace access for Claude Code
 Install: claude mcp add mempalace -- python -m mempalace.mcp_server [--palace /path/to/palace]
 
 Tools (read):
-  mempalace_status          — total drawers, wing/room breakdown
-  mempalace_list_wings      — all wings with drawer counts
-  mempalace_list_rooms      — rooms within a wing
-  mempalace_get_taxonomy    — full wing → room → count tree
+  mempalace_status          — palace overview with graph + KG stats
+  mempalace_taxonomy        — full wing → room → count tree
   mempalace_search          — semantic search, optional wing/room filter
   mempalace_check_duplicate — check if content already exists before filing
 
 Tools (write):
   mempalace_add_drawer      — file verbatim content into a wing/room
   mempalace_delete_drawer   — remove a drawer by ID
+
 """
 
 import argparse
@@ -26,7 +25,13 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
-from .config import MempalaceConfig, sanitize_name, sanitize_content
+from .config import (
+    MempalaceConfig,
+    get_embedding_function,
+    check_embedding_model_mismatch,
+    sanitize_name,
+    sanitize_content,
+)
 from .version import __version__
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
@@ -117,10 +122,18 @@ def _get_collection(create=False):
     global _collection_cache
     try:
         client = _get_client()
+        ef = get_embedding_function()
         if create:
-            _collection_cache = client.get_or_create_collection(_config.collection_name)
+            _collection_cache = client.get_or_create_collection(
+                _config.collection_name,
+                embedding_function=ef,
+                metadata={"embedding_model": _config.embedding_model},
+            )
         elif _collection_cache is None:
-            _collection_cache = client.get_collection(_config.collection_name)
+            _collection_cache = client.get_collection(
+                _config.collection_name, embedding_function=ef
+            )
+            check_embedding_model_mismatch(_collection_cache)
         return _collection_cache
     except Exception:
         return None
@@ -143,6 +156,7 @@ def tool_status():
     count = col.count()
     wings = {}
     rooms = {}
+    room_wings = {}  # room -> set of wings (for lightweight graph stats)
     try:
         all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
         for m in all_meta:
@@ -150,15 +164,34 @@ def tool_status():
             r = m.get("room", "unknown")
             wings[w] = wings.get(w, 0) + 1
             rooms[r] = rooms.get(r, 0) + 1
+            if r not in room_wings:
+                room_wings[r] = set()
+            room_wings[r].add(w)
     except Exception:
         pass
+
+    # Lightweight graph stats from already-fetched metadata (no second scan)
+    tunnel_rooms = [r for r, ws in room_wings.items() if len(ws) > 1]
+    total_edges = sum(len(ws) for ws in room_wings.values())
+
+    # KG stats (graceful on errors — disk issues, corruption, etc.)
+    kg_stats_data = None
+    try:
+        kg_stats_data = _kg.stats()
+    except Exception:
+        pass
+
     return {
         "total_drawers": count,
         "wings": wings,
         "rooms": rooms,
+        "graph": {
+            "total_rooms": len(room_wings),
+            "tunnel_rooms": len(tunnel_rooms),
+            "total_edges": total_edges,
+        },
+        "knowledge_graph": kg_stats_data,
         "palace_path": _config.palace_path,
-        "protocol": PALACE_PROTOCOL,
-        "aaak_dialect": AAAK_SPEC,
     }
 
 
@@ -170,8 +203,7 @@ PALACE_PROTOCOL = """IMPORTANT — MemPalace Memory Protocol:
 1. ON WAKE-UP: Call mempalace_status to load palace overview + AAAK spec.
 2. BEFORE RESPONDING about any person, project, or past event: call mempalace_kg_query or mempalace_search FIRST. Never guess — verify.
 3. IF UNSURE about a fact (name, gender, age, relationship): say "let me check" and query the palace. Wrong is worse than slow.
-4. AFTER EACH SESSION: call mempalace_diary_write to record what happened, what you learned, what matters.
-5. WHEN FACTS CHANGE: call mempalace_kg_invalidate on the old fact, mempalace_kg_add for the new one.
+4. WHEN FACTS CHANGE: call mempalace_kg_invalidate on the old fact, mempalace_kg_add for the new one.
 
 This protocol ensures the AI KNOWS before it speaks. Storage is not memory — but storage + this protocol = memory."""
 
@@ -246,14 +278,28 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
-    return search_memories(
+def tool_taxonomy():
+    """Unified taxonomy tool — returns full wing → room → count tree."""
+    return tool_get_taxonomy()
+
+
+def tool_search(
+    query: str, limit: int = 5, wing: str = None, room: str = None, snippet_len: int = 200
+):
+    result = search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
     )
+    # Truncate search results for token efficiency (0 = full text)
+    if snippet_len > 0 and "results" in result:
+        for hit in result["results"]:
+            text = hit.get("text", "")
+            if len(text) > snippet_len:
+                hit["text"] = text[:snippet_len] + "..."
+    return result
 
 
 def tool_check_duplicate(content: str, threshold: float = 0.9):
@@ -471,6 +517,24 @@ def tool_kg_stats():
     return _kg.stats()
 
 
+def tool_kg_extract(text: str, use_llm: str = "auto"):
+    """Extract entities and relationships from text into the knowledge graph."""
+    from .kg_extraction import EntityTripleExtractor
+
+    extractor = EntityTripleExtractor(_kg, use_llm=use_llm)
+    return extractor.extract(text)
+
+
+def tool_kg_traverse(entity: str, depth: int = 2, direction: str = "both", as_of: str = None):
+    """Walk the knowledge graph from an entity, discovering connected entities up to N hops away."""
+    return _kg.traverse(entity, depth=depth, direction=direction, as_of=as_of)
+
+
+def tool_kg_find_path(entity_a: str, entity_b: str, max_depth: int = 4):
+    """Find the shortest path between two entities in the knowledge graph."""
+    return _kg.find_path(entity_a, entity_b, max_depth=max_depth)
+
+
 # ==================== AGENT DIARY ====================
 
 
@@ -587,31 +651,25 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
 
 # ==================== MCP PROTOCOL ====================
 
+# Deprecated tool names → new tool name (for helpful error messages)
+DEPRECATED_TOOLS = {
+    "mempalace_list_wings": "mempalace_taxonomy",
+    "mempalace_list_rooms": "mempalace_taxonomy",
+    "mempalace_get_taxonomy": "mempalace_taxonomy",
+    "mempalace_graph_stats": "mempalace_status",
+    "mempalace_kg_stats": "mempalace_status",
+}
+
 TOOLS = {
     "mempalace_status": {
-        "description": "Palace overview — total drawers, wing and room counts",
+        "description": "Palace overview with graph and knowledge graph stats. ON WAKE-UP: call this first. BEFORE RESPONDING about any person, project, or past event: call mempalace_kg_query or mempalace_search FIRST — verify, never guess. WHEN FACTS CHANGE: call mempalace_kg_invalidate on the old fact, mempalace_kg_add for the new one.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_status,
     },
-    "mempalace_list_wings": {
-        "description": "List all wings with drawer counts",
+    "mempalace_taxonomy": {
+        "description": "Full palace taxonomy: wing → room → drawer count. Use this to understand palace structure.",
         "input_schema": {"type": "object", "properties": {}},
-        "handler": tool_list_wings,
-    },
-    "mempalace_list_rooms": {
-        "description": "List rooms within a wing (or all rooms if no wing given)",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "wing": {"type": "string", "description": "Wing to list rooms for (optional)"},
-            },
-        },
-        "handler": tool_list_rooms,
-    },
-    "mempalace_get_taxonomy": {
-        "description": "Full taxonomy: wing → room → drawer count",
-        "input_schema": {"type": "object", "properties": {}},
-        "handler": tool_get_taxonomy,
+        "handler": tool_taxonomy,
     },
     "mempalace_get_aaak_spec": {
         "description": "Get the AAAK dialect specification — the compressed memory format MemPalace uses. Call this if you need to read or write AAAK-compressed memories.",
@@ -619,7 +677,7 @@ TOOLS = {
         "handler": tool_get_aaak_spec,
     },
     "mempalace_kg_query": {
-        "description": "Query the knowledge graph for an entity's relationships. Returns typed facts with temporal validity. E.g. 'Max' → child_of Alice, loves chess, does swimming. Filter by date with as_of to see what was true at a point in time.",
+        "description": "Query the knowledge graph for an entity's relationships. Returns typed facts with temporal validity. E.g. 'Max' → child_of Alice, loves chess, does swimming. Filter by date with as_of to see what was true at a point in time. For multi-hop queries, use mempalace_kg_traverse instead.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -694,10 +752,62 @@ TOOLS = {
         },
         "handler": tool_kg_timeline,
     },
-    "mempalace_kg_stats": {
-        "description": "Knowledge graph overview: entities, triples, current vs expired facts, relationship types.",
-        "input_schema": {"type": "object", "properties": {}},
-        "handler": tool_kg_stats,
+    "mempalace_kg_extract": {
+        "description": "Extract entities and relationships from text into the knowledge graph. Uses NER (local, free) with optional LLM upgrade. Feed it conversation snippets, meeting notes, or any text with people/orgs/events.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Text to extract entities and relationships from",
+                },
+                "use_llm": {
+                    "type": "string",
+                    "description": "LLM usage: 'auto' (use if API key available), 'always', 'never' (default: auto)",
+                },
+            },
+            "required": ["text"],
+        },
+        "handler": tool_kg_extract,
+    },
+    "mempalace_kg_traverse": {
+        "description": "Walk the knowledge graph from an entity, discovering all connected entities within N hops. Returns nodes and edges as a subgraph.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entity": {"type": "string", "description": "Starting entity name"},
+                "depth": {
+                    "type": "integer",
+                    "description": "How many hops to traverse (1-3, default: 2)",
+                },
+                "direction": {
+                    "type": "string",
+                    "description": "outgoing, incoming, or both (default: both)",
+                },
+                "as_of": {
+                    "type": "string",
+                    "description": "Date filter — only traverse facts valid at this date (YYYY-MM-DD)",
+                },
+            },
+            "required": ["entity"],
+        },
+        "handler": tool_kg_traverse,
+    },
+    "mempalace_kg_find_path": {
+        "description": "Find the shortest path between two entities in the knowledge graph. Discovers how two people, orgs, or concepts are connected.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entity_a": {"type": "string", "description": "Starting entity"},
+                "entity_b": {"type": "string", "description": "Target entity"},
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Maximum path length to search (default: 4)",
+                },
+            },
+            "required": ["entity_a", "entity_b"],
+        },
+        "handler": tool_kg_find_path,
     },
     "mempalace_traverse": {
         "description": "Walk the palace graph from a room. Shows connected ideas across wings — the tunnels. Like following a thread through the palace: start at 'chromadb-setup' in wing_code, discover it connects to wing_myproject (planning) and wing_user (feelings about it).",
@@ -728,13 +838,8 @@ TOOLS = {
         },
         "handler": tool_find_tunnels,
     },
-    "mempalace_graph_stats": {
-        "description": "Palace graph overview: total rooms, tunnel connections, edges between wings.",
-        "input_schema": {"type": "object", "properties": {}},
-        "handler": tool_graph_stats,
-    },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
+        "description": "Semantic search. Returns drawer content with similarity scores.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -742,6 +847,10 @@ TOOLS = {
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "snippet_len": {
+                    "type": "integer",
+                    "description": "Max chars per result (default 200, 0=full text)",
+                },
             },
             "required": ["query"],
         },
@@ -883,6 +992,17 @@ def handle_request(request):
         tool_name = params.get("name")
         tool_args = params.get("arguments") or {}
         if tool_name not in TOOLS:
+            # Helpful redirect for deprecated/merged tool names
+            if tool_name in DEPRECATED_TOOLS:
+                new_name = DEPRECATED_TOOLS[tool_name]
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {
+                        "code": -32601,
+                        "message": f"Tool '{tool_name}' has been merged into '{new_name}'. Please use '{new_name}' instead.",
+                    },
+                }
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
@@ -904,7 +1024,16 @@ def handle_request(request):
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                result, indent=2 if os.environ.get("MEMPALACE_DEBUG") else None
+                            ),
+                        }
+                    ]
+                },
             }
         except Exception:
             logger.exception(f"Tool error in {tool_name}")

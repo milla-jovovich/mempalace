@@ -15,6 +15,7 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
+from .config import MempalaceConfig, get_embedding_function
 from .normalize import normalize
 from .palace import SKIP_DIRS, get_collection, file_already_mined
 
@@ -178,14 +179,100 @@ TOPIC_KEYWORDS = {
 }
 
 
+# Room descriptions for embedding-based semantic classification.
+# Language-agnostic: the embedding model handles any input language.
+ROOM_DESCRIPTIONS = {
+    "technical": (
+        "programming, code, functions, bugs, errors, API, database, server, "
+        "deployment, testing, debugging, refactoring, software development"
+    ),
+    "architecture": (
+        "system architecture, software design, design patterns, structure, "
+        "schema, modules, components, services, layers, interfaces"
+    ),
+    "planning": (
+        "project planning, roadmap, milestones, deadlines, priorities, "
+        "sprints, backlog, scope, requirements, specifications"
+    ),
+    "decisions": (
+        "decisions, choices, trade-offs, switching, migrating, replacing, "
+        "alternatives, options, approaches, strategies, weighing pros and cons"
+    ),
+    "problems": (
+        "problems, issues, bugs, errors, crashes, failures, stuck, broken, "
+        "workarounds, fixes, solutions, root causes, troubleshooting"
+    ),
+}
+
+# Cache for room description embeddings (computed once per session)
+_room_embeddings_cache = {}
+_multilingual_available = None
+
+
+def _is_multilingual_model_available():
+    """Check if sentence-transformers is installed for multilingual embedding."""
+    global _multilingual_available
+    if _multilingual_available is None:
+        try:
+            import sentence_transformers  # noqa: F401
+
+            _multilingual_available = True
+        except ImportError:
+            _multilingual_available = False
+    return _multilingual_available
+
+
+def _cosine_similarity(a, b):
+    """Compute cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(x * x for x in b) ** 0.5
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _get_room_embeddings(ef):
+    """Get or compute cached room description embeddings."""
+    global _room_embeddings_cache
+    if not _room_embeddings_cache:
+        descriptions = list(ROOM_DESCRIPTIONS.values())
+        room_names = list(ROOM_DESCRIPTIONS.keys())
+        embeddings = ef(descriptions)
+        _room_embeddings_cache = dict(zip(room_names, embeddings))
+    return _room_embeddings_cache
+
+
 def detect_convo_room(content: str) -> str:
-    """Score conversation content against topic keywords."""
+    """Classify conversation content into a room using semantic similarity.
+
+    Uses embedding-based classification when available (language-agnostic).
+    Falls back to keyword matching if embedding is unavailable.
+    """
+    # Try embedding-based classification (language-agnostic)
+    if _is_multilingual_model_available():
+        try:
+            ef = get_embedding_function()
+            room_embs = _get_room_embeddings(ef)
+            content_emb = ef([content[:1000]])[0]
+            best_room = "general"
+            best_score = 0.3  # minimum threshold to avoid classifying noise
+            for room, room_emb in room_embs.items():
+                score = _cosine_similarity(content_emb, room_emb)
+                if score > best_score:
+                    best_room = room
+                    best_score = score
+            return best_room
+        except Exception:
+            pass
+
+    # Fallback: keyword-based classification (English keywords only)
     content_lower = content[:3000].lower()
     scores = {}
     for room, keywords in TOPIC_KEYWORDS.items():
         score = sum(1 for kw in keywords if kw in content_lower)
         if score > 0:
-            scores[room] = score
+            scores[room] = scores.get(room, 0) + score
     if scores:
         return max(scores, key=scores.get)
     return "general"
@@ -351,6 +438,16 @@ def mine_convos(
                     ],
                 )
                 drawers_added += 1
+                if not dry_run:
+                    try:
+                        from .kg_extraction import EntityTripleExtractor
+                        from .knowledge_graph import KnowledgeGraph
+
+                        kg_path = os.path.join(palace_path, "knowledge_graph.sqlite3")
+                        extractor = EntityTripleExtractor(KnowledgeGraph(db_path=kg_path))
+                        extractor.extract(chunk["content"], source_closet=drawer_id)
+                    except Exception:
+                        pass  # KG extraction failure must never block ingest
             except Exception as e:
                 if "already exists" not in str(e).lower():
                     raise

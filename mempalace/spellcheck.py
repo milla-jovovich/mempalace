@@ -87,6 +87,9 @@ _MIN_LENGTH = 4
 
 def _should_skip(token: str, known_names: set) -> bool:
     """Return True if this token should be left as-is."""
+    # Skip Chinese/CJK characters entirely
+    if any("\u4e00" <= c <= "\u9fff" for c in token):
+        return True
     if len(token) < _MIN_LENGTH:
         return True
     if _HAS_DIGIT.search(token):
@@ -170,6 +173,12 @@ def spellcheck_user_text(text: str, known_names: Optional[set] = None) -> str:
     Returns:
         Corrected text. Falls back to original if autocorrect not installed.
     """
+    # Skip spellcheck entirely for Chinese-dominant text
+    from .language_detect import is_chinese
+
+    if is_chinese(text):
+        return text
+
     speller = _get_speller()
     if speller is None:
         return text  # autocorrect not installed — pass through unchanged

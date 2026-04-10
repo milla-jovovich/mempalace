@@ -294,6 +294,98 @@ _STOP_WORDS = {
     "need",
 }
 
+# === CHINESE STOP WORDS ===
+_STOP_WORDS_ZH = {
+    "的",
+    "了",
+    "着",
+    "过",
+    "過",
+    "把",
+    "被",
+    "和",
+    "与",
+    "與",
+    "或",
+    "但",
+    "而",
+    "在",
+    "从",
+    "從",
+    "到",
+    "对",
+    "對",
+    "向",
+    "为",
+    "為",
+    "以",
+    "就",
+    "也",
+    "都",
+    "又",
+    "不",
+    "没",
+    "沒",
+    "很",
+    "太",
+    "最",
+    "更",
+    "还",
+    "還",
+    "再",
+    "已",
+    "正",
+    "这",
+    "這",
+    "那",
+    "哪",
+    "什么",
+    "什麼",
+    "怎么",
+    "怎麼",
+    "如何",
+    "为什么",
+    "為什麼",
+    "我",
+    "你",
+    "他",
+    "她",
+    "它",
+    "我们",
+    "我們",
+    "你们",
+    "你們",
+    "他们",
+    "他們",
+    "是",
+    "有",
+    "会",
+    "會",
+    "能",
+    "可以",
+    "要",
+    "想",
+    "得",
+    "个",
+    "個",
+    "些",
+    "种",
+    "種",
+    "只",
+    "次",
+    "件",
+    "上",
+    "下",
+    "里",
+    "裡",
+    "中",
+    "前",
+    "后",
+    "後",
+    "左",
+    "右",
+}
+
 
 class Dialect:
     """
@@ -456,6 +548,12 @@ class Dialect:
             if "_" in w or "-" in w or (any(c.isupper() for c in w[1:])):
                 if w_lower in freq:
                     freq[w_lower] += 2
+
+        # CJK tokenizer: extract CJK bigrams+ (2+ consecutive CJK characters)
+        cjk_words = re.findall(r"[\u4e00-\u9fff]{2,}", text)
+        for w in cjk_words:
+            if w not in _STOP_WORDS_ZH:
+                freq[w] = freq.get(w, 0) + 1
 
         ranked = sorted(freq.items(), key=lambda x: -x[1])
         return [w for w, _ in ranked[:max_topics]]

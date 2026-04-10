@@ -318,6 +318,252 @@ class KnowledgeGraph:
             for r in rows
         ]
 
+    def traverse(
+        self,
+        entity_name: str,
+        depth: int = 2,
+        direction: str = "both",
+        as_of: str = None,
+        min_confidence: float = 0.0,
+    ) -> dict:
+        """BFS traversal from entity. Returns subgraph within depth hops.
+
+        Args:
+            entity_name: Starting entity
+            depth: Max hops (capped at 3)
+            direction: "outgoing", "incoming", or "both"
+            as_of: ISO date for temporal filtering
+            min_confidence: Minimum confidence threshold for edges
+
+        Returns:
+            {nodes: [{id, name, type, depth}], edges: [{subject, predicate, object, depth, confidence}]}
+        """
+        depth = min(depth, 3)
+        start_id = self._entity_id(entity_name)
+
+        conn = self._conn()
+        try:
+            visited = {start_id}
+            frontier = {start_id}
+
+            # Fetch starting entity info
+            start_row = conn.execute(
+                "SELECT id, name, type FROM entities WHERE id = ?", (start_id,)
+            ).fetchone()
+            nodes = []
+            if start_row:
+                nodes.append(
+                    {"id": start_row[0], "name": start_row[1], "type": start_row[2], "depth": 0}
+                )
+
+            edges = []
+
+            for hop in range(1, depth + 1):
+                next_frontier = set()
+
+                for node_id in frontier:
+                    if direction in ("outgoing", "both"):
+                        query = """
+                            SELECT t.predicate, t.object, t.confidence, e.name as obj_name, e.type as obj_type
+                            FROM triples t JOIN entities e ON t.object = e.id
+                            WHERE t.subject = ?
+                        """
+                        params = [node_id]
+                        if as_of:
+                            query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+                            params.extend([as_of, as_of])
+                        if min_confidence > 0:
+                            query += " AND t.confidence >= ?"
+                            params.append(min_confidence)
+
+                        src_row = conn.execute(
+                            "SELECT name FROM entities WHERE id = ?", (node_id,)
+                        ).fetchone()
+                        src_name = src_row[0] if src_row else node_id
+
+                        for row in conn.execute(query, params).fetchall():
+                            predicate, obj_id, confidence, obj_name, obj_type = row
+                            edges.append(
+                                {
+                                    "subject": src_name,
+                                    "predicate": predicate,
+                                    "object": obj_name,
+                                    "depth": hop,
+                                    "confidence": confidence,
+                                }
+                            )
+                            if obj_id not in visited:
+                                visited.add(obj_id)
+                                next_frontier.add(obj_id)
+                                nodes.append(
+                                    {"id": obj_id, "name": obj_name, "type": obj_type, "depth": hop}
+                                )
+
+                    if direction in ("incoming", "both"):
+                        query = """
+                            SELECT t.predicate, t.subject, t.confidence, e.name as sub_name, e.type as sub_type
+                            FROM triples t JOIN entities e ON t.subject = e.id
+                            WHERE t.object = ?
+                        """
+                        params = [node_id]
+                        if as_of:
+                            query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+                            params.extend([as_of, as_of])
+                        if min_confidence > 0:
+                            query += " AND t.confidence >= ?"
+                            params.append(min_confidence)
+
+                        tgt_row = conn.execute(
+                            "SELECT name FROM entities WHERE id = ?", (node_id,)
+                        ).fetchone()
+                        tgt_name = tgt_row[0] if tgt_row else node_id
+
+                        for row in conn.execute(query, params).fetchall():
+                            predicate, sub_id, confidence, sub_name, sub_type = row
+                            edges.append(
+                                {
+                                    "subject": sub_name,
+                                    "predicate": predicate,
+                                    "object": tgt_name,
+                                    "depth": hop,
+                                    "confidence": confidence,
+                                }
+                            )
+                            if sub_id not in visited:
+                                visited.add(sub_id)
+                                next_frontier.add(sub_id)
+                                nodes.append(
+                                    {"id": sub_id, "name": sub_name, "type": sub_type, "depth": hop}
+                                )
+
+                frontier = next_frontier
+                if not frontier:
+                    break
+        finally:
+            conn.close()
+        return {"nodes": nodes, "edges": edges}
+
+    def find_path(
+        self,
+        entity_a: str,
+        entity_b: str,
+        max_depth: int = 4,
+        as_of: str = None,
+        min_confidence: float = 0.0,
+    ) -> dict:
+        """Find shortest path between two entities using BFS.
+
+        Returns:
+            {paths: [[{subject, predicate, object}, ...]], length: int}
+            Empty paths list if no connection within max_depth.
+        """
+        max_depth = min(max_depth, 6)
+        start_id = self._entity_id(entity_a)
+        end_id = self._entity_id(entity_b)
+
+        if start_id == end_id:
+            return {"paths": [[]], "length": 0}
+
+        conn = self._conn()
+        try:
+            # parent_triple[node_id] = (parent_id, triple_dict) — tracks how we reached each node
+            parent_triple = {start_id: None}
+            frontier = [start_id]
+
+            found = False
+            for _hop in range(max_depth):
+                if not frontier:
+                    break
+                next_frontier = []
+
+                for node_id in frontier:
+                    node_row = conn.execute(
+                        "SELECT name FROM entities WHERE id = ?", (node_id,)
+                    ).fetchone()
+                    node_name = node_row[0] if node_row else node_id
+
+                    # Outgoing edges
+                    query = """
+                        SELECT t.predicate, t.object, t.confidence, e.name as obj_name
+                        FROM triples t JOIN entities e ON t.object = e.id
+                        WHERE t.subject = ?
+                    """
+                    params = [node_id]
+                    if as_of:
+                        query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+                        params.extend([as_of, as_of])
+                    if min_confidence > 0:
+                        query += " AND t.confidence >= ?"
+                        params.append(min_confidence)
+
+                    for row in conn.execute(query, params).fetchall():
+                        predicate, neighbor_id, confidence, neighbor_name = row
+                        if neighbor_id not in parent_triple:
+                            triple = {
+                                "subject": node_name,
+                                "predicate": predicate,
+                                "object": neighbor_name,
+                            }
+                            parent_triple[neighbor_id] = (node_id, triple)
+                            if neighbor_id == end_id:
+                                found = True
+                                break
+                            next_frontier.append(neighbor_id)
+
+                    if found:
+                        break
+
+                    # Incoming edges
+                    query = """
+                        SELECT t.predicate, t.subject, t.confidence, e.name as sub_name
+                        FROM triples t JOIN entities e ON t.subject = e.id
+                        WHERE t.object = ?
+                    """
+                    params = [node_id]
+                    if as_of:
+                        query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+                        params.extend([as_of, as_of])
+                    if min_confidence > 0:
+                        query += " AND t.confidence >= ?"
+                        params.append(min_confidence)
+
+                    for row in conn.execute(query, params).fetchall():
+                        predicate, neighbor_id, confidence, neighbor_name = row
+                        if neighbor_id not in parent_triple:
+                            triple = {
+                                "subject": neighbor_name,
+                                "predicate": predicate,
+                                "object": node_name,
+                            }
+                            parent_triple[neighbor_id] = (node_id, triple)
+                            if neighbor_id == end_id:
+                                found = True
+                                break
+                            next_frontier.append(neighbor_id)
+
+                    if found:
+                        break
+
+                if found:
+                    break
+                frontier = next_frontier
+        finally:
+            conn.close()
+
+        if not found:
+            return {"paths": [], "length": 0}
+
+        # Reconstruct path from parent pointers
+        path = []
+        cursor = end_id
+        while parent_triple.get(cursor) is not None:
+            parent_id, triple = parent_triple[cursor]
+            path.append(triple)
+            cursor = parent_id
+        path.reverse()
+
+        return {"paths": [path], "length": len(path)}
+
     # ── Stats ─────────────────────────────────────────────────────────────
 
     def stats(self):

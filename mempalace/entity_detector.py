@@ -437,16 +437,132 @@ SKIP_DIRS = {
 }
 
 
+# ==================== CHINESE PATTERNS ====================
+
+# Common surname characters (百家姓 top surnames, simplified + traditional)
+CHINESE_SURNAMES = set(
+    "王李张張刘劉陈陳杨楊黄黃赵趙周吴吳徐孙孫马馬胡朱郭何林罗羅高梁郑鄭"
+    "谢謝宋唐许許邓鄧冯馮韩韓曹曾彭萧蕭蔡潘田董袁于余叶葉蒋蔣杜苏蘇魏程"
+    "吕呂丁沈任姚卢盧傅钟鍾"
+)
+
+# Common words starting with surname chars that are NOT names
+CHINESE_STOPWORDS = {
+    "王国",
+    "张开",
+    "張開",
+    "李子",
+    "陈述",
+    "陳述",
+    "刘海",
+    "劉海",
+    "黄金",
+    "黃金",
+    "赵钱",
+    "趙錢",
+    "周围",
+    "周末",
+    "周期",
+    "吴语",
+    "吳語",
+    "徐徐",
+    "马上",
+    "馬上",
+    "马路",
+    "馬路",
+    "胡说",
+    "胡乱",
+    "朱红",
+    "何况",
+    "何必",
+    "林立",
+    "高兴",
+    "高興",
+    "高度",
+    "许多",
+    "許多",
+}
+
+CHINESE_PERSON_VERB_PATTERNS = [
+    r"{name}说",
+    r"{name}說",
+    r"{name}问",
+    r"{name}問",
+    r"{name}认为",
+    r"{name}認為",
+    r"{name}觉得",
+    r"{name}覺得",
+    r"{name}告诉",
+    r"{name}告訴",
+    r"{name}回答",
+    r"{name}笑了",
+    r"{name}决定",
+    r"{name}決定",
+    r"{name}喜欢",
+    r"{name}喜歡",
+    r"{name}讨厌",
+    r"{name}討厭",
+]
+
+CHINESE_DIALOGUE_PATTERNS = [
+    r"^{name}[：:]",
+    r"^【{name}】",
+    r"「{name}」",
+    r"\u201c{name}\u201d",
+]
+
+
+def _extract_chinese_names(text: str) -> dict:
+    """Extract Chinese person name candidates (2-3 chars starting with common surname).
+
+    Chinese names are typically 2-3 characters: one surname char + 1-2 given name chars.
+    We extract both 2-char and 3-char candidates independently using regex, then
+    use frequency + stopword filtering. Both lengths are counted separately so
+    "张三" and "张三丰" are independent candidates.
+    """
+    counts = defaultdict(int)
+    surname_pattern = "[" + "".join(CHINESE_SURNAMES) + "]"
+    # Extract 2-char candidates (surname + 1 CJK char)
+    # No word-boundary lookahead — Chinese text is continuous CJK.
+    # Frequency filtering (>= 2 occurrences) + CHINESE_STOPWORDS handle false positives.
+    for match in re.finditer(surname_pattern + r"[\u4e00-\u9fff]", text):
+        name = match.group()
+        if name not in CHINESE_STOPWORDS:
+            counts[name] += 1
+    # Extract 3-char candidates (surname + 2 CJK chars)
+    for match in re.finditer(surname_pattern + r"[\u4e00-\u9fff]{2}", text):
+        name = match.group()
+        if name not in CHINESE_STOPWORDS:
+            counts[name] += 1
+    # If a 3-char name appears frequently, remove the 2-char prefix
+    # (e.g., if "王大明" appears 3x, don't also count "王大")
+    to_remove = set()
+    for name3 in [n for n in counts if len(n) == 3]:
+        name2 = name3[:2]
+        if name2 in counts and counts[name3] >= counts[name2]:
+            to_remove.add(name2)
+    for name in to_remove:
+        del counts[name]
+    return {name: count for name, count in counts.items() if count >= 2}
+
+
+def _is_cjk(name: str) -> bool:
+    """Check if name contains CJK characters."""
+    return any("\u4e00" <= c <= "\u9fff" for c in name)
+
+
 # ==================== CANDIDATE EXTRACTION ====================
 
 
 def extract_candidates(text: str) -> dict:
     """
     Extract all capitalized proper noun candidates from text.
-    Returns {name: frequency} for names appearing 3+ times.
+    Returns {name: frequency} for names appearing 3+ times (English)
+    or 2+ times (Chinese).
     """
-    # Find all capitalized words (not at sentence start — harder, so we use frequency as filter)
-    raw = re.findall(r"\b([A-Z][a-z]{1,19})\b", text)
+    # Find all capitalized words. Use lookaround instead of \b to handle
+    # CJK-adjacent English words (e.g., "Simon和" — \b fails at ASCII-CJK boundary)
+    raw = re.findall(r"(?<![a-zA-Z])([A-Z][a-z]{1,19})(?![a-zA-Z])", text)
 
     counts = defaultdict(int)
     for word in raw:
@@ -454,13 +570,17 @@ def extract_candidates(text: str) -> dict:
             counts[word] += 1
 
     # Also find multi-word proper nouns (e.g. "Memory Palace", "Claude Code")
-    multi = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", text)
+    multi = re.findall(r"(?<![a-zA-Z])([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?![a-zA-Z])", text)
     for phrase in multi:
         if not any(w.lower() in STOPWORDS for w in phrase.split()):
             counts[phrase] += 1
 
-    # Filter: must appear at least 3 times to be a candidate
-    return {name: count for name, count in counts.items() if count >= 3}
+    # Chinese name candidates
+    chinese_names = _extract_chinese_names(text)
+    counts.update(chinese_names)
+
+    # Filter: must appear at least 3 times for English, 2 for Chinese
+    return {name: count for name, count in counts.items() if count >= (2 if _is_cjk(name) else 3)}
 
 
 # ==================== SIGNAL SCORING ====================
@@ -469,7 +589,7 @@ def extract_candidates(text: str) -> dict:
 def _build_patterns(name: str) -> dict:
     """Pre-compile all regex patterns for a single entity name."""
     n = re.escape(name)
-    return {
+    patterns = {
         "dialogue": [
             re.compile(p.format(name=n), re.MULTILINE | re.IGNORECASE) for p in DIALOGUE_PATTERNS
         ],
@@ -481,6 +601,15 @@ def _build_patterns(name: str) -> dict:
         "versioned": re.compile(rf"\b{n}[-v]\w+", re.IGNORECASE),
         "code_ref": re.compile(rf"\b{n}\.(py|js|ts|yaml|yml|json|sh)\b", re.IGNORECASE),
     }
+    # Add Chinese patterns for CJK names
+    if _is_cjk(name):
+        patterns["chinese_person_verbs"] = [
+            re.compile(p.format(name=n)) for p in CHINESE_PERSON_VERB_PATTERNS
+        ]
+        patterns["chinese_dialogue"] = [
+            re.compile(p.format(name=n), re.MULTILINE) for p in CHINESE_DIALOGUE_PATTERNS
+        ]
+    return patterns
 
 
 def score_entity(name: str, text: str, lines: list) -> dict:
@@ -529,6 +658,22 @@ def score_entity(name: str, text: str, lines: list) -> dict:
     if direct > 0:
         person_score += direct * 4
         person_signals.append(f"addressed directly ({direct}x)")
+
+    # Chinese person verb patterns
+    if "chinese_person_verbs" in patterns:
+        for rx in patterns["chinese_person_verbs"]:
+            matches = len(rx.findall(text))
+            if matches > 0:
+                person_score += matches * 2
+                person_signals.append(f"Chinese verb pattern ({matches}x)")
+
+    # Chinese dialogue patterns
+    if "chinese_dialogue" in patterns:
+        for rx in patterns["chinese_dialogue"]:
+            matches = len(rx.findall(text))
+            if matches > 0:
+                person_score += matches * 3
+                person_signals.append(f"Chinese dialogue ({matches}x)")
 
     # --- Project signals ---
 
