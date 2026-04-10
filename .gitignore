@@ -7,6 +7,33 @@ __pycache__/
 mempal.yaml
 .a5c/
 
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Coverage
+htmlcov/
+.coverage
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+
+# ChromaDB local data
+*.sqlite3-journal
+
 # Jekyll (docs site)
 _site/
 .jekyll-cache/

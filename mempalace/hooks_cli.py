@@ -63,6 +63,14 @@ def _count_human_messages(transcript_path: str) -> int:
                             if "<command-message>" in text:
                                 continue
                         count += 1
+                    # Also handle Codex CLI transcript format
+                    # {"type": "event_msg", "payload": {"type": "user_message", "message": "..."}}
+                    elif entry.get("type") == "event_msg":
+                        payload = entry.get("payload", {})
+                        if isinstance(payload, dict) and payload.get("type") == "user_message":
+                            msg_text = payload.get("message", "")
+                            if isinstance(msg_text, str) and "<command-message>" not in msg_text:
+                                count += 1
                 except (json.JSONDecodeError, AttributeError):
                     pass
     except OSError:
