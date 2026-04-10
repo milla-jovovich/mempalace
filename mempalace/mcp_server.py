@@ -18,6 +18,7 @@ Tools (write):
 """
 
 import argparse
+import inspect
 import os
 import sys
 import json
@@ -900,7 +901,10 @@ def handle_request(request):
             elif declared_type == "number" and not isinstance(value, (int, float)):
                 tool_args[key] = float(value)
         try:
-            result = TOOLS[tool_name]["handler"](**tool_args)
+            handler = TOOLS[tool_name]["handler"]
+            valid_params = set(inspect.signature(handler).parameters.keys())
+            filtered_args = {k: v for k, v in tool_args.items() if k in valid_params}
+            result = handler(**filtered_args)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,

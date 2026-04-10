@@ -157,6 +157,30 @@ class TestHandleRequest:
         content = json.loads(resp["result"]["content"][0]["text"])
         assert "total_drawers" in content
 
+    def test_mcp_dispatch_ignores_unexpected_tool_arguments(
+        self, monkeypatch, config, palace_path, seeded_kg
+    ):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import handle_request
+
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 11,
+                "params": {
+                    "name": "mempalace_status",
+                    "arguments": {"unexpected": "ignored"},
+                },
+            }
+        )
+
+        assert "error" not in resp
+        content = json.loads(resp["result"]["content"][0]["text"])
+        assert "total_drawers" in content
+
 
 # ── Read Tools ──────────────────────────────────────────────────────────
 
