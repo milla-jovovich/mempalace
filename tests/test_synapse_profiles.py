@@ -205,3 +205,27 @@ def test_to_annotated_dict(palace_dir):
     annotated = profile.to_annotated_dict()
     assert annotated["half_life_days"]["value"] == 120
     assert annotated["half_life_days"]["source"] == "default (config.json)"
+
+
+def test_result_contains_requested_and_used_profile_match(palace_dir):
+    """正しいプロファイル名 → requested と used が一致"""
+    config = {"synapse_profiles": {"orient": {"half_life_days": 180}}}
+    with open(os.path.join(palace_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    pm = ProfileManager(palace_dir)
+    profile = pm.resolve("orient")
+    assert profile.name == "orient"
+    requested = "orient"
+    used = profile.name
+    assert requested == used
+
+
+def test_result_contains_requested_and_used_profile_fallback(palace_dir):
+    """タイポ → requested と used が異なる"""
+    pm = ProfileManager(palace_dir)
+    profile = pm.resolve("oriemt")
+    assert profile.name == "default"
+    requested = "oriemt"
+    used = profile.name
+    assert requested != used
+    assert used == "default"

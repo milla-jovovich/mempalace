@@ -394,7 +394,7 @@ def tool_search(
     synapse_ltp_window_days: Optional[int] = None,
     synapse_ltp_max_boost: Optional[float] = None,
 ):
-    return search_memories(
+    result = search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
@@ -407,6 +407,13 @@ def tool_search(
         synapse_ltp_window_days=synapse_ltp_window_days,
         synapse_ltp_max_boost=synapse_ltp_max_boost,
     )
+    if result.get("synapse_enabled"):
+        response_meta = {
+            "synapse_requested_profile": result.get("synapse_requested_profile"),
+            "synapse_profile_used": result.get("synapse_profile_used"),
+        }
+        result = {**result, "response_meta": response_meta}
+    return result
 
 
 def tool_check_duplicate(content: str, threshold: float = 0.9):

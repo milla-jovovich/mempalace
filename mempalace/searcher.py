@@ -231,6 +231,10 @@ def search_memories(
                 global_merged=global_merged_from_mempalace_config(cfg),
             )
 
+            # Profile observability — expose fallback to caller
+            result["synapse_requested_profile"] = synapse_profile
+            result["synapse_profile_used"] = profile.name
+
             synapse_db = SynapseDB(palace_path)
             query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
             session_id = uuid.uuid4().hex[:16]
