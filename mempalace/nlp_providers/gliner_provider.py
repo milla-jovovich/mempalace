@@ -60,7 +60,9 @@ class GLiNERProvider:
 
                 if model_path is not None:
                     self._model = gliner_mod.GLiNER.from_pretrained(
-                        str(model_path), load_onnx_model=True
+                        str(model_path),
+                        load_onnx_model=True,
+                        onnx_model_file="onnx/model.onnx",
                     )
                     self._available = True
                 else:
@@ -69,6 +71,7 @@ class GLiNERProvider:
                         self._model = gliner_mod.GLiNER.from_pretrained(
                             "onnx-community/gliner_multi-v2.1",
                             load_onnx_model=True,
+                            onnx_model_file="onnx/model.onnx",
                         )
                         self._available = True
                     except Exception:
@@ -131,18 +134,21 @@ class GLiNERProvider:
     def extract_triples(self, text: str) -> List[Dict]:
         """Extract subject-predicate-object triples with confidence scores.
 
+        Uses GLiNER NER to find entities, then extracts the text between
+        co-occurring entity pairs within the same sentence as the predicate.
+        Falls back to predict_relations() if the model supports it.
+
         Returns list of dicts with subject, predicate, object, confidence keys.
         """
         self._ensure_loaded()
         if not self._available or self._model is None:
             return []
         try:
-            # Use predict_entities to find entities, then infer relations
             entities = self._model.predict_entities(text, DEFAULT_ENTITY_TYPES)
             if not entities:
                 return []
 
-            # Try relation extraction if the model supports it
+            # Try native relation extraction first
             if hasattr(self._model, "predict_relations"):
                 raw = self._model.predict_relations(text, entities)
                 results = []
@@ -157,11 +163,86 @@ class GLiNERProvider:
                                 "confidence": confidence,
                             }
                         )
-                return results
-            return []
+                if results:
+                    return results
+
+            # Fallback: extract triples from entity pairs using inter-entity text
+            return self._triples_from_entity_pairs(text, entities)
         except Exception as e:
             logger.warning(f"GLiNER triple extraction failed: {e}")
             return []
+
+    def _triples_from_entity_pairs(self, text: str, entities: list) -> List[Dict]:
+        """Build triples from entity pairs by extracting inter-entity text as predicate.
+
+        For each pair of entities appearing in the same sentence, the text
+        between them (cleaned of leading/trailing punctuation) becomes the predicate.
+        """
+        import re
+
+        # Split text into sentences
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+
+        # Map each entity to its sentence index
+        entity_positions = []
+        for ent in entities:
+            score = ent.get("score", 0)
+            if score < CONFIDENCE_THRESHOLD:
+                continue
+            start = ent.get("start", 0)
+            ent_text = ent.get("text", "")
+            label = ent.get("label", "UNKNOWN")
+            # Find which sentence this entity belongs to
+            char_offset = 0
+            sent_idx = 0
+            for i, sent in enumerate(sentences):
+                if char_offset <= start < char_offset + len(sent) + 1:
+                    sent_idx = i
+                    break
+                char_offset += len(sent) + 1  # +1 for the split whitespace
+            entity_positions.append(
+                {
+                    "text": ent_text,
+                    "label": label,
+                    "start": start,
+                    "end": ent.get("end", start + len(ent_text)),
+                    "score": score,
+                    "sentence": sent_idx,
+                }
+            )
+
+        # Sort by position
+        entity_positions.sort(key=lambda e: e["start"])
+
+        results = []
+        for i in range(len(entity_positions)):
+            for j in range(i + 1, len(entity_positions)):
+                e1 = entity_positions[i]
+                e2 = entity_positions[j]
+
+                # Only pair entities in the same sentence
+                if e1["sentence"] != e2["sentence"]:
+                    continue
+
+                # Extract text between the two entities as the predicate
+                between = text[e1["end"] : e2["start"]].strip()
+                # Clean up punctuation and whitespace
+                between = re.sub(r"^[,;:\s]+|[,;:\s]+$", "", between)
+
+                if not between or len(between) < 2:
+                    continue
+
+                confidence = min(e1["score"], e2["score"])
+                results.append(
+                    {
+                        "subject": e1["text"],
+                        "predicate": between,
+                        "object": e2["text"],
+                        "confidence": round(confidence, 3),
+                    }
+                )
+
+        return results
 
     def classify_text(self, text: str, labels: List[str]) -> Optional[Dict]:
         """Classify text into one of the given labels.

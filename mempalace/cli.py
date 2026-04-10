@@ -346,7 +346,6 @@ def _nlp_prefetch(args):
     Intended for Docker builds, CI pipelines, and air-gapped environments.
     """
     import os
-    import tempfile
 
     from .nlp_providers.model_manager import ModelManager
 
