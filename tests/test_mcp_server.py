@@ -89,7 +89,9 @@ class TestHandleRequest:
     def test_notifications_initialized_returns_none(self):
         from mempalace.mcp_server import handle_request
 
-        resp = handle_request({"method": "notifications/initialized", "id": None, "params": {}})
+        resp = handle_request(
+            {"method": "notifications/initialized", "id": None, "params": {}}
+        )
         assert resp is None
 
     def test_tools_list(self):
@@ -103,7 +105,9 @@ class TestHandleRequest:
         assert "mempalace_add_drawer" in names
         assert "mempalace_kg_add" in names
 
-    def test_null_arguments_does_not_hang(self, monkeypatch, config, palace_path, seeded_kg):
+    def test_null_arguments_does_not_hang(
+        self, monkeypatch, config, palace_path, seeded_kg
+    ):
         """Sending arguments: null should return a result, not hang (#394)."""
         _patch_mcp_server(monkeypatch, config, seeded_kg)
         from mempalace.mcp_server import handle_request
@@ -172,7 +176,9 @@ class TestReadTools:
         assert result["total_drawers"] == 0
         assert result["wings"] == {}
 
-    def test_status_with_data(self, monkeypatch, config, palace_path, seeded_collection, kg):
+    def test_status_with_data(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_status
 
@@ -189,7 +195,9 @@ class TestReadTools:
         assert result["wings"]["project"] == 3
         assert result["wings"]["notes"] == 1
 
-    def test_list_rooms_all(self, monkeypatch, config, palace_path, seeded_collection, kg):
+    def test_list_rooms_all(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_list_rooms
 
@@ -198,7 +206,9 @@ class TestReadTools:
         assert "frontend" in result["rooms"]
         assert "planning" in result["rooms"]
 
-    def test_list_rooms_filtered(self, monkeypatch, config, palace_path, seeded_collection, kg):
+    def test_list_rooms_filtered(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_list_rooms
 
@@ -206,7 +216,9 @@ class TestReadTools:
         assert "backend" in result["rooms"]
         assert "planning" not in result["rooms"]
 
-    def test_get_taxonomy(self, monkeypatch, config, palace_path, seeded_collection, kg):
+    def test_get_taxonomy(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_get_taxonomy
 
@@ -227,7 +239,9 @@ class TestReadTools:
 
 
 class TestSearchTool:
-    def test_search_basic(self, monkeypatch, config, palace_path, seeded_collection, kg):
+    def test_search_basic(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_search
 
@@ -238,14 +252,18 @@ class TestSearchTool:
         top = result["results"][0]
         assert "JWT" in top["text"] or "authentication" in top["text"].lower()
 
-    def test_search_with_wing_filter(self, monkeypatch, config, palace_path, seeded_collection, kg):
+    def test_search_with_wing_filter(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_search
 
         result = tool_search(query="planning", wing="notes")
         assert all(r["wing"] == "notes" for r in result["results"])
 
-    def test_search_with_room_filter(self, monkeypatch, config, palace_path, seeded_collection, kg):
+    def test_search_with_room_filter(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_search
 
@@ -287,7 +305,9 @@ class TestWriteTools:
         assert result2["success"] is True
         assert result2["reason"] == "already_exists"
 
-    def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
+    def test_delete_drawer(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_delete_drawer
 
@@ -295,14 +315,18 @@ class TestWriteTools:
         assert result["success"] is True
         assert seeded_collection.count() == 3
 
-    def test_delete_drawer_not_found(self, monkeypatch, config, palace_path, seeded_collection, kg):
+    def test_delete_drawer_not_found(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_delete_drawer
 
         result = tool_delete_drawer("nonexistent_drawer")
         assert result["success"] is False
 
-    def test_check_duplicate(self, monkeypatch, config, palace_path, seeded_collection, kg):
+    def test_check_duplicate(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_check_duplicate
 
@@ -320,6 +344,76 @@ class TestWriteTools:
             threshold=0.99,
         )
         assert result["is_duplicate"] is False
+
+    def test_add_drawer_semantic_dedup_rejects(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_add_drawer
+
+        result = tool_add_drawer(
+            wing="project",
+            room="backend",
+            content="The authentication module uses JWT tokens for session management. "
+            "Tokens expire after 24 hours. Refresh tokens are stored in HttpOnly cookies.",
+            dedup_threshold=0.5,
+        )
+        assert result["success"] is True
+        assert result["reason"] == "semantic_duplicate"
+        assert "existing_drawer_id" in result
+        assert result["similarity"] >= 0.5
+        assert "existing_content_preview" in result
+
+    def test_add_drawer_force_bypasses_dedup(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_add_drawer
+
+        result = tool_add_drawer(
+            wing="project",
+            room="backend",
+            content="The authentication module uses JWT tokens for session management. "
+            "Tokens expire after 24 hours. Refresh tokens are stored in HttpOnly cookies.",
+            dedup_threshold=0.5,
+            force=True,
+        )
+        assert result["success"] is True
+        assert result.get("reason") != "semantic_duplicate"
+        assert "drawer_id" in result
+
+    def test_add_drawer_dedup_threshold_high_passes(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_add_drawer
+
+        result = tool_add_drawer(
+            wing="project",
+            room="backend",
+            content="JWT authentication tokens expire after a full day and refresh tokens "
+            "use HttpOnly cookies for storage.",
+            dedup_threshold=0.99,
+        )
+        assert result["success"] is True
+        assert result.get("reason") != "semantic_duplicate"
+        assert "drawer_id" in result
+
+    def test_add_drawer_unrelated_content_passes(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_add_drawer
+
+        result = tool_add_drawer(
+            wing="science",
+            room="physics",
+            content="Black holes emit Hawking radiation near the event horizon "
+            "due to quantum effects in curved spacetime.",
+        )
+        assert result["success"] is True
+        assert result.get("reason") != "semantic_duplicate"
+        assert "drawer_id" in result
 
 
 # ── KG Tools ────────────────────────────────────────────────────────────
