@@ -37,6 +37,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .version import __version__
 
 
 def cmd_init(args):
@@ -243,7 +244,7 @@ def cmd_repair(args):
 def cmd_clean(args):
     """Remove drawers from a wing or a specific room within a wing."""
     import chromadb
-    from .palace import count_drawers, delete_drawers
+    from .palace import find_drawer_ids
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
@@ -272,8 +273,12 @@ def cmd_clean(args):
     except Exception:
         compressed_col = None
 
-    drawer_count = count_drawers(drawers_col, wing, room)
-    compressed_count = count_drawers(compressed_col, wing, room) if compressed_col else 0
+    # Fetch matching IDs once per collection. These lists drive both the
+    # preview counts and the subsequent delete, so no second scan is needed.
+    drawer_ids = find_drawer_ids(drawers_col, wing, room)
+    compressed_ids = find_drawer_ids(compressed_col, wing, room) if compressed_col else []
+    drawer_count = len(drawer_ids)
+    compressed_count = len(compressed_ids)
 
     print(f"\n{'=' * 55}")
     print("  MemPalace Clean")
@@ -306,8 +311,15 @@ def cmd_clean(args):
             print("  Cancelled.")
             return
 
-    removed_drawers = delete_drawers(drawers_col, wing, room)
-    removed_compressed = delete_drawers(compressed_col, wing, room) if compressed_col else 0
+    # Delete by ID — no additional scans. Guarded against empty lists
+    # because some ChromaDB versions reject delete() with no ids/where.
+    if drawer_ids:
+        drawers_col.delete(ids=drawer_ids)
+    if compressed_ids:
+        compressed_col.delete(ids=compressed_ids)
+
+    removed_drawers = drawer_count
+    removed_compressed = compressed_count
 
     # Log the operation to the WAL for audit trail
     try:
@@ -510,9 +522,16 @@ def cmd_compress(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="MemPalace — Give your AI a memory. No API key required.",
+        description=f"MemPalace v{__version__} — Give your AI a memory. No API key required.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"mempalace {__version__}",
+        help="Show the installed MemPalace version and exit",
     )
     parser.add_argument(
         "--palace",
