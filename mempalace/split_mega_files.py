@@ -216,7 +216,17 @@ def split_file(filepath, output_dir, dry_run=False, min_sessions=2):
     """
     Split a single mega-file into per-session files using streaming.
     Accumulates sessions line-by-line to avoid loading entire file into memory.
-    Returns list of output paths written (or would be written if dry_run).
+
+    Args:
+        filepath: Path to the transcript file to split
+        output_dir: Directory to write split files (None = same as source)
+        dry_run: If True, show what would happen without writing files
+        min_sessions: Minimum number of sessions required to split (default: 2).
+            Set to 1 to extract single sessions (e.g., extracting a session from
+            a file with preamble/footer content).
+
+    Returns:
+        List of output paths written (or would be written if dry_run)
     """
     path = Path(filepath)
     max_size = 500 * 1024 * 1024  # 500 MB safety limit
