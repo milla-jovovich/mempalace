@@ -150,7 +150,7 @@ def hook_stop(data: dict, harness: str):
     if since_last >= SAVE_INTERVAL and exchange_count > 0:
         # Update last save point
         try:
-            last_save_file.write_text(str(exchange_count))
+            last_save_file.write_text(str(exchange_count), encoding="utf-8")
         except OSError:
             pass
 

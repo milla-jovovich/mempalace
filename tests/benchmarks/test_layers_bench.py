@@ -148,9 +148,9 @@ class TestWakeUpTokenBudget:
         record_metric("wakeup_budget", f"tokens_at_{n_drawers}", token_estimate)
         record_metric("wakeup_budget", f"chars_at_{n_drawers}", len(text))
 
-        assert token_estimate < 1200, (
-            f"Wake-up exceeded budget: ~{token_estimate} tokens at {n_drawers} drawers"
-        )
+        assert (
+            token_estimate < 1200
+        ), f"Wake-up exceeded budget: ~{token_estimate} tokens at {n_drawers} drawers"
 
 
 @pytest.mark.benchmark
