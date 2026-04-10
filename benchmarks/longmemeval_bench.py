@@ -2926,106 +2926,19 @@ def _load_or_create_split(split_file: str, data: list, dev_size: int = 50, seed:
 
 def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=50):
     """
-    NLP-enhanced AAAK mode: uses NLP providers for better sentence splitting,
-    entity detection, and compression during AAAK ingestion.
+    NLP-enriched mode: uses NLP entity extraction to ENRICH indexed text
+    rather than compressing it.
 
-    When NLP flags are enabled (MEMPALACE_NLP_SENTENCES, MEMPALACE_NLP_NER, etc.),
-    the Dialect and entity_detector modules automatically use NLP providers
-    (pySBD, spaCy, GLiNER) for higher-quality processing.
+    Strategy: extract entities from each document using NLP providers, then
+    append entity names to the raw text before indexing. This gives the
+    embedding model more signal (entity names as keywords) without losing
+    any semantic content from the original text.
+
+    Also applies hybrid_v2 techniques: temporal date boost, assistant-reference
+    two-pass, and keyword overlap re-ranking — all enhanced with NLP entities.
     """
-    from mempalace.dialect import Dialect
-    from mempalace.entity_detector import extract_candidates
-
-    # Pre-scan for entities across all sessions to build entity codes
-    all_text = []
-    sessions = entry["haystack_sessions"]
-    for session in sessions:
-        for turn in session:
-            if turn["role"] == "user":
-                all_text.append(turn["content"])
-    combined = " ".join(all_text[:20])
-    candidates = extract_candidates(combined)
-
-    # Build entity code map from detected entities
-    entity_codes = {}
-    for name in list(candidates.keys())[:20]:
-        code = name[:3].upper()
-        if code not in entity_codes.values():
-            entity_codes[name] = code
-
-    dialect = Dialect(entities=entity_codes)
-
-    corpus = []
-    corpus_compressed = []
-    corpus_ids = []
-    corpus_timestamps = []
-
-    session_ids = entry["haystack_session_ids"]
-    dates = entry["haystack_dates"]
-
-    for sess_idx, (session, sess_id, date) in enumerate(zip(sessions, session_ids, dates)):
-        if granularity == "session":
-            user_turns = [t["content"] for t in session if t["role"] == "user"]
-            if user_turns:
-                doc = "\n".join(user_turns)
-                compressed = dialect.compress(doc, metadata={"date": date})
-                corpus.append(doc)
-                corpus_compressed.append(compressed)
-                corpus_ids.append(sess_id)
-                corpus_timestamps.append(date)
-        else:
-            turn_num = 0
-            for turn in session:
-                if turn["role"] == "user":
-                    compressed = dialect.compress(turn["content"])
-                    corpus.append(turn["content"])
-                    corpus_compressed.append(compressed)
-                    corpus_ids.append(f"{sess_id}_turn_{turn_num}")
-                    corpus_timestamps.append(date)
-                    turn_num += 1
-
-    if not corpus:
-        return [], corpus, corpus_ids, corpus_timestamps
-
-    collection = _fresh_collection()
-    collection.add(
-        documents=corpus_compressed,
-        ids=[f"doc_{i}" for i in range(len(corpus_compressed))],
-        metadatas=[
-            {"corpus_id": cid, "timestamp": ts} for cid, ts in zip(corpus_ids, corpus_timestamps)
-        ],
-    )
-
-    query = entry["question"]
-    results = collection.query(
-        query_texts=[query],
-        n_results=min(n_results, len(corpus)),
-        include=["distances", "metadatas"],
-    )
-
-    result_ids = results["ids"][0]
-    doc_id_to_idx = {f"doc_{i}": i for i in range(len(corpus))}
-    ranked_indices = [doc_id_to_idx[rid] for rid in result_ids]
-
-    seen = set(ranked_indices)
-    for i in range(len(corpus)):
-        if i not in seen:
-            ranked_indices.append(i)
-
-    return ranked_indices, corpus, corpus_ids, corpus_timestamps
-
-
-def build_palace_and_retrieve_nlp_hybrid(
-    entry, granularity="session", n_results=50, hybrid_weight=0.30
-):
-    """
-    NLP-enhanced hybrid mode: uses NLP entity extraction to improve keyword
-    boosting in the hybrid retrieval pipeline.
-
-    When NLP NER is active, entity names detected by spaCy/GLiNER are added
-    to the keyword overlap computation with higher weight, improving recall
-    for entity-centric questions.
-    """
+    import re as _re
+    from datetime import datetime, timedelta
     from mempalace.entity_detector import extract_candidates
 
     STOP_WORDS = {
@@ -3081,7 +2994,7 @@ def build_palace_and_retrieve_nlp_hybrid(
     }
 
     def extract_keywords(text):
-        words = re.findall(r"\b[a-z]{3,}\b", text.lower())
+        words = _re.findall(r"\b[a-z]{3,}\b", text.lower())
         return [w for w in words if w not in STOP_WORDS]
 
     def keyword_overlap(query_kws, query_entities, doc_text):
@@ -3090,46 +3003,152 @@ def build_palace_and_retrieve_nlp_hybrid(
             return 0.0
         total = len(query_kws) + len(query_entities)
         hits = sum(1 for kw in query_kws if kw in doc_lower)
-        # Entity overlap (higher weight)
         hits += sum(2 for ent in query_entities if ent.lower() in doc_lower)
         total += len(query_entities)
         return hits / total if total else 0.0
 
-    question = entry["question"]
-    query_entities = list(extract_candidates(question).keys())
+    def parse_question_date(date_str):
+        try:
+            return datetime.strptime(date_str.split(" (")[0], "%Y/%m/%d")
+        except Exception:
+            return None
 
-    corpus = []
-    corpus_ids = []
-    corpus_timestamps = []
+    def parse_time_offset_days(question):
+        q = question.lower()
+        patterns = [
+            (r"(\d+)\s+days?\s+ago", lambda m: (int(m.group(1)), 2)),
+            (r"a\s+couple\s+(?:of\s+)?days?\s+ago", lambda m: (2, 2)),
+            (r"yesterday", lambda m: (1, 1)),
+            (r"a\s+week\s+ago", lambda m: (7, 3)),
+            (r"(\d+)\s+weeks?\s+ago", lambda m: (int(m.group(1)) * 7, 5)),
+            (r"last\s+week", lambda m: (7, 3)),
+            (r"a\s+month\s+ago", lambda m: (30, 7)),
+            (r"(\d+)\s+months?\s+ago", lambda m: (int(m.group(1)) * 30, 10)),
+            (r"last\s+month", lambda m: (30, 7)),
+            (r"last\s+year", lambda m: (365, 30)),
+            (r"a\s+year\s+ago", lambda m: (365, 30)),
+            (r"recently", lambda m: (14, 14)),
+        ]
+        for pattern, extractor in patterns:
+            m = _re.search(pattern, q)
+            if m:
+                return extractor(m)
+        return None
+
+    def is_assistant_reference(question):
+        q = question.lower()
+        triggers = [
+            "you suggested",
+            "you told me",
+            "you mentioned",
+            "you said",
+            "you recommended",
+            "remind me what you",
+            "you provided",
+            "you listed",
+            "you gave me",
+            "you described",
+            "what did you",
+            "you came up with",
+            "you helped me",
+            "you explained",
+            "can you remind me",
+            "you identified",
+        ]
+        return any(t in q for t in triggers)
+
+    def enrich_text(text):
+        """Append NLP-detected entity names to text for better embedding signal."""
+        entities = extract_candidates(text)
+        if entities:
+            entity_names = " ".join(entities.keys())
+            return f"{text}\n{entity_names}"
+        return text
 
     sessions = entry["haystack_sessions"]
     session_ids = entry["haystack_session_ids"]
     dates = entry["haystack_dates"]
+    question = entry["question"]
+    question_date = parse_question_date(entry.get("question_date", ""))
 
-    for sess_idx, (session, sess_id, date) in enumerate(zip(sessions, session_ids, dates)):
+    # Extract entities from question for keyword boosting
+    query_entities = list(extract_candidates(question).keys())
+
+    corpus_user = []
+    corpus_enriched = []
+    corpus_full = []
+    corpus_ids = []
+    corpus_timestamps = []
+
+    for session, sess_id, date in zip(sessions, session_ids, dates):
         if granularity == "session":
             user_turns = [t["content"] for t in session if t["role"] == "user"]
+            all_turns = [t["content"] for t in session]
             if user_turns:
-                doc = "\n".join(user_turns)
-                corpus.append(doc)
+                raw = "\n".join(user_turns)
+                corpus_user.append(raw)
+                corpus_enriched.append(enrich_text(raw))
+                corpus_full.append("\n".join(all_turns))
                 corpus_ids.append(sess_id)
                 corpus_timestamps.append(date)
         else:
             turn_num = 0
             for turn in session:
                 if turn["role"] == "user":
-                    corpus.append(turn["content"])
+                    raw = turn["content"]
+                    corpus_user.append(raw)
+                    corpus_enriched.append(enrich_text(raw))
+                    corpus_full.append(raw)
                     corpus_ids.append(f"{sess_id}_turn_{turn_num}")
                     corpus_timestamps.append(date)
                     turn_num += 1
 
-    if not corpus:
-        return [], corpus, corpus_ids, corpus_timestamps
+    if not corpus_user:
+        return [], corpus_user, corpus_ids, corpus_timestamps
 
+    # Two-pass for assistant-reference questions
+    if is_assistant_reference(question):
+        collection = _fresh_collection()
+        collection.add(
+            documents=corpus_enriched,
+            ids=[f"doc_{i}" for i in range(len(corpus_enriched))],
+            metadatas=[
+                {"corpus_id": cid, "timestamp": ts}
+                for cid, ts in zip(corpus_ids, corpus_timestamps)
+            ],
+        )
+        results = collection.query(
+            query_texts=[question],
+            n_results=min(5, len(corpus_enriched)),
+            include=["distances", "metadatas"],
+        )
+        top_indices = [int(rid.split("_")[1]) for rid in results["ids"][0]]
+
+        top_corpus_full = [enrich_text(corpus_full[i]) for i in top_indices]
+        top_ids = [corpus_ids[i] for i in top_indices]
+        top_ts = [corpus_timestamps[i] for i in top_indices]
+
+        collection2 = _fresh_collection("mempal_drawers_pass2")
+        collection2.add(
+            documents=top_corpus_full,
+            ids=[f"doc2_{i}" for i in range(len(top_corpus_full))],
+            metadatas=[{"corpus_id": cid, "timestamp": ts} for cid, ts in zip(top_ids, top_ts)],
+        )
+        results2 = collection2.query(
+            query_texts=[question],
+            n_results=min(n_results, len(top_corpus_full)),
+            include=["distances", "metadatas"],
+        )
+        two_pass_order = [top_indices[int(rid.split("_")[1])] for rid in results2["ids"][0]]
+        seen = set(two_pass_order)
+        ranked_indices = two_pass_order + [i for i in range(len(corpus_user)) if i not in seen]
+        return ranked_indices, corpus_user, corpus_ids, corpus_timestamps
+
+    # Standard retrieval with NLP-enriched text
     collection = _fresh_collection()
     collection.add(
-        documents=corpus,
-        ids=[f"doc_{i}" for i in range(len(corpus))],
+        documents=corpus_enriched,
+        ids=[f"doc_{i}" for i in range(len(corpus_enriched))],
         metadatas=[
             {"corpus_id": cid, "timestamp": ts} for cid, ts in zip(corpus_ids, corpus_timestamps)
         ],
@@ -3138,31 +3157,323 @@ def build_palace_and_retrieve_nlp_hybrid(
     query_keywords = extract_keywords(question)
     results = collection.query(
         query_texts=[question],
-        n_results=min(n_results, len(corpus)),
+        n_results=min(n_results, len(corpus_enriched)),
         include=["distances", "metadatas", "documents"],
     )
 
     result_ids = results["ids"][0]
     distances = results["distances"][0]
     documents = results["documents"][0]
-    doc_id_to_idx = {f"doc_{i}": i for i in range(len(corpus))}
+    doc_id_to_idx = {f"doc_{i}": i for i in range(len(corpus_enriched))}
 
+    # Temporal proximity score
+    time_offset = parse_time_offset_days(question)
+    target_date = None
+    if time_offset and question_date:
+        days_back, tolerance = time_offset
+        target_date = question_date - timedelta(days=days_back)
+
+    hybrid_weight = 0.30
     scored = []
     for rid, dist, doc in zip(result_ids, distances, documents):
         idx = doc_id_to_idx[rid]
         overlap = keyword_overlap(query_keywords, query_entities, doc)
         fused_dist = dist * (1.0 - hybrid_weight * overlap)
+
+        # Temporal boost
+        if target_date:
+            sess_date = parse_question_date(corpus_timestamps[idx])
+            if sess_date:
+                delta_days = abs((sess_date - target_date).days)
+                tol = time_offset[1]
+                if delta_days <= tol:
+                    temporal_boost = 0.40
+                elif delta_days <= tol * 3:
+                    temporal_boost = 0.40 * (1.0 - (delta_days - tol) / (tol * 2))
+                else:
+                    temporal_boost = 0.0
+                fused_dist = fused_dist * (1.0 - temporal_boost)
+
         scored.append((idx, fused_dist))
 
     scored.sort(key=lambda x: x[1])
     ranked_indices = [idx for idx, _ in scored]
 
     seen = set(ranked_indices)
-    for i in range(len(corpus)):
+    for i in range(len(corpus_user)):
         if i not in seen:
             ranked_indices.append(i)
 
-    return ranked_indices, corpus, corpus_ids, corpus_timestamps
+    return ranked_indices, corpus_user, corpus_ids, corpus_timestamps
+
+
+def build_palace_and_retrieve_nlp_hybrid(
+    entry, granularity="session", n_results=50, hybrid_weight=0.30
+):
+    """
+    NLP-enhanced hybrid mode with full hybrid_v2 techniques.
+
+    Combines NLP entity extraction with:
+    1. Temporal date boost (from hybrid_v2)
+    2. Two-pass for assistant-reference questions (from hybrid_v2)
+    3. NLP entity-weighted keyword overlap (3x weight for entity matches)
+    4. NLP entity extraction from BOTH query and documents for cross-matching
+    """
+    import re as _re
+    from datetime import datetime, timedelta
+    from mempalace.entity_detector import extract_candidates
+
+    STOP_WORDS = {
+        "what",
+        "when",
+        "where",
+        "who",
+        "how",
+        "which",
+        "did",
+        "do",
+        "was",
+        "were",
+        "have",
+        "has",
+        "had",
+        "is",
+        "are",
+        "the",
+        "a",
+        "an",
+        "my",
+        "me",
+        "i",
+        "you",
+        "your",
+        "their",
+        "it",
+        "its",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "ago",
+        "last",
+        "that",
+        "this",
+        "there",
+        "about",
+        "get",
+        "got",
+        "give",
+        "gave",
+        "buy",
+        "bought",
+        "made",
+        "make",
+    }
+
+    def extract_keywords(text):
+        words = _re.findall(r"\b[a-z]{3,}\b", text.lower())
+        return [w for w in words if w not in STOP_WORDS]
+
+    def keyword_overlap(query_kws, query_entities, doc_text):
+        doc_lower = doc_text.lower()
+        if not query_kws and not query_entities:
+            return 0.0
+        total = len(query_kws) + len(query_entities)
+        hits = sum(1 for kw in query_kws if kw in doc_lower)
+        # Entity overlap with 3x weight — NLP entities are high-signal
+        hits += sum(3 for ent in query_entities if ent.lower() in doc_lower)
+        total += len(query_entities) * 2  # scale denominator for entity weight
+        return hits / total if total else 0.0
+
+    def parse_question_date(date_str):
+        try:
+            return datetime.strptime(date_str.split(" (")[0], "%Y/%m/%d")
+        except Exception:
+            return None
+
+    def parse_time_offset_days(question):
+        q = question.lower()
+        patterns = [
+            (r"(\d+)\s+days?\s+ago", lambda m: (int(m.group(1)), 2)),
+            (r"a\s+couple\s+(?:of\s+)?days?\s+ago", lambda m: (2, 2)),
+            (r"yesterday", lambda m: (1, 1)),
+            (r"a\s+week\s+ago", lambda m: (7, 3)),
+            (r"(\d+)\s+weeks?\s+ago", lambda m: (int(m.group(1)) * 7, 5)),
+            (r"last\s+week", lambda m: (7, 3)),
+            (r"a\s+month\s+ago", lambda m: (30, 7)),
+            (r"(\d+)\s+months?\s+ago", lambda m: (int(m.group(1)) * 30, 10)),
+            (r"last\s+month", lambda m: (30, 7)),
+            (r"last\s+year", lambda m: (365, 30)),
+            (r"a\s+year\s+ago", lambda m: (365, 30)),
+            (r"recently", lambda m: (14, 14)),
+        ]
+        for pattern, extractor in patterns:
+            m = _re.search(pattern, q)
+            if m:
+                return extractor(m)
+        return None
+
+    def is_assistant_reference(question):
+        q = question.lower()
+        triggers = [
+            "you suggested",
+            "you told me",
+            "you mentioned",
+            "you said",
+            "you recommended",
+            "remind me what you",
+            "you provided",
+            "you listed",
+            "you gave me",
+            "you described",
+            "what did you",
+            "you came up with",
+            "you helped me",
+            "you explained",
+            "can you remind me",
+            "you identified",
+        ]
+        return any(t in q for t in triggers)
+
+    sessions = entry["haystack_sessions"]
+    session_ids = entry["haystack_session_ids"]
+    dates = entry["haystack_dates"]
+    question = entry["question"]
+    question_date = parse_question_date(entry.get("question_date", ""))
+
+    # NLP entity extraction from question
+    query_entities = list(extract_candidates(question).keys())
+
+    corpus_user = []
+    corpus_full = []
+    corpus_ids = []
+    corpus_timestamps = []
+
+    for session, sess_id, date in zip(sessions, session_ids, dates):
+        if granularity == "session":
+            user_turns = [t["content"] for t in session if t["role"] == "user"]
+            all_turns = [t["content"] for t in session]
+            if user_turns:
+                corpus_user.append("\n".join(user_turns))
+                corpus_full.append("\n".join(all_turns))
+                corpus_ids.append(sess_id)
+                corpus_timestamps.append(date)
+        else:
+            turn_num = 0
+            for turn in session:
+                if turn["role"] == "user":
+                    corpus_user.append(turn["content"])
+                    corpus_full.append(turn["content"])
+                    corpus_ids.append(f"{sess_id}_turn_{turn_num}")
+                    corpus_timestamps.append(date)
+                    turn_num += 1
+
+    if not corpus_user:
+        return [], corpus_user, corpus_ids, corpus_timestamps
+
+    # Two-pass for assistant-reference questions
+    if is_assistant_reference(question):
+        collection = _fresh_collection()
+        collection.add(
+            documents=corpus_user,
+            ids=[f"doc_{i}" for i in range(len(corpus_user))],
+            metadatas=[
+                {"corpus_id": cid, "timestamp": ts}
+                for cid, ts in zip(corpus_ids, corpus_timestamps)
+            ],
+        )
+        results = collection.query(
+            query_texts=[question],
+            n_results=min(5, len(corpus_user)),
+            include=["distances", "metadatas"],
+        )
+        top_indices = [int(rid.split("_")[1]) for rid in results["ids"][0]]
+
+        top_corpus_full = [corpus_full[i] for i in top_indices]
+        top_ids = [corpus_ids[i] for i in top_indices]
+        top_ts = [corpus_timestamps[i] for i in top_indices]
+
+        collection2 = _fresh_collection("mempal_drawers_pass2")
+        collection2.add(
+            documents=top_corpus_full,
+            ids=[f"doc2_{i}" for i in range(len(top_corpus_full))],
+            metadatas=[{"corpus_id": cid, "timestamp": ts} for cid, ts in zip(top_ids, top_ts)],
+        )
+        results2 = collection2.query(
+            query_texts=[question],
+            n_results=min(n_results, len(top_corpus_full)),
+            include=["distances", "metadatas"],
+        )
+        two_pass_order = [top_indices[int(rid.split("_")[1])] for rid in results2["ids"][0]]
+        seen = set(two_pass_order)
+        ranked_indices = two_pass_order + [i for i in range(len(corpus_user)) if i not in seen]
+        return ranked_indices, corpus_user, corpus_ids, corpus_timestamps
+
+    # Standard hybrid retrieval with NLP entity boosting + temporal
+    collection = _fresh_collection()
+    collection.add(
+        documents=corpus_user,
+        ids=[f"doc_{i}" for i in range(len(corpus_user))],
+        metadatas=[
+            {"corpus_id": cid, "timestamp": ts} for cid, ts in zip(corpus_ids, corpus_timestamps)
+        ],
+    )
+
+    query_keywords = extract_keywords(question)
+    results = collection.query(
+        query_texts=[question],
+        n_results=min(n_results, len(corpus_user)),
+        include=["distances", "metadatas", "documents"],
+    )
+
+    result_ids = results["ids"][0]
+    distances = results["distances"][0]
+    documents = results["documents"][0]
+    doc_id_to_idx = {f"doc_{i}": i for i in range(len(corpus_user))}
+
+    # Temporal proximity score
+    time_offset = parse_time_offset_days(question)
+    target_date = None
+    if time_offset and question_date:
+        days_back, tolerance = time_offset
+        target_date = question_date - timedelta(days=days_back)
+
+    scored = []
+    for rid, dist, doc in zip(result_ids, distances, documents):
+        idx = doc_id_to_idx[rid]
+        overlap = keyword_overlap(query_keywords, query_entities, doc)
+        fused_dist = dist * (1.0 - hybrid_weight * overlap)
+
+        # Temporal boost
+        if target_date:
+            sess_date = parse_question_date(corpus_timestamps[idx])
+            if sess_date:
+                delta_days = abs((sess_date - target_date).days)
+                tol = time_offset[1]
+                if delta_days <= tol:
+                    temporal_boost = 0.40
+                elif delta_days <= tol * 3:
+                    temporal_boost = 0.40 * (1.0 - (delta_days - tol) / (tol * 2))
+                else:
+                    temporal_boost = 0.0
+                fused_dist = fused_dist * (1.0 - temporal_boost)
+
+        scored.append((idx, fused_dist))
+
+    scored.sort(key=lambda x: x[1])
+    ranked_indices = [idx for idx, _ in scored]
+
+    seen = set(ranked_indices)
+    for i in range(len(corpus_user)):
+        if i not in seen:
+            ranked_indices.append(i)
+
+    return ranked_indices, corpus_user, corpus_ids, corpus_timestamps
 
 
 def run_benchmark(
