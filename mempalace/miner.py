@@ -14,6 +14,7 @@ import fnmatch
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import chromadb
 
@@ -55,6 +56,8 @@ CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+BATCH_SIZE = 128  # chunks per upsert call
+MAX_WORKERS = min(32, (os.cpu_count() or 4) * 2)
 
 
 # =============================================================================
@@ -404,6 +407,56 @@ def add_drawer(
 # =============================================================================
 
 
+def process_file_cpu(
+    filepath: Path,
+    project_path: Path,
+    wing: str,
+    rooms: list,
+    agent: str,
+) -> "tuple | None":
+    """Read, chunk, and route a file. Thread-safe, no ChromaDB calls."""
+    source_file = str(filepath)
+    try:
+        content = filepath.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+    content = content.strip()
+    if len(content) < MIN_CHUNK_SIZE:
+        return None
+
+    room = detect_room(filepath, content, rooms, project_path)
+    chunks = chunk_text(content, source_file)
+    if not chunks:
+        return None
+
+    now = datetime.now().isoformat()
+    try:
+        mtime = os.path.getmtime(source_file)
+    except OSError:
+        mtime = None
+
+    drawer_id_prefix = f"drawer_{wing}_{room}_"
+    records = []
+    for chunk in chunks:
+        drawer_id = drawer_id_prefix + hashlib.sha256(
+            (source_file + str(chunk["chunk_index"])).encode()
+        ).hexdigest()[:24]
+        meta = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file,
+            "chunk_index": chunk["chunk_index"],
+            "added_by": agent,
+            "filed_at": now,
+        }
+        if mtime is not None:
+            meta["source_mtime"] = mtime
+        records.append((drawer_id, chunk["content"], meta))
+
+    return source_file, room, records
+
+
 def process_file(
     filepath: Path,
     project_path: Path,
@@ -414,43 +467,69 @@ def process_file(
     dry_run: bool,
 ) -> tuple:
     """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
-
-    # Skip if already filed
     source_file = str(filepath)
     if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
         return 0, None
 
-    try:
-        content = filepath.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    result = process_file_cpu(filepath, project_path, wing, rooms, agent)
+    if result is None:
         return 0, None
 
-    content = content.strip()
-    if len(content) < MIN_CHUNK_SIZE:
-        return 0, None
-
-    room = detect_room(filepath, content, rooms, project_path)
-    chunks = chunk_text(content, source_file)
+    _, room, records = result
 
     if dry_run:
-        print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
-        return len(chunks), room
+        print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(records)} drawers)")
+        return len(records), room
 
     drawers_added = 0
-    for chunk in chunks:
+    for drawer_id, chunk_content, meta in records:
         added = add_drawer(
             collection=collection,
             wing=wing,
             room=room,
-            content=chunk["content"],
+            content=chunk_content,
             source_file=source_file,
-            chunk_index=chunk["chunk_index"],
+            chunk_index=meta["chunk_index"],
             agent=agent,
         )
         if added:
             drawers_added += 1
 
     return drawers_added, room
+
+
+# =============================================================================
+# MINED FILE CACHE
+# =============================================================================
+
+
+def build_mined_cache(collection) -> dict:
+    """Fetch all mined file mtimes in one query. Returns {source_file: mtime}."""
+    try:
+        results = collection.get(include=["metadatas"])
+    except Exception:
+        return {}
+    cache = {}
+    for meta in results.get("metadatas") or []:
+        sf = meta.get("source_file")
+        if sf and sf not in cache:
+            mt = meta.get("source_mtime")
+            cache[sf] = float(mt) if mt is not None else None
+    return cache
+
+
+def is_stale(filepath: Path, mined_cache: dict) -> bool:
+    """Return True if the file needs to be (re-)mined."""
+    sf = str(filepath)
+    if sf not in mined_cache:
+        return True
+    mt = mined_cache[sf]
+    if mt is None:
+        return True
+    try:
+        return os.path.getmtime(sf) != mt
+    except OSError:
+        return True
 
 
 # =============================================================================
@@ -577,23 +656,69 @@ def mine(
     files_skipped = 0
     room_counts = defaultdict(int)
 
-    for i, filepath in enumerate(files, 1):
-        drawers, room = process_file(
-            filepath=filepath,
-            project_path=project_path,
-            collection=collection,
-            wing=wing,
-            rooms=rooms,
-            agent=agent,
-            dry_run=dry_run,
-        )
-        if drawers == 0 and not dry_run:
-            files_skipped += 1
-        else:
-            total_drawers += drawers
-            room_counts[room] += 1
-            if not dry_run:
-                print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+    if dry_run:
+        for i, filepath in enumerate(files, 1):
+            drawers, room = process_file(
+                filepath=filepath,
+                project_path=project_path,
+                collection=collection,
+                wing=wing,
+                rooms=rooms,
+                agent=agent,
+                dry_run=True,
+            )
+            if drawers > 0:
+                total_drawers += drawers
+                room_counts[room] += 1
+    else:
+        print(f"  Checking {len(files)} files for changes...")
+        mined_cache = build_mined_cache(collection)
+        pending = [fp for fp in files if is_stale(fp, mined_cache)]
+        already_mined = len(files) - len(pending)
+
+        batch_ids, batch_docs, batch_metas = [], [], []
+        completed = 0
+        skipped_small = 0
+
+        def flush_batch(ids, docs, metas):
+            if ids:
+                collection.upsert(documents=docs, ids=ids, metadatas=metas)
+                ids.clear()
+                docs.clear()
+                metas.clear()
+
+        try:
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                futures = {
+                    executor.submit(process_file_cpu, fp, project_path, wing, rooms, agent): fp
+                    for fp in pending
+                }
+                for future in as_completed(futures):
+                    fp = futures[future]
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        print(f"  ! [ERROR] {fp.name}: {e}")
+                        completed += 1
+                        continue
+                    completed += 1
+                    if result is None:
+                        skipped_small += 1
+                        continue
+                    source_file, room, records = result
+                    for drawer_id, chunk_content, meta in records:
+                        batch_ids.append(drawer_id)
+                        batch_docs.append(chunk_content)
+                        batch_metas.append(meta)
+                        if len(batch_ids) >= BATCH_SIZE:
+                            flush_batch(batch_ids, batch_docs, batch_metas)
+                    total_drawers += len(records)
+                    room_counts[room] += 1
+                    print(f"  ✓ [{completed:4}/{len(pending)}] {Path(source_file).name[:50]:50} +{len(records)}")
+        finally:
+            flush_batch(batch_ids, batch_docs, batch_metas)
+
+        files_skipped = already_mined + skipped_small
 
     print(f"\n{'=' * 55}")
     print("  Done.")

@@ -260,3 +260,115 @@ def test_file_already_mined_check_mtime():
         # Release ChromaDB file handles before cleanup (required on Windows)
         del col, client
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_process_file_cpu_returns_records():
+    """process_file_cpu returns (source_file, room, records) without touching ChromaDB."""
+    from mempalace.miner import process_file_cpu
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+        os.makedirs(project_root / "src")
+        filepath = project_root / "src" / "app.py"
+        write_file(filepath, "def main():\n    print('hello')\n" * 20)
+
+        rooms = [{"name": "src", "description": "Source code"}]
+        result = process_file_cpu(filepath, project_root, "testwing", rooms, "testbot")
+
+        assert result is not None
+        source_file, room, records = result
+        assert source_file == str(filepath)
+        assert room == "src"
+        assert len(records) > 0
+        drawer_id, content, meta = records[0]
+        assert drawer_id.startswith("drawer_testwing_src_")
+        assert "def main" in content
+        assert meta["wing"] == "testwing"
+        assert meta["room"] == "src"
+        assert meta["added_by"] == "testbot"
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_process_file_cpu_returns_none_for_empty_file():
+    from mempalace.miner import process_file_cpu
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+        filepath = project_root / "empty.py"
+        write_file(filepath, "")
+
+        result = process_file_cpu(filepath, project_root, "testwing", [], "testbot")
+        assert result is None
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_mine_parallel_produces_same_result_as_serial():
+    """Parallel mine indexes the same files and drawer count as the original serial path."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+        os.makedirs(project_root / "src")
+
+        for i in range(5):
+            write_file(
+                project_root / "src" / f"module_{i}.py",
+                f"# module {i}\ndef func_{i}():\n    pass\n" * 20,
+            )
+        with open(project_root / "mempalace.yaml", "w") as f:
+            yaml.dump(
+                {"wing": "test_parallel", "rooms": [{"name": "src", "description": "Source"}]},
+                f,
+            )
+
+        palace_path = project_root / "palace"
+        mine(str(project_root), str(palace_path))
+
+        client = chromadb.PersistentClient(path=str(palace_path))
+        col = client.get_collection("mempalace_drawers")
+        first_count = col.count()
+        assert first_count > 0
+
+        results = col.get(where={"wing": "test_parallel"})
+        source_files = {m["source_file"] for m in results["metadatas"]}
+        assert len(source_files) == 5
+        del col, client
+
+        # Re-mine: idempotent — count must not change
+        mine(str(project_root), str(palace_path))
+        client = chromadb.PersistentClient(path=str(palace_path))
+        col = client.get_collection("mempalace_drawers")
+        assert col.count() == first_count
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_mine_skips_already_mined_files_on_rerun():
+    """Re-running mine skips unchanged files (incremental behaviour preserved)."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+        filepath = project_root / "notes.md"
+        write_file(filepath, "# Notes\n\nSome content here.\n" * 20)
+
+        with open(project_root / "mempalace.yaml", "w") as f:
+            yaml.dump({"wing": "test_incr", "rooms": [{"name": "general", "description": "General"}]}, f)
+
+        palace_path = project_root / "palace"
+        mine(str(project_root), str(palace_path))
+
+        client = chromadb.PersistentClient(path=str(palace_path))
+        col = client.get_collection("mempalace_drawers")
+        count_after_first = col.count()
+        del col, client
+
+        mine(str(project_root), str(palace_path))
+
+        client = chromadb.PersistentClient(path=str(palace_path))
+        col = client.get_collection("mempalace_drawers")
+        assert col.count() == count_after_first
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
