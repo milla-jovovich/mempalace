@@ -449,7 +449,7 @@ def main():
         "--device",
         choices=["auto", "cuda", "rocm", "mps", "cpu"],
         default="auto",
-        help="Embedding device: auto, cuda (NVIDIA), rocm (AMD), mps (Apple), cpu",
+        help="Embedding device: auto (CUDA if available, CPU on Apple Silicon — MPS is 2x slower for mining), cuda, rocm, mps, cpu",
     )
 
     # search

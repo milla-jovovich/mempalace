@@ -124,6 +124,9 @@ def verify_embedding_compatibility(collection, device="auto"):
     and checks if the L2 distance suggests compatible embedding spaces.
     Returns True if compatible (or collection is empty), False if mismatch detected.
     """
+    if collection.count() == 0:
+        return True  # Empty palace, nothing to compare against
+
     test_text = "The quick brown fox jumps over the lazy dog"
     ef = get_embedding_function(device)
     if ef is None:
@@ -189,8 +192,14 @@ def flush_batch(collection, batch: list) -> int:
     if not batch:
         return 0
     total_added = 0
-    for i in range(0, len(batch), CHROMA_MAX_BATCH):
+    if len(batch) > CHROMA_MAX_BATCH:
+        total_chunks = (len(batch) + CHROMA_MAX_BATCH - 1) // CHROMA_MAX_BATCH
+    else:
+        total_chunks = 1
+    for chunk_num, i in enumerate(range(0, len(batch), CHROMA_MAX_BATCH), 1):
         chunk = batch[i : i + CHROMA_MAX_BATCH]
+        if total_chunks > 1:
+            logger.debug("Flushing chunk %d/%d (%d items)", chunk_num, total_chunks, len(chunk))
         total_added += _flush_chunk(collection, chunk)
     return total_added
 
