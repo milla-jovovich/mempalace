@@ -165,9 +165,9 @@ def seeded_collection(collection):
 
 @pytest.fixture
 def kg(tmp_dir):
-    """An isolated KnowledgeGraph using a temp SQLite file."""
-    db_path = os.path.join(tmp_dir, "test_kg.sqlite3")
-    return KnowledgeGraph(db_path=db_path)
+    """An isolated KnowledgeGraph using a temp directory."""
+    kg_dir = os.path.join(tmp_dir, "kg_palace")
+    return KnowledgeGraph(palace_path=kg_dir)
 
 
 @pytest.fixture

@@ -59,9 +59,9 @@ if _args.palace:
 
 _config = MempalaceConfig()
 if _args.palace:
-    _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
+    _kg = KnowledgeGraph(palace_path=_config.palace_path)
 else:
-    _kg = KnowledgeGraph()
+    _kg = KnowledgeGraph(palace_path=_config.palace_path)
 
 
 _client_cache = None

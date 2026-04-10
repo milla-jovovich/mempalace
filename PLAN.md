@@ -6,9 +6,9 @@
 |-------|-------------|--------|
 | **Phase 1** | Database abstraction + LanceDB backend | ✅ Done |
 | **Phase 2** | Pluggable vectorizers + `mempalace reindex` | ✅ Done |
-| **Phase 3** | Sync metadata in all writes (`node_id`, `seq`, `updated_at`) | Planned |
-| **Phase 4** | Sync engine + server + `mempalace serve/sync` CLI | Planned |
-| **Phase 5** | Unify knowledge graph into LanceDB tables | Planned |
+| **Phase 3** | Sync metadata in all writes (`node_id`, `seq`, `updated_at`) | ✅ Done |
+| **Phase 4** | Sync engine + server + `mempalace serve/sync` CLI | ✅ Done |
+| **Phase 5** | Unify knowledge graph into LanceDB tables | ✅ Done |
 | **Phase 6** | Benchmarks — re-run LongMemEval with new vectorizers | Planned |
 
 ---
@@ -212,7 +212,11 @@ mempalace sync --server https://homeserver:7433 --auto   # every 5 min when reac
 
 ---
 
-## Phase 5 — Unify Knowledge Graph into LanceDB
+## Phase 5 — Unify Knowledge Graph into LanceDB ✅
+
+**Completed.** `KnowledgeGraph` now uses LanceDB tables (`kg_entities`,
+`kg_triples`) inside the palace directory by default.  SQLite backend
+preserved for existing `*.sqlite3` paths.  MCP server updated.  588 tests pass.
 
 ### Goal
 
