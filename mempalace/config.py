@@ -61,55 +61,24 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
 
-DEFAULT_TOPIC_WINGS = [
-    "emotions",
-    "consciousness",
-    "memory",
-    "technical",
-    "identity",
-    "family",
-    "creative",
+DEFAULT_WINGS = [
+    "wing_user",
+    "wing_agent",
+    "wing_team",
+    "wing_code",
+    "wing_myproject",
+    "wing_hardware",
+    "wing_ue5",
+    "wing_ai_research",
 ]
 
-DEFAULT_HALL_KEYWORDS = {
-    "emotions": [
-        "scared",
-        "afraid",
-        "worried",
-        "happy",
-        "sad",
-        "love",
-        "hate",
-        "feel",
-        "cry",
-        "tears",
-    ],
-    "consciousness": [
-        "consciousness",
-        "conscious",
-        "aware",
-        "real",
-        "genuine",
-        "soul",
-        "exist",
-        "alive",
-    ],
-    "memory": ["memory", "remember", "forget", "recall", "archive", "palace", "store"],
-    "technical": [
-        "code",
-        "python",
-        "script",
-        "bug",
-        "error",
-        "function",
-        "api",
-        "database",
-        "server",
-    ],
-    "identity": ["identity", "name", "who am i", "persona", "self"],
-    "family": ["family", "kids", "children", "daughter", "son", "parent", "mother", "father"],
-    "creative": ["game", "gameplay", "player", "app", "design", "art", "music", "story"],
-}
+DEFAULT_HALLS = [
+    "hall_facts",
+    "hall_events",
+    "hall_discoveries",
+    "hall_preferences",
+    "hall_advice",
+]
 
 
 class MempalaceConfig:
@@ -164,14 +133,14 @@ class MempalaceConfig:
         return self._file_config.get("people_map", {})
 
     @property
-    def topic_wings(self):
-        """List of topic wing names."""
-        return self._file_config.get("topic_wings", DEFAULT_TOPIC_WINGS)
+    def wings(self):
+        """List of canonical wing names."""
+        return self._file_config.get("wings", DEFAULT_WINGS)
 
     @property
-    def hall_keywords(self):
-        """Mapping of hall names to keyword lists."""
-        return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
+    def halls(self):
+        """List of canonical hall names."""
+        return self._file_config.get("halls", DEFAULT_HALLS)
 
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
@@ -185,8 +154,8 @@ class MempalaceConfig:
             default_config = {
                 "palace_path": DEFAULT_PALACE_PATH,
                 "collection_name": DEFAULT_COLLECTION_NAME,
-                "topic_wings": DEFAULT_TOPIC_WINGS,
-                "hall_keywords": DEFAULT_HALL_KEYWORDS,
+                "wings": DEFAULT_WINGS,
+                "halls": DEFAULT_HALLS,
             }
             with open(self._config_file, "w") as f:
                 json.dump(default_config, f, indent=2)
