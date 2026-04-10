@@ -92,9 +92,12 @@ class LanceCollection:
     """
 
     # Columns stored as real columns for filtering; everything else goes in metadata_json.
-    FILTER_COLUMNS = {"wing", "room", "source_file"}
+    FILTER_COLUMNS = {"wing", "room", "source_file", "node_id", "seq"}
     # Columns that are part of the schema but not user metadata.
-    SCHEMA_COLUMNS = {"id", "document", "vector", "wing", "room", "source_file", "metadata_json"}
+    SCHEMA_COLUMNS = {
+        "id", "document", "vector", "wing", "room", "source_file",
+        "node_id", "seq", "metadata_json",
+    }
     # Fields that are internal bookkeeping (not returned in metadata unless stored in metadata_json).
     INTERNAL_FIELDS = {"_distance", "_relevance_score"}
 
@@ -149,6 +152,8 @@ class LanceCollection:
                 "wing": str(meta.get("wing", "")),
                 "room": str(meta.get("room", "")),
                 "source_file": str(meta.get("source_file", "")),
+                "node_id": str(meta.get("node_id", "")),
+                "seq": int(meta.get("seq", 0)),
                 "metadata_json": json.dumps(meta_with_model, default=str),
             }
             records.append(record)

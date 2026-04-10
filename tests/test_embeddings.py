@@ -301,3 +301,29 @@ def test_lance_dimension_mismatch_guard(tmp_path):
 
     with pytest.raises(RuntimeError, match="dimension"):
         open_collection(palace, backend="lance", embedder=FakeEmbedder768())
+
+
+def test_lance_node_id_seq_are_filterable_columns(tmp_path):
+    """node_id and seq must be top-level LanceDB columns, not buried in metadata_json."""
+    from mempalace.db import open_collection
+
+    palace = str(tmp_path / "palace")
+    col = open_collection(palace, backend="lance")
+    col.upsert(
+        documents=["doc one", "doc two"],
+        ids=["d1", "d2"],
+        metadatas=[
+            {"wing": "w", "room": "r", "source_file": "", "node_id": "aaa", "seq": 1},
+            {"wing": "w", "room": "r", "source_file": "", "node_id": "bbb", "seq": 5},
+        ],
+    )
+
+    # Filter by node_id — only works if it's a real column
+    result = col.get(where={"node_id": "bbb"}, include=["metadatas"])
+    assert len(result["ids"]) == 1
+    assert result["ids"][0] == "d2"
+
+    # Filter by seq with $gt — only works if it's a real column
+    result = col.get(where={"seq": {"$gt": 2}}, include=["metadatas"])
+    assert len(result["ids"]) == 1
+    assert result["ids"][0] == "d2"
