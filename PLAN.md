@@ -15,7 +15,7 @@
 | **Phase 3** | Sync metadata in all writes (`node_id`, `seq`, `updated_at`) | ✅ Done |
 | **Phase 4** | Sync engine + server + `mempalace serve/sync` CLI | ✅ Done |
 | **Phase 5** | Unify knowledge graph into LanceDB tables | ✅ Done |
-| **Phase 6** | Benchmarks — re-run LongMemEval with new vectorizers | Planned |
+| **Phase 6** | Benchmarks — LongMemEval comparison across backends | ✅ Done |
 
 ---
 
@@ -280,7 +280,11 @@ vector similarity), so the tables have no vector column.
 
 ---
 
-## Phase 6 — Benchmarks
+## Phase 6 — Benchmarks ✅
+
+**Completed.** Full 500-question LongMemEval run comparing ChromaDB baseline,
+LanceDB+MiniLM, and LanceDB+BGE-small.  LanceDB matches ChromaDB R@5 (0.966)
+while being 1.8× faster (638ms vs 1165ms/query).  See `benchmarks/BENCHMARKS_V4.md`.
 
 ### Goal
 

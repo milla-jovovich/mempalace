@@ -232,6 +232,39 @@ triples via the MCP tools or seed from entity facts.
 
 ---
 
+## 5. Benchmark Results (Phase 6)
+
+Full 500-question LongMemEval benchmark run comparing the v3.x ChromaDB
+baseline with the new v4.0 LanceDB backends.
+
+### Results
+
+| Backend + Embedder | R@5 | R@10 | NDCG@5 | ms/query |
+|---|---|---|---|---|
+| ChromaDB + MiniLM (v3.x) | 0.966 | 0.982 | 0.888 | 1165 |
+| **LanceDB + MiniLM (v4.0)** | **0.966** | **0.982** | **0.888** | **638** |
+| LanceDB + BGE-small | 0.962 | 0.978 | 0.895 | 2624 |
+
+**Zero retrieval regression.** LanceDB produces identical recall to ChromaDB
+while being **1.8× faster** (638ms vs 1165ms per query).
+
+Full details: `benchmarks/BENCHMARKS_V4.md`
+
+### How-to
+
+```bash
+# Quick test (20 questions, ~2 min)
+python benchmarks/longmemeval_v4.py DATA --mode quick --limit 20
+
+# Full comparison (500 questions, ~45 min)
+python benchmarks/longmemeval_v4.py DATA --mode all
+
+# Compare all embedders
+python benchmarks/longmemeval_v4.py DATA --mode embedders
+```
+
+---
+
 ## New CLI Commands (summary)
 
 | Command | Description |
