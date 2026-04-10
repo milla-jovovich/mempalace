@@ -19,17 +19,22 @@ STATE_DIR = Path.home() / ".mempalace" / "hook_state"
 
 STOP_BLOCK_REASON = (
     "AUTO-SAVE checkpoint. Save key topics, decisions, quotes, and code "
-    "from this session to your memory system. Organize into appropriate "
-    "categories. Use verbatim quotes where possible. Continue conversation "
-    "after saving."
+    "from this session to MemPalace using the MCP tools:\n"
+    "1. Use mempalace_diary_write to save a session summary (what was discussed, "
+    "key decisions, current state of work).\n"
+    "2. Use mempalace_add_drawer for each important decision, quote, or code "
+    "snippet — place in the appropriate wing and room.\n"
+    "Use verbatim quotes where possible. Continue conversation after saving."
 )
 
 PRECOMPACT_BLOCK_REASON = (
-    "COMPACTION IMMINENT. Save ALL topics, decisions, quotes, code, and "
-    "important context from this session to your memory system. Be thorough "
-    "\u2014 after compaction, detailed context will be lost. Organize into "
-    "appropriate categories. Use verbatim quotes where possible. Save "
-    "everything, then allow compaction to proceed."
+    "COMPACTION IMMINENT — detailed context will be lost. Save ALL topics, "
+    "decisions, quotes, code, and important context to MemPalace using MCP tools:\n"
+    "1. Use mempalace_diary_write for a thorough session summary.\n"
+    "2. Use mempalace_add_drawer for EVERY key decision, finding, quote, and "
+    "code snippet — place each in the appropriate wing and room.\n"
+    "Be thorough — after compaction this is all that survives. Use verbatim "
+    "quotes. Save everything, then allow compaction to proceed."
 )
 
 
@@ -103,6 +108,37 @@ def _maybe_auto_ingest():
             pass
 
 
+def _ingest_transcript(transcript_path: str):
+    """Mine a Claude Code session transcript into the palace as a conversation."""
+    path = Path(transcript_path).expanduser()
+    if not path.is_file() or path.stat().st_size < 100:
+        return
+
+    from .config import MempalaceConfig
+
+    try:
+        palace_path = MempalaceConfig().palace_path
+    except Exception:
+        return
+
+    try:
+        log_path = STATE_DIR / "hook.log"
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a") as log_f:
+            subprocess.Popen(
+                [
+                    sys.executable, "-m", "mempalace", "mine",
+                    str(path.parent), "--mode", "convos",
+                    "--wing", "sessions",
+                ],
+                stdout=log_f,
+                stderr=log_f,
+            )
+        _log(f"Transcript ingest started: {path.name}")
+    except OSError:
+        pass
+
+
 SUPPORTED_HARNESSES = {"claude-code", "codex"}
 
 
@@ -156,7 +192,11 @@ def hook_stop(data: dict, harness: str):
 
         _log(f"TRIGGERING SAVE at exchange {exchange_count}")
 
-        # Optional: auto-ingest if MEMPAL_DIR is set
+        # Auto-ingest transcript into palace (background)
+        if transcript_path:
+            _ingest_transcript(transcript_path)
+
+        # Optional: auto-ingest project dir if MEMPAL_DIR is set
         _maybe_auto_ingest()
 
         _output({"decision": "block", "reason": STOP_BLOCK_REASON})
@@ -184,8 +224,13 @@ def hook_precompact(data: dict, harness: str):
     session_id = parsed["session_id"]
 
     _log(f"PRE-COMPACT triggered for session {session_id}")
+    transcript_path = parsed["transcript_path"]
 
-    # Optional: auto-ingest synchronously before compaction (so memories land first)
+    # Auto-ingest transcript before compaction (so conversation lands in palace)
+    if transcript_path:
+        _ingest_transcript(transcript_path)
+
+    # Optional: auto-ingest project dir synchronously
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
     if mempal_dir and os.path.isdir(mempal_dir):
         try:
