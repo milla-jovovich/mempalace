@@ -4,8 +4,12 @@ palace.py — Shared palace operations.
 Consolidates ChromaDB access patterns used by both miners and the MCP server.
 """
 
+import logging
 import os
+
 import chromadb
+
+logger = logging.getLogger(__name__)
 
 SKIP_DIRS = {
     ".git",
@@ -71,15 +75,14 @@ def file_already_mined(collection, source_file: str, check_mtime: bool = False) 
         return False
 
 
-def bulk_check_mined(collection, filepaths: list[str]) -> dict[str, float]:
+def bulk_check_mined(collection) -> dict[str, float]:
     """Pre-fetch source_file/source_mtime pairs for all documents in the collection.
 
     Returns a dict mapping source_file -> source_mtime (as float) for every
     document that has both fields.  Callers can check membership and compare
     mtimes locally instead of issuing one ChromaDB query per file.
 
-    The *filepaths* argument is accepted for API symmetry but the function
-    fetches the full collection in paginated batches (like palace_graph.py)
+    Fetches the full collection in paginated batches (like palace_graph.py)
     since a WHERE-IN filter on thousands of paths is not supported by ChromaDB.
     """
     mined: dict[str, float] = {}
@@ -97,5 +100,5 @@ def bulk_check_mined(collection, filepaths: list[str]) -> dict[str, float]:
                 break
             offset += len(batch["ids"])
     except Exception:
-        pass
+        logger.warning("bulk_check_mined: partial fetch, %d files loaded", len(mined))
     return mined

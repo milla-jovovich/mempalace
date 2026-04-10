@@ -6,6 +6,9 @@ Produces:
     index.md              — table of contents
     wing_name/
       room_name.md        — one file per room, drawers as sections
+
+Streams drawers in paginated batches so memory usage stays bounded
+regardless of palace size.
 """
 
 import os
@@ -17,6 +20,10 @@ from .palace import get_collection
 
 def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -> dict:
     """Export all palace drawers as markdown files organized by wing/room.
+
+    Streams drawers in batches of 1000 and writes each wing/room file
+    incrementally, keeping memory usage proportional to batch size rather
+    than total palace size.
 
     Args:
         palace_path: Path to the ChromaDB palace directory.
@@ -33,70 +40,78 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
         print("  Palace is empty — nothing to export.")
         return {"wings": 0, "rooms": 0, "drawers": 0}
 
-    # Paginate all drawers in batches of 1000
-    print(f"  Reading {total} drawers...")
-    grouped = defaultdict(lambda: defaultdict(list))
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Track which room files have been opened (so we can append vs overwrite)
+    opened_rooms: set[tuple[str, str]] = set()
+    # Track stats per wing: {wing: {room: count}}
+    wing_stats: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    total_drawers = 0
+
+    print(f"  Streaming {total} drawers...")
     offset = 0
     while offset < total:
         batch = col.get(limit=1000, offset=offset, include=["documents", "metadatas"])
         if not batch["ids"]:
             break
+
+        # Group this batch by wing/room so we do one file write per room per batch
+        batch_grouped: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
         for doc_id, doc, meta in zip(batch["ids"], batch["documents"], batch["metadatas"]):
             wing = meta.get("wing", "unknown")
             room = meta.get("room", "general")
-            grouped[wing][room].append({
+            batch_grouped[wing][room].append({
                 "id": doc_id,
                 "content": doc,
                 "source": meta.get("source_file", ""),
                 "filed_at": meta.get("filed_at", ""),
                 "added_by": meta.get("added_by", ""),
             })
+
+        # Write/append each room file
+        for wing, rooms in batch_grouped.items():
+            wing_dir = os.path.join(output_dir, wing)
+            os.makedirs(wing_dir, exist_ok=True)
+
+            for room, drawers in rooms.items():
+                room_path = os.path.join(wing_dir, f"{room}.md")
+                key = (wing, room)
+                is_new = key not in opened_rooms
+
+                with open(room_path, "a" if not is_new else "w", encoding="utf-8") as f:
+                    if is_new:
+                        f.write(f"# {wing} / {room}\n\n")
+                        opened_rooms.add(key)
+
+                    for drawer in drawers:
+                        source = drawer["source"] or "unknown"
+                        filed = drawer["filed_at"] or "unknown"
+                        added_by = drawer["added_by"] or "unknown"
+
+                        f.write(
+                            f"## {drawer['id']}\n"
+                            f"\n"
+                            f"> {_quote_content(drawer['content'])}\n"
+                            f"\n"
+                            f"| Field | Value |\n"
+                            f"|-------|-------|\n"
+                            f"| Source | {source} |\n"
+                            f"| Filed | {filed} |\n"
+                            f"| Added by | {added_by} |\n"
+                            f"\n"
+                            f"---\n\n"
+                        )
+
+                    wing_stats[wing][room] += len(drawers)
+                    total_drawers += len(drawers)
+
         offset += len(batch["ids"])
 
-    # Write markdown files
-    os.makedirs(output_dir, exist_ok=True)
-    total_drawers = 0
-
+    # Build and print stats
     index_rows = []
-
-    for wing in sorted(grouped):
-        wing_dir = os.path.join(output_dir, wing)
-        os.makedirs(wing_dir, exist_ok=True)
-        wing_drawer_count = 0
-
-        rooms = grouped[wing]
-        for room in sorted(rooms):
-            drawers = rooms[room]
-            room_path = os.path.join(wing_dir, f"{room}.md")
-
-            sections = []
-            for drawer in drawers:
-                source = drawer["source"] or "unknown"
-                filed = drawer["filed_at"] or "unknown"
-                added_by = drawer["added_by"] or "unknown"
-
-                section = (
-                    f"## {drawer['id']}\n"
-                    f"\n"
-                    f"> {_quote_content(drawer['content'])}\n"
-                    f"\n"
-                    f"| Field | Value |\n"
-                    f"|-------|-------|\n"
-                    f"| Source | {source} |\n"
-                    f"| Filed | {filed} |\n"
-                    f"| Added by | {added_by} |\n"
-                    f"\n"
-                    f"---"
-                )
-                sections.append(section)
-
-            body = f"# {wing} / {room}\n\n" + "\n\n".join(sections) + "\n"
-            with open(room_path, "w", encoding="utf-8") as f:
-                f.write(body)
-
-            wing_drawer_count += len(drawers)
-
-        total_drawers += wing_drawer_count
+    for wing in sorted(wing_stats):
+        rooms = wing_stats[wing]
+        wing_drawer_count = sum(rooms.values())
         index_rows.append((wing, len(rooms), wing_drawer_count))
         print(f"  {wing}: {len(rooms)} rooms, {wing_drawer_count} drawers")
 
@@ -116,7 +131,7 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
     with open(index_path, "w", encoding="utf-8") as f:
         f.write("\n".join(index_lines))
 
-    stats = {"wings": len(grouped), "rooms": sum(r for _, r, _ in index_rows), "drawers": total_drawers}
+    stats = {"wings": len(wing_stats), "rooms": sum(r for _, r, _ in index_rows), "drawers": total_drawers}
     print(f"\n  Exported {stats['drawers']} drawers across {stats['wings']} wings, {stats['rooms']} rooms")
     print(f"  Output: {output_dir}")
     return stats

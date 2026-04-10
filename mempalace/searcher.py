@@ -18,6 +18,17 @@ class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
 
 
+def _build_where_filter(wing: str = None, room: str = None) -> dict:
+    """Build ChromaDB where filter for wing/room filtering."""
+    if wing and room:
+        return {"$and": [{"wing": wing}, {"room": room}]}
+    elif wing:
+        return {"wing": wing}
+    elif room:
+        return {"room": room}
+    return {}
+
+
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
     """
     Search the palace. Returns verbatim drawer content.
@@ -31,14 +42,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         raise SearchError(f"No palace found at {palace_path}")
 
-    # Build where filter
-    where = {}
-    if wing and room:
-        where = {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        where = {"wing": wing}
-    elif room:
-        where = {"room": room}
+    where = _build_where_filter(wing, room)
 
     try:
         kwargs = {
@@ -98,9 +102,20 @@ def search_memories(
     n_results: int = 5,
     min_similarity: float = 0.0,
 ) -> dict:
-    """
-    Programmatic search — returns a dict instead of printing.
+    """Programmatic search — returns a dict instead of printing.
+
     Used by the MCP server and other callers that need data.
+
+    Args:
+        query: Natural language search query.
+        palace_path: Path to the ChromaDB palace directory.
+        wing: Optional wing filter.
+        room: Optional room filter.
+        n_results: Max results to return.
+        min_similarity: Max L2 (Euclidean) distance threshold. ChromaDB uses
+            L2 distance by default — 0 = identical, larger = less similar.
+            Results with distance > this value are filtered out. A value of
+            0.0 disables filtering. Typical useful range: 0.5–1.5.
     """
     try:
         client = chromadb.PersistentClient(path=palace_path)
@@ -112,14 +127,7 @@ def search_memories(
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
         }
 
-    # Build where filter
-    where = {}
-    if wing and room:
-        where = {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        where = {"wing": wing}
-    elif room:
-        where = {"room": room}
+    where = _build_where_filter(wing, room)
 
     try:
         kwargs = {
