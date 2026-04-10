@@ -56,8 +56,12 @@ def _chroma_where_to_sql(where: dict) -> Optional[str]:
             conditions.append(f"{key} = {value}")
         elif isinstance(value, dict):
             op_map = {
-                "$gt": ">", "$gte": ">=", "$lt": "<",
-                "$lte": "<=", "$ne": "!=", "$eq": "=",
+                "$gt": ">",
+                "$gte": ">=",
+                "$lt": "<",
+                "$lte": "<=",
+                "$ne": "!=",
+                "$eq": "=",
             }
             for op, val in value.items():
                 sql_op = op_map.get(op)
@@ -91,6 +95,8 @@ class LanceCollection:
     FILTER_COLUMNS = {"wing", "room", "source_file"}
     # Columns that are part of the schema but not user metadata.
     SCHEMA_COLUMNS = {"id", "document", "vector", "wing", "room", "source_file", "metadata_json"}
+    # Fields that are internal bookkeeping (not returned in metadata unless stored in metadata_json).
+    INTERNAL_FIELDS = {"_distance", "_relevance_score"}
 
     def __init__(self, db, table_name: str, embedder):
         self._db = db
@@ -103,7 +109,7 @@ class LanceCollection:
     def _list_table_names(self) -> list:
         """Get table names as a plain list (handles lancedb API variations)."""
         result = self._db.list_tables()
-        if hasattr(result, 'tables'):
+        if hasattr(result, "tables"):
             return result.tables  # ListTablesResponse object
         return list(result)  # plain list or iterable
 
@@ -146,10 +152,12 @@ class LanceCollection:
             return
 
         try:
-            (self._table.merge_insert("id")
+            (
+                self._table.merge_insert("id")
                 .when_matched_update_all()
                 .when_not_matched_insert_all()
-                .execute(records))
+                .execute(records)
+            )
         except Exception as e:
             logger.debug("merge_insert failed (%s), falling back to delete+add", e)
             for r in records:
@@ -253,7 +261,10 @@ class LanceCollection:
         }
 
     def delete(self, ids):
-        """Delete records by ID."""
+        """Delete records by ID.
+
+        Performs a hard delete.
+        """
         if self._table is None:
             return
         escaped = [id_.replace("'", "''") for id_ in ids]
@@ -275,7 +286,8 @@ class LanceCollection:
         except (json.JSONDecodeError, TypeError):
             # Fallback: reconstruct from known columns
             return {
-                k: v for k, v in record.items()
+                k: v
+                for k, v in record.items()
                 if k not in self.SCHEMA_COLUMNS and not k.startswith("_")
             }
 
@@ -413,6 +425,7 @@ def _open_lance(palace_path, collection_name, embedder):
     if embedder is None:
         from .embeddings import get_embedder
         from .config import MempalaceConfig
+
         embedder = get_embedder(MempalaceConfig().embedder_config)
 
     db = lancedb.connect(palace_path)

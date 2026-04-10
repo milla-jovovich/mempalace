@@ -265,7 +265,9 @@ def cmd_reindex(args):
 
     resolved_name = resolve_model_name(embedder_config.get("embedder", "all-MiniLM-L6-v2"))
     if embedder_config.get("embedder") == "ollama":
-        display_name = f"ollama/{embedder_config['embedder_options'].get('model', 'nomic-embed-text')}"
+        display_name = (
+            f"ollama/{embedder_config['embedder_options'].get('model', 'nomic-embed-text')}"
+        )
     else:
         display_name = resolved_name
 
@@ -280,6 +282,7 @@ def cmd_reindex(args):
 
     # Read all existing records
     from .db import open_collection
+
     col = open_collection(palace_path, embedder=embedder)
     total = col.count()
 
@@ -358,17 +361,19 @@ def cmd_embedders(args):
 
     for e in list_embedders():
         marker = " ◄ active" if e["name"] == current or e["alias"] == current else ""
-        dim_str = str(e['dim']).rjust(4)
+        dim_str = str(e["dim"]).rjust(4)
         print(f"  {e['alias']:12s}  {dim_str}d  {e['name']}")
         print(f"               {e['notes']}{marker}")
         print()
 
-    print(f"  Configure in ~/.mempalace/config.json:")
-    print(f'    {{"embedder": "bge-small", "embedder_options": {{"device": "cpu"}}}}')
+    print("  Configure in ~/.mempalace/config.json:")
+    print('    {"embedder": "bge-small", "embedder_options": {"device": "cpu"}}')
     print()
-    print(f"  For Ollama (GPU server):")
-    print(f'    {{"embedder": "ollama", "embedder_options": {{"model": "nomic-embed-text", "base_url": "http://server:11434"}}}}')
-    print(f"\n  After changing embedder, run: mempalace reindex")
+    print("  For Ollama (GPU server):")
+    print(
+        '    {"embedder": "ollama", "embedder_options": {"model": "nomic-embed-text", "base_url": "http://server:11434"}}'
+    )
+    print("\n  After changing embedder, run: mempalace reindex")
     print(f"{'=' * 70}\n")
 
 
@@ -383,6 +388,7 @@ def cmd_migrate(args):
         return
 
     from .db import detect_backend
+
     current = detect_backend(palace_path)
 
     if current == "lance":
@@ -397,6 +403,7 @@ def cmd_migrate(args):
     # Read all data from ChromaDB
     try:
         import chromadb
+
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
         total = col.count()
@@ -416,8 +423,7 @@ def cmd_migrate(args):
     offset = 0
     while offset < total:
         batch = col.get(
-            limit=batch_size, offset=offset,
-            include=["documents", "metadatas", "embeddings"]
+            limit=batch_size, offset=offset, include=["documents", "metadatas", "embeddings"]
         )
         all_ids.extend(batch["ids"])
         all_docs.extend(batch["documents"])
@@ -440,6 +446,7 @@ def cmd_migrate(args):
     shutil.rmtree(palace_path)
 
     from .db import open_collection
+
     if has_embeddings:
         print("  Transferring with original embeddings (no re-embedding needed)...")
     else:
@@ -454,8 +461,7 @@ def cmd_migrate(args):
         batch_metas = all_metas[i : i + batch_size]
         batch_embs = all_embeddings[i : i + batch_size] if has_embeddings else None
         lance_col.upsert(
-            documents=batch_docs, ids=batch_ids,
-            metadatas=batch_metas, embeddings=batch_embs
+            documents=batch_docs, ids=batch_ids, metadatas=batch_metas, embeddings=batch_embs
         )
         filed += len(batch_ids)
         print(f"  Migrated {filed}/{len(all_ids)} drawers...")
@@ -468,14 +474,19 @@ def cmd_migrate(args):
         if comp_total > 0:
             print(f"\n  Migrating {comp_total} compressed drawers...")
             comp_data = comp_col.get(
-                limit=comp_total,
-                include=["documents", "metadatas", "embeddings"]
+                limit=comp_total, include=["documents", "metadatas", "embeddings"]
             )
             comp_lance = open_collection(palace_path, "mempalace_compressed", backend="lance")
-            comp_embs = comp_data.get("embeddings") if comp_data.get("embeddings") and comp_data["embeddings"][0] is not None else None
+            comp_embs = (
+                comp_data.get("embeddings")
+                if comp_data.get("embeddings") and comp_data["embeddings"][0] is not None
+                else None
+            )
             comp_lance.upsert(
-                documents=comp_data["documents"], ids=comp_data["ids"],
-                metadatas=comp_data["metadatas"], embeddings=comp_embs
+                documents=comp_data["documents"],
+                ids=comp_data["ids"],
+                metadatas=comp_data["metadatas"],
+                embeddings=comp_embs,
             )
             print(f"  Migrated {comp_total} compressed drawers.")
     except Exception:
@@ -484,7 +495,7 @@ def cmd_migrate(args):
     print(f"\n{'=' * 55}")
     print(f"  Migration complete. {filed} drawers moved to LanceDB.")
     print(f"  ChromaDB backup at: {backup_path}")
-    print(f"  To verify: mempalace status")
+    print("  To verify: mempalace status")
     print(f"{'=' * 55}\n")
 
 

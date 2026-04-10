@@ -1,9 +1,11 @@
 """Tests for the embeddings module — pluggable vectorizers."""
 
+import numpy as np
 import pytest
 from unittest.mock import patch, MagicMock
 
 from mempalace.embeddings import (
+    OnnxEmbedder,
     SentenceTransformerEmbedder,
     OllamaEmbedder,
     get_embedder,
@@ -11,6 +13,14 @@ from mempalace.embeddings import (
     list_embedders,
     MODEL_ALIASES,
 )
+
+_st_available = True
+try:
+    import sentence_transformers  # noqa: F401
+except ImportError:
+    _st_available = False
+
+st_required = pytest.mark.skipif(not _st_available, reason="sentence-transformers not installed")
 
 
 # ── Model aliases ──────────────────────────────────────────────────────
@@ -48,6 +58,7 @@ def test_st_embedder_lazy_load():
     assert e._model is None  # not loaded yet
 
 
+@st_required
 def test_st_embedder_embed():
     """Integration test — actually loads the default model."""
     e = SentenceTransformerEmbedder()
@@ -57,6 +68,7 @@ def test_st_embedder_embed():
     assert all(isinstance(x, float) for x in result[0])
 
 
+@st_required
 def test_st_embedder_dimension():
     e = SentenceTransformerEmbedder()
     assert e.dimension == 384
@@ -111,26 +123,107 @@ def test_ollama_embedder_no_embeddings_error():
             e.embed(["hello"])
 
 
+# ── OnnxEmbedder ──────────────────────────────────────────────────────
+
+
+def test_onnx_embedder_properties():
+    e = OnnxEmbedder()
+    assert e.model_name == "all-MiniLM-L6-v2"
+
+
+def test_onnx_embedder_lazy_load():
+    """ONNX session and tokenizer are not loaded until embed() or dimension is called."""
+    e = OnnxEmbedder()
+    assert e._session is None
+    assert e._tokenizer is None
+
+
+def test_onnx_embedder_embed():
+    e = OnnxEmbedder()
+    result = e.embed(["hello world", "test sentence"])
+    assert len(result) == 2
+    assert len(result[0]) == 384
+    assert all(isinstance(x, float) for x in result[0])
+
+
+def test_onnx_embedder_dimension():
+    e = OnnxEmbedder()
+    assert e.dimension == 384
+
+
+def test_onnx_embedder_output_normalized():
+    """ONNX embedder output vectors must be unit length."""
+    e = OnnxEmbedder()
+    result = e.embed(["normalization check"])
+    norm = np.linalg.norm(result[0])
+    assert abs(norm - 1.0) < 1e-5
+
+
+def test_onnx_embedder_batch():
+    """ONNX embedder handles batches larger than internal batch size."""
+    e = OnnxEmbedder()
+    texts = [f"document number {i}" for i in range(50)]
+    result = e.embed(texts)
+    assert len(result) == 50
+    assert all(len(v) == 384 for v in result)
+
+
+def test_onnx_embedder_deterministic():
+    """Same input produces identical output across calls."""
+    e = OnnxEmbedder()
+    r1 = e.embed(["reproducibility test"])
+    r2 = e.embed(["reproducibility test"])
+    assert r1 == r2
+
+
+def test_onnx_embedder_missing_onnxruntime():
+    with patch.dict("sys.modules", {"onnxruntime": None}):
+        e = OnnxEmbedder()
+        with pytest.raises(ImportError, match="onnxruntime"):
+            e.embed(["test"])
+
+
+def test_onnx_embedder_missing_tokenizers():
+    with patch.dict("sys.modules", {"tokenizers": None}):
+        e = OnnxEmbedder()
+        with pytest.raises(ImportError, match="tokenizers"):
+            e.embed(["test"])
+
+
 # ── get_embedder factory ──────────────────────────────────────────────
 
 
 def test_get_embedder_default():
     e = get_embedder()
-    assert isinstance(e, SentenceTransformerEmbedder)
+    assert isinstance(e, OnnxEmbedder)
     assert e.model_name == "all-MiniLM-L6-v2"
 
 
+def test_get_embedder_explicit_onnx():
+    e = get_embedder({"embedder": "all-MiniLM-L6-v2"})
+    assert isinstance(e, OnnxEmbedder)
+
+
+def test_get_embedder_gpu_device_uses_st():
+    """Requesting cuda/mps device routes to SentenceTransformerEmbedder."""
+    e = get_embedder({"embedder": "all-MiniLM-L6-v2", "embedder_options": {"device": "cuda"}})
+    assert isinstance(e, SentenceTransformerEmbedder)
+
+
 def test_get_embedder_by_alias():
+    """Non-default HF models route to SentenceTransformerEmbedder."""
     e = get_embedder({"embedder": "bge-small"})
     assert isinstance(e, SentenceTransformerEmbedder)
     assert e.model_name == "BAAI/bge-small-en-v1.5"
 
 
 def test_get_embedder_ollama():
-    e = get_embedder({
-        "embedder": "ollama",
-        "embedder_options": {"model": "nomic-embed-text", "base_url": "http://myserver:11434"},
-    })
+    e = get_embedder(
+        {
+            "embedder": "ollama",
+            "embedder_options": {"model": "nomic-embed-text", "base_url": "http://myserver:11434"},
+        }
+    )
     assert isinstance(e, OllamaEmbedder)
     assert e.model_name == "ollama/nomic-embed-text"
 
@@ -181,4 +274,5 @@ def test_embedding_model_stored_in_metadata(tmp_path):
     result = col.get(ids=["t1"], include=["metadatas"])
     meta = result["metadatas"][0]
     assert "embedding_model" in meta
+    # Default embedder is now OnnxEmbedder, same model name
     assert meta["embedding_model"] == "all-MiniLM-L6-v2"

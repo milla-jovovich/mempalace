@@ -1,7 +1,7 @@
 # MemPalace v4.0 — Upgrade Changelog
 
 > Covers all changes on the `feat/multishare` branch: LanceDB migration,
-> pluggable embedders, multi-device sync.  Each section includes a compact
+> pluggable embedders.  Each section includes a compact
 > how-to so you can start using the feature immediately.
 
 ---
@@ -29,7 +29,6 @@ interface regardless of backend.
 ### Why
 
 - No more ONNX segfaults on Apple Silicon
-- Append-only versioned format (foundation for sync)
 - ~40 fewer transitive dependencies
 - Built-in SQL-like filtering without SQLite
 
@@ -124,94 +123,11 @@ EOF
 
 ---
 
-## 3. Multi-Device Sync (Phases 3 + 4)
-
-MemPalace now supports hub-and-spoke replication between machines.  A
-powerful home server acts as the hub; laptops sync over VPN when connected
-and work fully offline in between.
-
-### Architecture
-
-```
-┌─────────────────┐         VPN          ┌─────────────────┐
-│   HOME SERVER    │◄───────────────────►│     LAPTOP      │
-│                  │                      │                  │
-│  LanceDB (full) │   sync protocol      │  LanceDB (full) │
-│  Ollama (GPU)   │  POST /sync/push     │  local embedder  │
-│  Sync Server    │  POST /sync/pull     │  Sync Client     │
-│  :7433          │  GET  /sync/status   │                  │
-└─────────────────┘                      └─────────────────┘
-```
-
-### How it works
-
-1. Each machine gets a unique **node ID** (auto-generated, persisted in
-   `~/.mempalace/node_id`).
-2. Every write increments a **monotonic sequence counter** and stamps the
-   record with `node_id`, `seq`, and `updated_at`.
-3. On sync, nodes exchange only the records the other hasn't seen, using
-   **version vectors** (`node_id → highest_seq`).
-4. **Conflicts** (same drawer edited on both machines) are resolved with
-   last-writer-wins by timestamp, with node ID as tiebreaker.
-
-### How-to: Server (home machine)
-
-```bash
-pip install 'mempalace[server]'   # adds fastapi + uvicorn
-
-# Start the sync server
-mempalace serve --host 0.0.0.0 --port 7433
-
-# Or with a custom palace path
-mempalace --palace /data/palace serve --port 7433
-```
-
-### How-to: Client (laptop)
-
-```bash
-# One-shot sync
-mempalace sync --server http://homeserver:7433
-
-# Auto-sync every 5 minutes (stop with Ctrl+C)
-mempalace sync --server http://homeserver:7433 --auto
-
-# Custom interval (seconds)
-mempalace sync --server http://homeserver:7433 --auto --interval 60
-```
-
-### Offline operation
-
-The laptop is fully self-sufficient between syncs:
-
-- Local LanceDB with a complete copy of all data
-- Local embedder runs on CPU (e.g. `bge-small`)
-- All MCP tools, mining, and search work identically
-- Writes accumulate locally with the laptop's node ID
-
-When the laptop reconnects, `mempalace sync` pushes local changes and pulls
-remote changes.  After sync, both machines have identical data.
-
-### Embedding consistency
-
-Both nodes **must use the same embedding model** for vectors to be
-compatible.  Configure both machines with the same `embedder` in
-`config.json`.  If you change model, run `mempalace reindex` on both sides.
-
-### Conflict resolution
-
-| Scenario | Resolution |
-|----------|------------|
-| New drawer (exists only on one side) | Copied to both sides |
-| Same ID edited on both sides | Newer `updated_at` wins |
-| Same timestamp | Higher `node_id` wins (deterministic) |
-
----
-
 ## 4. Unified Knowledge Graph (Phase 5)
 
 The knowledge graph (entities + triples) has moved from a separate SQLite
 file into LanceDB tables inside the palace directory.  One data directory,
-one format, one sync unit.
+one format.
 
 ### What changed
 
@@ -272,8 +188,6 @@ python benchmarks/longmemeval_v4.py DATA --mode embedders
 | `mempalace migrate` | Convert ChromaDB palace to LanceDB |
 | `mempalace reindex [--embedder NAME]` | Re-embed all drawers with a different model |
 | `mempalace embedders` | List available embedding models |
-| `mempalace serve [--host H --port P]` | Start the sync server |
-| `mempalace sync --server URL [--auto]` | Sync with a remote server |
 
 ---
 
@@ -283,10 +197,6 @@ python benchmarks/longmemeval_v4.py DATA --mode embedders
 |------|---------|
 | `mempalace/db.py` | Database abstraction — `LanceCollection`, `ChromaCollection` |
 | `mempalace/embeddings.py` | `SentenceTransformerEmbedder`, `OllamaEmbedder`, factory |
-| `mempalace/sync_meta.py` | `NodeIdentity`, atomic sequence counter |
-| `mempalace/sync.py` | `SyncEngine`, `VersionVector`, `ChangeSet` |
-| `mempalace/sync_server.py` | FastAPI sync server |
-| `mempalace/sync_client.py` | HTTP sync client |
 
 ---
 
@@ -316,6 +226,4 @@ All settings in `~/.mempalace/config.json`:
 
 | File | Purpose |
 |------|---------|
-| `~/.mempalace/node_id` | This machine's unique 12-char sync ID |
 | `~/.mempalace/seq` | Monotonic write counter |
-| `<palace>/version_vector.json` | Sync state (node→seq mapping) |

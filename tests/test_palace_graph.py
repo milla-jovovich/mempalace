@@ -3,7 +3,15 @@
 All ChromaDB access is mocked — no real database needed.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
+from mempalace.palace_graph import (
+    _fuzzy_match,
+    build_graph,
+    find_tunnels,
+    graph_stats,
+    traverse,
+)
 
 
 def _make_fake_collection(metadatas, ids=None):
@@ -21,16 +29,6 @@ def _make_fake_collection(metadatas, ids=None):
 
     col.get.side_effect = fake_get
     return col
-
-
-# palace_graph no longer depends on chromadb directly
-from mempalace.palace_graph import (
-    _fuzzy_match,
-    build_graph,
-    find_tunnels,
-    graph_stats,
-    traverse,
-    )
 
 
 # --- build_graph ---

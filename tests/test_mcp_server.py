@@ -20,6 +20,7 @@ def _patch_mcp_server(monkeypatch, config, kg):
 def _get_collection(palace_path, create=False):
     """Helper to get collection from test palace."""
     from mempalace.palace import get_collection
+
     return None, get_collection(palace_path)
 
 

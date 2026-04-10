@@ -9,7 +9,10 @@ from .version import __version__  # noqa: E402
 
 # Silence noisy loggers from dependencies.
 logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
-logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+try:
+    logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+except Exception:
+    pass
 
 # ONNX Runtime's CoreML provider segfaults during vector queries on Apple Silicon.
 # Force CPU execution unless the user has explicitly set a preference.

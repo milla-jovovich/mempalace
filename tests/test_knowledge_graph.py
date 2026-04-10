@@ -124,7 +124,6 @@ class TestTimeline:
 class TestWALMode:
     def test_wal_mode_enabled(self, tmp_dir):
         """WAL mode is enabled on the SQLite backend."""
-        import sqlite3
         db_path = os.path.join(tmp_dir, "wal_test.sqlite3")
         kg = KnowledgeGraph(db_path=db_path)
         conn = kg._conn()
