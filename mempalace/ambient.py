@@ -1,12 +1,13 @@
 """ambient.py — Onnipervasività for MemPalace."""
 
-from .palace import get_collection
+import logging
 from .config import MempalaceConfig
 from .knowledge_graph import KnowledgeGraph
-from .topology import find_structural_holes, calculate_pagerank
+from .palace import get_collection
+from .topology import calculate_pagerank, find_structural_holes
 
 
-def get_whisper(context: str, palace_path: str = None, threshold: float = 1.5) -> str:
+def get_whisper(context: str, palace_path: str = None, threshold: float = 0.3) -> str:
     """Get a highly relevant historical context whisper based on current text."""
     config = MempalaceConfig()
     path = palace_path or config.palace_path
@@ -25,8 +26,6 @@ def get_whisper(context: str, palace_path: str = None, threshold: float = 1.5) -
                 room = res["metadatas"][0][0].get("room", "unknown")
                 return f"[Whisper from {room}]: {doc[:200]}..."
     except Exception as e:
-        import logging
-
         logging.error(f"Whisper error: {e}")
         pass
     return ""
