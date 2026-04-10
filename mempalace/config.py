@@ -172,6 +172,21 @@ class MempalaceConfig:
     def synapse_log_retention_days(self):
         return self._file_config.get("synapse_log_retention_days", 90)
 
+    @property
+    def synapse_consolidation_inactive_days(self):
+        """Days without retrieval before a drawer is a consolidation candidate."""
+        return self._file_config.get("synapse_consolidation_inactive_days", 180)
+
+    @property
+    def synapse_soft_archive_suggestions_enabled(self):
+        """Surface soft-archive move suggestions for inactive drawers (#336)."""
+        return self._file_config.get("synapse_soft_archive_suggestions_enabled", True)
+
+    @property
+    def synapse_soft_archive_target_wing(self):
+        """Suggested wing name for cold-storage moves (nudge only)."""
+        return self._file_config.get("synapse_soft_archive_target_wing", "archive")
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)

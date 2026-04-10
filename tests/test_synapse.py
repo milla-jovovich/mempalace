@@ -13,7 +13,12 @@ from unittest.mock import patch
 import pytest
 
 from mempalace.searcher import search_memories
-from mempalace.synapse import DEFAULT_LTP_WINDOW_DAYS, SynapseDB
+from mempalace.synapse import (
+    DEFAULT_LTP_WINDOW_DAYS,
+    SYNAPSE_MARK_NEW,
+    build_soft_archive_proposal,
+    SynapseDB,
+)
 
 
 def _synapse_cfg(**overrides):
@@ -28,6 +33,9 @@ def _synapse_cfg(**overrides):
         synapse_tagging_max_boost=1.5,
         synapse_association_max_boost=1.5,
         synapse_association_coefficient=0.15,
+        synapse_consolidation_inactive_days=180,
+        synapse_soft_archive_suggestions_enabled=True,
+        synapse_soft_archive_target_wing="archive",
         synapse_log_retrievals=False,
     )
     base.update(overrides)
@@ -354,3 +362,18 @@ def test_co_occurrence_clusters_merge(tmp_palace):
     clusters = db.get_co_occurrence_clusters(10, 5)
     assert any(len(c["drawers"]) >= 2 for c in clusters)
     assert any("a" in c["drawers"] and "b" in c["drawers"] for c in clusters)
+
+
+# --- Phase 3: synaptic marking + soft-archive nudges ---
+
+
+def test_soft_archive_proposal_shape():
+    p = build_soft_archive_proposal("my wing", "my room", target_wing="archive", inactive_days=180)
+    assert p["suggested_wing"] == "archive"
+    assert "my_wing__my_room" in p["suggested_room"]
+    assert p["related_issue"] == "#336"
+    assert p["reason"] == "inactive_beyond_consolidation_window"
+
+
+def test_synaptic_mark_constant():
+    assert SYNAPSE_MARK_NEW == "new"

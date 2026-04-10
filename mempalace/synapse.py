@@ -16,6 +16,12 @@ DEFAULT_ASSOCIATION_MAX_BOOST = 1.5
 DEFAULT_ASSOCIATION_COEFFICIENT = 0.15
 SYNAPSE_DB_NAME = "synapse.sqlite3"
 
+# Chroma drawer metadata — Phase 3 synaptic marking for newly filed drawers
+SYNAPSE_MARK_METADATA_KEY = "synapse_mark"
+SYNAPSE_MARK_NEW = "new"
+
+SOFT_ARCHIVE_ISSUE_REF = "#336"
+
 
 def _canonical_pair(a: str, b: str) -> tuple[str, str]:
     return (a, b) if a < b else (b, a)
@@ -27,6 +33,29 @@ def _utc_now_iso() -> str:
 
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
+
+
+def build_soft_archive_proposal(
+    wing: str,
+    room: str,
+    *,
+    target_wing: str = "archive",
+    inactive_days: int = 180,
+) -> dict[str, Any]:
+    """
+    Soft-archive nudge for consolidation candidates (#336).
+    Does not move data — surfaces suggested wing/room for a future soft-archive wing.
+    """
+    safe_w = (wing or "unknown").replace(" ", "_")
+    safe_r = (room or "unknown").replace(" ", "_")
+    return {
+        "reason": "inactive_beyond_consolidation_window",
+        "inactive_days_threshold": inactive_days,
+        "suggested_wing": target_wing,
+        "suggested_room": f"{safe_w}__{safe_r}"[:220],
+        "related_issue": SOFT_ARCHIVE_ISSUE_REF,
+        "disclaimer": "Suggestion only — no automatic move; user or agent relocates the drawer.",
+    }
 
 
 class SynapseDB:
