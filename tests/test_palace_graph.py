@@ -1,100 +1,244 @@
-import chromadb
-from mempalace.palace_graph import build_graph, traverse, find_tunnels, graph_stats, _fuzzy_match
+"""Tests for mempalace.palace_graph — graph traversal layer.
+
+All ChromaDB access is mocked — no real database needed.
+"""
+
+from unittest.mock import MagicMock, patch
 
 
-def _make_collection(palace_path, ids, documents, metadatas):
-    """Create a ChromaDB collection with test data."""
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
-    col.add(ids=ids, documents=documents, metadatas=metadatas)
+def _make_fake_collection(metadatas, ids=None):
+    """Create a mock collection that returns the given metadata in batches."""
+    if ids is None:
+        ids = [f"id_{i}" for i in range(len(metadatas))]
+
+    col = MagicMock()
+    col.count.return_value = len(metadatas)
+
+    def fake_get(limit=1000, offset=0, include=None):
+        batch_meta = metadatas[offset : offset + limit]
+        batch_ids = ids[offset : offset + limit]
+        return {"ids": batch_ids, "metadatas": batch_meta}
+
+    col.get.side_effect = fake_get
     return col
 
 
-def test_build_graph_creates_nodes(populated_palace):
-    palace_path, col = populated_palace
-    nodes, edges = build_graph(col=col)
-    assert "hobbies" in nodes
-    assert "backend" in nodes
-    assert "decisions" in nodes
-    assert "sports" in nodes
-
-
-def test_build_graph_skips_general(palace_path):
-    col = _make_collection(
-        palace_path,
-        ids=["g1"],
-        documents=["generic content"],
-        metadatas=[{"wing": "misc", "room": "general", "hall": ""}],
+# Patch chromadb at import time so palace_graph can be imported
+with patch.dict("sys.modules", {"chromadb": MagicMock()}):
+    from mempalace.palace_graph import (
+        _fuzzy_match,
+        build_graph,
+        find_tunnels,
+        graph_stats,
+        traverse,
     )
-    nodes, edges = build_graph(col=col)
-    assert "general" not in nodes
 
 
-def test_build_graph_detects_tunnels(palace_path):
-    col = _make_collection(
-        palace_path,
-        ids=["t1", "t2"],
-        documents=["content a", "content b"],
-        metadatas=[
-            {"wing": "wing_a", "room": "shared-topic", "hall": "hall_facts"},
-            {"wing": "wing_b", "room": "shared-topic", "hall": "hall_facts"},
-        ],
-    )
-    nodes, edges = build_graph(col=col)
-    assert len(edges) >= 1
-    assert edges[0]["room"] == "shared-topic"
+# --- build_graph ---
 
 
-def test_traverse_unknown_room(populated_palace):
-    palace_path, col = populated_palace
-    result = traverse("nonexistent-room", col=col)
-    assert isinstance(result, dict)
-    assert "error" in result
+class TestBuildGraph:
+    def test_empty_collection(self):
+        col = _make_fake_collection([])
+        nodes, edges = build_graph(col=col)
+        assert nodes == {}
+        assert edges == []
+
+    def test_falsy_collection(self):
+        """When col is explicitly falsy, build_graph returns empty."""
+        nodes, edges = build_graph(col=0)
+        assert nodes == {}
+        assert edges == []
+
+    def test_single_wing_no_edges(self):
+        col = _make_fake_collection(
+            [
+                {"room": "auth", "wing": "wing_code", "hall": "security", "date": "2026-01-01"},
+                {"room": "auth", "wing": "wing_code", "hall": "security", "date": "2026-01-02"},
+            ]
+        )
+        nodes, edges = build_graph(col=col)
+        assert "auth" in nodes
+        assert nodes["auth"]["count"] == 2
+        assert edges == []
+
+    def test_multi_wing_creates_edges(self):
+        col = _make_fake_collection(
+            [
+                {
+                    "room": "chromadb",
+                    "wing": "wing_code",
+                    "hall": "databases",
+                    "date": "2026-01-01",
+                },
+                {
+                    "room": "chromadb",
+                    "wing": "wing_project",
+                    "hall": "databases",
+                    "date": "2026-01-02",
+                },
+            ]
+        )
+        nodes, edges = build_graph(col=col)
+        assert "chromadb" in nodes
+        assert len(edges) == 1
+        assert edges[0]["wing_a"] == "wing_code"
+        assert edges[0]["wing_b"] == "wing_project"
+        assert edges[0]["hall"] == "databases"
+
+    def test_general_room_excluded(self):
+        col = _make_fake_collection(
+            [
+                {"room": "general", "wing": "wing_code", "hall": "misc", "date": ""},
+            ]
+        )
+        nodes, edges = build_graph(col=col)
+        assert "general" not in nodes
+
+    def test_missing_wing_excluded(self):
+        col = _make_fake_collection(
+            [
+                {"room": "orphan", "wing": "", "hall": "misc", "date": ""},
+            ]
+        )
+        nodes, edges = build_graph(col=col)
+        assert "orphan" not in nodes
+
+    def test_dates_capped_at_five(self):
+        col = _make_fake_collection(
+            [
+                {"room": "busy", "wing": "w", "hall": "h", "date": f"2026-01-{i:02d}"}
+                for i in range(1, 10)
+            ]
+        )
+        nodes, _ = build_graph(col=col)
+        assert len(nodes["busy"]["dates"]) <= 5
 
 
-def test_traverse_hop_distance(palace_path):
-    col = _make_collection(
-        palace_path,
-        ids=["a1", "a2", "b1"],
-        documents=["x", "y", "z"],
-        metadatas=[
-            {"wing": "w1", "room": "start", "hall": "h"},
-            {"wing": "w1", "room": "neighbor", "hall": "h"},
-            {"wing": "w2", "room": "neighbor", "hall": "h"},
-        ],
-    )
-    results = traverse("start", col=col, max_hops=1)
-    rooms = {r["room"] for r in results}
-    assert "start" in rooms
-    assert "neighbor" in rooms
+# --- traverse ---
 
 
-def test_find_tunnels_filters_by_wing(palace_path):
-    col = _make_collection(
-        palace_path,
-        ids=["f1", "f2", "f3"],
-        documents=["a", "b", "c"],
-        metadatas=[
-            {"wing": "alpha", "room": "bridge", "hall": "h"},
-            {"wing": "beta", "room": "bridge", "hall": "h"},
-            {"wing": "gamma", "room": "other-bridge", "hall": "h"},
-        ],
-    )
-    tunnels = find_tunnels(wing_a="alpha", col=col)
-    rooms = [t["room"] for t in tunnels]
-    assert "bridge" in rooms
+class TestTraverse:
+    def _build_col(self):
+        return _make_fake_collection(
+            [
+                {"room": "auth", "wing": "wing_code", "hall": "security", "date": "2026-01-01"},
+                {"room": "login", "wing": "wing_code", "hall": "security", "date": "2026-01-01"},
+                {"room": "deploy", "wing": "wing_ops", "hall": "infra", "date": "2026-01-01"},
+            ]
+        )
+
+    def test_traverse_known_room(self):
+        col = self._build_col()
+        result = traverse("auth", col=col)
+        assert isinstance(result, list)
+        rooms = [r["room"] for r in result]
+        assert "auth" in rooms
+        # login shares wing_code with auth
+        assert "login" in rooms
+
+    def test_traverse_unknown_room(self):
+        col = self._build_col()
+        result = traverse("nonexistent", col=col)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "suggestions" in result
+
+    def test_traverse_max_hops(self):
+        col = self._build_col()
+        result = traverse("auth", col=col, max_hops=0)
+        # Only the start room itself at hop 0
+        assert len(result) == 1
+        assert result[0]["room"] == "auth"
 
 
-def test_graph_stats(populated_palace):
-    palace_path, col = populated_palace
-    stats = graph_stats(col=col)
-    assert "total_rooms" in stats
-    assert "tunnel_rooms" in stats
-    assert stats["total_rooms"] >= 1
+# --- find_tunnels ---
 
 
-def test_fuzzy_match():
-    nodes = {"chromadb-setup": {}, "riley-school": {}, "gpu-pricing": {}}
-    assert "chromadb-setup" in _fuzzy_match("chromadb", nodes)
-    assert "riley-school" in _fuzzy_match("riley", nodes)
-    assert _fuzzy_match("nonexistent", nodes) == []
+class TestFindTunnels:
+    def _build_tunnel_col(self):
+        return _make_fake_collection(
+            [
+                {"room": "chromadb", "wing": "wing_code", "hall": "db", "date": "2026-01-01"},
+                {"room": "chromadb", "wing": "wing_project", "hall": "db", "date": "2026-01-02"},
+                {"room": "auth", "wing": "wing_code", "hall": "security", "date": "2026-01-01"},
+            ]
+        )
+
+    def test_find_all_tunnels(self):
+        col = self._build_tunnel_col()
+        tunnels = find_tunnels(col=col)
+        assert len(tunnels) == 1
+        assert tunnels[0]["room"] == "chromadb"
+
+    def test_find_tunnels_with_wing_filter(self):
+        col = self._build_tunnel_col()
+        tunnels = find_tunnels(wing_a="wing_code", col=col)
+        assert len(tunnels) == 1
+
+    def test_find_tunnels_no_match(self):
+        col = self._build_tunnel_col()
+        tunnels = find_tunnels(wing_a="wing_nonexistent", col=col)
+        assert tunnels == []
+
+    def test_find_tunnels_both_wings(self):
+        col = self._build_tunnel_col()
+        tunnels = find_tunnels(wing_a="wing_code", wing_b="wing_project", col=col)
+        assert len(tunnels) == 1
+        assert tunnels[0]["room"] == "chromadb"
+
+
+# --- graph_stats ---
+
+
+class TestGraphStats:
+    def test_empty_graph(self):
+        col = _make_fake_collection([])
+        stats = graph_stats(col=col)
+        assert stats["total_rooms"] == 0
+        assert stats["tunnel_rooms"] == 0
+        assert stats["total_edges"] == 0
+
+    def test_stats_with_data(self):
+        col = _make_fake_collection(
+            [
+                {"room": "chromadb", "wing": "wing_code", "hall": "db", "date": "2026-01-01"},
+                {"room": "chromadb", "wing": "wing_project", "hall": "db", "date": "2026-01-02"},
+                {"room": "auth", "wing": "wing_code", "hall": "security", "date": "2026-01-01"},
+            ]
+        )
+        stats = graph_stats(col=col)
+        assert stats["total_rooms"] == 2
+        assert stats["tunnel_rooms"] == 1
+        assert stats["total_edges"] == 1
+        assert "wing_code" in stats["rooms_per_wing"]
+
+
+# --- _fuzzy_match ---
+
+
+class TestFuzzyMatch:
+    def test_exact_substring(self):
+        nodes = {"chromadb-setup": {}, "auth-module": {}, "deploy-config": {}}
+        result = _fuzzy_match("chromadb", nodes)
+        assert "chromadb-setup" in result
+
+    def test_partial_word_match(self):
+        nodes = {"chromadb-setup": {}, "auth-module": {}, "deploy-config": {}}
+        result = _fuzzy_match("auth", nodes)
+        assert "auth-module" in result
+
+    def test_no_match(self):
+        nodes = {"chromadb-setup": {}, "auth-module": {}}
+        result = _fuzzy_match("zzzzz", nodes)
+        assert result == []
+
+    def test_hyphenated_query(self):
+        nodes = {"riley-college-apps": {}, "college-prep": {}}
+        result = _fuzzy_match("riley-college", nodes)
+        assert "riley-college-apps" in result
+
+    def test_max_results(self):
+        nodes = {f"room-{i}": {} for i in range(20)}
+        result = _fuzzy_match("room", nodes, n=3)
+        assert len(result) <= 3

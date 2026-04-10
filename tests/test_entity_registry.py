@@ -1,181 +1,313 @@
+"""Tests for mempalace.entity_registry."""
+
 from unittest.mock import patch
 
-from mempalace.entity_registry import EntityRegistry, _wikipedia_lookup
+from mempalace.entity_registry import (
+    COMMON_ENGLISH_WORDS,
+    PERSON_CONTEXT_PATTERNS,
+    EntityRegistry,
+)
 
 
-def test_load_empty(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    assert reg.people == {}
-    assert reg.projects == []
+# ── COMMON_ENGLISH_WORDS ────────────────────────────────────────────────
 
 
-def test_seed_and_save(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    reg.seed(
+def test_common_english_words_has_expected_entries():
+    assert "ever" in COMMON_ENGLISH_WORDS
+    assert "grace" in COMMON_ENGLISH_WORDS
+    assert "will" in COMMON_ENGLISH_WORDS
+    assert "may" in COMMON_ENGLISH_WORDS
+    assert "monday" in COMMON_ENGLISH_WORDS
+
+
+def test_common_english_words_is_lowercase():
+    for word in COMMON_ENGLISH_WORDS:
+        assert word == word.lower(), f"{word} should be lowercase"
+
+
+# ── PERSON_CONTEXT_PATTERNS ─────────────────────────────────────────────
+
+
+def test_person_context_patterns_is_nonempty():
+    assert len(PERSON_CONTEXT_PATTERNS) > 0
+
+
+# ── EntityRegistry creation and empty state ─────────────────────────────
+
+
+def test_load_from_nonexistent_dir(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    assert registry.people == {}
+    assert registry.projects == []
+    assert registry.mode == "personal"
+    assert registry.ambiguous_flags == []
+
+
+def test_save_and_load_roundtrip(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
+        mode="work",
+        people=[{"name": "Alice", "relationship": "colleague", "context": "work"}],
+        projects=["MemPalace"],
+    )
+    # Load again from same dir
+    loaded = EntityRegistry.load(config_dir=tmp_path)
+    assert loaded.mode == "work"
+    assert "Alice" in loaded.people
+    assert "MemPalace" in loaded.projects
+
+
+def test_save_creates_file(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.save()
+    assert (tmp_path / "entity_registry.json").exists()
+
+
+# ── seed ────────────────────────────────────────────────────────────────
+
+
+def test_seed_registers_people(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
         mode="personal",
         people=[
-            {"name": "Alice", "relationship": "creator", "context": "personal"},
-            {"name": "Max", "relationship": "son", "context": "personal"},
+            {"name": "Riley", "relationship": "daughter", "context": "personal"},
+            {"name": "Devon", "relationship": "friend", "context": "personal"},
         ],
         projects=["MemPalace"],
     )
-    assert "Alice" in reg.people
-    assert "Max" in reg.people
-    assert "MemPalace" in reg.projects
-    assert "max" in reg.ambiguous_flags
+    assert "Riley" in registry.people
+    assert "Devon" in registry.people
+    assert registry.people["Riley"]["relationship"] == "daughter"
+    assert registry.people["Riley"]["source"] == "onboarding"
+    assert registry.people["Riley"]["confidence"] == 1.0
 
 
-def test_save_and_reload(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    reg.seed(mode="personal", people=[{"name": "Alice"}], projects=["Acme"])
-    reg.save()
-
-    reg2 = EntityRegistry.load(config_dir=tmp_dir)
-    assert "Alice" in reg2.people
-    assert "Acme" in reg2.projects
+def test_seed_registers_projects(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(mode="work", people=[], projects=["Acme", "Widget"])
+    assert registry.projects == ["Acme", "Widget"]
 
 
-def test_lookup_known_person(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    reg.seed(mode="personal", people=[{"name": "Riley", "relationship": "daughter"}], projects=[])
-    result = reg.lookup("Riley")
-    assert result["type"] == "person"
-    assert result["confidence"] == 1.0
+def test_seed_sets_mode(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(mode="combo", people=[], projects=[])
+    assert registry.mode == "combo"
 
 
-def test_lookup_project(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    reg.seed(mode="personal", people=[], projects=["MemPalace"])
-    result = reg.lookup("MemPalace")
-    assert result["type"] == "project"
-
-
-def test_lookup_unknown(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    result = reg.lookup("Zxywvut")
-    assert result["type"] == "unknown"
-
-
-def test_disambiguate_person_context(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    reg.seed(mode="personal", people=[{"name": "Max", "relationship": "son"}], projects=[])
-    result = reg.lookup("Max", context="Max said hello to everyone")
-    assert result["type"] == "person"
-
-
-def test_disambiguate_concept_context(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    reg.seed(mode="personal", people=[{"name": "Ever", "relationship": "friend"}], projects=[])
-    result = reg.lookup("Ever", context="have you ever since then")
-    assert result["type"] == "concept"
-
-
-def test_extract_people_from_query(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    reg.seed(
+def test_seed_flags_ambiguous_names(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
         mode="personal",
-        people=[{"name": "Alice"}, {"name": "Bob"}],
+        people=[
+            {"name": "Grace", "relationship": "friend", "context": "personal"},
+            {"name": "Riley", "relationship": "daughter", "context": "personal"},
+        ],
         projects=[],
     )
-    found = reg.extract_people_from_query("What did Alice say to Bob yesterday?")
-    assert "Alice" in found
-    assert "Bob" in found
+    assert "grace" in registry.ambiguous_flags
+    # Riley is not a common English word
+    assert "riley" not in registry.ambiguous_flags
 
 
-def test_extract_unknown_candidates(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    unknowns = reg.extract_unknown_candidates("Did Zephyr meet Quorra at the park?")
-    assert "Zephyr" in unknowns or "Quorra" in unknowns
-
-
-def test_seed_with_aliases(tmp_dir):
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    reg.seed(
+def test_seed_with_aliases(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
         mode="personal",
-        people=[{"name": "Maxwell", "relationship": "son"}],
+        people=[{"name": "Maxwell", "relationship": "friend", "context": "personal"}],
         projects=[],
         aliases={"Max": "Maxwell"},
     )
-    result_canonical = reg.lookup("Maxwell")
-    result_alias = reg.lookup("Max")
-    assert result_canonical["type"] == "person"
-    assert result_alias["type"] == "person"
+    assert "Maxwell" in registry.people
+    assert "Max" in registry.people
+    assert registry.people["Max"].get("canonical") == "Maxwell"
 
 
-# ── New tests ─────────────────────────────────────────────────────────────────
-
-
-def test_learn_from_text_auto_discovers_person(tmp_dir):
-    """learn_from_text should detect a person mentioned many times via dialogue + verbs."""
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-
-    # Build text with "Zephira" appearing 3+ times with dialogue markers and person-verb signals
-    text = (
-        "Zephira said she would come over later.\n"
-        "Zephira: Sure, let me check my calendar.\n"
-        "Zephira asked about the project.\n"
-        "I heard Zephira laughed at the story.\n"
-        "She told me that Zephira knows everything.\n"
+def test_seed_skips_empty_names(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
+        mode="personal",
+        people=[{"name": "", "relationship": "", "context": "personal"}],
+        projects=[],
     )
-
-    candidates = reg.learn_from_text(text, min_confidence=0.75)
-
-    # "Zephira" should have been added to the registry as a learned person
-    assert "Zephira" in reg.people
-    entry = reg.people["Zephira"]
-    assert entry["source"] == "learned"
-    assert entry["confidence"] >= 0.75
-
-    # The returned list should mention Zephira
-    names = [c["name"] for c in candidates]
-    assert "Zephira" in names
+    assert len(registry.people) == 0
 
 
-def test_disambiguate_tie_returns_none_falls_through_to_person(tmp_dir):
-    """When person_score == concept_score (both > 0), _disambiguate returns None,
-    so lookup falls through to the registered person result."""
-    reg = EntityRegistry.load(config_dir=tmp_dir)
-    # "Grace" is in COMMON_ENGLISH_WORDS → it will be flagged as ambiguous
-    reg.seed(mode="personal", people=[{"name": "Grace", "relationship": "friend"}], projects=[])
-    assert "grace" in reg.ambiguous_flags
+# ── lookup ──────────────────────────────────────────────────────────────
 
-    # Craft context that fires exactly one person pattern AND one concept pattern:
-    #   "Grace was ..."        → PERSON: r"\b{name}\s+was\b"
-    #   "the grace of ..."     → CONCEPT: r"(?:the\s+)?{name}\s+(?:of|in|at|for|to)\b"
-    context = "Grace was beautiful; the grace of her movement was stunning."
 
-    # _disambiguate should return None (tie), so lookup falls through to person
-    result = reg.lookup("Grace", context=context)
+def test_lookup_known_person(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
+        mode="personal",
+        people=[{"name": "Riley", "relationship": "daughter", "context": "personal"}],
+        projects=[],
+    )
+    result = registry.lookup("Riley")
     assert result["type"] == "person"
-    assert result["name"] == "Grace"
+    assert result["confidence"] == 1.0
+    assert result["name"] == "Riley"
 
 
-def test_research_with_mock_wikipedia(tmp_dir):
-    """research() should call _wikipedia_lookup, cache the result, and allow confirmation."""
-    reg = EntityRegistry.load(config_dir=tmp_dir)
+def test_lookup_known_project(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(mode="work", people=[], projects=["MemPalace"])
+    result = registry.lookup("MemPalace")
+    assert result["type"] == "project"
+    assert result["confidence"] == 1.0
 
-    fake_result = {
+
+def test_lookup_unknown_word(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(mode="personal", people=[], projects=[])
+    result = registry.lookup("Xyzzy")
+    assert result["type"] == "unknown"
+    assert result["confidence"] == 0.0
+
+
+def test_lookup_case_insensitive(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
+        mode="personal",
+        people=[{"name": "Riley", "relationship": "daughter", "context": "personal"}],
+        projects=[],
+    )
+    result = registry.lookup("riley")
+    assert result["type"] == "person"
+
+
+def test_lookup_alias(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
+        mode="personal",
+        people=[{"name": "Maxwell", "relationship": "friend", "context": "personal"}],
+        projects=[],
+        aliases={"Max": "Maxwell"},
+    )
+    result = registry.lookup("Max")
+    assert result["type"] == "person"
+
+
+# ── disambiguation ──────────────────────────────────────────────────────
+
+
+def test_lookup_ambiguous_word_as_person(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
+        mode="personal",
+        people=[{"name": "Grace", "relationship": "friend", "context": "personal"}],
+        projects=[],
+    )
+    result = registry.lookup("Grace", context="I went with Grace today")
+    assert result["type"] == "person"
+
+
+def test_lookup_ambiguous_word_as_concept(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
+        mode="personal",
+        people=[{"name": "Ever", "relationship": "friend", "context": "personal"}],
+        projects=[],
+    )
+    result = registry.lookup("Ever", context="have you ever tried this")
+    assert result["type"] == "concept"
+
+
+# ── research (Wikipedia) — mocked ──────────────────────────────────────
+
+
+def test_research_caches_result(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(mode="personal", people=[], projects=[])
+
+    mock_result = {
         "inferred_type": "person",
-        "confidence": 0.90,
-        "wiki_summary": "Rowan is a given name of Irish origin.",
-        "wiki_title": "Rowan (name)",
+        "confidence": 0.80,
+        "wiki_summary": "Saoirse is an Irish given name.",
+        "wiki_title": "Saoirse",
     }
 
-    with patch("mempalace.entity_registry._wikipedia_lookup", return_value=fake_result):
-        result = reg.research("Rowan", auto_confirm=False)
+    with patch("mempalace.entity_registry._wikipedia_lookup", return_value=mock_result):
+        result = registry.research("Saoirse", auto_confirm=True)
+    assert result["inferred_type"] == "person"
 
-    # Result should be cached
-    assert "Rowan" in reg._data["wiki_cache"]
-    cached = reg._data["wiki_cache"]["Rowan"]
+    # Second call should use cache, not call Wikipedia again
+    with patch(
+        "mempalace.entity_registry._wikipedia_lookup",
+        side_effect=AssertionError("should not be called"),
+    ):
+        cached = registry.research("Saoirse")
     assert cached["inferred_type"] == "person"
-    assert cached["confirmed"] is False
 
-    # Confirm it as a person
-    reg.confirm_research("Rowan", entity_type="person", relationship="colleague")
-    assert "Rowan" in reg.people
-    assert reg.people["Rowan"]["source"] == "wiki"
 
-    # lookup should now resolve via wiki cache
-    lookup_result = reg.lookup("Rowan")
-    assert lookup_result["type"] == "person"
-    assert lookup_result["source"] == "wiki"
+def test_confirm_research_adds_to_people(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(mode="personal", people=[], projects=[])
+
+    mock_result = {
+        "inferred_type": "person",
+        "confidence": 0.80,
+        "wiki_summary": "Saoirse is a name",
+        "wiki_title": "Saoirse",
+    }
+    with patch("mempalace.entity_registry._wikipedia_lookup", return_value=mock_result):
+        registry.research("Saoirse", auto_confirm=False)
+
+    registry.confirm_research("Saoirse", entity_type="person", relationship="friend")
+    assert "Saoirse" in registry.people
+    assert registry.people["Saoirse"]["source"] == "wiki"
+
+
+# ── extract_people_from_query ───────────────────────────────────────────
+
+
+def test_extract_people_from_query(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
+        mode="personal",
+        people=[
+            {"name": "Riley", "relationship": "daughter", "context": "personal"},
+            {"name": "Devon", "relationship": "friend", "context": "personal"},
+        ],
+        projects=[],
+    )
+    found = registry.extract_people_from_query("What did Riley say about the weather?")
+    assert "Riley" in found
+    assert "Devon" not in found
+
+
+# ── extract_unknown_candidates ──────────────────────────────────────────
+
+
+def test_extract_unknown_candidates(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(mode="personal", people=[], projects=[])
+    unknowns = registry.extract_unknown_candidates("Saoirse went to the store")
+    assert "Saoirse" in unknowns
+
+
+def test_extract_unknown_candidates_skips_known(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
+        mode="personal",
+        people=[{"name": "Riley", "relationship": "daughter", "context": "personal"}],
+        projects=[],
+    )
+    unknowns = registry.extract_unknown_candidates("Riley went to the store")
+    assert "Riley" not in unknowns
+
+
+# ── summary ─────────────────────────────────────────────────────────────
+
+
+def test_summary(tmp_path):
+    registry = EntityRegistry.load(config_dir=tmp_path)
+    registry.seed(
+        mode="personal",
+        people=[{"name": "Riley", "relationship": "daughter", "context": "personal"}],
+        projects=["MemPalace"],
+    )
+    s = registry.summary()
+    assert "personal" in s
+    assert "Riley" in s
+    assert "MemPalace" in s

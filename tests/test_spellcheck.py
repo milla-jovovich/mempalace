@@ -7,10 +7,15 @@ Covers:
 """
 
 import unittest.mock as mock
+from unittest.mock import patch
 
-import pytest
-
-from mempalace.spellcheck import _should_skip, spellcheck_user_text
+from mempalace.spellcheck import (
+    _get_system_words,
+    _should_skip,
+    spellcheck_transcript,
+    spellcheck_transcript_line,
+    spellcheck_user_text,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -130,11 +135,13 @@ class TestShouldSkip:
 # spellcheck_user_text — fallback (no autocorrect) path
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestSpellcheckUserTextFallback:
     """When autocorrect is not installed, text must be returned unchanged."""
 
     def _run_without_autocorrect(self, text, **kwargs):
         import mempalace.spellcheck as sc
+
         with mock.patch.object(sc, "_get_speller", return_value=None):
             return spellcheck_user_text(text, **kwargs)
 
@@ -170,6 +177,7 @@ class TestSpellcheckUserTextFallback:
 # spellcheck_user_text — with a mock speller
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestSpellcheckUserTextWithSpeller:
     """
     Tests using a deterministic mock speller so we don't depend on the
@@ -188,9 +196,11 @@ class TestSpellcheckUserTextWithSpeller:
         def fake_speller(word):
             return corrections.get(word, word)
 
-        with mock.patch.object(sc, "_get_speller", return_value=fake_speller), \
-             mock.patch.object(sc, "_get_system_words", return_value=set()), \
-             mock.patch.object(sc, "_load_known_names", return_value=known_names or set()):
+        with (
+            mock.patch.object(sc, "_get_speller", return_value=fake_speller),
+            mock.patch.object(sc, "_get_system_words", return_value=set()),
+            mock.patch.object(sc, "_load_known_names", return_value=known_names or set()),
+        ):
             return spellcheck_user_text(text, known_names=known_names)
 
     def test_corrects_simple_typo(self):
@@ -298,3 +308,80 @@ class TestSpellcheckUserTextWithSpeller:
             {},
         )
         assert "   " in result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _get_system_words / spellcheck_transcript / spellcheck_transcript_line
+# (merged from upstream main)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_get_system_words_returns_set():
+    result = _get_system_words()
+    assert isinstance(result, set)
+
+
+def test_spellcheck_user_text_passthrough_no_autocorrect():
+    """When autocorrect is not installed, text passes through unchanged."""
+    with patch("mempalace.spellcheck._get_speller", return_value=None):
+        text = "somee misspeledd textt"
+        assert spellcheck_user_text(text) == text
+
+
+def test_spellcheck_user_text_with_speller():
+    """When a speller is available, it corrects words."""
+
+    def fake_speller(word):
+        corrections = {"knoe": "know", "befor": "before"}
+        return corrections.get(word, word)
+
+    with patch("mempalace.spellcheck._get_speller", return_value=fake_speller):
+        with patch("mempalace.spellcheck._get_system_words", return_value=set()):
+            with patch("mempalace.spellcheck._load_known_names", return_value=set()):
+                result = spellcheck_user_text("knoe the question befor")
+                assert "know" in result
+                assert "before" in result
+
+
+def test_spellcheck_preserves_technical_terms():
+    """Technical terms should never be touched even with a speller."""
+
+    def fake_speller(word):
+        return "WRONG"
+
+    with patch("mempalace.spellcheck._get_speller", return_value=fake_speller):
+        with patch("mempalace.spellcheck._get_system_words", return_value=set()):
+            result = spellcheck_user_text("ChromaDB bge-large", known_names=set())
+            assert "ChromaDB" in result
+            assert "bge-large" in result
+            assert "WRONG" not in result
+
+
+def test_transcript_line_user_turn():
+    """Lines starting with '>' should be processed."""
+    with patch("mempalace.spellcheck.spellcheck_user_text", return_value="corrected"):
+        result = spellcheck_transcript_line("> hello world")
+        assert "corrected" in result
+
+
+def test_transcript_line_assistant_turn():
+    """Lines not starting with '>' should pass through unchanged."""
+    line = "This is an assistant response"
+    assert spellcheck_transcript_line(line) == line
+
+
+def test_transcript_line_empty_user_turn():
+    """A '> ' line with no message content should pass through."""
+    line = "> "
+    assert spellcheck_transcript_line(line) == line
+
+
+def test_spellcheck_transcript_processes_content():
+    """Full transcript: only '>' lines are touched."""
+    content = "Assistant line\n> user line\nAnother assistant line"
+    with patch("mempalace.spellcheck.spellcheck_user_text", return_value="fixed"):
+        result = spellcheck_transcript(content)
+        lines = result.split("\n")
+        assert lines[0] == "Assistant line"
+        assert "fixed" in lines[1]
+        assert lines[2] == "Another assistant line"

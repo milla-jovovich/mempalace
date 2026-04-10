@@ -39,6 +39,23 @@ def test_invalidate(tmp_dir):
     assert stats["current_facts"] == 0
     assert stats["expired_facts"] == 1
 
+    def test_timeline_entity_has_limit(self, kg):
+        # Add > 100 triples all connected to a single entity
+        for i in range(105):
+            kg.add_triple(
+                "hub", "connects_to", f"spoke_{i}", valid_from=f"2025-01-{(i % 28) + 1:02d}"
+            )
+        tl = kg.timeline("hub")
+        assert len(tl) == 100  # LIMIT 100 on entity-filtered branch
+
+
+class TestWALMode:
+    def test_wal_mode_enabled(self, kg):
+        conn = kg._conn()
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        conn.close()
+        assert mode == "wal"
+
 
 def test_query_entity_outgoing(tmp_dir):
     kg = KnowledgeGraph(db_path=str(tmp_dir / "kg.db"))

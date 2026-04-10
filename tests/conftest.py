@@ -35,8 +35,26 @@ from mempalace.config import MempalaceConfig  # noqa: E402
 from mempalace.knowledge_graph import KnowledgeGraph  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _reset_mcp_cache():
+    """Reset the MCP server's cached ChromaDB client/collection between tests."""
+
+    def _clear_cache():
+        try:
+            from mempalace import mcp_server
+
+            mcp_server._client_cache = None
+            mcp_server._collection_cache = None
+        except (ImportError, AttributeError):
+            pass
+
+    _clear_cache()
+    yield
+    _clear_cache()
+
+
 @pytest.fixture(scope="session", autouse=True)
-def _isolate_home(tmp_path_factory):
+def _isolate_home():
     """Ensure HOME points to a temp dir for the entire test session.
 
     The env vars were already set at module level (above) so that
@@ -85,7 +103,9 @@ def collection(palace_path):
     """A ChromaDB collection pre-seeded in the temp palace."""
     client = chromadb.PersistentClient(path=palace_path)
     col = client.get_or_create_collection("mempalace_drawers")
-    return col
+    yield col
+    client.delete_collection("mempalace_drawers")
+    del client
 
 
 @pytest.fixture
@@ -211,9 +231,7 @@ def seeded_kg(kg):
     kg.add_triple("Alice", "parent_of", "Max", valid_from="2015-04-01")
     kg.add_triple("Max", "does", "swimming", valid_from="2025-01-01")
     kg.add_triple("Max", "does", "chess", valid_from="2024-06-01")
-    kg.add_triple(
-        "Alice", "works_at", "Acme Corp", valid_from="2020-01-01", valid_to="2024-12-31"
-    )
+    kg.add_triple("Alice", "works_at", "Acme Corp", valid_from="2020-01-01", valid_to="2024-12-31")
     kg.add_triple("Alice", "works_at", "NewCo", valid_from="2025-01-01")
 
     return kg
