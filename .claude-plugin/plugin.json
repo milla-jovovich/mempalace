@@ -9,7 +9,7 @@
   "commands": [],
   "mcpServers": {
     "mempalace": {
-      "command": "${env:OS == 'Windows_NT' ? 'py' : 'python3'}",
+      "command": "python3",
       "args": [
         "-m",
         "mempalace.mcp_server"
@@ -25,5 +25,6 @@
     "palace",
     "search"
   ],
-  "repository": "https://github.com/milla-jovovich/mempalace"
+  "repository": "https://github.com/milla-jovovich/mempalace",
+  "_windows_note": "On Windows, change 'command' to 'py' if python3 is not on PATH"
 }
