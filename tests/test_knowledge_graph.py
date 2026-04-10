@@ -1,5 +1,4 @@
 from mempalace.knowledge_graph import KnowledgeGraph
-import pytest
 
 
 def test_add_entity(tmp_dir):
