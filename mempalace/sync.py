@@ -304,6 +304,11 @@ class SyncEngine:
         """Return True if the remote record should overwrite the local one.
 
         Comparison: updated_at descending (parsed as UTC), then node_id tiebreak.
+
+        On exact timestamp tie the lexicographically higher node_id wins.
+        This is arbitrary but deterministic — both sides reach the same
+        conclusion without coordination.  Node IDs are stable across
+        restarts (persisted in ~/.mempalace/node_id).
         """
         r_time = self._parse_ts(remote_meta.get("updated_at", ""))
         l_time = self._parse_ts(local_meta.get("updated_at", ""))
