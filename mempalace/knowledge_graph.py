@@ -191,6 +191,26 @@ class KnowledgeGraph:
                 (ended, sub_id, pred, obj_id),
             )
 
+    def add_bridge(self, room_a: str, room_b: str, score: float, reason: str = ""):
+        """Create a semantic wormhole between two rooms."""
+        self.add_entity(room_a, "room")
+        self.add_entity(room_b, "room")
+        # Store score as confidence
+        return self.add_triple(room_a, "semantically_bridges", room_b, confidence=score, source_file=reason)
+
+    def evolve_fact(self, old_triple_id: str, new_triple_id: str, reason: str = ""):
+        """Mark an old fact as evolved into a new fact."""
+        conn = self._conn()
+        with conn:
+            # Invalidate old triple
+            ended = datetime.now().isoformat()
+            conn.execute("UPDATE triples SET valid_to=? WHERE id=?", (ended, old_triple_id))
+            
+            # Create meta-entity for triples to link them
+            self.add_entity(old_triple_id, "fact")
+            self.add_entity(new_triple_id, "fact")
+            self.add_triple(old_triple_id, "evolved_into", new_triple_id, source_file=reason)
+
     # ── Query operations ──────────────────────────────────────────────────
 
     def query_entity(self, name: str, as_of: str = None, direction: str = "outgoing"):
