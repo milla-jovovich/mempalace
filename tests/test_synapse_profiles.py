@@ -229,3 +229,84 @@ def test_result_contains_requested_and_used_profile_fallback(palace_dir):
     used = profile.name
     assert requested != used
     assert used == "default"
+
+
+def test_axes_enabled_empty_disables_all_axes(palace_dir):
+    """axes_enabled: [] → all Synapse axes disabled, raw similarity only"""
+    config = {
+        "synapse_profiles": {
+            "observe": {
+                "axes_enabled": [],
+                "ltp_enabled": True,
+                "tagging_enabled": True,
+                "association_enabled": True,
+            }
+        }
+    }
+    with open(os.path.join(palace_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    pm = ProfileManager(palace_dir)
+    profile = pm.resolve("observe")
+    assert profile.ltp_enabled is False
+    assert profile.tagging_enabled is False
+    assert profile.association_enabled is False
+
+
+def test_axes_enabled_empty_high_ltp_same_as_fresh(palace_dir):
+    """With axes_enabled: [], a high-LTP drawer scores the same as a fresh drawer"""
+    config = {"synapse_profiles": {"observe": {"axes_enabled": []}}}
+    with open(os.path.join(palace_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    pm = ProfileManager(palace_dir)
+    profile = pm.resolve("observe")
+    similarity = 0.85
+    ltp_high = 2.0
+    _ = ltp_high  # narrative: LTP differs in DB but axis is off
+    ltp_factor = ltp_high if profile.ltp_enabled else 1.0
+    tagging_factor = 1.0
+    association_factor = 1.0
+    score_high = similarity * ltp_factor * tagging_factor * association_factor
+    score_fresh = similarity * 1.0 * 1.0 * 1.0
+    assert score_high == score_fresh
+
+
+def test_annotated_dict_includes_axes_enabled(palace_dir):
+    """to_annotated_dict() includes axes_enabled with source"""
+    config = {
+        "synapse_profiles": {"orient": {"axes_enabled": ["ltp", "association"]}}
+    }
+    with open(os.path.join(palace_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    pm = ProfileManager(palace_dir)
+    profile = pm.resolve("orient")
+    annotated = profile.to_annotated_dict()
+    assert "axes_enabled" in annotated
+    assert annotated["axes_enabled"]["value"] == ["ltp", "association"]
+    assert "profile" in annotated["axes_enabled"]["source"]
+
+
+def test_validate_rejects_unknown_axis(palace_dir):
+    config = {"synapse_profiles": {"bad": {"axes_enabled": ["ltp", "magic"]}}}
+    with open(os.path.join(palace_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    pm = ProfileManager(palace_dir)
+    with pytest.raises(ValueError, match="Unknown axis 'magic'"):
+        pm.resolve("bad")
+
+
+def test_validate_rejects_negative_half_life(palace_dir):
+    config = {"synapse_profiles": {"bad": {"half_life_days": -10}}}
+    with open(os.path.join(palace_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    pm = ProfileManager(palace_dir)
+    with pytest.raises(ValueError, match="half_life_days must be > 0"):
+        pm.resolve("bad")
+
+
+def test_validate_rejects_low_ltp_max_boost(palace_dir):
+    config = {"synapse_profiles": {"bad": {"ltp_max_boost": 0.5}}}
+    with open(os.path.join(palace_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    pm = ProfileManager(palace_dir)
+    with pytest.raises(ValueError, match="ltp_max_boost must be >= 1.0"):
+        pm.resolve("bad")

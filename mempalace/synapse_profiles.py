@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+VALID_AXES = frozenset({"ltp", "tagging", "association", "similarity", "decay", "recency"})
+
 HARDCODED_DEFAULTS: Dict[str, Any] = {
     "half_life_days": 90,
     "ltp_enabled": True,
@@ -157,6 +159,47 @@ class ProfileManager:
         names.add("default")
         return sorted(names)
 
+    def _validate(self, merged: Dict[str, Any], profile_name: str) -> None:
+        """Fail fast with clear error messages on invalid profile values."""
+        errors: List[str] = []
+
+        axes = merged.get("axes_enabled", [])
+        if isinstance(axes, list):
+            for ax in axes:
+                if ax not in VALID_AXES:
+                    errors.append(
+                        f"Unknown axis '{ax}' in axes_enabled. Valid: {sorted(VALID_AXES)}"
+                    )
+
+        hld = merged.get("half_life_days")
+        if hld is not None and hld <= 0:
+            errors.append(f"half_life_days must be > 0 or null, got {hld}")
+
+        lmb = merged.get("ltp_max_boost")
+        if lmb is not None and lmb < 1.0:
+            errors.append(f"ltp_max_boost must be >= 1.0, got {lmb}")
+
+        tmb = merged.get("tagging_max_boost")
+        if tmb is not None and tmb < 1.0:
+            errors.append(f"tagging_max_boost must be >= 1.0, got {tmb}")
+
+        amb = merged.get("association_max_boost")
+        if amb is not None and amb < 1.0:
+            errors.append(f"association_max_boost must be >= 1.0, got {amb}")
+
+        lwd = merged.get("ltp_window_days")
+        if lwd is not None and lwd <= 0:
+            errors.append(f"ltp_window_days must be > 0, got {lwd}")
+
+        twh = merged.get("tagging_window_hours")
+        if twh is not None and twh <= 0:
+            errors.append(f"tagging_window_hours must be > 0, got {twh}")
+
+        if errors:
+            raise ValueError(
+                f"Invalid profile '{profile_name}': " + "; ".join(errors)
+            )
+
     def resolve(
         self,
         profile_name: Optional[str] = None,
@@ -234,5 +277,7 @@ class ProfileManager:
             if "association" not in axes:
                 merged["association_enabled"] = False
                 sources["association_enabled"] = f"axes_enabled ({ax_src})"
+
+        self._validate(merged, actual_name)
 
         return RetrievalProfile(actual_name, merged, sources=sources)
