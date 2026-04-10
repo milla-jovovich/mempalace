@@ -157,6 +157,63 @@ def cmd_status(args):
     status(palace_path=palace_path)
 
 
+def cmd_prune(args):
+    """Detect and remove stale drawers from the palace."""
+    from .pruner import prune
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+
+    if not os.path.isdir(palace_path):
+        print(f"\n  No palace found at {palace_path}")
+        return
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Prune — Stale Drawer Cleanup")
+    print(f"{'=' * 55}")
+    print(f"  Palace:   {palace_path}")
+    print(f"  Strategy: {args.strategy}")
+    if args.wing:
+        print(f"  Wing:     {args.wing}")
+    if args.dry_run:
+        print(f"  Mode:     DRY RUN (no deletions)")
+    print(f"{'-' * 55}\n")
+
+    result = prune(
+        palace_path=palace_path,
+        strategy=args.strategy,
+        wing=args.wing,
+        dry_run=args.dry_run,
+    )
+
+    if "error" in result:
+        print(f"  Error: {result['error']}")
+        return
+
+    print(f"  Total drawers:  {result['total_drawers']}")
+    print(f"  Stale found:    {result['stale_found']}")
+
+    if result["by_reason"]:
+        print(f"\n  By reason:")
+        for reason, count in result["by_reason"].items():
+            print(f"    {reason}: {count}")
+
+    if result.get("stale_drawers"):
+        print(f"\n  Stale drawers (showing up to 50):")
+        for entry in result["stale_drawers"]:
+            src = os.path.basename(entry.get("source_file", "?"))
+            reason = entry.get("reason", "?")
+            wing = entry.get("wing", "?")
+            print(f"    [{wing}] {src} — {reason}")
+
+    if not args.dry_run and result["deleted"] > 0:
+        print(f"\n  Deleted: {result['deleted']} stale drawers")
+
+    if args.dry_run and result["stale_found"] > 0:
+        print(f"\n  Run without --dry-run to delete these drawers.")
+
+    print(f"\n{'=' * 55}\n")
+
+
 def cmd_repair(args):
     """Rebuild palace vector index from SQLite metadata."""
     import chromadb
@@ -518,6 +575,22 @@ def main():
     for instr_name in ["init", "search", "mine", "help", "status"]:
         instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
 
+    # prune
+    p_prune = sub.add_parser(
+        "prune",
+        help="Detect and remove stale drawers (deleted/modified source files)",
+    )
+    p_prune.add_argument(
+        "--strategy",
+        choices=["existence", "mtime", "orphans", "all"],
+        default="all",
+        help="Detection strategy: 'existence' (deleted files), 'mtime' (modified files), 'orphans' (leftover chunks), 'all' (default)",
+    )
+    p_prune.add_argument("--wing", default=None, help="Limit to one wing")
+    p_prune.add_argument(
+        "--dry-run", action="store_true", help="Preview stale drawers without deleting"
+    )
+
     # repair
     sub.add_parser(
         "repair",
@@ -564,6 +637,7 @@ def main():
         "mcp": cmd_mcp,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
+        "prune": cmd_prune,
         "repair": cmd_repair,
         "status": cmd_status,
     }
