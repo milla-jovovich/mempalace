@@ -11,7 +11,7 @@
 | What | Before (v3.x) | After (v4.0) |
 |------|---------------|--------------|
 | Default database | ChromaDB (embedded SQLite + HNSW) | LanceDB (Lance columnar format) |
-| Default dependency | `chromadb>=0.5` | `lancedb>=0.14`, `sentence-transformers>=2.2` |
+| Default dependency | `chromadb>=0.5` | `lancedb>=0.14`, `onnxruntime`, `tokenizers` |
 | ChromaDB | Required | Optional — `pip install 'mempalace[chroma]'` |
 | Embeddings | Hidden inside ChromaDB (ONNX all-MiniLM-L6-v2) | Explicit, configurable, tracked per record |
 

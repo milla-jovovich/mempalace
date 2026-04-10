@@ -42,8 +42,15 @@ def get_collection(
     """Get or create the palace collection.
 
     This is the main entry point for all palace database access.
-    Auto-detects the backend (LanceDB or ChromaDB) based on existing data.
+    If backend is not specified, consults MEMPALACE_BACKEND env var and
+    config, then falls back to auto-detection from existing data.
     """
+    if backend is None:
+        from .config import MempalaceConfig
+        configured = MempalaceConfig().backend
+        if configured:
+            backend = configured
+
     return open_collection(
         palace_path=palace_path,
         collection_name=collection_name,
