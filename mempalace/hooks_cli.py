@@ -17,15 +17,7 @@ from pathlib import Path
 SAVE_INTERVAL = 15
 STATE_DIR = Path.home() / ".mempalace" / "hook_state"
 
-STOP_BLOCK_REASON = (
-    "AUTO-SAVE checkpoint. Save key topics, decisions, quotes, and code "
-    "from this session to MemPalace using the MCP tools:\n"
-    "1. Use mempalace_diary_write to save a session summary (what was discussed, "
-    "key decisions, current state of work).\n"
-    "2. Use mempalace_add_drawer for each important decision, quote, or code "
-    "snippet — place in the appropriate wing and room.\n"
-    "Use verbatim quotes where possible. Continue conversation after saving."
-)
+_RECENT_MSG_COUNT = 30  # how many recent user messages to summarize
 
 PRECOMPACT_BLOCK_REASON = (
     "COMPACTION IMMINENT — detailed context will be lost. Save ALL topics, "
@@ -92,6 +84,19 @@ def _output(data: dict):
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
+def _notify(body: str, title: str = "MemPalace"):
+    """Send a desktop toast + short terminal line. Fails silently."""
+    print(f"\033[38;5;141m\u2726 {title}\033[0m \033[2m{body}\033[0m", file=sys.stderr)
+    try:
+        subprocess.Popen(
+            ["notify-send", "--app-name=MemPalace", "--icon=brain", title, body],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        pass
+
+
 def _maybe_auto_ingest():
     """If MEMPAL_DIR is set and exists, run mempalace mine in background."""
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
@@ -106,6 +111,70 @@ def _maybe_auto_ingest():
                 )
         except OSError:
             pass
+
+
+def _extract_recent_messages(transcript_path: str, count: int = _RECENT_MSG_COUNT) -> list[str]:
+    """Extract the last N user messages from a JSONL transcript."""
+    path = Path(transcript_path).expanduser()
+    if not path.is_file():
+        return []
+    messages = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                    msg = entry.get("message", {})
+                    if not isinstance(msg, dict) or msg.get("role") != "user":
+                        continue
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        content = " ".join(
+                            b.get("text", "") for b in content if isinstance(b, dict)
+                        )
+                    if not isinstance(content, str) or not content.strip():
+                        continue
+                    if "<command-message>" in content or "<system-reminder>" in content:
+                        continue
+                    # Truncate long messages
+                    text = content.strip()[:200]
+                    messages.append(text)
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+    except OSError:
+        return []
+    return messages[-count:]
+
+
+def _save_diary_direct(transcript_path: str, session_id: str):
+    """Write a diary checkpoint directly via Python API (no MCP calls)."""
+    messages = _extract_recent_messages(transcript_path)
+    if not messages:
+        _log("No recent messages to save")
+        return
+
+    # Build a compressed diary entry from recent conversation
+    now = datetime.now()
+    topics = "|".join(m[:80] for m in messages[-10:])
+    entry = (
+        f"CHECKPOINT:{now.strftime('%Y-%m-%d')}|session:{session_id}"
+        f"|msgs:{len(messages)}|recent:{topics}"
+    )
+
+    try:
+        from .mcp_server import tool_diary_write
+        result = tool_diary_write(
+            agent_name="session-hook",
+            entry=entry,
+            topic="checkpoint",
+        )
+        if result.get("success"):
+            _log(f"Diary checkpoint saved: {result.get('entry_id', '?')}")
+            _notify(f"Checkpoint saved \u2014 {len(messages)} messages archived")
+        else:
+            _log(f"Diary checkpoint failed: {result.get('error', 'unknown')}")
+    except Exception as e:
+        _log(f"Diary checkpoint error: {e}")
 
 
 def _ingest_transcript(transcript_path: str):
@@ -192,16 +261,16 @@ def hook_stop(data: dict, harness: str):
 
         _log(f"TRIGGERING SAVE at exchange {exchange_count}")
 
-        # Auto-ingest transcript into palace (background)
+        # Save diary checkpoint directly (no MCP, no terminal clutter)
         if transcript_path:
+            _save_diary_direct(transcript_path, session_id)
             _ingest_transcript(transcript_path)
 
         # Optional: auto-ingest project dir if MEMPAL_DIR is set
         _maybe_auto_ingest()
 
-        _output({"decision": "block", "reason": STOP_BLOCK_REASON})
-    else:
-        _output({})
+    # Never block — saving happens silently above
+    _output({})
 
 
 def hook_session_start(data: dict, harness: str):

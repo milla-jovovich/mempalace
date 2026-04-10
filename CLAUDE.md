@@ -52,4 +52,4 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 ## Testing
 
-Always run `python -m pytest tests/ -x -q` after changes. 573 tests expected to pass. Benchmark and stress tests are excluded by default (use `-m benchmark` or `-m stress` to include).
+Always run `python -m pytest tests/ -x -q` after changes. 576 tests expected to pass. Benchmark and stress tests are excluded by default (use `-m benchmark` or `-m stress` to include).
