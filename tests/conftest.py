@@ -27,7 +27,6 @@ os.environ["HOMEDRIVE"] = os.path.splitdrive(_session_tmp)[0] or "C:"
 os.environ["HOMEPATH"] = os.path.splitdrive(_session_tmp)[1] or _session_tmp
 
 # Now it is safe to import mempalace modules that trigger initialisation.
-import chromadb  # noqa: E402 — kept for legacy test compatibility
 from mempalace.palace import get_collection as _get_collection  # noqa: E402
 import pytest  # noqa: E402
 

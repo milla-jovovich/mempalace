@@ -7,7 +7,7 @@ Backend-agnostic: works with LanceDB (default) or ChromaDB (legacy).
 
 import os
 
-from .db import open_collection, detect_backend
+from .db import open_collection
 
 SKIP_DIRS = {
     ".git",
@@ -36,8 +36,9 @@ SKIP_DIRS = {
 }
 
 
-def get_collection(palace_path: str, collection_name: str = "mempalace_drawers",
-                   backend: str = None, embedder=None):
+def get_collection(
+    palace_path: str, collection_name: str = "mempalace_drawers", backend: str = None, embedder=None
+):
     """Get or create the palace collection.
 
     This is the main entry point for all palace database access.

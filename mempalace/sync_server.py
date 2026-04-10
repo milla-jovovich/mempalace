@@ -32,6 +32,7 @@ def _get_engine() -> SyncEngine:
         palace_path = _config.palace_path
 
         from .db import open_collection
+
         col = open_collection(palace_path)
 
         identity = NodeIdentity()
@@ -40,7 +41,8 @@ def _get_engine() -> SyncEngine:
         _engine = SyncEngine(col, identity=identity, vv_path=vv_path)
         logger.info(
             "Sync engine initialised — node=%s palace=%s",
-            identity.node_id, palace_path,
+            identity.node_id,
+            palace_path,
         )
     return _engine
 
@@ -54,8 +56,7 @@ def create_app():
         from fastapi import FastAPI, Request
     except ImportError:
         raise ImportError(
-            "fastapi is required for the sync server. "
-            "Install with: pip install 'mempalace[server]'"
+            "fastapi is required for the sync server. Install with: pip install 'mempalace[server]'"
         )
 
     app = FastAPI(title="MemPalace Sync Server", version="1.0.0")

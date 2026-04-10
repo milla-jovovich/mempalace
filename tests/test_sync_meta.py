@@ -1,9 +1,7 @@
 """Tests for sync_meta — node identity, sequence counter, metadata injection."""
 
-import os
 import threading
 
-import pytest
 
 from mempalace.sync_meta import NodeIdentity, inject_sync_meta, utcnow_iso
 
@@ -153,6 +151,7 @@ def test_utcnow_iso_format():
     assert "T" in ts
     # Should be parseable
     from datetime import datetime
+
     dt = datetime.fromisoformat(ts)
     assert dt.tzinfo is not None
 
@@ -166,9 +165,7 @@ def test_sync_meta_in_lance_records(tmp_path):
     from mempalace.sync_meta import NodeIdentity
 
     ni = NodeIdentity(config_dir=str(tmp_path / "config"))
-    col = open_collection(
-        str(tmp_path / "palace"), backend="lance", sync_identity=ni
-    )
+    col = open_collection(str(tmp_path / "palace"), backend="lance", sync_identity=ni)
 
     col.upsert(
         documents=["test document one", "test document two"],

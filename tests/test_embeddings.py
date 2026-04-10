@@ -127,10 +127,12 @@ def test_get_embedder_by_alias():
 
 
 def test_get_embedder_ollama():
-    e = get_embedder({
-        "embedder": "ollama",
-        "embedder_options": {"model": "nomic-embed-text", "base_url": "http://myserver:11434"},
-    })
+    e = get_embedder(
+        {
+            "embedder": "ollama",
+            "embedder_options": {"model": "nomic-embed-text", "base_url": "http://myserver:11434"},
+        }
+    )
     assert isinstance(e, OllamaEmbedder)
     assert e.model_name == "ollama/nomic-embed-text"
 

@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import logging
 from urllib.request import Request, urlopen
-from urllib.error import URLError
 import json
 
-from .sync import SyncEngine, ChangeSet, SyncRecord
+from .sync import SyncEngine, ChangeSet
 
 logger = logging.getLogger("mempalace.sync_client")
 
@@ -69,7 +68,8 @@ class SyncClient:
 
         logger.info(
             "Sync start — server=%s drawers=%d",
-            server_node, status["total_drawers"],
+            server_node,
+            status["total_drawers"],
         )
 
         # 2. Push: send records the server hasn't seen
@@ -84,7 +84,9 @@ class SyncClient:
             }
             logger.info(
                 "Push: sent=%d accepted=%d rejected=%d",
-                push_result["sent"], push_result["accepted"], push_result["rejected"],
+                push_result["sent"],
+                push_result["accepted"],
+                push_result["rejected"],
             )
 
         # 3. Pull: get records we haven't seen
@@ -100,7 +102,9 @@ class SyncClient:
             }
             logger.info(
                 "Pull: received=%d accepted=%d rejected=%d",
-                pull_result["received"], pull_result["accepted"], pull_result["rejected"],
+                pull_result["received"],
+                pull_result["accepted"],
+                pull_result["rejected"],
             )
 
         return {

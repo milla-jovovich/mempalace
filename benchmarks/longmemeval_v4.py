@@ -28,7 +28,6 @@ Usage:
 
 import json
 import math
-import os
 import sys
 import tempfile
 import time
@@ -69,6 +68,7 @@ def _make_lance_collection(embedder_name="all-MiniLM-L6-v2"):
 
     # Create a NodeIdentity that won't pollute the user's home dir
     from mempalace.sync_meta import NodeIdentity
+
     ni = NodeIdentity(config_dir=tempfile.mkdtemp())
 
     return LanceCollection(db, "bench", embedder, sync_identity=ni)
@@ -77,6 +77,7 @@ def _make_lance_collection(embedder_name="all-MiniLM-L6-v2"):
 def _make_chroma_collection():
     """Create a fresh ephemeral ChromaDB collection (baseline)."""
     import chromadb
+
     client = chromadb.EphemeralClient()
     try:
         client.delete_collection("bench")
@@ -109,8 +110,10 @@ def retrieve_lance(entry, embedder_name="all-MiniLM-L6-v2", n_results=50):
     col.upsert(
         documents=corpus,
         ids=[f"doc_{i}" for i in range(len(corpus))],
-        metadatas=[{"corpus_id": cid, "timestamp": ts, "wing": "bench", "room": "bench", "source_file": ""}
-                   for cid, ts in zip(corpus_ids, corpus_ts)],
+        metadatas=[
+            {"corpus_id": cid, "timestamp": ts, "wing": "bench", "room": "bench", "source_file": ""}
+            for cid, ts in zip(corpus_ids, corpus_ts)
+        ],
     )
 
     results = col.query(
@@ -186,7 +189,6 @@ def run_single_mode(data, mode_name, retrieve_fn, ks=(5, 10)):
     times = []
 
     for i, entry in enumerate(data):
-        qid = entry["question_id"]
         qtype = entry["question_type"]
         answer_sids = set(entry["answer_session_ids"])
 
@@ -209,7 +211,7 @@ def run_single_mode(data, mode_name, retrieve_fn, ks=(5, 10)):
         if (i + 1) % 25 == 0 or i == 0:
             r5 = sum(metrics["recall@5"]) / len(metrics["recall@5"])
             avg_ms = sum(times) / len(times) * 1000
-            print(f"  [{i+1:4}/{len(data)}] {mode_name:20s}  R@5={r5:.3f}  avg={avg_ms:.0f}ms")
+            print(f"  [{i + 1:4}/{len(data)}] {mode_name:20s}  R@5={r5:.3f}  avg={avg_ms:.0f}ms")
 
     # Aggregate
     summary = {}
@@ -235,7 +237,7 @@ def run_benchmark(data_file, modes, limit=0, out_file=None, embedder=None):
         data = data[:limit]
 
     print(f"\n{'=' * 70}")
-    print(f"  MemPalace LongMemEval Benchmark (v4)")
+    print("  MemPalace LongMemEval Benchmark (v4)")
     print(f"{'=' * 70}")
     print(f"  Questions:  {len(data)}")
     print(f"  Modes:      {', '.join(modes)}")
@@ -247,19 +249,21 @@ def run_benchmark(data_file, modes, limit=0, out_file=None, embedder=None):
     for mode in modes:
         print(f"\n── {mode} {'─' * (55 - len(mode))}\n")
 
-        if mode == "chroma-default":
-            fn = lambda entry: retrieve_chroma(entry)
-        elif mode == "lance-default":
-            fn = lambda entry: retrieve_lance(entry, "all-MiniLM-L6-v2")
-        elif mode == "lance-bge-small":
-            fn = lambda entry: retrieve_lance(entry, "BAAI/bge-small-en-v1.5")
-        elif mode == "lance-bge-base":
-            fn = lambda entry: retrieve_lance(entry, "BAAI/bge-base-en-v1.5")
-        elif mode == "lance-nomic":
-            fn = lambda entry: retrieve_lance(entry, "nomic-ai/nomic-embed-text-v1.5")
+        MODE_DISPATCH = {
+            "chroma-default": lambda entry: retrieve_chroma(entry),
+            "lance-default": lambda entry: retrieve_lance(entry, "all-MiniLM-L6-v2"),
+            "lance-bge-small": lambda entry: retrieve_lance(entry, "BAAI/bge-small-en-v1.5"),
+            "lance-bge-base": lambda entry: retrieve_lance(entry, "BAAI/bge-base-en-v1.5"),
+            "lance-nomic": lambda entry: retrieve_lance(entry, "nomic-ai/nomic-embed-text-v1.5"),
+        }
+
+        if mode in MODE_DISPATCH:
+            fn = MODE_DISPATCH[mode]
         elif mode.startswith("lance-"):
             emb = embedder or mode.split("lance-", 1)[1]
-            fn = lambda entry, e=emb: retrieve_lance(entry, e)
+
+            def fn(entry, _e=emb):
+                return retrieve_lance(entry, _e)
         else:
             print(f"  Unknown mode: {mode}, skipping.")
             continue
@@ -270,7 +274,7 @@ def run_benchmark(data_file, modes, limit=0, out_file=None, embedder=None):
     # ── Print comparison table ────────────────────────────────────────
 
     print(f"\n\n{'=' * 70}")
-    print(f"  RESULTS COMPARISON")
+    print("  RESULTS COMPARISON")
     print(f"{'=' * 70}\n")
 
     header = f"  {'Mode':25s} {'R@5':>8s} {'R@10':>8s} {'NDCG@5':>8s} {'NDCG@10':>8s} {'ms/q':>8s}"
@@ -278,8 +282,10 @@ def run_benchmark(data_file, modes, limit=0, out_file=None, embedder=None):
     print(f"  {'─' * 65}")
 
     for mode, s in all_results.items():
-        print(f"  {mode:25s} {s.get('recall@5',0):8.3f} {s.get('recall@10',0):8.3f} "
-              f"{s.get('ndcg@5',0):8.3f} {s.get('ndcg@10',0):8.3f} {s.get('avg_ms',0):8.0f}")
+        print(
+            f"  {mode:25s} {s.get('recall@5', 0):8.3f} {s.get('recall@10', 0):8.3f} "
+            f"{s.get('ndcg@5', 0):8.3f} {s.get('ndcg@10', 0):8.3f} {s.get('avg_ms', 0):8.0f}"
+        )
 
     # Per-type breakdown
     all_types = set()
@@ -287,7 +293,7 @@ def run_benchmark(data_file, modes, limit=0, out_file=None, embedder=None):
         all_types.update(s.get("per_type", {}).keys())
 
     if all_types:
-        print(f"\n  Per-type Recall@5:")
+        print("\n  Per-type Recall@5:")
         print(f"  {'Type':30s}", end="")
         for mode in all_results:
             print(f" {mode[:12]:>12s}", end="")
@@ -324,9 +330,12 @@ MODE_PRESETS = {
 def main():
     parser = argparse.ArgumentParser(description="MemPalace v4 LongMemEval Benchmark")
     parser.add_argument("data_file", help="Path to longmemeval_s_cleaned.json")
-    parser.add_argument("--mode", default="all",
-                        help="Mode(s): all, quick, embedders, or comma-separated "
-                             "(chroma-default, lance-default, lance-bge-small, lance-bge-base, lance-nomic)")
+    parser.add_argument(
+        "--mode",
+        default="all",
+        help="Mode(s): all, quick, embedders, or comma-separated "
+        "(chroma-default, lance-default, lance-bge-small, lance-bge-base, lance-nomic)",
+    )
     parser.add_argument("--limit", type=int, default=0, help="Limit questions (0=all)")
     parser.add_argument("--out", default=None, help="Output JSON file for results")
     parser.add_argument("--embedder", default=None, help="Custom embedder for lance-custom mode")
@@ -337,7 +346,9 @@ def main():
     else:
         modes = [m.strip() for m in args.mode.split(",")]
 
-    run_benchmark(args.data_file, modes, limit=args.limit, out_file=args.out, embedder=args.embedder)
+    run_benchmark(
+        args.data_file, modes, limit=args.limit, out_file=args.out, embedder=args.embedder
+    )
 
 
 if __name__ == "__main__":

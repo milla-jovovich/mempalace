@@ -56,8 +56,12 @@ def _chroma_where_to_sql(where: dict) -> Optional[str]:
             conditions.append(f"{key} = {value}")
         elif isinstance(value, dict):
             op_map = {
-                "$gt": ">", "$gte": ">=", "$lt": "<",
-                "$lte": "<=", "$ne": "!=", "$eq": "=",
+                "$gt": ">",
+                "$gte": ">=",
+                "$lt": "<",
+                "$lte": "<=",
+                "$ne": "!=",
+                "$eq": "=",
             }
             for op, val in value.items():
                 sql_op = op_map.get(op)
@@ -106,7 +110,7 @@ class LanceCollection:
     def _list_table_names(self) -> list:
         """Get table names as a plain list (handles lancedb API variations)."""
         result = self._db.list_tables()
-        if hasattr(result, 'tables'):
+        if hasattr(result, "tables"):
             return result.tables  # ListTablesResponse object
         return list(result)  # plain list or iterable
 
@@ -144,8 +148,10 @@ class LanceCollection:
         """Inject sync metadata (node_id, seq, updated_at) into a write batch."""
         if self._sync_identity is None:
             from .sync_meta import get_identity
+
             self._sync_identity = get_identity()
         from .sync_meta import inject_sync_meta
+
         return inject_sync_meta(metadatas, self._sync_identity)
 
     def upsert(self, documents, ids, metadatas, embeddings=None, _raw=False):
@@ -163,10 +169,12 @@ class LanceCollection:
             return
 
         try:
-            (self._table.merge_insert("id")
+            (
+                self._table.merge_insert("id")
                 .when_matched_update_all()
                 .when_not_matched_insert_all()
-                .execute(records))
+                .execute(records)
+            )
         except Exception as e:
             logger.debug("merge_insert failed (%s), falling back to delete+add", e)
             for r in records:
@@ -296,7 +304,8 @@ class LanceCollection:
         except (json.JSONDecodeError, TypeError):
             # Fallback: reconstruct from known columns
             return {
-                k: v for k, v in record.items()
+                k: v
+                for k, v in record.items()
                 if k not in self.SCHEMA_COLUMNS and not k.startswith("_")
             }
 
@@ -436,6 +445,7 @@ def _open_lance(palace_path, collection_name, embedder, sync_identity=None):
     if embedder is None:
         from .embeddings import get_embedder
         from .config import MempalaceConfig
+
         embedder = get_embedder(MempalaceConfig().embedder_config)
 
     db = lancedb.connect(palace_path)

@@ -31,6 +31,7 @@ logger = logging.getLogger("mempalace.sync")
 @dataclass
 class SyncRecord:
     """One record in a changeset."""
+
     id: str
     document: str
     metadata: dict
@@ -55,6 +56,7 @@ class SyncRecord:
 @dataclass
 class ChangeSet:
     """A batch of records to sync."""
+
     source_node: str
     records: list[SyncRecord] = field(default_factory=list)
 
@@ -75,6 +77,7 @@ class ChangeSet:
 @dataclass
 class MergeResult:
     """Result of applying a changeset."""
+
     accepted: int = 0
     rejected_conflicts: int = 0
     errors: list[str] = field(default_factory=list)
@@ -189,9 +192,13 @@ class SyncEngine:
                 rec_seq = int(rec_seq)
 
             if rec_node == our_node and rec_seq > remote_knows:
-                changeset.records.append(SyncRecord(
-                    id=id_, document=doc, metadata=meta,
-                ))
+                changeset.records.append(
+                    SyncRecord(
+                        id=id_,
+                        document=doc,
+                        metadata=meta,
+                    )
+                )
 
         return changeset
 

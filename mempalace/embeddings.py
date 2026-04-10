@@ -72,8 +72,7 @@ class SentenceTransformerEmbedder:
             from sentence_transformers import SentenceTransformer
         except ImportError:
             raise ImportError(
-                "sentence-transformers is required. "
-                "Install with: pip install sentence-transformers"
+                "sentence-transformers is required. Install with: pip install sentence-transformers"
             )
         self._model = SentenceTransformer(self._model_name, device=self._device)
         self._dim = self._model.get_embedding_dimension()
@@ -154,9 +153,7 @@ class OllamaEmbedder:
 
         if self._dim is None:
             self._dim = len(embeddings[0])
-            logger.info(
-                "Ollama embedder: %s (%dd via %s)", self._model, self._dim, self._base_url
-            )
+            logger.info("Ollama embedder: %s (%dd via %s)", self._model, self._dim, self._base_url)
 
         return embeddings
 
@@ -214,9 +211,7 @@ def get_embedder(config: dict = None) -> Embedder:
     cache_key = f"st:{resolved}:{device}"
 
     if cache_key not in _embedder_cache:
-        _embedder_cache[cache_key] = SentenceTransformerEmbedder(
-            model_name=resolved, device=device
-        )
+        _embedder_cache[cache_key] = SentenceTransformerEmbedder(model_name=resolved, device=device)
     return _embedder_cache[cache_key]
 
 

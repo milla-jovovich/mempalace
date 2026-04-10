@@ -6,7 +6,7 @@ import os
 import pytest
 
 from mempalace.db import open_collection
-from mempalace.sync import SyncEngine, ChangeSet, SyncRecord, VersionVector, MergeResult
+from mempalace.sync import SyncEngine, ChangeSet, SyncRecord, VersionVector
 from mempalace.sync_meta import NodeIdentity
 
 
@@ -147,8 +147,11 @@ class TestSyncEngine:
                     id="remote_1",
                     document="hello from remote",
                     metadata={
-                        "wing": "proj", "room": "x", "source_file": "",
-                        "node_id": "remote_node", "seq": 1,
+                        "wing": "proj",
+                        "room": "x",
+                        "source_file": "",
+                        "node_id": "remote_node",
+                        "seq": 1,
                         "updated_at": "2026-04-10T10:00:00+00:00",
                     },
                 ),
@@ -166,29 +169,40 @@ class TestSyncEngine:
     def test_conflict_last_writer_wins(self, tmp_path):
         engine, col, ni = _make_engine(tmp_path)
 
-        # Write a local record
+        # Write a local record with a known old timestamp (bypass sync injection)
         col.upsert(
             documents=["local version"],
             ids=["conflict_id"],
-            metadatas=[{
-                "wing": "p", "room": "r", "source_file": "",
-                "node_id": ni.node_id, "seq": 1,
-                "updated_at": "2026-04-10T10:00:00+00:00",
-            }],
+            metadatas=[
+                {
+                    "wing": "p",
+                    "room": "r",
+                    "source_file": "",
+                    "node_id": ni.node_id,
+                    "seq": 1,
+                    "updated_at": "2020-01-01T00:00:00+00:00",
+                }
+            ],
+            _raw=True,
         )
 
         # Remote has a NEWER version of the same ID
         cs = ChangeSet(
             source_node="remote",
-            records=[SyncRecord(
-                id="conflict_id",
-                document="remote version WINS",
-                metadata={
-                    "wing": "p", "room": "r", "source_file": "",
-                    "node_id": "remote", "seq": 5,
-                    "updated_at": "2026-04-10T12:00:00+00:00",  # later
-                },
-            )],
+            records=[
+                SyncRecord(
+                    id="conflict_id",
+                    document="remote version WINS",
+                    metadata={
+                        "wing": "p",
+                        "room": "r",
+                        "source_file": "",
+                        "node_id": "remote",
+                        "seq": 5,
+                        "updated_at": "2099-01-01T00:00:00+00:00",
+                    },
+                )
+            ],
         )
 
         result = engine.apply_changes(cs)
@@ -200,29 +214,40 @@ class TestSyncEngine:
     def test_conflict_local_wins_when_newer(self, tmp_path):
         engine, col, ni = _make_engine(tmp_path)
 
-        # Write a local record with LATER timestamp
+        # Write a local record with a known future timestamp (bypass sync injection)
         col.upsert(
             documents=["local version WINS"],
             ids=["conflict_id"],
-            metadatas=[{
-                "wing": "p", "room": "r", "source_file": "",
-                "node_id": ni.node_id, "seq": 1,
-                "updated_at": "2026-04-10T14:00:00+00:00",  # later
-            }],
+            metadatas=[
+                {
+                    "wing": "p",
+                    "room": "r",
+                    "source_file": "",
+                    "node_id": ni.node_id,
+                    "seq": 1,
+                    "updated_at": "2099-01-01T00:00:00+00:00",
+                }
+            ],
+            _raw=True,
         )
 
         # Remote has an OLDER version
         cs = ChangeSet(
             source_node="remote",
-            records=[SyncRecord(
-                id="conflict_id",
-                document="remote version LOSES",
-                metadata={
-                    "wing": "p", "room": "r", "source_file": "",
-                    "node_id": "remote", "seq": 5,
-                    "updated_at": "2026-04-10T10:00:00+00:00",  # earlier
-                },
-            )],
+            records=[
+                SyncRecord(
+                    id="conflict_id",
+                    document="remote version LOSES",
+                    metadata={
+                        "wing": "p",
+                        "room": "r",
+                        "source_file": "",
+                        "node_id": "remote",
+                        "seq": 5,
+                        "updated_at": "2020-01-01T00:00:00+00:00",
+                    },
+                )
+            ],
         )
 
         result = engine.apply_changes(cs)
@@ -237,16 +262,30 @@ class TestSyncEngine:
         cs = ChangeSet(
             source_node="remote",
             records=[
-                SyncRecord(id="r1", document="a", metadata={
-                    "wing": "p", "room": "r", "source_file": "",
-                    "node_id": "remote", "seq": 10,
-                    "updated_at": "2026-04-10T10:00:00+00:00",
-                }),
-                SyncRecord(id="r2", document="b", metadata={
-                    "wing": "p", "room": "r", "source_file": "",
-                    "node_id": "remote", "seq": 11,
-                    "updated_at": "2026-04-10T10:00:00+00:00",
-                }),
+                SyncRecord(
+                    id="r1",
+                    document="a",
+                    metadata={
+                        "wing": "p",
+                        "room": "r",
+                        "source_file": "",
+                        "node_id": "remote",
+                        "seq": 10,
+                        "updated_at": "2026-04-10T10:00:00+00:00",
+                    },
+                ),
+                SyncRecord(
+                    id="r2",
+                    document="b",
+                    metadata={
+                        "wing": "p",
+                        "room": "r",
+                        "source_file": "",
+                        "node_id": "remote",
+                        "seq": 11,
+                        "updated_at": "2026-04-10T10:00:00+00:00",
+                    },
+                ),
             ],
         )
 
@@ -339,6 +378,7 @@ class TestSyncServer:
 
         # Reset server globals
         import mempalace.sync_server as ss
+
         ss._engine = None
         ss._config = None
         monkeypatch.setattr(
@@ -347,6 +387,7 @@ class TestSyncServer:
         )
 
         from mempalace.sync_server import create_app
+
         self._app = create_app()
         self._palace = palace
         self._tmp = tmp_path
@@ -359,6 +400,7 @@ class TestSyncServer:
 
     def _client(self):
         from fastapi.testclient import TestClient
+
         return TestClient(self._app)
 
     def test_health(self):
@@ -385,8 +427,11 @@ class TestSyncServer:
                     "id": "lap_1",
                     "document": "laptop document one",
                     "metadata": {
-                        "wing": "proj", "room": "a", "source_file": "",
-                        "node_id": "laptop_node", "seq": 1,
+                        "wing": "proj",
+                        "room": "a",
+                        "source_file": "",
+                        "node_id": "laptop_node",
+                        "seq": 1,
                         "updated_at": "2026-04-10T10:00:00+00:00",
                     },
                 },
@@ -394,8 +439,11 @@ class TestSyncServer:
                     "id": "lap_2",
                     "document": "laptop document two",
                     "metadata": {
-                        "wing": "proj", "room": "b", "source_file": "",
-                        "node_id": "laptop_node", "seq": 2,
+                        "wing": "proj",
+                        "room": "b",
+                        "source_file": "",
+                        "node_id": "laptop_node",
+                        "seq": 2,
                         "updated_at": "2026-04-10T10:00:00+00:00",
                     },
                 },

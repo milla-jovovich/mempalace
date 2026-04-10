@@ -173,6 +173,7 @@ class MempalaceConfig:
     def node_id(self):
         """This machine's unique sync node ID."""
         from .sync_meta import get_identity
+
         return get_identity(str(self._config_dir)).node_id
 
     @property
