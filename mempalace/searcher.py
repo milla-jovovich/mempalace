@@ -34,8 +34,6 @@ def search(
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
     except Exception:
-        print(f"\n  No palace found at {palace_path}")
-        print("  Run: mempalace init <dir> then mempalace mine <dir>")
         raise SearchError(f"No palace found at {palace_path}")
 
     # Build where filter
@@ -65,62 +63,27 @@ def search(
         results = col.query(**kwargs)
 
     except Exception as e:
-        print(f"\n  Search error: {e}")
         raise SearchError(f"Search error: {e}") from e
 
     docs = results["documents"][0]
     metas = results["metadatas"][0]
     dists = results["distances"][0]
 
-    if not docs:
-        print(f'\n  No results found for: "{query}"')
-        return
-
-    # Post-filter if not deep
     filtered = []
     for doc, meta, dist in zip(docs, metas, dists):
         meta = meta or {}
         if not deep and meta.get("wing") == "archive":
             continue
-        filtered.append((doc, meta, dist))
+        filtered.append({
+            "document": doc,
+            "metadata": meta,
+            "distance": dist
+        })
         if len(filtered) >= n_results:
             break
 
-    if not filtered:
-        print(f'\n  No results found for: "{query}"')
-        return
+    return filtered
 
-    print(f"\n{'=' * 60}")
-    print(f'  Results for: "{query}"')
-    if wing:
-        print(f"  Wing: {wing}")
-    if room:
-        print(f"  Room: {room}")
-    print(f"{'=' * 60}\n")
-
-    for i, (doc, meta, dist) in enumerate(filtered, 1):
-        similarity = round(1 - dist, 3)
-        source = Path(meta.get("source_file", "?")).name
-        wing_name = meta.get("wing", "?")
-        room_name = meta.get("room", "?")
-
-        prefix = ""
-        if wing_name == "archive":
-            prefix = "[ARCHIVE] "
-            if "original_wing" in meta and "original_room" in meta:
-                room_name = f"{meta['original_room']} (from {meta['original_wing']})"
-
-        print(f"  [{i}] {prefix}{wing_name} / {room_name}")
-        print(f"      Source: {source}")
-        print(f"      Match:  {similarity}")
-        print()
-        # Print the verbatim text, indented
-        for line in doc.strip().split("\n"):
-            print(f"      {line}")
-        print()
-        print(f"  {'─' * 56}")
-
-    print()
 
 
 def search_memories(

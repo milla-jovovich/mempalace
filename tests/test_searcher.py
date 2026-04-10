@@ -129,38 +129,36 @@ class TestSearchMemories:
 
 
 class TestSearchCLI:
-    def test_search_prints_results(self, palace_path, seeded_collection, capsys):
-        search("JWT authentication", palace_path)
-        captured = capsys.readouterr()
-        assert "JWT" in captured.out or "authentication" in captured.out
+    def test_search_returns_results(self, palace_path, seeded_collection):
+        results = search("JWT authentication", palace_path)
+        assert len(results) > 0
+        doc = results[0]["document"]
+        assert "JWT" in doc or "authentication" in doc
 
-    def test_search_with_wing_filter(self, palace_path, seeded_collection, capsys):
-        search("planning", palace_path, wing="notes")
-        captured = capsys.readouterr()
-        assert "Results for" in captured.out
+    def test_search_with_wing_filter(self, palace_path, seeded_collection):
+        results = search("planning", palace_path, wing="notes")
+        assert len(results) > 0
+        assert all(r["metadata"].get("wing") == "notes" for r in results)
 
-    def test_search_with_room_filter(self, palace_path, seeded_collection, capsys):
-        search("database", palace_path, room="backend")
-        captured = capsys.readouterr()
-        assert "Room:" in captured.out
+    def test_search_with_room_filter(self, palace_path, seeded_collection):
+        results = search("database", palace_path, room="backend")
+        assert len(results) > 0
+        assert all(r["metadata"].get("room") == "backend" for r in results)
 
-    def test_search_with_wing_and_room(self, palace_path, seeded_collection, capsys):
-        search("code", palace_path, wing="project", room="frontend")
-        captured = capsys.readouterr()
-        assert "Wing:" in captured.out
-        assert "Room:" in captured.out
+    def test_search_with_wing_and_room(self, palace_path, seeded_collection):
+        results = search("code", palace_path, wing="project", room="frontend")
+        assert len(results) > 0
+        assert all(r["metadata"].get("wing") == "project" and r["metadata"].get("room") == "frontend" for r in results)
 
     def test_search_no_palace_raises(self, tmp_path):
         with pytest.raises(SearchError, match="No palace found"):
             search("anything", str(tmp_path / "missing"))
 
-    def test_search_no_results(self, palace_path, collection, capsys):
-        """Empty collection returns no results message."""
+    def test_search_no_results(self, palace_path, collection):
+        """Empty collection returns empty list."""
         # collection is empty (no seeded data)
-        result = search("xyzzy_nonexistent_query", palace_path, n_results=1)
-        captured = capsys.readouterr()
-        # Either prints "No results" or returns None
-        assert result is None or "No results" in captured.out
+        results = search("xyzzy_nonexistent_query", palace_path, n_results=1)
+        assert results == []
 
     def test_search_query_error_raises(self):
         """search raises SearchError when query fails."""
@@ -173,11 +171,9 @@ class TestSearchCLI:
             with pytest.raises(SearchError, match="Search error"):
                 search("test", "/fake/path")
 
-    def test_search_n_results(self, palace_path, seeded_collection, capsys):
-        search("code", palace_path, n_results=1)
-        captured = capsys.readouterr()
-        # Should have output with at least one result block
-        assert "[1]" in captured.out
+    def test_search_n_results(self, palace_path, seeded_collection):
+        results = search("code", palace_path, n_results=1)
+        assert len(results) <= 1
 
     def test_search_deep_false(self, palace_path, seeded_collection):
         mock_col = MagicMock()

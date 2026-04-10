@@ -109,7 +109,7 @@ def cmd_search(args):
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     try:
-        search(
+        results = search(
             query=args.query,
             palace_path=palace_path,
             wing=args.wing,
@@ -117,8 +117,39 @@ def cmd_search(args):
             n_results=args.results,
             deep=args.deep,
         )
-    except SearchError:
+    except SearchError as e:
+        print(f"\n  Search error: {e}")
         sys.exit(1)
+
+    if not results:
+        print(f'\n  No results found for: "{args.query}"')
+        return
+
+    print(f"\n{'=' * 60}")
+    print(f'  Results for: "{args.query}"')
+    if args.wing:
+        print(f"  Wing: {args.wing}")
+    if args.room:
+        print(f"  Room: {args.room}")
+    print(f"{'=' * 60}")
+
+    for i, res in enumerate(results, 1):
+        meta = res["metadata"]
+        score = round(1 - res["distance"], 3)
+        room_str = meta.get("room", "unknown")
+        wing_str = meta.get("wing", "general")
+        
+        # UX enhancement: tag archived results
+        prefix = ""
+        if wing_str == "archive":
+            prefix = "[ARCHIVE] "
+            # Attempt to show original classification if available
+            if "original_wing" in meta and "original_room" in meta:
+                room_str = f"{meta['original_room']} (from {meta['original_wing']})"
+        
+        print(f"\n{i}. {prefix}{wing_str}::{room_str} (score: {score})")
+        print(f"   {res['document']}")
+    print()
 
 
 def cmd_wakeup(args):
@@ -276,12 +307,16 @@ def cmd_crystallize(args):
         if "." in args.diamonds:
             diamonds_val = float(args.diamonds)
             if not (0.0 < diamonds_val <= 1.0):
-                print(f"Warning: Percentage must be between 0.0 and 1.0. Got {diamonds_val}. Falling back to 10.")
+                print(
+                    f"Warning: Percentage must be between 0.0 and 1.0. Got {diamonds_val}. Falling back to 10."
+                )
                 diamonds_val = 10
         else:
             diamonds_val = int(args.diamonds)
             if diamonds_val <= 0:
-                print(f"Warning: Absolute diamond count must be > 0. Got {diamonds_val}. Falling back to 10.")
+                print(
+                    f"Warning: Absolute diamond count must be > 0. Got {diamonds_val}. Falling back to 10."
+                )
                 diamonds_val = 10
     except ValueError:
         print(f"Warning: Invalid diamonds value '{args.diamonds}'. Falling back to 10.")
