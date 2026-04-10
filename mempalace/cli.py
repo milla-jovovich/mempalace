@@ -206,7 +206,10 @@ def cmd_repair(args):
     # Backup and rebuild
     # Normalize path to strip trailing slashes and resolve symlinks
     # Prevents infinite recursion when backup_path ends up inside palace_path
+    original_path = palace_path
     palace_path = str(Path(palace_path).resolve())
+    if original_path != palace_path:
+        print(f"  Normalized path: {original_path} → {palace_path}")
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
         shutil.rmtree(backup_path)
