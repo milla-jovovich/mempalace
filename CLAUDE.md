@@ -20,7 +20,7 @@ JP's fork of [milla-jovovich/mempalace](https://github.com/milla-jovovich/mempal
 
 ```bash
 source venv/bin/activate
-python -m pytest tests/ -x -q           # run tests (573 expected)
+python -m pytest tests/ -x -q           # run tests (576 expected)
 mempalace status                         # check palace state
 mempalace search "query"                 # test search
 python -m mempalace.mcp_server           # run MCP server standalone
@@ -36,7 +36,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 4. **perf: batch ChromaDB writes** — one upsert per file instead of per chunk in both miners
 5. **fix: entity detector STOPWORDS** — 73 technical terms added (Handler, Node, Service, etc.)
 6. **feat: similarity threshold** — `min_similarity` parameter in search, default 1.5 L2 distance in MCP
-7. **fix: hooks_cli** — stop/precompact hooks now instruct AI to use mempalace MCP tools, auto-ingest transcripts
+7. **feat: hooks_cli** — stop hook saves directly via Python API with systemMessage notification, precompact blocks for AI-driven save, auto-ingest transcripts
 
 ## Upstream PRs
 
@@ -47,9 +47,9 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 - **Claude Code plugin**: installed at user scope via marketplace
 - **MCP server**: global user scope — available in all projects
-- **Stop hook**: fires every 15 messages, saves to palace via MCP tools + auto-ingests transcript
+- **Stop hook**: fires every 15 messages, saves directly via Python API + systemMessage notification + auto-ingests transcript
 - **PreCompact hook**: emergency save before context compaction
 
 ## Testing
 
-Always run `python -m pytest tests/ -x -q` after changes. 534 tests expected to pass. Benchmark and stress tests are excluded by default (use `-m benchmark` or `-m stress` to include).
+Always run `python -m pytest tests/ -x -q` after changes. 576 tests expected to pass. Benchmark and stress tests are excluded by default (use `-m benchmark` or `-m stress` to include).

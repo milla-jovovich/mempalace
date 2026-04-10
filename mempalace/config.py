@@ -174,6 +174,27 @@ class MempalaceConfig:
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
     @property
+    def hook_silent_save(self):
+        """Whether the stop hook saves directly (True) or blocks for MCP calls (False)."""
+        return self._file_config.get("hooks", {}).get("silent_save", True)
+
+    @property
+    def hook_desktop_toast(self):
+        """Whether the stop hook shows a desktop notification via notify-send."""
+        return self._file_config.get("hooks", {}).get("desktop_toast", False)
+
+    def set_hook_setting(self, key: str, value: bool):
+        """Update a hook setting and write config to disk."""
+        if "hooks" not in self._file_config:
+            self._file_config["hooks"] = {}
+        self._file_config["hooks"][key] = value
+        try:
+            with open(self._config_file, "w") as f:
+                json.dump(self._file_config, f, indent=2)
+        except OSError:
+            pass
+
+    @property
     def chunk_size(self):
         """Characters per drawer chunk."""
         return self._file_config.get("chunk_size", 800)
