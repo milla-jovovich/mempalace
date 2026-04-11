@@ -274,7 +274,7 @@ def mine_convos(
         source_file = str(filepath)
 
         # Skip if already filed
-        if not dry_run and file_already_mined(collection, source_file):
+        if not dry_run and file_already_mined(collection, source_file, wing=wing):
             files_skipped += 1
             continue
 

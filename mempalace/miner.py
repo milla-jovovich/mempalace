@@ -22,6 +22,7 @@ from .palace import SKIP_DIRS, get_collection, file_already_mined
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
+    ".rst",
     ".py",
     ".js",
     ".ts",
@@ -40,6 +41,9 @@ READABLE_EXTENSIONS = {
     ".csv",
     ".sql",
     ".toml",
+    ".al",  # Microsoft Dynamics 365 / AL Language
+    ".xlf",  # XLIFF localisation files
+    ".ps1",  # PowerShell scripts
 }
 
 SKIP_FILENAMES = {
@@ -417,7 +421,7 @@ def process_file(
 
     # Skip if already filed
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
+    if not dry_run and file_already_mined(collection, source_file, check_mtime=True, wing=wing):
         return 0, None
 
     try:

@@ -48,15 +48,23 @@ def get_collection(palace_path: str, collection_name: str = "mempalace_drawers")
         return client.create_collection(collection_name)
 
 
-def file_already_mined(collection, source_file: str, check_mtime: bool = False) -> bool:
+def file_already_mined(
+    collection, source_file: str, check_mtime: bool = False, wing: str = ""
+) -> bool:
     """Check if a file has already been filed in the palace.
 
     When check_mtime=True (used by project miner), returns False if the file
     has been modified since it was last mined, so it gets re-mined.
     When check_mtime=False (used by convo miner), just checks existence.
+    When wing is provided, only records from that wing are considered.
     """
     try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
+        if wing:
+            where_filter = {"$and": [{"source_file": source_file}, {"wing": wing}]}
+        else:
+            where_filter = {"source_file": source_file}
+
+        results = collection.get(where=where_filter, limit=1)
         if not results.get("ids"):
             return False
         if check_mtime:

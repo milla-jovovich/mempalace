@@ -180,6 +180,26 @@ def test_scan_project_can_include_exact_file_without_known_extension():
         shutil.rmtree(tmpdir)
 
 
+def test_scan_project_includes_added_readable_extensions():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / "automation.ps1", "Write-Host 'hello'\n" * 20)
+        write_file(project_root / "translations.xlf", "<xliff>hello</xliff>\n" * 20)
+        write_file(project_root / "page.al", "page 50100 CustomerCard {}\n" * 20)
+        write_file(project_root / "notes.rst", "Heading\n=======\n" * 20)
+
+        assert scanned_files(project_root, respect_gitignore=False) == [
+            "automation.ps1",
+            "notes.rst",
+            "page.al",
+            "translations.xlf",
+        ]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
 def test_scan_project_include_override_beats_skip_dirs():
     tmpdir = tempfile.mkdtemp()
     try:
@@ -258,5 +278,31 @@ def test_file_already_mined_check_mtime():
         assert file_already_mined(col, "/fake/no_mtime.txt", check_mtime=True) is False
     finally:
         # Release ChromaDB file handles before cleanup (required on Windows)
+        del col, client
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_file_already_mined_is_wing_scoped():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        palace_path = os.path.join(tmpdir, "palace")
+        os.makedirs(palace_path)
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_or_create_collection("mempalace_drawers")
+
+        test_file = os.path.join(tmpdir, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("hello world")
+
+        col.add(
+            ids=["d1"],
+            documents=["hello world"],
+            metadatas=[{"source_file": test_file, "wing": "alpha"}],
+        )
+
+        assert file_already_mined(col, test_file, wing="alpha") is True
+        assert file_already_mined(col, test_file, wing="beta") is False
+        assert file_already_mined(col, test_file) is True
+    finally:
         del col, client
         shutil.rmtree(tmpdir, ignore_errors=True)
