@@ -3,7 +3,6 @@ import shutil
 import tempfile
 from pathlib import Path
 
-import chromadb
 import yaml
 
 from mempalace.miner import mine, scan_project, status
@@ -44,8 +43,9 @@ def test_project_mining():
         palace_path = project_root / "palace"
         mine(str(project_root), str(palace_path))
 
-        client = chromadb.PersistentClient(path=str(palace_path))
-        col = client.get_collection("mempalace_drawers")
+        from mempalace.palace import get_collection as _get_col
+
+        col = _get_col(str(palace_path), "mempalace_drawers", create=False)
         assert col.count() > 0
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -214,8 +214,9 @@ def test_file_already_mined_check_mtime():
     try:
         palace_path = os.path.join(tmpdir, "palace")
         os.makedirs(palace_path)
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_or_create_collection("mempalace_drawers")
+        from mempalace.palace import get_collection as _get_col
+
+        col = _get_col(palace_path, "mempalace_drawers", create=True)
 
         test_file = os.path.join(tmpdir, "test.txt")
         with open(test_file, "w") as f:
@@ -257,8 +258,8 @@ def test_file_already_mined_check_mtime():
         )
         assert file_already_mined(col, "/fake/no_mtime.txt", check_mtime=True) is False
     finally:
-        # Release ChromaDB file handles before cleanup (required on Windows)
-        del col, client
+        # Release file handles before cleanup (required on Windows)
+        del col
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 

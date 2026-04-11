@@ -18,17 +18,15 @@ def _patch_mcp_server(monkeypatch, config, kg):
 
 
 def _get_collection(palace_path, create=False):
-    """Helper to get collection from test palace.
+    """Helper to get collection from test palace, via the backend seam.
 
-    Returns (client, collection) so callers can clean up the client
-    when they are done.
+    Returns (None, collection) for backward compatibility with callers
+    that unpack two values — we no longer expose the raw client since
+    the seam abstracts it, but the cleanup path is still valid.
     """
-    import chromadb
+    from mempalace.palace import get_collection as _get_col
 
-    client = chromadb.PersistentClient(path=palace_path)
-    if create:
-        return client, client.get_or_create_collection("mempalace_drawers")
-    return client, client.get_collection("mempalace_drawers")
+    return None, _get_col(palace_path, "mempalace_drawers", create=create)
 
 
 # ── Protocol Layer ──────────────────────────────────────────────────────

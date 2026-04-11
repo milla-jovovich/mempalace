@@ -6,7 +6,7 @@ Consolidates collection access patterns used by both miners and the MCP server.
 
 import os
 
-from .backends.chroma import ChromaBackend
+from .backends import get_default_backend
 
 SKIP_DIRS = {
     ".git",
@@ -34,7 +34,12 @@ SKIP_DIRS = {
     "target",
 }
 
-_DEFAULT_BACKEND = ChromaBackend()
+# Picked from the MEMPAL_STORAGE env var on module import. Defaults to
+# ChromaBackend for zero-risk backward compatibility; set
+# MEMPAL_STORAGE=palace_store to swap in the bespoke store without
+# touching any other call sites — the BaseCollection contract is the
+# only thing the rest of mempalace sees.
+_DEFAULT_BACKEND = get_default_backend()
 
 
 def get_collection(

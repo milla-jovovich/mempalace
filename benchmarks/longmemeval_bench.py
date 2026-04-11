@@ -39,10 +39,21 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
-import chromadb
-
-# Add mempal to path
+# Add mempal to path so palace_store.compat is importable when we
+# opt into it via MEMPAL_STORAGE below.
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Storage backend selector. Default (no env var) uses real chromadb.
+# Setting MEMPAL_STORAGE=palace_store (or any of its aliases) swaps in
+# palace_store.compat, which is API-compatible with chromadb's
+# PersistentClient/EphemeralClient for the narrow surface this
+# benchmark uses. Inlined here rather than imported from mempalace so
+# benchmarks/ stays free of mempalace's internal import dance.
+_BACKEND_NAME = os.environ.get("MEMPAL_STORAGE", "").strip().lower()
+if _BACKEND_NAME in ("palace", "palace_store", "palacestore"):
+    from palace_store import compat as chromadb  # noqa: E402,F401
+else:
+    import chromadb  # noqa: E402
 
 
 # =============================================================================
