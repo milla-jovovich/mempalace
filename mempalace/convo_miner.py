@@ -326,37 +326,43 @@ def mine_convos(
         if extract_mode != "general":
             room_counts[room] += 1
 
-        # File each chunk
-        drawers_added = 0
+        # Batch all chunks into a single add call per file
+        batch_docs = []
+        batch_ids = []
+        batch_metas = []
         for chunk in chunks:
             chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
             if extract_mode == "general":
                 room_counts[chunk_room] += 1
             drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
-            try:
+            batch_docs.append(chunk["content"])
+            batch_ids.append(drawer_id)
+            batch_metas.append(
+                {
+                    "wing": wing,
+                    "room": chunk_room,
+                    "source_file": source_file,
+                    "chunk_index": chunk["chunk_index"],
+                    "added_by": agent,
+                    "filed_at": datetime.now().isoformat(),
+                    "ingest_mode": "convos",
+                    "extract_mode": extract_mode,
+                }
+            )
+        drawers_added = 0
+        _ADD_BATCH_SIZE = 100
+        if batch_docs:
+            for batch_start in range(0, len(batch_docs), _ADD_BATCH_SIZE):
+                batch_end = batch_start + _ADD_BATCH_SIZE
                 collection.upsert(
-                    documents=[chunk["content"]],
-                    ids=[drawer_id],
-                    metadatas=[
-                        {
-                            "wing": wing,
-                            "room": chunk_room,
-                            "source_file": source_file,
-                            "chunk_index": chunk["chunk_index"],
-                            "added_by": agent,
-                            "filed_at": datetime.now().isoformat(),
-                            "ingest_mode": "convos",
-                            "extract_mode": extract_mode,
-                        }
-                    ],
+                    documents=batch_docs[batch_start:batch_end],
+                    ids=batch_ids[batch_start:batch_end],
+                    metadatas=batch_metas[batch_start:batch_end],
                 )
-                drawers_added += 1
-            except Exception as e:
-                if "already exists" not in str(e).lower():
-                    raise
+                drawers_added += len(batch_docs[batch_start:batch_end])
 
         total_drawers += drawers_added
-        print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
+        print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
 
     print(f"\n{'=' * 55}")
     print("  Done.")

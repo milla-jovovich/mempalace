@@ -95,6 +95,7 @@ def cmd_mine(args):
             dry_run=args.dry_run,
             respect_gitignore=not args.no_gitignore,
             include_ignored=include_ignored,
+            workers=args.workers,
         )
 
 
@@ -449,6 +450,12 @@ def main():
         choices=["exchange", "general"],
         default="exchange",
         help="Extraction strategy for convos mode: 'exchange' (default) or 'general' (5 memory types)",
+    )
+    p_mine.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="Parallel workers for file processing (default: min(8, cpu_count); 1 = sequential)",
     )
 
     # search
