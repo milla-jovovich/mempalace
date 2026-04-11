@@ -105,6 +105,13 @@ _client_cache = None
 _collection_cache = None
 
 
+def _invalidate_cache():
+    """Reset client and collection caches so the next call reconnects."""
+    global _client_cache, _collection_cache
+    _client_cache = None
+    _collection_cache = None
+
+
 def _get_client():
     """Return a singleton ChromaDB PersistentClient."""
     global _client_cache
@@ -123,7 +130,9 @@ def _get_collection(create=False):
         elif _collection_cache is None:
             _collection_cache = client.get_collection(_config.collection_name)
         return _collection_cache
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to get collection: {e}")
+        _invalidate_cache()
         return None
 
 
@@ -176,7 +185,7 @@ def tool_status():
     return result
 
 
-# ── AAAK Dialect Spec ─────────────────────────────────────────────────────────
+# ── AAAK Dialect Spec ─────────────────────────────────────────────────────────────────
 # Included in status response so the AI learns it on first wake-up call.
 # Also available via mempalace_get_aaak_spec tool.
 
@@ -434,8 +443,13 @@ def tool_add_drawer(
         existing = col.get(ids=[drawer_id])
         if existing and existing["ids"]:
             return {"success": True, "reason": "already_exists", "drawer_id": drawer_id}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Idempotency check failed for {drawer_id}: {e}")
+        # Invalidate cache and re-acquire collection before upsert attempt
+        _invalidate_cache()
+        col = _get_collection(create=True)
+        if not col:
+            return {"success": False, "error": f"Collection unavailable after reconnect: {e}"}
 
     try:
         col.upsert(
@@ -455,6 +469,8 @@ def tool_add_drawer(
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
     except Exception as e:
+        logger.exception(f"Failed to upsert drawer {drawer_id}")
+        _invalidate_cache()
         return {"success": False, "error": str(e)}
 
 
