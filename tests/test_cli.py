@@ -170,6 +170,30 @@ def test_load_drawer_ids_uses_valid_chroma_include():
     mock_col.get.assert_any_call(where={"wing": "wing-a"}, include=[], limit=500, offset=0)
 
 
+def test_load_drawer_ids_falls_back_without_offset():
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [
+        Exception("offset not supported"),
+        {"ids": ["a", "b"]},
+        {"ids": ["a", "b"]},
+    ]
+
+    ids = _load_drawer_ids(mock_col, {"wing": "wing-a"})
+
+    assert ids == ["a", "b"]
+    assert mock_col.get.call_args_list[0].kwargs == {
+        "where": {"wing": "wing-a"},
+        "include": [],
+        "limit": 500,
+        "offset": 0,
+    }
+    assert mock_col.get.call_args_list[1].kwargs == {
+        "where": {"wing": "wing-a"},
+        "include": [],
+        "limit": 500,
+    }
+
+
 @patch("mempalace.cli.MempalaceConfig")
 def test_cmd_delete_room_dry_run(mock_config_cls, capsys):
     mock_config_cls.return_value.palace_path = "/fake/palace"
@@ -281,6 +305,91 @@ def test_cmd_delete_room_noninteractive_multi_wing_fails(mock_config_cls, capsys
     out = capsys.readouterr().out
     assert "matches multiple wings" in out
     mock_input.assert_not_called()
+    mock_col.delete.assert_not_called()
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_handles_id_load_failure(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="drawer",
+        id=None,
+        wing=None,
+        room=None,
+        all=False,
+        dry_run=False,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [Exception("offset fail"), Exception("no offset")]
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        with pytest.raises(SystemExit):
+            cmd_delete(args)
+    out = capsys.readouterr().out
+    assert "Error loading drawer IDs" in out
+    mock_col.delete.assert_not_called()
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_wing_all_requires_phrase_confirmation(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="wing",
+        name=None,
+        all=True,
+        dry_run=False,
+        yes=True,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [
+        {"ids": ["a", "b"]},
+        {"ids": []},
+    ]
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with (
+        patch.dict("sys.modules", {"chromadb": mock_chromadb}),
+        patch.object(sys.stdin, "isatty", return_value=True),
+        patch("builtins.input", return_value="delete all") as mock_input,
+    ):
+        cmd_delete(args)
+    mock_input.assert_called_once()
+    mock_col.delete.assert_called_once_with(ids=["a", "b"])
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_wing_all_noninteractive_fails(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="wing",
+        name=None,
+        all=True,
+        dry_run=False,
+        yes=True,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.return_value = {"ids": ["a"], "metadatas": []}
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with (
+        patch.dict("sys.modules", {"chromadb": mock_chromadb}),
+        patch.object(sys.stdin, "isatty", return_value=False),
+    ):
+        with pytest.raises(SystemExit):
+            cmd_delete(args)
+    out = capsys.readouterr().out
+    assert "Refusing to delete" in out
     mock_col.delete.assert_not_called()
 
 

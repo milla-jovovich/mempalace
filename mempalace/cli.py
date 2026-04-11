@@ -399,18 +399,36 @@ def cmd_compress(args):
 def _load_drawer_ids(col, where=None, batch_size: int = 500):
     """Collect drawer IDs matching a filter to enable safe bulk deletion."""
     ids = []
+    seen = set()
     offset = 0
+    use_offset = True
     while True:
-        kwargs = {"include": [], "limit": batch_size, "offset": offset}
+        kwargs = {"include": [], "limit": batch_size}
+        if use_offset:
+            kwargs["offset"] = offset
         if where:
             kwargs["where"] = where
-        batch = col.get(**kwargs)
-        batch_ids = batch.get("ids", [])
+        try:
+            batch = col.get(**kwargs)
+        except Exception as e:
+            if use_offset:
+                use_offset = False
+                continue
+            raise RuntimeError(f"failed to list drawer IDs: {e}") from e
+
+        batch_ids = batch.get("ids") or []
         if not batch_ids:
             break
-        ids.extend(batch_ids)
-        offset += len(batch_ids)
-        if len(batch_ids) < batch_size:
+        new_ids = batch_ids if use_offset else [i for i in batch_ids if i not in seen]
+        if not new_ids:
+            break
+        ids.extend(new_ids)
+        seen.update(new_ids)
+        if use_offset:
+            offset += len(batch_ids)
+            if len(batch_ids) < batch_size:
+                break
+        elif len(batch_ids) < batch_size:
             break
     return ids
 
@@ -474,6 +492,111 @@ def _delete_ids(col, ids, batch_size: int = 500):
         col.delete(ids=ids[i : i + batch_size])
 
 
+def _confirm_bulk(args, count: int):
+    if count > 1 and not args.yes and not args.dry_run:
+        print(f"\n  Refusing to delete {count} drawers without --yes.")
+        sys.exit(1)
+
+
+def _confirm_delete_all_wings(args, count: int):
+    if args.delete_target != "wing" or not args.all or args.dry_run or count == 0:
+        return
+
+    is_interactive = getattr(sys.stdin, "isatty", lambda: False)()
+    if not is_interactive:
+        print(
+            f"\n  Refusing to delete {count} drawer(s) across all wings without an interactive confirmation."
+        )
+        print("  Re-run in a terminal or scope with --wing <name>.")
+        sys.exit(1)
+
+    print(f"\n  This will delete {count} drawer(s) across ALL wings.")
+    confirm = input("  Type 'delete all' to confirm: ").strip().lower()
+    if confirm != "delete all":
+        print("\n  Cancelled.")
+        sys.exit(1)
+
+
+def _load_ids(args, col, filters):
+    try:
+        return _load_drawer_ids(col, filters or None)
+    except Exception as e:
+        print(f"\n  Error loading drawer IDs: {e}")
+        sys.exit(1)
+
+
+def _handle_deletion(args, col, ids, label: str):
+    if not ids:
+        print(f"\n  No drawers found for {label}.")
+        return
+    if args.dry_run:
+        print(f"\n  Would delete {len(ids)} drawer(s) for {label}.")
+        return
+    _confirm_bulk(args, len(ids))
+    try:
+        _delete_ids(col, ids)
+        print(f"\n  Deleted {len(ids)} drawer(s) for {label}.")
+    except Exception as e:
+        print(f"\n  Error deleting drawers for {label}: {e}")
+        sys.exit(1)
+
+
+def _delete_drawer_target(args, col):
+    if args.id:
+        existing = col.get(ids=[args.id]).get("ids", [])
+        if not existing:
+            print(f"\n  Drawer not found: {args.id}")
+            sys.exit(1)
+        _handle_deletion(args, col, existing, f"drawer '{args.id}'")
+        return
+
+    filters = {}
+    if args.wing:
+        filters["wing"] = args.wing
+    if args.room:
+        filters["room"] = args.room
+    ids = _load_ids(args, col, filters)
+    if len(ids) > 1 and not args.all and not args.dry_run:
+        print(
+            "\n  Multiple drawers match the filters. Use --all to delete them or pass --id for a single drawer."
+        )
+        sys.exit(1)
+    _handle_deletion(args, col, ids, "selected drawers")
+
+
+def _delete_room_target(args, col):
+    if not args.name and not args.all:
+        print("\n  Provide --name to delete a room or --all to delete every room.")
+        sys.exit(1)
+    filters = {}
+    if args.name:
+        filters["room"] = args.name
+    if args.wing:
+        filters["wing"] = args.wing
+    elif args.name and not args.all:
+        wings = _load_room_wings(col, args.name)
+        if wings:
+            filters["wing"] = _choose_room_wing(args.name, wings)
+    ids = _load_ids(args, col, filters)
+    label = f"room '{args.name}'" if args.name else "all rooms"
+    if args.name and filters.get("wing"):
+        label += f" in wing '{filters['wing']}'"
+    _handle_deletion(args, col, ids, label)
+
+
+def _delete_wing_target(args, col):
+    if not args.name and not args.all:
+        print("\n  Provide --name to delete a wing or --all to delete every wing.")
+        sys.exit(1)
+    filters = {}
+    if args.name:
+        filters["wing"] = args.name
+    ids = _load_ids(args, col, filters)
+    label = f"wing '{args.name}'" if args.name else "all wings"
+    _confirm_delete_all_wings(args, len(ids))
+    _handle_deletion(args, col, ids, label)
+
+
 def cmd_delete(args):
     """Delete drawers, rooms, or wings from the palace."""
     import chromadb
@@ -487,80 +610,17 @@ def cmd_delete(args):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         sys.exit(1)
 
-    def _confirm_bulk(count: int):
-        if count > 1 and not args.yes and not args.dry_run:
-            print(f"\n  Refusing to delete {count} drawers without --yes.")
-            sys.exit(1)
-
-    def _handle_deletion(ids, label: str):
-        if not ids:
-            print(f"\n  No drawers found for {label}.")
-            return
-        if args.dry_run:
-            print(f"\n  Would delete {len(ids)} drawer(s) for {label}.")
-            return
-        _confirm_bulk(len(ids))
-        try:
-            _delete_ids(col, ids)
-            print(f"\n  Deleted {len(ids)} drawer(s) for {label}.")
-        except Exception as e:
-            print(f"\n  Error deleting drawers for {label}: {e}")
-            sys.exit(1)
-
     target = getattr(args, "delete_target", None)
     if target == "drawer":
-        if args.id:
-            existing = col.get(ids=[args.id]).get("ids", [])
-            if not existing:
-                print(f"\n  Drawer not found: {args.id}")
-                sys.exit(1)
-            _handle_deletion(existing, f"drawer '{args.id}'")
-            return
-
-        filters = {}
-        if args.wing:
-            filters["wing"] = args.wing
-        if args.room:
-            filters["room"] = args.room
-        ids = _load_drawer_ids(col, filters or None)
-        if len(ids) > 1 and not args.all and not args.dry_run:
-            print(
-                "\n  Multiple drawers match the filters. Use --all to delete them or pass --id for a single drawer."
-            )
-            sys.exit(1)
-        _handle_deletion(ids, "selected drawers")
+        _delete_drawer_target(args, col)
         return
 
     if target == "room":
-        if not args.name and not args.all:
-            print("\n  Provide --name to delete a room or --all to delete every room.")
-            sys.exit(1)
-        filters = {}
-        if args.name:
-            filters["room"] = args.name
-        if args.wing:
-            filters["wing"] = args.wing
-        elif args.name and not args.all:
-            wings = _load_room_wings(col, args.name)
-            if wings:
-                filters["wing"] = _choose_room_wing(args.name, wings)
-        ids = _load_drawer_ids(col, filters or None)
-        label = f"room '{args.name}'" if args.name else "all rooms"
-        if args.name and filters.get("wing"):
-            label += f" in wing '{filters['wing']}'"
-        _handle_deletion(ids, label)
+        _delete_room_target(args, col)
         return
 
     if target == "wing":
-        if not args.name and not args.all:
-            print("\n  Provide --name to delete a wing or --all to delete every wing.")
-            sys.exit(1)
-        filters = {}
-        if args.name:
-            filters["wing"] = args.name
-        ids = _load_drawer_ids(col, filters or None)
-        label = f"wing '{args.name}'" if args.name else "all wings"
-        _handle_deletion(ids, label)
+        _delete_wing_target(args, col)
         return
 
     print("\n  Unknown delete target. Use: drawer, room, or wing.")
