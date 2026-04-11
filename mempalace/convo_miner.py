@@ -216,7 +216,13 @@ def scan_convos(convo_dir: str) -> list:
                 if filepath.is_symlink():
                     continue
                 try:
-                    if filepath.stat().st_size > MAX_FILE_SIZE:
+                    fsize = filepath.stat().st_size
+                    if fsize > MAX_FILE_SIZE:
+                        print(
+                            f"  ⚠ Skipping large file"
+                            f" ({fsize // (1024 * 1024)}MB > {MAX_FILE_SIZE // (1024 * 1024)}MB"
+                            f" limit): {filepath.name}"
+                        )
                         continue
                 except OSError:
                     continue

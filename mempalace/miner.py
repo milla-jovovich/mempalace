@@ -418,16 +418,16 @@ def process_file(
     # Skip if already filed
     source_file = str(filepath)
     if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
-        return 0, None
+        return 0, "general"
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return 0, None
+        return 0, "general"
 
     content = content.strip()
     if len(content) < MIN_CHUNK_SIZE:
-        return 0, None
+        return 0, "general"
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)

@@ -104,6 +104,13 @@ with open(sys.argv[1]) as f:
                 content = msg.get('content', '')
                 if isinstance(content, str) and '<command-message>' in content:
                     continue
+                # Fix #549: skip tool_result messages — they arrive as
+                # role: "user" but aren't human input
+                if isinstance(content, list) and all(
+                    isinstance(b, dict) and b.get('type') == 'tool_result'
+                    for b in content
+                ):
+                    continue
                 count += 1
         except:
             pass

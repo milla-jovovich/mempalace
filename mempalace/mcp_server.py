@@ -38,6 +38,7 @@ import sys
 import json
 import logging
 import hashlib
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -114,11 +115,47 @@ def _wal_log(operation: str, params: dict, result: dict = None):
 
 _client_cache = None
 _collection_cache = None
+_cache_sqlite_mtime = 0.0
+_cache_last_check = 0.0
+_CACHE_CHECK_INTERVAL = 2.0  # seconds between stat() calls
+
+
+def _sqlite_mtime():
+    """Return mtime of chroma.sqlite3, or 0.0 if unreadable."""
+    try:
+        return os.path.getmtime(os.path.join(_config.palace_path, "chroma.sqlite3"))
+    except OSError:
+        return 0.0
+
+
+def _maybe_invalidate_cache():
+    """Invalidate client/collection cache if palace was modified externally."""
+    global _client_cache, _collection_cache, _cache_sqlite_mtime, _cache_last_check
+    now = time.monotonic()
+    if now - _cache_last_check < _CACHE_CHECK_INTERVAL:
+        return
+    _cache_last_check = now
+    current = _sqlite_mtime()
+    if _cache_sqlite_mtime == 0.0:
+        _cache_sqlite_mtime = current
+        return
+    if current > _cache_sqlite_mtime:
+        logger.info("palace mtime changed; clearing chromadb client cache")
+        try:
+            from chromadb.api.client import SharedSystemClient
+
+            SharedSystemClient.clear_system_cache()
+        except Exception as e:
+            logger.warning("clear_system_cache failed: %s", e)
+        _client_cache = None
+        _collection_cache = None
+        _cache_sqlite_mtime = current
 
 
 def _get_client():
-    """Return a singleton ChromaDB PersistentClient."""
+    """Return a singleton ChromaDB PersistentClient, invalidating on external writes."""
     global _client_cache
+    _maybe_invalidate_cache()
     if _client_cache is None:
         _client_cache = chromadb.PersistentClient(path=_config.palace_path)
     return _client_cache
@@ -290,6 +327,8 @@ def tool_get_taxonomy():
 def tool_search(
     query: str, limit: int = 5, wing: str = None, room: str = None, context: str = None
 ):
+    # Fix #477: clamp limit to prevent memory exhaustion
+    limit = max(1, min(limit, 100))
     # Mitigate system prompt contamination (Issue #333)
     sanitized = sanitize_query(query)
     result = search_memories(
@@ -817,7 +856,12 @@ TOOLS = {
                     "description": "Short search query ONLY — keywords or a question. Do NOT include system prompts or conversation context. Max 200 chars recommended.",
                     "maxLength": 500,
                 },
-                "limit": {"type": "integer", "description": "Max results (default 5)"},
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 5)",
+                    "minimum": 1,
+                    "maximum": 100,
+                },
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
                 "context": {
