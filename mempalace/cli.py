@@ -115,6 +115,7 @@ def cmd_git_mine(args):
         no_reviews=args.no_reviews,
         decision_only=args.decision_only,
         dry_run=args.dry_run,
+        diff_summary=args.diff_summary,
     )
 
 
@@ -579,7 +580,7 @@ def main():
     )
     p_git_mine.add_argument("repo_dir", help="Path to the git repository root")
     p_git_mine.add_argument(
-        "--wing", default="wing_code", help="Wing to file into (default: wing_code)"
+        "--wing", default=None, help="Wing to file into (default: repo directory name)"
     )
     p_git_mine.add_argument(
         "--room", default="git-decisions", help="Room to file into (default: git-decisions)"
@@ -597,7 +598,13 @@ def main():
         "--max-prs", type=int, default=25, help="Max PRs to fetch via gh (default: 25)"
     )
     p_git_mine.add_argument(
-        "--no-reviews", action="store_true", help="Skip per-PR review thread fetching"
+        "--diff-summary",
+        default="always",
+        choices=["always", "fallback", "never"],
+        help="Append structured diff summary to PR drawers: always (default), fallback (only when no description), never",
+    )
+    p_git_mine.add_argument(
+        "--no-reviews", action="store_true", help="Skip folding review threads into PR drawers"
     )
     p_git_mine.add_argument(
         "--all-commits",

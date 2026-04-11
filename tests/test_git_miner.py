@@ -5,18 +5,23 @@ All tests mock subprocess.run so they require no git binary, no gh CLI,
 and no network access.
 """
 
-import hashlib
 import shutil
 import subprocess
 import tempfile
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import chromadb
 import pytest
 
 from mempalace.git_miner import (
     DEFAULT_ROOM,
-    DEFAULT_WING,
+    DIFF_SUMMARY_ALWAYS,
+    DIFF_SUMMARY_FALLBACK,
+    DIFF_SUMMARY_NEVER,
+    _FALLBACK_WING,
+    _build_pr_body,
+    _default_wing,
+    _parse_diff_summary,
     GitEntry,
     _DECISION_RE,
     collect_commits,
@@ -28,7 +33,7 @@ from mempalace.git_miner import (
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
-LOG_SEP = ">>MP<<"
+LOG_SEP = "\x00"
 
 
 def _make_log_output(*records):
@@ -40,15 +45,15 @@ def _make_log_output(*records):
 
 
 FAKE_LOG = _make_log_output(
-    ("abc123def456", "Alice", "2026-01-01T00:00:00Z", "refactor: extract auth module", ""),
+    ("abc123def456" + "a" * 28, "Alice", "2026-01-01T00:00:00Z", "refactor: extract auth module", ""),
     (
-        "111222333444",
+        "111222333444" + "b" * 28,
         "Bob",
         "2026-01-02T00:00:00Z",
         "feat: add rate limiter",
         "Decided to use token bucket instead of leaky bucket because it handles burst traffic better.",
     ),
-    ("deadbeefcafe", "Carol", "2026-01-03T00:00:00Z", "chore: bump deps", ""),
+    ("deadbeefcafe" + "c" * 28, "Carol", "2026-01-03T00:00:00Z", "chore: bump deps", ""),
 )
 
 FAKE_PR_LIST = """[
@@ -68,18 +73,48 @@ FAKE_PR_LIST = """[
   }
 ]"""
 
-FAKE_PR_REVIEWS = """{"reviews": [
+# PR detail response: reviews + commits (commits are used to populate pr_shas)
+FAKE_PR_DETAIL_42 = """{
+  "reviews": [
+    {
+      "author": {"login": "carol"},
+      "body": "Why not use REST here? The team decided on gRPC for performance reasons.",
+      "createdAt": "2026-01-10T12:00:00Z"
+    },
+    {
+      "author": {"login": "dan"},
+      "body": "",
+      "createdAt": "2026-01-10T13:00:00Z"
+    }
+  ],
+  "commits": [
+    {"oid": "abc123def456aaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    {"oid": "deadbeefcafecccccccccccccccccccccccccccc"}
+  ]
+}"""
+
+FAKE_PR_DETAIL_43 = '{"reviews": [], "commits": []}'
+
+# Fake GitHub REST API /pulls/{n}/files response with patch text including
+# hunk context so we can test diff summary extraction.
+FAKE_PR_FILES_42 = """[
   {
-    "author": {"login": "carol"},
-    "body": "Why not use REST here? The team decided on gRPC for performance reasons.",
-    "createdAt": "2026-01-10T12:00:00Z"
+    "filename": "mempalace/cli.py",
+    "status": "modified",
+    "additions": 62,
+    "deletions": 0,
+    "patch": "@@ -98,6 +98,26 @@ def cmd_mine(args):\\n+new line\\n @@ -552,6 +572,47 @@ def main():\\n+other"
   },
   {
-    "author": {"login": "dan"},
-    "body": "",
-    "createdAt": "2026-01-10T13:00:00Z"
+    "filename": "mempalace/git_miner.py",
+    "status": "added",
+    "additions": 467,
+    "deletions": 0,
+    "patch": "@@ -0,0 +1,467 @@"
   }
-]}"""
+]"""
+
+FAKE_PR_FILES_43 = "[]"
 
 
 def _mock_run(stdout="", returncode=0):
@@ -87,6 +122,120 @@ def _mock_run(stdout="", returncode=0):
     m.stdout = stdout
     m.returncode = returncode
     return m
+
+
+# ── _default_wing ─────────────────────────────────────────────────────────────
+
+
+class TestDefaultWing:
+    def test_derives_from_repo_name(self):
+        assert _default_wing("/path/to/mempalace") == "mempalace"
+
+    def test_lowercases_name(self):
+        assert _default_wing("/path/to/MyProject") == "myproject"
+
+    def test_replaces_hyphens(self):
+        assert _default_wing("/path/to/my-repo") == "my_repo"
+
+    def test_replaces_spaces(self):
+        assert _default_wing("/path/to/my repo") == "my_repo"
+
+    def test_fallback_on_invalid_name(self):
+        # A repo directory starting with '_' fails sanitize_name → fallback
+        assert _default_wing("/path/to/_hidden") == _FALLBACK_WING
+
+
+# ── _parse_diff_summary ────────────────────────────────────────────────────────
+
+
+class TestParseDiffSummary:
+    def test_empty_returns_empty(self):
+        assert _parse_diff_summary([]) == ""
+        assert _parse_diff_summary(None) == ""
+
+    def test_no_hunk_context(self):
+        files = [{"filename": "go.sum", "status": "modified", "additions": 10, "deletions": 5, "patch": ""}]
+        result = _parse_diff_summary(files)
+        assert "go.sum" in result
+        assert "modified" in result
+        assert "+10" in result
+        assert "-5" in result
+        assert "→" not in result
+
+    def test_extracts_hunk_context(self):
+        patch = "@@ -98,6 +98,26 @@ def cmd_mine(args):\n+new\n@@ -200,3 +220,5 @@ def main():\n+other"
+        files = [{"filename": "cli.py", "status": "modified", "additions": 28, "deletions": 0, "patch": patch}]
+        result = _parse_diff_summary(files)
+        assert "→" in result
+        assert "def cmd_mine(args):" in result
+        assert "def main():" in result
+
+    def test_deduplicates_context(self):
+        patch = "@@ -10,3 +10,5 @@ def foo():\n+x\n@@ -20,3 +22,5 @@ def foo():\n+y"
+        files = [{"filename": "a.py", "status": "modified", "additions": 2, "deletions": 0, "patch": patch}]
+        result = _parse_diff_summary(files)
+        assert result.count("def foo():") == 1
+
+    def test_new_file_no_context(self):
+        files = [{"filename": "new.py", "status": "added", "additions": 120, "deletions": 0, "patch": "@@ -0,0 +1,120 @@"}]
+        result = _parse_diff_summary(files)
+        assert "new.py" in result
+        assert "added" in result
+        assert "+120" in result
+
+    def test_multiple_files_one_line_each(self):
+        files = [
+            {"filename": "a.py", "status": "modified", "additions": 5, "deletions": 2, "patch": ""},
+            {"filename": "b.py", "status": "added", "additions": 10, "deletions": 0, "patch": ""},
+        ]
+        lines = _parse_diff_summary(files).splitlines()
+        assert len(lines) == 2
+
+
+# ── _build_pr_body ─────────────────────────────────────────────────────────────
+
+
+class TestBuildPRBody:
+    def test_no_reviews_no_diff(self):
+        assert _build_pr_body("description", [], "") == "description"
+
+    def test_reviews_folded_in(self):
+        reviews = [
+            {"author": "alice", "body": "Looks good."},
+            {"author": "bob", "body": "Why not gRPC?"},
+        ]
+        body = _build_pr_body("Switch to gRPC.", reviews, "")
+        assert "Switch to gRPC." in body
+        assert "--- Review threads ---" in body
+        assert "[alice] Looks good." in body
+        assert "[bob] Why not gRPC?" in body
+
+    def test_diff_summary_appended(self):
+        summary = "  cli.py  modified  +5"
+        body = _build_pr_body("desc", [], summary)
+        assert "--- Code changes ---" in body
+        assert "cli.py" in body
+
+    def test_all_three_sections_in_order(self):
+        reviews = [{"author": "x", "body": "LGTM"}]
+        summary = "  a.py  modified  +1"
+        body = _build_pr_body("desc", reviews, summary)
+        desc_idx = body.index("desc")
+        review_idx = body.index("--- Review threads ---")
+        code_idx = body.index("--- Code changes ---")
+        assert desc_idx < review_idx < code_idx
+
+    def test_empty_pr_body_with_reviews(self):
+        reviews = [{"author": "carol", "body": "LGTM"}]
+        body = _build_pr_body("", reviews, "")
+        assert not body.startswith("\n"), "should not start with newline when PR body is empty"
+        assert "[carol] LGTM" in body
+
+    def test_diff_only_no_description(self):
+        summary = "  main.py  modified  +5"
+        body = _build_pr_body("", [], summary)
+        assert not body.startswith("\n")
+        assert "--- Code changes ---" in body
 
 
 # ── GitEntry ───────────────────────────────────────────────────────────────────
@@ -100,23 +249,19 @@ class TestGitEntry:
         assert "Subject: fix: auth bug" in text
         assert "Body text" in text
 
-    def test_format_pr(self):
-        e = GitEntry("pr", "42", "feat: add feature", "PR body", "bob", "2026-01-01")
+    def test_format_pr_with_reviews_folded(self):
+        body = "Switch to gRPC.\n\n--- Review threads ---\n[alice] LGTM"
+        e = GitEntry("pr", "42", "feat: add gRPC", body, "bob", "2026-01-01")
         text = e.format()
         assert "PR #42" in text
-        assert "Title: feat: add feature" in text
-
-    def test_format_review(self):
-        e = GitEntry("review", "42.0", "Review on PR #42: feat", "Review body", "carol", "2026-01-01")
-        text = e.format()
-        assert "REVIEW 42.0" in text
-        assert "Review body" in text
+        assert "Title: feat: add gRPC" in text
+        assert "--- Review threads ---" in text
+        assert "[alice] LGTM" in text
 
     def test_format_no_body(self):
         e = GitEntry("commit", "abc", "subject only", "", "Alice", "2026-01-01")
         text = e.format()
         assert "subject only" in text
-        # No blank body section appended
         assert text.count("\n\n") == 0
 
     def test_has_decision_signal_title(self):
@@ -159,21 +304,33 @@ class TestCollectCommits:
         entries = collect_commits("/fake/repo", include_all=True)
         assert len(entries) == 3
         assert all(e.source == "commit" for e in entries)
-        assert entries[0].ref == "abc123def456"[:12]
+        assert entries[0].ref == "abc123def456"
         assert entries[0].title == "refactor: extract auth module"
         assert entries[1].body.startswith("Decided")
+
+    @patch("subprocess.run")
+    def test_git_sha_populated(self, mock_run):
+        mock_run.return_value = _mock_run(FAKE_LOG)
+        entries = collect_commits("/fake/repo", include_all=True)
+        for e in entries:
+            assert len(e.git_sha) == 40, f"expected 40-char SHA, got {e.git_sha!r}"
 
     @patch("subprocess.run")
     def test_filters_trivial_commits_by_default(self, mock_run):
         mock_run.return_value = _mock_run(FAKE_LOG)
         entries = collect_commits("/fake/repo", include_all=False)
-        # abc123 has no body and no decision signal → excluded
-        # deadbeef has no body and no decision signal → excluded
-        # 111222 has a body with decision signal → included
-        # Also "refactor" in abc123 title matches → included
         titles = [e.title for e in entries]
-        assert "chore: bump deps" not in titles  # no body, no signal
+        assert "chore: bump deps" not in titles
         assert "feat: add rate limiter" in titles
+
+    @patch("subprocess.run")
+    def test_pr_shas_excluded(self, mock_run):
+        mock_run.return_value = _mock_run(FAKE_LOG)
+        # Exclude the first commit's SHA
+        sha = "abc123def456" + "a" * 28
+        entries = collect_commits("/fake/repo", include_all=True, pr_shas={sha})
+        refs = [e.ref for e in entries]
+        assert "abc123def456" not in refs
 
     @patch("subprocess.run")
     def test_max_commits_passed_to_git(self, mock_run):
@@ -208,20 +365,19 @@ class TestCollectCommits:
 class TestCollectPRs:
     @patch("shutil.which", return_value=None)
     def test_no_gh_returns_empty(self, mock_which):
-        prs, reviews = collect_prs("/fake/repo")
+        prs, pr_shas = collect_prs("/fake/repo")
         assert prs == []
-        assert reviews == []
+        assert pr_shas == set()
 
     @patch("shutil.which", return_value="/usr/bin/gh")
     @patch("subprocess.run")
     def test_parses_prs(self, mock_run, mock_which):
-        # First call: pr list; subsequent: pr view per PR
         mock_run.side_effect = [
             _mock_run(FAKE_PR_LIST),
-            _mock_run(FAKE_PR_REVIEWS),  # reviews for PR 42
-            _mock_run('{"reviews": []}'),  # reviews for PR 43
+            _mock_run(FAKE_PR_DETAIL_42),
+            _mock_run(FAKE_PR_DETAIL_43),
         ]
-        prs, reviews = collect_prs("/fake/repo")
+        prs, _ = collect_prs("/fake/repo", diff_summary=DIFF_SUMMARY_NEVER)
         assert len(prs) == 2
         assert prs[0].ref == "42"
         assert prs[0].title == "feat: switch to gRPC instead of REST"
@@ -229,42 +385,114 @@ class TestCollectPRs:
 
     @patch("shutil.which", return_value="/usr/bin/gh")
     @patch("subprocess.run")
-    def test_reviews_fetched_per_pr(self, mock_run, mock_which):
+    def test_reviews_folded_into_pr_body(self, mock_run, mock_which):
         mock_run.side_effect = [
             _mock_run(FAKE_PR_LIST),
-            _mock_run(FAKE_PR_REVIEWS),
-            _mock_run('{"reviews": []}'),
+            _mock_run(FAKE_PR_DETAIL_42),
+            _mock_run(FAKE_PR_DETAIL_43),
         ]
-        prs, reviews = collect_prs("/fake/repo")
-        # One non-empty review body from PR 42
-        assert len(reviews) == 1
-        assert reviews[0].source == "review"
-        assert "gRPC" in reviews[0].body
+        prs, _ = collect_prs("/fake/repo", diff_summary=DIFF_SUMMARY_NEVER)
+        assert "--- Review threads ---" in prs[0].body
+        assert "[carol]" in prs[0].body
+        assert "gRPC" in prs[0].body
+        assert "[dan]" not in prs[0].body
 
     @patch("shutil.which", return_value="/usr/bin/gh")
     @patch("subprocess.run")
-    def test_no_reviews_flag_skips_review_fetch(self, mock_run, mock_which):
+    def test_no_review_source_entries(self, mock_run, mock_which):
+        """collect_prs must never return entries with source=='review'."""
+        mock_run.side_effect = [
+            _mock_run(FAKE_PR_LIST),
+            _mock_run(FAKE_PR_DETAIL_42),
+            _mock_run(FAKE_PR_DETAIL_43),
+        ]
+        prs, _ = collect_prs("/fake/repo", diff_summary=DIFF_SUMMARY_NEVER)
+        assert all(e.source == "pr" for e in prs)
+
+    @patch("shutil.which", return_value="/usr/bin/gh")
+    @patch("subprocess.run")
+    def test_pr_shas_populated(self, mock_run, mock_which):
+        """pr_shas should contain commit OIDs from the fetched PR detail."""
+        mock_run.side_effect = [
+            _mock_run(FAKE_PR_LIST),
+            _mock_run(FAKE_PR_DETAIL_42),
+            _mock_run(FAKE_PR_DETAIL_43),
+        ]
+        _, pr_shas = collect_prs("/fake/repo", diff_summary=DIFF_SUMMARY_NEVER)
+        assert "abc123def456" + "a" * 28 in pr_shas
+        assert "deadbeefcafe" + "c" * 28 in pr_shas
+
+    @patch("shutil.which", return_value="/usr/bin/gh")
+    @patch("subprocess.run")
+    def test_no_reviews_flag_skips_detail_fetch(self, mock_run, mock_which):
+        # no_reviews=True AND diff_summary=never → only pr list call
         mock_run.return_value = _mock_run(FAKE_PR_LIST)
-        prs, reviews = collect_prs("/fake/repo", no_reviews=True)
-        assert reviews == []
-        # Only one subprocess call (pr list), no pr view calls
+        prs, pr_shas = collect_prs("/fake/repo", no_reviews=True, diff_summary=DIFF_SUMMARY_NEVER)
         assert mock_run.call_count == 1
+        assert pr_shas == set()
 
     @patch("shutil.which", return_value="/usr/bin/gh")
     @patch("subprocess.run")
     def test_gh_failure_returns_empty(self, mock_run, mock_which):
         mock_run.side_effect = subprocess.CalledProcessError(1, "gh", stderr=b"auth error")
-        prs, reviews = collect_prs("/fake/repo")
+        prs, pr_shas = collect_prs("/fake/repo")
         assert prs == []
-        assert reviews == []
+        assert pr_shas == set()
 
     @patch("shutil.which", return_value="/usr/bin/gh")
     @patch("subprocess.run")
     def test_max_prs_limit_passed_to_gh(self, mock_run, mock_which):
         mock_run.side_effect = [_mock_run("[]")]
-        collect_prs("/fake/repo", max_prs=10)
+        collect_prs("/fake/repo", max_prs=10, diff_summary=DIFF_SUMMARY_NEVER)
         args = mock_run.call_args[0][0]
         assert "10" in args
+
+    @patch("shutil.which", return_value="/usr/bin/gh")
+    @patch("subprocess.run")
+    def test_diff_summary_always_fetches_files(self, mock_run, mock_which):
+        """diff_summary=always calls gh api /files for each PR."""
+        mock_run.side_effect = [
+            _mock_run(FAKE_PR_LIST),          # pr list
+            _mock_run(FAKE_PR_DETAIL_42),     # pr view 42
+            _mock_run(FAKE_PR_FILES_42),      # gh api files 42
+            _mock_run(FAKE_PR_DETAIL_43),     # pr view 43
+            _mock_run(FAKE_PR_FILES_43),      # gh api files 43
+        ]
+        prs, _ = collect_prs("/fake/repo", diff_summary=DIFF_SUMMARY_ALWAYS)
+        assert "--- Code changes ---" in prs[0].body
+        assert "mempalace/cli.py" in prs[0].body
+        # PR 43 has empty body (short) — diff summary present but files empty
+        assert "--- Code changes ---" not in prs[1].body
+
+    @patch("shutil.which", return_value="/usr/bin/gh")
+    @patch("subprocess.run")
+    def test_diff_summary_fallback_only_when_no_body(self, mock_run, mock_which):
+        """diff_summary=fallback: only fetch files for PR 43 (empty body)."""
+        mock_run.side_effect = [
+            _mock_run(FAKE_PR_LIST),          # pr list
+            _mock_run(FAKE_PR_DETAIL_42),     # pr view 42 (has body — no files fetch)
+            _mock_run(FAKE_PR_DETAIL_43),     # pr view 43 (no body — files fetch)
+            _mock_run(FAKE_PR_FILES_43),      # gh api files 43
+        ]
+        prs, _ = collect_prs("/fake/repo", diff_summary=DIFF_SUMMARY_FALLBACK)
+        # PR 42 has a description → no diff appended
+        assert "--- Code changes ---" not in prs[0].body
+        # PR 43 has no description → diff appended (but files fixture is empty)
+        # (No code-changes block because FAKE_PR_FILES_43 = "[]")
+
+    @patch("shutil.which", return_value="/usr/bin/gh")
+    @patch("subprocess.run")
+    def test_diff_summary_never_skips_files(self, mock_run, mock_which):
+        """diff_summary=never: no gh api /files calls."""
+        mock_run.side_effect = [
+            _mock_run(FAKE_PR_LIST),
+            _mock_run(FAKE_PR_DETAIL_42),
+            _mock_run(FAKE_PR_DETAIL_43),
+        ]
+        prs, _ = collect_prs("/fake/repo", diff_summary=DIFF_SUMMARY_NEVER)
+        assert "--- Code changes ---" not in prs[0].body
+        assert "--- Code changes ---" not in prs[1].body
+        assert mock_run.call_count == 3  # list + 2x pr view, no files calls
 
 
 # ── collect_entries ────────────────────────────────────────────────────────────
@@ -281,11 +509,27 @@ class TestCollectEntries:
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
-    def test_all_sources_combined(self, mock_run, mock_which):
+    def test_only_commit_and_pr_sources(self, mock_run, mock_which):
         mock_run.return_value = _mock_run(FAKE_LOG)
         entries = collect_entries("/fake/repo", include_all=True)
-        sources = {e.source for e in entries}
-        assert "commit" in sources  # no gh → only commits
+        for e in entries:
+            assert e.source in ("commit", "pr"), f"Unexpected source: {e.source!r}"
+
+    @patch("shutil.which", return_value="/usr/bin/gh")
+    @patch("subprocess.run")
+    def test_pr_commits_excluded_from_commit_entries(self, mock_run, mock_which):
+        """Commits that belong to a fetched PR must not appear as separate drawers."""
+        mock_run.side_effect = [
+            _mock_run(FAKE_PR_LIST),
+            _mock_run(FAKE_PR_DETAIL_42),
+            _mock_run(FAKE_PR_DETAIL_43),
+            _mock_run(FAKE_LOG),
+        ]
+        entries = collect_entries("/fake/repo", include_all=True, diff_summary=DIFF_SUMMARY_NEVER)
+        commit_refs = [e.ref for e in entries if e.source == "commit"]
+        assert "abc123def456" not in commit_refs
+        assert "deadbeefcafe" not in commit_refs
+        assert "111222333444" in commit_refs
 
 
 # ── mine_git (integration via tempdir palace) ──────────────────────────────────
@@ -305,7 +549,6 @@ class TestMineGit:
             )
             assert result["filed"] == 3
             assert result["commits"] == 3
-            # Verify drawers landed in ChromaDB
             client = chromadb.PersistentClient(path=tmpdir)
             col = client.get_collection("mempalace_drawers")
             assert col.count() == 3
@@ -325,9 +568,7 @@ class TestMineGit:
                 dry_run=True,
             )
             assert result["filed"] == 0
-            # No palace directory created by ChromaDB
             import os
-
             assert not os.path.exists(os.path.join(tmpdir, "chroma.sqlite3"))
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -335,7 +576,6 @@ class TestMineGit:
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
     def test_idempotent_upsert(self, mock_run, mock_which):
-        """Filing the same repo twice should not duplicate drawers."""
         mock_run.return_value = _mock_run(FAKE_LOG)
         tmpdir = tempfile.mkdtemp()
         try:
@@ -357,8 +597,10 @@ class TestMineGit:
             client = chromadb.PersistentClient(path=tmpdir)
             col = client.get_collection("mempalace_drawers")
             metas = col.get(include=["metadatas"])["metadatas"]
-            assert all(m["wing"] == DEFAULT_WING for m in metas)
+            expected_wing = _default_wing("/fake/repo")
+            assert all(m["wing"] == expected_wing for m in metas)
             assert all(m["room"] == DEFAULT_ROOM for m in metas)
+            assert result["wing"] == expected_wing
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -371,16 +613,26 @@ class TestMineGit:
     def test_decision_only_reduces_count(self, mock_run, mock_which):
         mock_run.return_value = _mock_run(FAKE_LOG)
         tmpdir = tempfile.mkdtemp()
+        tmpdir2 = tempfile.mkdtemp()
         try:
             result_all = mine_git("/fake/repo", tmpdir, include_all=True)
-            shutil.rmtree(tmpdir)
-
-            tmpdir2 = tempfile.mkdtemp()
             result_dec = mine_git("/fake/repo", tmpdir2, include_all=True, decision_only=True)
             assert result_dec["filed"] <= result_all["filed"]
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
             shutil.rmtree(tmpdir2, ignore_errors=True)
+
+    @patch("shutil.which", return_value=None)
+    @patch("subprocess.run")
+    def test_no_reviews_key_in_result(self, mock_run, mock_which):
+        """result dict must not contain 'reviews' — that field was removed."""
+        mock_run.return_value = _mock_run(FAKE_LOG)
+        tmpdir = tempfile.mkdtemp()
+        try:
+            result = mine_git("/fake/repo", tmpdir, include_all=True)
+            assert "reviews" not in result
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ── MCP tool ───────────────────────────────────────────────────────────────────
@@ -394,14 +646,13 @@ class TestToolGitMine:
         tmpdir = tempfile.mkdtemp()
         try:
             import os
-
             with patch.dict(os.environ, {"MEMPALACE_PALACE_PATH": tmpdir}):
-                # Re-import to pick up patched env (config reads at call time)
                 from mempalace.mcp_server import tool_git_mine
-
                 result = tool_git_mine(repo_dir="/fake/repo", all_commits=True)
             assert result["success"] is True
             assert result["drawers_filed"] == 3
+            assert "reviews_scanned" not in result
+
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -410,7 +661,6 @@ class TestToolGitMine:
     def test_mcp_tool_dry_run(self, mock_run, mock_which):
         mock_run.return_value = _mock_run(FAKE_LOG)
         from mempalace.mcp_server import tool_git_mine
-
         result = tool_git_mine(repo_dir="/fake/repo", all_commits=True, dry_run=True)
         assert result["dry_run"] is True
         assert result["total"] == 3
@@ -418,7 +668,6 @@ class TestToolGitMine:
 
     def test_mcp_tool_in_tools_registry(self):
         from mempalace.mcp_server import TOOLS
-
         assert "mempalace_git_mine" in TOOLS
         schema = TOOLS["mempalace_git_mine"]["input_schema"]
         assert "repo_dir" in schema["required"]

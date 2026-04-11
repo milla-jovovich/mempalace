@@ -590,7 +590,7 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
 
 def tool_git_mine(
     repo_dir: str,
-    wing: str = "wing_code",
+    wing: str = None,
     room: str = "git-decisions",
     since: str = "",
     max_commits: int = 0,
@@ -599,10 +599,11 @@ def tool_git_mine(
     no_reviews: bool = False,
     decision_only: bool = False,
     dry_run: bool = False,
+    diff_summary: str = "always",
 ):
     """
-    Mine a git repository for commits, PR descriptions, and review threads
-    and file them into the palace.
+    Mine a git repository for merged PRs (with review threads and diff summary
+    folded in) and standalone commits, filing one drawer per entry into the palace.
 
     Commit mining uses ``git log`` (no auth required). PR and review mining
     requires the ``gh`` CLI to be installed and authenticated. When ``gh``
@@ -624,6 +625,7 @@ def tool_git_mine(
                 include_all=all_commits,
                 no_reviews=no_reviews,
                 decision_only=decision_only,
+                diff_summary=diff_summary,
             )
         except Exception as exc:
             return {"success": False, "error": str(exc)}
@@ -653,6 +655,7 @@ def tool_git_mine(
         no_reviews=no_reviews,
         decision_only=decision_only,
         dry_run=False,
+        diff_summary=diff_summary,
     )
     if "error" in result:
         return {"success": False, "error": result["error"]}
@@ -661,9 +664,8 @@ def tool_git_mine(
         "success": True,
         "commits_scanned": result["commits"],
         "prs_scanned": result["prs"],
-        "reviews_scanned": result["reviews"],
         "drawers_filed": result["filed"],
-        "wing": wing,
+        "wing": result.get("wing", wing),
         "room": room,
         "errors": result.get("errors", []),
     }
@@ -920,8 +922,9 @@ TOOLS = {
     },
     "mempalace_git_mine": {
         "description": (
-            "Mine a git repository for commits, PR descriptions, and review threads "
-            "and file them into the palace under wing_code/git-decisions. "
+            "Mine a git repository for merged PRs (with review threads folded into each PR drawer) "
+            "and standalone commits, filing one drawer per entry into the palace under the "
+            "repository's own wing (derived from the repo directory name) in git-decisions. "
             "Commit mining requires only git. PR and review mining requires the gh CLI "
             "(https://cli.github.com) to be installed and authenticated — it degrades "
             "gracefully when gh is unavailable."
@@ -935,7 +938,7 @@ TOOLS = {
                 },
                 "wing": {
                     "type": "string",
-                    "description": "Wing to file into (default: wing_code)",
+                    "description": "Wing to file into (default: derived from repo directory name, e.g. 'mempalace' for /path/to/mempalace)",
                 },
                 "room": {
                     "type": "string",
@@ -944,6 +947,10 @@ TOOLS = {
                 "since": {
                     "type": "string",
                     "description": "Only include commits after this date (e.g. 2025-01-01)",
+                },
+                "diff_summary": {
+                    "type": "string",
+                    "description": "When to append structured diff summary (changed files + touched functions) to PR drawers: 'always' (default), 'fallback' (only when PR has no description), or 'never'",
                 },
                 "max_commits": {
                     "type": "integer",
@@ -959,7 +966,7 @@ TOOLS = {
                 },
                 "no_reviews": {
                     "type": "boolean",
-                    "description": "Skip per-PR review thread fetching (faster for large repos)",
+                    "description": "Skip folding review threads into PR drawers (faster for large repos)",
                 },
                 "decision_only": {
                     "type": "boolean",
