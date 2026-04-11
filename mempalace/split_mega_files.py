@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 split_mega_files.py — Split concatenated transcript files into per-session files
-=================================================================================
 
 Scans a directory for .txt files that contain multiple Claude Code sessions
 (identified by "Claude Code v" headers). Splits each into individual files
@@ -27,6 +26,8 @@ import json
 import os
 import re
 from pathlib import Path
+
+from .compat import CHECKMARK as _CHECKMARK
 
 HOME = Path.home()
 LUMI_DIR = Path(os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts")))
@@ -224,7 +225,7 @@ def split_file(filepath, output_dir, dry_run=False):
             print(f"  [{i + 1}/{len(boundaries) - 1}] {name}  ({len(chunk)} lines)")
         else:
             out_path.write_text("".join(chunk), encoding="utf-8")
-            print(f"  ✓ {name}  ({len(chunk)} lines)")
+            print(f"  {_CHECKMARK} {name}  ({len(chunk)} lines)")
 
         written.append(out_path)
 

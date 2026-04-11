@@ -18,6 +18,8 @@ Usage:
 import re
 import os
 from pathlib import Path
+
+from .compat import _stdout_supports
 from collections import defaultdict
 
 
@@ -708,8 +710,10 @@ def _print_entity_list(entities: list, label: str):
     if not entities:
         print("    (none detected)")
         return
+    filled_char, empty_char = ("●", "○") if _stdout_supports("●○") else ("#", ".")
     for i, e in enumerate(entities):
-        confidence_bar = "●" * int(e["confidence"] * 5) + "○" * (5 - int(e["confidence"] * 5))
+        filled = int(e["confidence"] * 5)
+        confidence_bar = filled_char * filled + empty_char * (5 - filled)
         signals_str = ", ".join(e["signals"][:2]) if e["signals"] else ""
         print(f"    {i + 1:2}. {e['name']:20} [{confidence_bar}] {signals_str}")
 

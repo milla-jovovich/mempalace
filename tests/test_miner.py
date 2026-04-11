@@ -1,3 +1,4 @@
+import gc
 import os
 import shutil
 import tempfile
@@ -8,6 +9,8 @@ import yaml
 
 from mempalace.miner import mine, scan_project
 from mempalace.palace import file_already_mined
+
+from conftest import force_cleanup_tempdir as _force_cleanup
 
 
 def write_file(path: Path, content: str):
@@ -47,8 +50,10 @@ def test_project_mining():
         client = chromadb.PersistentClient(path=str(palace_path))
         col = client.get_collection("mempalace_drawers")
         assert col.count() > 0
+        del col, client
+        gc.collect()
     finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        _force_cleanup(tmpdir)
 
 
 def test_scan_project_respects_gitignore():
@@ -209,6 +214,85 @@ def test_scan_project_skip_dirs_still_apply_without_override():
         shutil.rmtree(tmpdir)
 
 
+def test_scan_project_respects_mpignore():
+    """`.mpignore` works like `.gitignore` but is always active."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".mpignore", "data/results/\n*.csv\n")
+        write_file(project_root / "src" / "app.py", "print('hello')\n" * 20)
+        write_file(project_root / "data" / "results" / "big.json", '{"a": 1}\n' * 20)
+        write_file(project_root / "data" / "summary.csv", "a,b\n1,2\n" * 20)
+        write_file(project_root / "data" / "readme.md", "# Data\n" * 20)
+
+        result = scanned_files(project_root)
+        assert "src/app.py" in result
+        assert "data/readme.md" in result
+        assert "data/results/big.json" not in result
+        assert "data/summary.csv" not in result
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_mpignore_active_even_with_no_gitignore():
+    """`.mpignore` is respected even when `respect_gitignore=False`."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(project_root / ".gitignore", "ignored.py\n")
+        write_file(project_root / ".mpignore", "heavy_data.json\n")
+        write_file(project_root / "app.py", "print('ok')\n" * 20)
+        write_file(project_root / "ignored.py", "print('git-ignored')\n" * 20)
+        write_file(project_root / "heavy_data.json", '{"x": 1}\n' * 20)
+
+        result = scanned_files(project_root, respect_gitignore=False)
+        assert "app.py" in result
+        assert "ignored.py" in result, ".gitignore should be bypassed"
+        assert "heavy_data.json" not in result, ".mpignore should still apply"
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_detect_room_exact_match_no_substring():
+    """Short folder names must not match room names via substring.
+
+    Regression test: a folder named 'ml/' was matching a room called
+    'visualizeml' because the old logic used ``part in room_name``.
+    """
+    from mempalace.miner import detect_room
+
+    rooms = [
+        {"name": "visualizeml", "description": "ML visualizations", "keywords": ["visualizeml"]},
+        {"name": "ml-infra", "description": "ML infrastructure", "keywords": ["ml-infra", "ml"]},
+        {"name": "general", "description": "Catch-all", "keywords": []},
+    ]
+    project_path = Path("/fake/project")
+
+    # ml/ folder should match ml-infra (exact keyword 'ml'), NOT visualizeml
+    filepath = Path("/fake/project/ml/village.ai/train.py")
+    result = detect_room(filepath, "", rooms, project_path)
+    assert result == "ml-infra", f"Expected ml-infra but got {result}"
+
+    # visualizeml/ folder should still match visualizeml (exact name)
+    filepath = Path("/fake/project/visualizeml/chart.tsx")
+    result = detect_room(filepath, "", rooms, project_path)
+    assert result == "visualizeml", f"Expected visualizeml but got {result}"
+
+    # hyphen-component match: "backend" matches keyword "backend-api"
+    rooms_with_hyphen = [
+        {"name": "api", "description": "API layer", "keywords": ["backend-api"]},
+        {"name": "general", "description": "Catch-all", "keywords": []},
+    ]
+    filepath = Path("/fake/project/backend/server.py")
+    result = detect_room(filepath, "", rooms_with_hyphen, project_path)
+    assert result == "api", f"Expected api but got {result}"
+
+    # unrelated folder falls through to general
+    filepath = Path("/fake/project/docs/readme.md")
+    result = detect_room(filepath, "", rooms, project_path)
+    assert result == "general", f"Expected general but got {result}"
 def test_file_already_mined_check_mtime():
     tmpdir = tempfile.mkdtemp()
     try:

@@ -17,6 +17,7 @@ from collections import defaultdict
 
 import chromadb
 
+from .compat import CHECKMARK as _CHECKMARK
 from .palace import SKIP_DIRS, get_collection, file_already_mined
 
 READABLE_EXTENSIONS = {
@@ -48,6 +49,7 @@ SKIP_FILENAMES = {
     "mempal.yaml",
     "mempal.yml",
     ".gitignore",
+    ".mpignore",
     "package-lock.json",
 }
 
@@ -70,13 +72,13 @@ class GitignoreMatcher:
         self.rules = rules
 
     @classmethod
-    def from_dir(cls, dir_path: Path):
-        gitignore_path = dir_path / ".gitignore"
-        if not gitignore_path.is_file():
+    def from_dir(cls, dir_path: Path, filename: str = ".gitignore"):
+        ignore_path = dir_path / filename
+        if not ignore_path.is_file():
             return None
 
         try:
-            lines = gitignore_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            lines = ignore_path.read_text(encoding="utf-8", errors="replace").splitlines()
         except Exception:
             return None
 
@@ -178,15 +180,16 @@ class GitignoreMatcher:
         return matches(0, 0)
 
 
-def load_gitignore_matcher(dir_path: Path, cache: dict):
-    """Load and cache one directory's .gitignore matcher."""
-    if dir_path not in cache:
-        cache[dir_path] = GitignoreMatcher.from_dir(dir_path)
-    return cache[dir_path]
+def load_ignore_matcher(dir_path: Path, cache: dict, filename: str = ".gitignore"):
+    """Load and cache one directory's ignore-file matcher."""
+    key = (dir_path, filename)
+    if key not in cache:
+        cache[key] = GitignoreMatcher.from_dir(dir_path, filename=filename)
+    return cache[key]
 
 
-def is_gitignored(path: Path, matchers: list, is_dir: bool = False) -> bool:
-    """Apply active .gitignore matchers in ancestor order; last match wins."""
+def is_ignored(path: Path, matchers: list, is_dir: bool = False) -> bool:
+    """Apply active ignore matchers (.gitignore / .mpignore) in ancestor order; last match wins."""
     ignored = False
     for matcher in matchers:
         decision = matcher.matches(path, is_dir=is_dir)
@@ -289,16 +292,20 @@ def detect_room(filepath: Path, content: str, rooms: list, project_path: Path) -
     content_lower = content[:2000].lower()
 
     # Priority 1: folder path matches room name or keywords
+    # Exact match or hyphen-component match to avoid false positives from
+    # short directory names (e.g. "ml/" matching room "visualizeml" via substring)
+    # while still allowing "backend" to match keyword "backend-api".
     path_parts = relative.replace("\\", "/").split("/")
     for part in path_parts[:-1]:  # skip filename itself
         for room in rooms:
             candidates = [room["name"].lower()] + [k.lower() for k in room.get("keywords", [])]
-            if any(part == c or c in part or part in c for c in candidates):
+            if any(part == c or part in c.split("-") for c in candidates):
                 return room["name"]
 
-    # Priority 2: filename matches room name
+    # Priority 2: filename matches room name or keywords
     for room in rooms:
-        if room["name"].lower() in filename or filename in room["name"].lower():
+        candidates = [room["name"].lower()] + [k.lower() for k in room.get("keywords", [])]
+        if any(filename == c or filename in c.split("-") for c in candidates):
             return room["name"]
 
     # Priority 3: keyword scoring from room keywords + name
@@ -476,22 +483,30 @@ def scan_project(
     """Return list of all readable file paths."""
     project_path = Path(project_dir).expanduser().resolve()
     files = []
-    active_matchers = []
+    active_gi_matchers = []
+    active_mp_matchers = []
     matcher_cache = {}
     include_paths = normalize_include_paths(include_ignored)
+
+    def _prune_matchers(matchers, root):
+        return [m for m in matchers if root.is_relative_to(m.base_dir)]
 
     for root, dirs, filenames in os.walk(project_path):
         root_path = Path(root)
 
+        # .mpignore is always active (independent of --no-gitignore)
+        active_mp_matchers = _prune_matchers(active_mp_matchers, root_path)
+        mp_matcher = load_ignore_matcher(root_path, matcher_cache, ".mpignore")
+        if mp_matcher is not None:
+            active_mp_matchers.append(mp_matcher)
+
         if respect_gitignore:
-            active_matchers = [
-                matcher
-                for matcher in active_matchers
-                if root_path == matcher.base_dir or matcher.base_dir in root_path.parents
-            ]
-            current_matcher = load_gitignore_matcher(root_path, matcher_cache)
-            if current_matcher is not None:
-                active_matchers.append(current_matcher)
+            active_gi_matchers = _prune_matchers(active_gi_matchers, root_path)
+            gi_matcher = load_ignore_matcher(root_path, matcher_cache, ".gitignore")
+            if gi_matcher is not None:
+                active_gi_matchers.append(gi_matcher)
+
+        all_matchers = active_gi_matchers + active_mp_matchers if respect_gitignore else active_mp_matchers
 
         dirs[:] = [
             d
@@ -499,12 +514,12 @@ def scan_project(
             if is_force_included(root_path / d, project_path, include_paths)
             or not should_skip_dir(d)
         ]
-        if respect_gitignore and active_matchers:
+        if all_matchers:
             dirs[:] = [
                 d
                 for d in dirs
                 if is_force_included(root_path / d, project_path, include_paths)
-                or not is_gitignored(root_path / d, active_matchers, is_dir=True)
+                or not is_ignored(root_path / d, all_matchers, is_dir=True)
             ]
 
         for filename in filenames:
@@ -516,8 +531,8 @@ def scan_project(
                 continue
             if filepath.suffix.lower() not in READABLE_EXTENSIONS and not exact_force_include:
                 continue
-            if respect_gitignore and active_matchers and not force_include:
-                if is_gitignored(filepath, active_matchers, is_dir=False):
+            if all_matchers and not force_include:
+                if is_ignored(filepath, all_matchers, is_dir=False):
                     continue
             # Skip symlinks — prevents following links to /dev/urandom, etc.
             if filepath.is_symlink():
@@ -573,7 +588,7 @@ def mine(
     if dry_run:
         print("  DRY RUN — nothing will be filed")
     if not respect_gitignore:
-        print("  .gitignore: DISABLED")
+        print("  .gitignore: DISABLED  (.mpignore still active)")
     if include_ignored:
         print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
     print(f"{'─' * 55}\n")
@@ -603,7 +618,7 @@ def mine(
             total_drawers += drawers
             room_counts[room] += 1
             if not dry_run:
-                print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+                print(f"  {_CHECKMARK} [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
 
     print(f"\n{'=' * 55}")
     print("  Done.")
