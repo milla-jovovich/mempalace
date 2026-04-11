@@ -14,7 +14,7 @@ Items ordered by implementation priority: quick wins first, then feature gaps, t
 
 ---
 
-## 0. Fix convo_miner wing assignment (1 hour)
+## 0. ~~Fix convo_miner wing assignment~~ ✓ (b7376ee)
 
 **Bug:** Auto-mined conversation transcripts all land in generic `sessions` wing. The project name is in the path (`~/.claude/projects/-home-jp-Projects-kiyo-xhci-fix/`) but `convo_miner.py:250` derives the wing from the parent directory name, losing project context. Manual `add_drawer` calls to project-specific wings work, but auto-mined content is unfindable by project.
 
@@ -32,7 +32,7 @@ Items ordered by implementation priority: quick wins first, then feature gaps, t
 
 ---
 
-## 1. Hybrid search fallback (half day)
+## 1. ~~Hybrid search fallback~~ ✓ (b7376ee)
 
 **Gap:** ChromaDB vector-only search. Exact-match queries ("error code E4021") rely entirely on embedding proximity, which misses when semantic meaning doesn't cluster near the literal string.
 
