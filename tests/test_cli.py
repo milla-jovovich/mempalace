@@ -381,7 +381,7 @@ def test_mcp_run_sets_palace_env(monkeypatch, tmp_path):
         with patch.dict("sys.modules", {"mempalace.mcp_server": MagicMock(main=mock_server_main)}):
             cmd_mcp_run(args)
         mock_server_main.assert_called_once()
-        assert os.environ.get("MEMPALACE_PALACE_PATH") == os.path.abspath(palace_dir)
+        assert os.environ.get("MEMPALACE_PALACE_PATH") == str(Path(palace_dir).resolve())
 
 
 def test_main_hook_no_subcommand_prints_help(capsys):

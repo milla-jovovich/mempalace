@@ -275,7 +275,7 @@ def cmd_mcp(args):
 def cmd_mcp_run(args):
     """Start the MCP server (JSON-RPC over stdin/stdout)."""
     if args.palace:
-        os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(args.palace)
+        os.environ["MEMPALACE_PALACE_PATH"] = str(Path(args.palace).expanduser().resolve())
 
     from .mcp_server import main as mcp_main
 
