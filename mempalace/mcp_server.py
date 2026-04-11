@@ -100,10 +100,6 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
-_client_cache = None
-_collection_cache = None
-
-
 def _get_client():
     """Return a singleton ChromaDB PersistentClient."""
     global _client_cache
