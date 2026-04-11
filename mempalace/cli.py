@@ -177,9 +177,8 @@ def cmd_purge(args):
 
     Note: ``--room`` without ``--wing`` purges that room across ALL wings.
 
-    Not idempotent — running purge twice on the same criteria will fail the
-    second time if the first run completed (nothing left to match).  The
-    backup directory is preserved for recovery.
+    Running purge again on the same criteria returns cleanly with "No drawers
+    found" if the first run removed everything that matched.
     """
     import chromadb
     import shutil
@@ -188,8 +187,8 @@ def cmd_purge(args):
     try:
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")
-    except Exception:
-        print(f"\n  No palace found at {palace_path}")
+    except Exception as e:
+        print(f"\n  No palace found at {palace_path}: {e}")
         return
 
     where = {}
@@ -257,7 +256,17 @@ def cmd_purge(args):
     del col, client
 
     # Nuke and rebuild with clean HNSW index
-    palace_path = palace_path.rstrip(os.sep)
+    palace_path = os.path.realpath(palace_path).rstrip(os.sep)
+    if not palace_path or palace_path == os.sep:
+        print("  Error: palace path resolves to filesystem root — aborting.")
+        return
+
+    backup_path = palace_path + ".backup"
+    if os.path.exists(backup_path):
+        shutil.rmtree(backup_path)
+    print(f"  Backing up to {backup_path}...")
+    shutil.copytree(palace_path, backup_path)
+
     print("  Rebuilding palace...")
     shutil.rmtree(palace_path)
     os.makedirs(palace_path, mode=0o700)
@@ -354,7 +363,10 @@ def cmd_repair(args):
     del col, client
 
     # Backup the entire palace directory
-    palace_path = os.path.normpath(palace_path)
+    palace_path = os.path.realpath(palace_path).rstrip(os.sep)
+    if not palace_path or palace_path == os.sep:
+        print("  Error: palace path resolves to filesystem root — aborting.")
+        return
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
         if not contains_palace_database(backup_path):
