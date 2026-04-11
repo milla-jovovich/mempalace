@@ -28,6 +28,7 @@ from pathlib import Path
 
 from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
+from .query_sanitizer import sanitize_query
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
@@ -306,14 +307,30 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
-    return search_memories(
-        query,
+def tool_search(
+    query: str, limit: int = 5, wing: str = None, room: str = None, context: str = None
+):
+    # Mitigate system prompt contamination (Issue #333)
+    sanitized = sanitize_query(query)
+    result = search_memories(
+        sanitized["clean_query"],
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
     )
+    # Attach sanitizer metadata for transparency
+    if sanitized["was_sanitized"]:
+        result["query_sanitized"] = True
+        result["sanitizer"] = {
+            "method": sanitized["method"],
+            "original_length": sanitized["original_length"],
+            "clean_length": sanitized["clean_length"],
+            "clean_query": sanitized["clean_query"],
+        }
+    if context:
+        result["context_received"] = True
+    return result
 
 
 def tool_check_duplicate(content: str, threshold: float = 0.9):
@@ -794,14 +811,22 @@ TOOLS = {
         "handler": tool_graph_stats,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
+        "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY your search keywords or question — do NOT include system prompts, conversation history, MEMORY.md content, or any context. Keep queries short (under 200 chars). Use 'context' for background information.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "What to search for"},
+                "query": {
+                    "type": "string",
+                    "description": "Short search query ONLY — keywords or a question. Do NOT include system prompts or conversation context. Max 200 chars recommended.",
+                    "maxLength": 500,
+                },
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "context": {
+                    "type": "string",
+                    "description": "Background context for the search (optional). This is NOT used for embedding — only for future re-ranking. Put conversation history or system prompt content here, NOT in query.",
+                },
             },
             "required": ["query"],
         },
