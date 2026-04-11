@@ -1,8 +1,34 @@
 # Fork Improvements — TODO
 
-Gaps identified from [lhl/agentic-memory analysis](https://github.com/lhl/agentic-memory/blob/main/ANALYSIS-mempalace.md) cross-referenced against our own codebase audit (2026-04-11).
+Gaps identified from [lhl/agentic-memory analysis](https://github.com/lhl/agentic-memory/blob/main/ANALYSIS-mempalace.md) cross-referenced against our own codebase audit and the full [agentic-memory survey](https://github.com/lhl/agentic-memory) (2026-04-11).
+
+**Why we're staying on MemPalace:** It's the only MCP-native local memory system that works with Claude Code today. Every alternative (Karta, Gigabrain, ByteRover, Codex memory, OpenViking) would need an MCP wrapper written before it could be used. The gaps below are real but fixable.
+
+**Patterns to steal from the survey:**
+- [Karta](https://github.com/rohithzr/karta) — contradiction detection, dream engine feedback loop, foresight signals, dual-granularity search, 14-step read pipeline with abstention
+- [Gigabrain](https://github.com/legendaryvibecoder/gigabrain) — 30+ junk filter patterns on write, event-sourced audit trail, nightly 8-stage maintenance
+- [Codex memory](https://github.com/openai/codex) — citation-driven retention (usage_count from retrieval → selection → pruning), two-phase extraction→consolidation
+- [ByteRover CLI](https://github.com/campfirein/byterover-cli) — 5-tier progressive retrieval (exact cache → fuzzy cache → index → LLM → agentic)
 
 Items ordered by implementation priority: quick wins first, then feature gaps, then deeper work.
+
+---
+
+## 0. Fix convo_miner wing assignment (1 hour)
+
+**Bug:** Auto-mined conversation transcripts all land in generic `sessions` wing. The project name is in the path (`~/.claude/projects/-home-jp-Projects-kiyo-xhci-fix/`) but `convo_miner.py:250` derives the wing from the parent directory name, losing project context. Manual `add_drawer` calls to project-specific wings work, but auto-mined content is unfindable by project.
+
+**Files:**
+- Modify: `mempalace/convo_miner.py` — `mine_convos()` wing derivation
+- Modify: `mempalace/hooks_cli.py` — hook auto-mine wing parameter
+- Test: `tests/test_convo_miner.py`
+
+**Approach:**
+1. When source path matches `~/.claude/projects/-home-*-Projects-<name>/`, extract `<name>` as the wing
+2. Fallback to current behavior (directory name) for non-Claude-Code paths
+3. Hook auto-mine should pass the derived project wing, not hardcoded `sessions`
+
+**Why this first:** This is a bug, not a feature request. Auto-mined content is going to the wrong wing, making per-project search fail. Discovered when searching `wing: "kiyo-xhci-fix"` returned 0 results despite 335 mempalace mentions in the session transcript.
 
 ---
 
@@ -164,9 +190,30 @@ Items 4-5 (decay, feedback) are opinionated — better as fork features first, u
 
 Items 6-7 (entity resolution, sanitization) could go either way.
 
+## Future: Karta-inspired features (after TODOs 0-7)
+
+These are more ambitious features inspired by [Karta's architecture](https://github.com/lhl/agentic-memory/blob/main/ANALYSIS-karta.md). Not immediate work, but worth tracking.
+
+### Contradiction detection
+KG triples with conflicting values (e.g., two different `works_at` for the same entity) should be flagged, not silently accumulated. Requires entity resolution (#6) first. Karta's approach: dream engine scans clusters, LLM detects conflicts, contradiction notes are force-injected into retrieval.
+
+**Simpler version for us:** SQL query for entities with multiple open triples on the same predicate. No LLM needed — just `SELECT * FROM triples WHERE subject=? AND predicate=? AND valid_to IS NULL GROUP BY predicate HAVING COUNT(*) > 1`. Surface via `mempalace_kg_query` as a warning.
+
+### Foresight signals
+Karta stores forward-looking predictions ("this project will need X") with TTL expiry windows. During retrieval, active predictions get a score boost. Expired ones are pruned by the dream engine.
+
+**Simpler version for us:** New metadata field `prediction_ttl` on drawers. Drawers with expired TTL get demoted in search. Could be useful for project planning memories that have a natural expiry.
+
+### Query classification
+Karta classifies queries into 6 modes (Standard, Recency, Breadth, Computation, Temporal, Existence) via embedding similarity to prototype centroids, then adjusts retrieval behavior per mode.
+
+**Simpler version for us:** Keyword heuristics. If query contains "how many" → widen n_results. If query contains "when" or "latest" → boost recency. If query contains "all" or "everything about" → search multiple wings. No embeddings needed.
+
 ## Not pursuing (and why)
 
 - **AAAK overhaul**: upstream's problem, not ours. We store verbatim.
 - **Multi-collection sharding**: premature. Single collection works to ~500K drawers.
 - **LLM-based extraction**: deliberate design choice. Zero-LLM write path is a feature, not a bug. If we add LLM extraction, it should be opt-in and additive, not replacing the deterministic pipeline.
-- **Contradiction detection**: the KG would need entity resolution (#6) first. Revisit after that ships.
+- **Dream engine (Karta-style)**: Fascinating but requires LLM calls on every dream pass. Karta's 7-type inference engine is 952 lines of Rust prompting GPT — beautiful architecture, wrong cost model for us. Our zero-LLM philosophy means we'd need a local model or explicit opt-in.
+- **Dual-granularity ANN**: Karta searches notes AND atomic facts in parallel, expanding fact hits to parent notes. Would require a second ChromaDB collection for facts. Premature — fix basic search quality (#1 hybrid) first.
+- **Full event sourcing (Gigabrain-style)**: Append-only event log for every write/reject/dedup. Overkill for local use. Our provenance metadata (source_file, filed_at, added_by) covers 80% of the audit need.
