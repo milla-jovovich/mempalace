@@ -241,6 +241,7 @@ def _folder_to_wing(folder_name: str) -> str:
     slug = folder_name.lower()
     # Keep word characters (Unicode-aware), hyphens, digits
     slug = re.sub(r'[^\w\-]+', '_', slug)
+    # Trim leading/trailing separators so '--project--' -> 'project', not '--project--'
     slug = slug.strip('_-')
     if not slug:
         slug = "unnamed"

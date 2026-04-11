@@ -30,7 +30,7 @@ class TestFolderToWing:
         assert _folder_to_wing("Project (v2)!") == "wing_project_v2"
 
     def test_leading_trailing_cleanup(self):
-        assert _folder_to_wing("--project--") == "wing_--project--"
+        assert _folder_to_wing("--project--") == "wing_project"
 
     def test_unicode_cjk_folder(self):
         """CJK folder names are preserved, not stripped."""
