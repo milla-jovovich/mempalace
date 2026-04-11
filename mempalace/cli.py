@@ -386,8 +386,9 @@ def cmd_compress(args):
 
     # Summary
     ratio = total_original / max(total_compressed, 1)
-    orig_tokens = Dialect.count_tokens("x" * total_original)
-    comp_tokens = Dialect.count_tokens("x" * total_compressed)
+    # Estimate tokens from char count (~3.8 chars/token for English text)
+    orig_tokens = max(1, int(total_original / 3.8))
+    comp_tokens = max(1, int(total_compressed / 3.8))
     print(f"  Total: {orig_tokens:,}t -> {comp_tokens:,}t ({ratio:.1f}x compression)")
     if args.dry_run:
         print("  (dry run -- nothing stored)")
