@@ -9,7 +9,6 @@ Tests error paths, corrupted data, and edge conditions in:
 """
 
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest

@@ -44,6 +44,8 @@ def _reset_mcp_cache():
 
             mcp_server._client_cache = None
             mcp_server._collection_cache = None
+            mcp_server._cache_sqlite_mtime = 0.0
+            mcp_server._cache_last_check = 0.0
         except (ImportError, AttributeError):
             pass
 

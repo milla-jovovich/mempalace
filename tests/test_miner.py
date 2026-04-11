@@ -6,7 +6,7 @@ from pathlib import Path
 import chromadb
 import yaml
 
-from mempalace.miner import mine, scan_project
+from mempalace.miner import mine, process_file, scan_project
 from mempalace.palace import file_already_mined
 
 
@@ -192,6 +192,58 @@ def test_scan_project_include_override_beats_skip_dirs():
             respect_gitignore=False,
             include_ignored=[".pytest_cache"],
         ) == [".pytest_cache/cache.py"]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+# ── process_file edge cases (#586) ─────────────────────────────────────
+
+
+def test_process_file_tiny_content_returns_general():
+    """process_file returns 'general' (not None) for tiny files (#586)."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+        tiny = project_root / "tiny.py"
+        tiny.write_text("x", encoding="utf-8")
+
+        drawers, room = process_file(
+            filepath=tiny,
+            project_path=project_root,
+            collection=None,
+            wing="test",
+            rooms=[],
+            agent="miner",
+            dry_run=True,
+        )
+        assert drawers == 0
+        assert room == "general"
+        # The critical requirement: room must be a string, not None,
+        # because the caller formats it with f"{room:20}"
+        assert isinstance(room, str)
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_process_file_unreadable_returns_general():
+    """process_file returns 'general' for unreadable files (#586)."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+        missing = project_root / "does_not_exist.py"
+
+        drawers, room = process_file(
+            filepath=missing,
+            project_path=project_root,
+            collection=None,
+            wing="test",
+            rooms=[],
+            agent="miner",
+            dry_run=True,
+        )
+        assert drawers == 0
+        assert room == "general"
+        assert isinstance(room, str)
     finally:
         shutil.rmtree(tmpdir)
 

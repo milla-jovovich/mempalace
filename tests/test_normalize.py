@@ -297,6 +297,46 @@ def test_claude_ai_privacy_export_non_dict_items():
     assert result is not None
 
 
+def test_claude_ai_sender_fallback_flat():
+    """Flat messages with 'sender' instead of 'role' should parse correctly (#602)."""
+    data = [
+        {"sender": "human", "content": "What is memory?"},
+        {"sender": "assistant", "content": "Memory is persistence."},
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "What is memory?" in result
+    assert "Memory is persistence." in result
+
+
+def test_claude_ai_sender_fallback_privacy_export():
+    """Privacy export with 'sender' instead of 'role' should parse correctly (#602)."""
+    data = [
+        {
+            "chat_messages": [
+                {"sender": "human", "content": "Hello"},
+                {"sender": "assistant", "content": "Hi there"},
+            ]
+        }
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "Hello" in result
+    assert "Hi there" in result
+
+
+def test_claude_ai_sender_mixed_with_role():
+    """Messages mixing 'role' and 'sender' fields should all parse."""
+    data = [
+        {"role": "user", "content": "Q1"},
+        {"sender": "assistant", "content": "A1"},
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "Q1" in result
+    assert "A1" in result
+
+
 # ── _try_chatgpt_json ─────────────────────────────────────────────────
 
 

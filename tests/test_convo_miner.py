@@ -3,8 +3,9 @@
 import os
 
 import chromadb
+import pytest
 
-from mempalace.convo_miner import mine_convos, scan_convos, MIN_CHUNK_SIZE, MAX_FILE_SIZE
+from mempalace.convo_miner import mine_convos, scan_convos, MAX_FILE_SIZE
 
 
 # ── Integration: mine_convos end-to-end ────────────────────────────────
@@ -177,3 +178,11 @@ class TestScanConvosEdgeCases:
         (tmp_path / "data.jsonl").write_text('{"msg": "hi"}', encoding="utf-8")
         files = scan_convos(str(tmp_path))
         assert any(f.suffix == ".jsonl" for f in files)
+
+    def test_oversized_file_prints_warning(self, tmp_path, capsys):
+        """Oversized files emit a warning message (#602)."""
+        big_file = tmp_path / "huge.txt"
+        big_file.write_text("x" * (MAX_FILE_SIZE + 1), encoding="utf-8")
+        scan_convos(str(tmp_path))
+        captured = capsys.readouterr()
+        assert "Skipping large file" in captured.out

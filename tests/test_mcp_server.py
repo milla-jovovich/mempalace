@@ -252,6 +252,30 @@ class TestSearchTool:
         result = tool_search(query="database", room="backend")
         assert all(r["room"] == "backend" for r in result["results"])
 
+    def test_search_limit_clamped_high(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        """limit > 100 is clamped to 100 (#477)."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_search
+
+        result = tool_search(query="JWT", limit=999)
+        assert "results" in result
+
+    def test_search_limit_clamped_low(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        """limit < 1 is clamped to 1 (#477)."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_search
+
+        result = tool_search(query="JWT", limit=0)
+        assert "results" in result
+
+    def test_search_limit_negative(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        """Negative limit is clamped to 1 (#477)."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_search
+
+        result = tool_search(query="JWT", limit=-5)
+        assert "results" in result
+
 
 # ── Write Tools ─────────────────────────────────────────────────────────
 
@@ -320,6 +344,65 @@ class TestWriteTools:
             threshold=0.99,
         )
         assert result["is_duplicate"] is False
+
+
+# ── Cache Invalidation (#608) ───────────────────────────────────────────
+
+
+class TestCacheInvalidation:
+    def test_sqlite_mtime_missing_file(self, monkeypatch, config, kg):
+        """_sqlite_mtime returns 0.0 when chroma.sqlite3 doesn't exist."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import _sqlite_mtime
+
+        assert _sqlite_mtime() == 0.0
+
+    def test_sqlite_mtime_existing_file(self, monkeypatch, config, palace_path, kg):
+        """_sqlite_mtime returns a positive float when chroma.sqlite3 exists."""
+        import os
+
+        _patch_mcp_server(monkeypatch, config, kg)
+        # Create the file so mtime is > 0
+        with open(os.path.join(palace_path, "chroma.sqlite3"), "w") as f:
+            f.write("")
+        from mempalace.mcp_server import _sqlite_mtime
+
+        assert _sqlite_mtime() > 0.0
+
+    def test_maybe_invalidate_cache_rate_limited(self, monkeypatch, config, kg):
+        """_maybe_invalidate_cache is rate-limited by _CACHE_CHECK_INTERVAL."""
+        import time
+
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        # Simulate recent check
+        mcp_server._cache_last_check = time.monotonic()
+        old_mtime = mcp_server._cache_sqlite_mtime
+        mcp_server._maybe_invalidate_cache()
+        # Should not have changed the stored mtime (skipped due to rate limit)
+        assert mcp_server._cache_sqlite_mtime == old_mtime
+
+    def test_maybe_invalidate_clears_on_mtime_change(self, monkeypatch, config, palace_path, kg):
+        """Cache is cleared when chroma.sqlite3 mtime changes."""
+        import os
+
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        # Create palace DB to get a real mtime
+        db_file = os.path.join(palace_path, "chroma.sqlite3")
+        with open(db_file, "w") as f:
+            f.write("v1")
+        mcp_server._cache_sqlite_mtime = os.path.getmtime(db_file) - 10
+        mcp_server._cache_last_check = 0.0  # force check
+        mcp_server._client_cache = "sentinel"
+        mcp_server._collection_cache = "sentinel"
+
+        mcp_server._maybe_invalidate_cache()
+        # Cache should have been cleared
+        assert mcp_server._client_cache is None
+        assert mcp_server._collection_cache is None
 
 
 # ── KG Tools ────────────────────────────────────────────────────────────
