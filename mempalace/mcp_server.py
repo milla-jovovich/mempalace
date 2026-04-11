@@ -27,7 +27,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from .config import MempalaceConfig, sanitize_name, sanitize_content
+SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-03-26", "2024-11-05"]
+
+from .config import MempalaceConfig
 from .version import __version__
 import chromadb
 from .query_sanitizer import sanitize_query
@@ -1311,17 +1313,18 @@ def handle_request(request):
     req_id = request.get("id")
 
     if method == "initialize":
-        client_version = params.get("protocolVersion", SUPPORTED_PROTOCOL_VERSIONS[-1])
-        negotiated = (
-            client_version
-            if client_version in SUPPORTED_PROTOCOL_VERSIONS
-            else SUPPORTED_PROTOCOL_VERSIONS[0]
-        )
+        client_version = params.get("protocolVersion")
+        if client_version in SUPPORTED_PROTOCOL_VERSIONS:
+            protocol_version = client_version
+        elif client_version:
+            protocol_version = SUPPORTED_PROTOCOL_VERSIONS[0]
+        else:
+            protocol_version = SUPPORTED_PROTOCOL_VERSIONS[-1]
         return {
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
-                "protocolVersion": negotiated,
+                "protocolVersion": protocol_version,
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "mempalace", "version": __version__},
             },
