@@ -401,7 +401,7 @@ def _load_drawer_ids(col, where=None, batch_size: int = 500):
     ids = []
     offset = 0
     while True:
-        kwargs = {"include": ["ids"], "limit": batch_size, "offset": offset}
+        kwargs = {"include": [], "limit": batch_size, "offset": offset}
         if where:
             kwargs["where"] = where
         batch = col.get(**kwargs)
@@ -413,6 +413,60 @@ def _load_drawer_ids(col, where=None, batch_size: int = 500):
         if len(batch_ids) < batch_size:
             break
     return ids
+
+
+def _load_room_wings(col, room_name, batch_size: int = 500):
+    """Collect unique wings that contain drawers for the given room."""
+    wings = []
+    seen = set()
+    offset = 0
+    while True:
+        batch = col.get(
+            where={"room": room_name},
+            include=["metadatas"],
+            limit=batch_size,
+            offset=offset,
+        )
+        batch_ids = batch.get("ids", [])
+        if not batch_ids:
+            break
+        for meta in batch.get("metadatas", []):
+            wing = (meta or {}).get("wing")
+            if wing and wing not in seen:
+                seen.add(wing)
+                wings.append(wing)
+        offset += len(batch_ids)
+        if len(batch_ids) < batch_size:
+            break
+    return wings
+
+
+def _choose_room_wing(room_name, wings):
+    """Pick a wing for a room delete when the room exists in multiple wings."""
+    wings = sorted(wings)
+    if len(wings) == 1:
+        return wings[0]
+
+    is_interactive = getattr(sys.stdin, "isatty", lambda: False)()
+    if not is_interactive:
+        print(f"\n  Room '{room_name}' matches multiple wings: {', '.join(wings)}.")
+        print("  Re-run with --wing <name> or --all.")
+        sys.exit(1)
+
+    print(f"\n  Room '{room_name}' exists in multiple wings:")
+    for idx, wing in enumerate(wings, 1):
+        print(f"    [{idx}] {wing}")
+
+    while True:
+        choice = input("  Choose a wing [number or Enter to cancel]: ").strip()
+        if not choice:
+            print("\n  Cancelled.")
+            sys.exit(1)
+        if choice.isdigit():
+            selection = int(choice)
+            if 1 <= selection <= len(wings):
+                return wings[selection - 1]
+        print(f"  Enter a number from 1 to {len(wings)}, or press Enter to cancel.")
 
 
 def _delete_ids(col, ids, batch_size: int = 500):
@@ -486,8 +540,14 @@ def cmd_delete(args):
             filters["room"] = args.name
         if args.wing:
             filters["wing"] = args.wing
+        elif args.name and not args.all:
+            wings = _load_room_wings(col, args.name)
+            if wings:
+                filters["wing"] = _choose_room_wing(args.name, wings)
         ids = _load_drawer_ids(col, filters or None)
         label = f"room '{args.name}'" if args.name else "all rooms"
+        if args.name and filters.get("wing"):
+            label += f" in wing '{filters['wing']}'"
         _handle_deletion(ids, label)
         return
 
