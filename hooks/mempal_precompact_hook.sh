@@ -61,7 +61,7 @@ SESSION_ID=$(echo "$INPUT" | python3 -c "
 import sys, json, re
 data = json.load(sys.stdin)
 sid = data.get('session_id', 'unknown')
-safe = lambda s: re.sub(r'[^a-zA-Z0-9_/.\\-~]', '', str(s))
+safe = lambda s: re.sub(r'[^a-zA-Z0-9_-]', '', str(s))
 print(safe(sid))
 " 2>/dev/null)
 
