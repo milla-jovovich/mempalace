@@ -189,6 +189,7 @@ class MempalaceConfig:
             self._file_config["hooks"] = {}
         self._file_config["hooks"][key] = value
         try:
+            self._config_dir.mkdir(parents=True, exist_ok=True)
             with open(self._config_file, "w", encoding="utf-8") as f:
                 json.dump(self._file_config, f, indent=2, ensure_ascii=False)
         except OSError:

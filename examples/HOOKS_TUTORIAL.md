@@ -39,5 +39,5 @@ Both hooks now have **two-layer capture**:
 ### 4. Configuration
 
 - **`SAVE_INTERVAL=15`** — How many human messages between saves
-- **`MEMPAL_PYTHON`** — Python interpreter with mempalace + chromadb. Auto-detects: env var → repo venv → system python3
+- **`MEMPALACE_PYTHON`** — Python interpreter with mempalace + chromadb. Auto-detects: env var → repo venv → system python3
 - **`MEMPAL_DIR`** — Optional directory for auto-ingest via `mempalace mine`

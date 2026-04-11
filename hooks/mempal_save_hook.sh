@@ -62,9 +62,9 @@ mkdir -p "$STATE_DIR"
 MEMPAL_DIR=""
 
 # Python interpreter with mempalace + chromadb installed.
-# Auto-detects: MEMPAL_PYTHON env var → repo venv → system python3
-if [ -n "$MEMPAL_PYTHON" ]; then
-    MP_PYTHON="$MEMPAL_PYTHON"
+# Auto-detects: MEMPALACE_PYTHON env var → repo venv → system python3
+if [ -n "$MEMPALACE_PYTHON" ]; then
+    MP_PYTHON="$MEMPALACE_PYTHON"
 elif [ -f "$(dirname "$(dirname "${BASH_SOURCE[0]}")")/venv/bin/python3" ]; then
     MP_PYTHON="$(dirname "$(dirname "${BASH_SOURCE[0]}")")/venv/bin/python3"
 else
