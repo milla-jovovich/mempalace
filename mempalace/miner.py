@@ -9,6 +9,7 @@ Stores verbatim chunks as drawers. No summaries. Ever.
 
 import os
 import sys
+import json
 import hashlib
 import fnmatch
 from pathlib import Path
@@ -55,6 +56,83 @@ CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+
+
+# =============================================================================
+# EPOCH TRACKING
+# =============================================================================
+#
+# Each mine run increments a monotonic epoch counter stored in
+# {palace}/epoch.json. Every chunk is tagged with its mine_epoch in metadata,
+# giving every drawer a "generation number" that identifies which mine run
+# produced it. This enables:
+#   - Knowing how stale a chunk is (current_epoch - chunk.mine_epoch)
+#   - Reconstructing the palace state at any previous epoch
+#   - Auditing which mine run introduced any given piece of content
+#
+# REVISION SNAPSHOTS
+# ------------------
+# When a file is re-mined, upstream's #521 fix (delete-before-insert) purges
+# all existing chunks for that file before the fresh ones are written. This
+# avoids hnswlib segfaults but also destroys the previous version of the file.
+# _snapshot_revisions() runs just before that delete, capturing the chunks to
+# {palace}/revisions.jsonl so the previous version can still be retrieved.
+
+
+def _load_epoch(palace_path: str) -> int:
+    """Load the current mine epoch from the palace. Returns 0 if none exists."""
+    epoch_file = os.path.join(palace_path, "epoch.json")
+    if os.path.exists(epoch_file):
+        try:
+            with open(epoch_file) as f:
+                return json.load(f).get("current", 0)
+        except Exception:
+            return 0
+    return 0
+
+
+def _save_epoch(palace_path: str, epoch: int):
+    """Persist the current mine epoch."""
+    epoch_file = os.path.join(palace_path, "epoch.json")
+    with open(epoch_file, "w") as f:
+        json.dump({
+            "current": epoch,
+            "last_mine": datetime.now().isoformat(),
+        }, f)
+
+
+def _snapshot_revisions(palace_path: str, collection, source_file: str, mine_epoch: int):
+    """Save the current chunks for source_file to revisions.jsonl before deletion.
+
+    Captures each chunk's full content and metadata so the previous version
+    can be reconstructed or queried later. Called just before upstream's
+    delete-before-insert purge in process_file() so that the snapshot records
+    exactly what is about to be discarded.
+    """
+    revisions_path = os.path.join(palace_path, "revisions.jsonl")
+    existing = collection.get(
+        where={"source_file": source_file},
+        include=["documents", "metadatas"],
+    )
+    if not existing.get("ids"):
+        return
+    superseded_at = datetime.now().isoformat()
+    with open(revisions_path, "a") as f:
+        for id_, doc, meta in zip(
+            existing["ids"], existing["documents"], existing["metadatas"]
+        ):
+            record = {
+                "superseded_at": superseded_at,
+                "superseded_by_epoch": mine_epoch,
+                "source_file": meta.get("source_file", ""),
+                "chunk_index": meta.get("chunk_index", 0),
+                "content": doc,
+                "original_epoch": meta.get("mine_epoch", 0),
+                "original_filed_at": meta.get("filed_at", ""),
+                "wing": meta.get("wing", ""),
+                "room": meta.get("room", ""),
+            }
+            f.write(json.dumps(record) + "\n")
 
 
 # =============================================================================
@@ -371,7 +449,8 @@ def chunk_text(content: str, source_file: str) -> list:
 
 
 def add_drawer(
-    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
+    collection, wing: str, room: str, content: str, source_file: str,
+    chunk_index: int, agent: str, mine_epoch: int = 0,
 ):
     """Add one drawer to the palace."""
     drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
@@ -383,6 +462,7 @@ def add_drawer(
             "chunk_index": chunk_index,
             "added_by": agent,
             "filed_at": datetime.now().isoformat(),
+            "mine_epoch": mine_epoch,
         }
         # Store file mtime so we can detect modifications later.
         try:
@@ -412,8 +492,15 @@ def process_file(
     rooms: list,
     agent: str,
     dry_run: bool,
+    palace_path: str = "",
+    mine_epoch: int = 0,
 ) -> tuple:
-    """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
+    """Read, chunk, route, and file one file. Returns (drawer_count, room_name).
+
+    When a file is re-mined, its existing chunks are snapshotted to
+    {palace}/revisions.jsonl before the delete-before-insert purge, preserving
+    a queryable history of what the file used to contain.
+    """
 
     # Skip if already filed
     source_file = str(filepath)
@@ -436,6 +523,16 @@ def process_file(
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
         return len(chunks), room
 
+    # Snapshot the current chunks to revisions.jsonl before they get purged.
+    # This runs before upstream's delete-before-insert so we capture exactly
+    # what is about to be discarded. Best-effort — never fail mining over a
+    # snapshot error.
+    if palace_path:
+        try:
+            _snapshot_revisions(palace_path, collection, source_file, mine_epoch)
+        except Exception:
+            pass
+
     # Purge stale drawers for this file before re-inserting the fresh chunks.
     # Converts modified-file re-mines from upsert-over-existing-IDs (which hits
     # hnswlib's thread-unsafe updatePoint path and can segfault on macOS ARM
@@ -456,6 +553,7 @@ def process_file(
             source_file=source_file,
             chunk_index=chunk["chunk_index"],
             agent=agent,
+            mine_epoch=mine_epoch,
         )
         if added:
             drawers_added += 1
@@ -563,6 +661,15 @@ def mine(
     if limit > 0:
         files = files[:limit]
 
+    # Increment the mine epoch for this run — every chunk filed below will
+    # carry this epoch number in its metadata, and revisions.jsonl records
+    # will use it as the "superseded_by_epoch" marker.
+    if not dry_run:
+        mine_epoch = _load_epoch(palace_path) + 1
+        _save_epoch(palace_path, mine_epoch)
+    else:
+        mine_epoch = 0
+
     print(f"\n{'=' * 55}")
     print("  MemPalace Mine")
     print(f"{'=' * 55}")
@@ -570,6 +677,8 @@ def mine(
     print(f"  Rooms:   {', '.join(r['name'] for r in rooms)}")
     print(f"  Files:   {len(files)}")
     print(f"  Palace:  {palace_path}")
+    if not dry_run:
+        print(f"  Epoch:   {mine_epoch}")
     if dry_run:
         print("  DRY RUN — nothing will be filed")
     if not respect_gitignore:
@@ -596,6 +705,8 @@ def mine(
             rooms=rooms,
             agent=agent,
             dry_run=dry_run,
+            palace_path=palace_path,
+            mine_epoch=mine_epoch,
         )
         if drawers == 0 and not dry_run:
             files_skipped += 1
@@ -640,8 +751,13 @@ def status(palace_path: str):
     for m in metas:
         wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
 
+    # Show current epoch if one is tracked
+    epoch = _load_epoch(palace_path)
+
     print(f"\n{'=' * 55}")
     print(f"  MemPalace Status — {len(metas)} drawers")
+    if epoch > 0:
+        print(f"  Current epoch: {epoch}")
     print(f"{'=' * 55}\n")
     for wing, rooms in sorted(wing_rooms.items()):
         print(f"  WING: {wing}")
