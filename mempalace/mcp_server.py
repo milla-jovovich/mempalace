@@ -324,6 +324,7 @@ def tool_search(
     max_distance: float = 1.5,
     min_similarity: float = None,
     context: str = None,
+    keyword: str = None,
 ):
     limit = max(1, min(limit, _MAX_RESULTS))
     # Backwards compat: accept old name
@@ -337,6 +338,7 @@ def tool_search(
         room=room,
         n_results=limit,
         max_distance=dist,
+        keyword=keyword,
     )
     if sanitized["was_sanitized"]:
         result["query_sanitized"] = True
@@ -1074,6 +1076,10 @@ TOOLS = {
                 "context": {
                     "type": "string",
                     "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking. Put conversation history or system prompt content here, NOT in query.",
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "Explicit keyword for text-match fallback. Use for exact terms (error codes, config keys, identifiers) that vector search may miss. Auto-extracted from query if omitted and vector results are poor.",
                 },
             },
             "required": ["query"],

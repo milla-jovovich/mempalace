@@ -272,6 +272,19 @@ def _save_diary_direct(
     return {"count": 0}
 
 
+def _wing_from_transcript_path(transcript_path: str) -> str:
+    """Derive a project wing name from a Claude Code transcript path.
+
+    Claude Code stores transcripts at:
+        ~/.claude/projects/-home-<user>-Projects-<project>/session.jsonl
+    We extract <project> as the wing name.  Falls back to "sessions".
+    """
+    match = re.search(r"-Projects-([^/]+?)(?:/|$)", transcript_path)
+    if match:
+        return match.group(1).lower().replace(" ", "_")
+    return "sessions"
+
+
 def _ingest_transcript(transcript_path: str):
     """Mine a Claude Code session transcript into the palace as a conversation."""
     path = Path(transcript_path).expanduser()
@@ -284,6 +297,8 @@ def _ingest_transcript(transcript_path: str):
         MempalaceConfig()  # validate config loads
     except Exception:
         return
+
+    wing = _wing_from_transcript_path(str(path))
 
     try:
         log_path = STATE_DIR / "hook.log"
@@ -299,12 +314,12 @@ def _ingest_transcript(transcript_path: str):
                     "--mode",
                     "convos",
                     "--wing",
-                    "sessions",
+                    wing,
                 ],
                 stdout=log_f,
                 stderr=log_f,
             )
-        _log(f"Transcript ingest started: {path.name}")
+        _log(f"Transcript ingest started: {path.name} → wing:{wing}")
     except OSError:
         pass
 
