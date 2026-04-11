@@ -83,10 +83,16 @@ Delete a room and all drawers in that room:
 
     mempalace delete room --name <room> --wing <wing> --yes
     mempalace delete room --name <room> --dry-run
+    mempalace delete room --name <room> --all --yes
 
-Delete all rooms:
+Delete every room:
 
     mempalace delete room --all --yes
+
+If you omit --wing for delete room --name <room> and the room exists in more than one wing:
+
+    - Interactive terminal: MemPalace prompts you to choose a wing.
+    - Non-interactive mode: the command exits and asks for --wing.
 
 Delete a wing and all drawers in that wing:
 
@@ -95,16 +101,15 @@ Delete a wing and all drawers in that wing:
 
 Delete all wings:
 
-    mempalace delete wing --all --yes
+    mempalace delete wing --all
 
 Safety behavior:
 
 - Use --dry-run to preview deletions without deleting anything.
 - Bulk deletes require --yes.
 - For drawer filter deletes, use --all when multiple drawers match.
-- If deleting by room name without --wing and the room exists in multiple wings:
-  - Interactive terminal: MemPalace prompts you to choose a wing.
-  - Non-interactive mode (scripts/CI): command exits and asks for --wing.
+- delete wing --all uses an interactive confirmation prompt before deleting every wing.
+- In non-interactive shells, delete wing --all fails safely instead of guessing.
 
 ---
 
