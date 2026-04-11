@@ -3,7 +3,7 @@ name = "mempalace"
 version = "3.0.14"
 description = "Give your AI a memory — mine projects and conversations into a searchable palace. No API key required."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9, <3.14"
 license = "MIT"
 authors = [
     {name = "milla-jovovich"},
@@ -66,6 +66,12 @@ quote-style = "double"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-m 'not benchmark and not slow and not stress'"
+filterwarnings = [
+    # ChromaDB 0.6.x uses model_fields on instances — fixed in ChromaDB 1.x (see upgrade task)
+    "ignore::pydantic.warnings.PydanticDeprecatedSince211:chromadb",
+    # ChromaDB 0.6.x calls tar.extractall() without filter — fixed in ChromaDB 1.x
+    "ignore:Python 3.14 will:DeprecationWarning:chromadb",
+]
 markers = [
     "benchmark: scale/performance benchmark tests",
     "slow: tests that take more than 30 seconds",
