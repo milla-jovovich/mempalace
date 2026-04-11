@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mempalace.cli import (
+    cmd_delete,
     cmd_compress,
     cmd_hook,
     cmd_init,
@@ -97,6 +98,90 @@ def test_cmd_hook_calls_run_hook():
     with patch("mempalace.hooks_cli.run_hook") as mock_run:
         cmd_hook(args)
         mock_run.assert_called_once_with(hook_name="session-start", harness="claude-code")
+
+
+# ── cmd_delete ────────────────────────────────────────────────────────
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_drawer_by_id(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="drawer",
+        id="drawer-1",
+        wing=None,
+        room=None,
+        all=False,
+        dry_run=False,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.return_value = {"ids": ["drawer-1"]}
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        cmd_delete(args)
+    mock_col.delete.assert_called_once_with(ids=["drawer-1"])
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_drawer_requires_all_for_multiple(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="drawer",
+        id=None,
+        wing="wing-a",
+        room=None,
+        all=False,
+        dry_run=False,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [
+        {"ids": ["a", "b"]},
+        {"ids": []},
+    ]
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        with pytest.raises(SystemExit):
+            cmd_delete(args)
+    # ensure we fetched the IDs but did not delete
+    mock_col.delete.assert_not_called()
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_room_dry_run(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="room",
+        name="general",
+        wing=None,
+        all=False,
+        dry_run=True,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [
+        {"ids": ["a", "b", "c"]},
+        {"ids": []},
+    ]
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        cmd_delete(args)
+    out = capsys.readouterr().out
+    assert "Would delete" in out
+    mock_col.delete.assert_not_called()
 
 
 # ── cmd_init ───────────────────────────────────────────────────────────
@@ -322,6 +407,15 @@ def test_main_split_dispatches():
     with (
         patch("sys.argv", ["mempalace", "split", "/chats"]),
         patch("mempalace.cli.cmd_split") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+
+
+def test_main_delete_dispatches():
+    with (
+        patch("sys.argv", ["mempalace", "delete", "drawer", "--id", "abc"]),
+        patch("mempalace.cli.cmd_delete") as mock_cmd,
     ):
         main()
         mock_cmd.assert_called_once()

@@ -13,6 +13,9 @@ Commands:
     mempalace split <dir>                 Split concatenated mega-files into per-session files
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
+    mempalace delete drawer --id <id>     Delete a specific drawer (or filters with --all)
+    mempalace delete room --name <room>   Delete a room and its drawers (optionally by wing)
+    mempalace delete wing --name <wing>   Delete a wing and all drawers
     mempalace search "query"              Find anything, exact words
     mempalace mcp                         Show MCP setup command
     mempalace wake-up                     Show L0 + L1 wake-up context
@@ -393,6 +396,117 @@ def cmd_compress(args):
         print("  (dry run -- nothing stored)")
 
 
+def _load_drawer_ids(col, where=None, batch_size: int = 500):
+    """Collect drawer IDs matching a filter to enable safe bulk deletion."""
+    ids = []
+    offset = 0
+    while True:
+        kwargs = {"include": ["ids"], "limit": batch_size, "offset": offset}
+        if where:
+            kwargs["where"] = where
+        batch = col.get(**kwargs)
+        batch_ids = batch.get("ids", [])
+        if not batch_ids:
+            break
+        ids.extend(batch_ids)
+        offset += len(batch_ids)
+        if len(batch_ids) < batch_size:
+            break
+    return ids
+
+
+def _delete_ids(col, ids, batch_size: int = 500):
+    for i in range(0, len(ids), batch_size):
+        col.delete(ids=ids[i : i + batch_size])
+
+
+def cmd_delete(args):
+    """Delete drawers, rooms, or wings from the palace."""
+    import chromadb
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    try:
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection("mempalace_drawers")
+    except Exception:
+        print(f"\n  No palace found at {palace_path}")
+        print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        sys.exit(1)
+
+    def _confirm_bulk(count: int):
+        if count > 1 and not args.yes and not args.dry_run:
+            print(f"\n  Refusing to delete {count} drawers without --yes.")
+            sys.exit(1)
+
+    def _handle_deletion(ids, label: str):
+        if not ids:
+            print(f"\n  No drawers found for {label}.")
+            return
+        if args.dry_run:
+            print(f"\n  Would delete {len(ids)} drawer(s) for {label}.")
+            return
+        _confirm_bulk(len(ids))
+        try:
+            _delete_ids(col, ids)
+            print(f"\n  Deleted {len(ids)} drawer(s) for {label}.")
+        except Exception as e:
+            print(f"\n  Error deleting drawers for {label}: {e}")
+            sys.exit(1)
+
+    target = getattr(args, "delete_target", None)
+    if target == "drawer":
+        if args.id:
+            existing = col.get(ids=[args.id]).get("ids", [])
+            if not existing:
+                print(f"\n  Drawer not found: {args.id}")
+                sys.exit(1)
+            _handle_deletion(existing, f"drawer '{args.id}'")
+            return
+
+        filters = {}
+        if args.wing:
+            filters["wing"] = args.wing
+        if args.room:
+            filters["room"] = args.room
+        ids = _load_drawer_ids(col, filters or None)
+        if len(ids) > 1 and not args.all and not args.dry_run:
+            print(
+                "\n  Multiple drawers match the filters. Use --all to delete them or pass --id for a single drawer."
+            )
+            sys.exit(1)
+        _handle_deletion(ids, "selected drawers")
+        return
+
+    if target == "room":
+        if not args.name and not args.all:
+            print("\n  Provide --name to delete a room or --all to delete every room.")
+            sys.exit(1)
+        filters = {}
+        if args.name:
+            filters["room"] = args.name
+        if args.wing:
+            filters["wing"] = args.wing
+        ids = _load_drawer_ids(col, filters or None)
+        label = f"room '{args.name}'" if args.name else "all rooms"
+        _handle_deletion(ids, label)
+        return
+
+    if target == "wing":
+        if not args.name and not args.all:
+            print("\n  Provide --name to delete a wing or --all to delete every wing.")
+            sys.exit(1)
+        filters = {}
+        if args.name:
+            filters["wing"] = args.name
+        ids = _load_drawer_ids(col, filters or None)
+        label = f"wing '{args.name}'" if args.name else "all wings"
+        _handle_deletion(ids, label)
+        return
+
+    print("\n  Unknown delete target. Use: drawer, room, or wing.")
+    sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
@@ -497,6 +611,47 @@ def main():
         help="Only split files containing at least N sessions (default: 2)",
     )
 
+    # delete
+    p_delete = sub.add_parser(
+        "delete",
+        help="Delete drawers, rooms, or wings",
+    )
+    delete_sub = p_delete.add_subparsers(dest="delete_target")
+    p_delete_drawer = delete_sub.add_parser("drawer", help="Delete a drawer or matching drawers")
+    p_delete_drawer.add_argument("--id", help="Drawer ID to delete")
+    p_delete_drawer.add_argument("--wing", help="Wing to scope deletion")
+    p_delete_drawer.add_argument("--room", help="Room to scope deletion")
+    p_delete_drawer.add_argument(
+        "--all",
+        action="store_true",
+        help="Delete all drawers that match the provided filters",
+    )
+    p_delete_drawer.add_argument("--dry-run", action="store_true", help="Preview deletions")
+    p_delete_drawer.add_argument(
+        "--yes", action="store_true", help="Confirm deletion when multiple drawers match"
+    )
+
+    p_delete_room = delete_sub.add_parser("room", help="Delete a room (removes its drawers)")
+    p_delete_room.add_argument("--name", help="Room name to delete")
+    p_delete_room.add_argument("--wing", help="Wing to scope deletion")
+    p_delete_room.add_argument(
+        "--all", action="store_true", help="Delete every room (removes all drawers)"
+    )
+    p_delete_room.add_argument("--dry-run", action="store_true", help="Preview deletions")
+    p_delete_room.add_argument(
+        "--yes", action="store_true", help="Confirm deletion of all drawers in the room(s)"
+    )
+
+    p_delete_wing = delete_sub.add_parser("wing", help="Delete a wing (all rooms + drawers)")
+    p_delete_wing.add_argument("--name", help="Wing name to delete")
+    p_delete_wing.add_argument(
+        "--all", action="store_true", help="Delete every wing (clears the palace)"
+    )
+    p_delete_wing.add_argument("--dry-run", action="store_true", help="Preview deletions")
+    p_delete_wing.add_argument(
+        "--yes", action="store_true", help="Confirm deletion of all drawers in the wing(s)"
+    )
+
     # hook
     p_hook = sub.add_parser(
         "hook",
@@ -573,6 +728,13 @@ def main():
             return
         args.name = name
         cmd_instructions(args)
+        return
+
+    if args.command == "delete":
+        if not getattr(args, "delete_target", None):
+            p_delete.print_help()
+            return
+        cmd_delete(args)
         return
 
     dispatch = {
