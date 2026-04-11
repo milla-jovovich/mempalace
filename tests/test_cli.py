@@ -300,6 +300,15 @@ def test_main_init_dispatches():
         mock_cmd.assert_called_once()
 
 
+def test_main_init_defaults_to_current_directory():
+    with (
+        patch("sys.argv", ["mempalace", "init"]),
+        patch("mempalace.cli.cmd_init") as mock_cmd,
+    ):
+        main()
+        assert mock_cmd.call_args.args[0].dir == "."
+
+
 def test_main_mine_dispatches():
     with (
         patch("sys.argv", ["mempalace", "mine", "/some/dir"]),
@@ -546,10 +555,10 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -564,6 +573,8 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     out = capsys.readouterr().out
     assert "dry run" in out.lower()
     assert "Compressing" in out
+    assert "25t -> 8t (3.3x)" in out
+    assert "Total: 25t -> 8t (3.1x compression)" in out
 
 
 @patch("mempalace.cli.MempalaceConfig")
@@ -619,10 +630,10 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -636,6 +647,7 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
         cmd_compress(args)
     out = capsys.readouterr().out
     assert "Stored" in out
+    assert "Total: 25t -> 8t (3.1x compression)" in out
     mock_comp_col.upsert.assert_called_once()
 
 

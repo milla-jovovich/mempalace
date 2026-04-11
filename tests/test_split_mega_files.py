@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from mempalace import split_mega_files as smf
 
@@ -11,6 +12,7 @@ def test_load_known_people_falls_back_when_config_missing(monkeypatch, tmp_path)
     smf._KNOWN_NAMES_CACHE = None
 
     assert smf._load_known_people() == smf._FALLBACK_KNOWN_PEOPLE
+    assert smf._load_known_people() == []
     assert smf._load_username_map() == {}
 
 
@@ -290,3 +292,72 @@ def test_split_file_tiny_fragments_skipped(tmp_path):
     # The first chunk is very small, should be skipped
     for p in written:
         assert p.stat().st_size > 0
+
+
+def test_main_expands_user_paths(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    src_dir = home / "transcripts"
+    out_dir = home / "output"
+    src_dir.mkdir(parents=True)
+    out_dir.mkdir(parents=True)
+    (src_dir / "mega.txt").write_text("placeholder\n")
+
+    monkeypatch.setenv("HOME", str(home))
+
+    captured = {}
+
+    def fake_split_file(filepath, output_dir, dry_run=False):
+        captured["filepath"] = filepath
+        captured["output_dir"] = output_dir
+        captured["dry_run"] = dry_run
+        return []
+
+    with (
+        patch.object(smf, "find_session_boundaries", return_value=[0, 1]),
+        patch.object(smf, "split_file", side_effect=fake_split_file),
+        patch(
+            "sys.argv",
+            [
+                "split_mega_files.py",
+                "--source",
+                "~/transcripts",
+                "--output-dir",
+                "~/output",
+                "--dry-run",
+            ],
+        ),
+    ):
+        smf.main()
+
+    assert captured["filepath"] == src_dir / "mega.txt"
+    assert captured["output_dir"] == str(out_dir)
+    assert captured["dry_run"] is True
+
+
+def test_main_expands_env_default_source_dir(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    src_dir = home / "transcripts"
+    src_dir.mkdir(parents=True)
+    (src_dir / "mega.txt").write_text("placeholder\n")
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("MEMPALACE_SOURCE_DIR", "~/transcripts")
+
+    captured = {}
+
+    def fake_split_file(filepath, output_dir, dry_run=False):
+        captured["filepath"] = filepath
+        captured["output_dir"] = output_dir
+        captured["dry_run"] = dry_run
+        return []
+
+    with (
+        patch.object(smf, "find_session_boundaries", return_value=[0, 1]),
+        patch.object(smf, "split_file", side_effect=fake_split_file),
+        patch("sys.argv", ["split_mega_files.py", "--dry-run"]),
+    ):
+        smf.main()
+
+    assert captured["filepath"] == src_dir / "mega.txt"
+    assert captured["output_dir"] is None
+    assert captured["dry_run"] is True

@@ -629,7 +629,7 @@ def status(palace_path: str):
         col = client.get_collection("mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
-        print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        print("  Run: mempalace init [dir] then mempalace mine <dir>")
         return
 
     # Count by wing and room

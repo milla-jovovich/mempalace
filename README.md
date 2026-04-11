@@ -25,7 +25,6 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 [![][version-shield]][release-link]
 [![][python-shield]][python-link]
 [![][license-shield]][license-link]
-[![][discord-shield]][discord-link]
 
 <br>
 
@@ -572,7 +571,7 @@ The 96.6% raw score is the highest published LongMemEval result requiring no API
 
 ```bash
 # Setup
-mempalace init <dir>                              # guided onboarding + AAAK bootstrap
+mempalace init [dir]                              # guided onboarding + AAAK bootstrap
 
 # Mining
 mempalace mine <dir>                              # mine project files
@@ -728,5 +727,3 @@ MIT — see [LICENSE](LICENSE).
 [python-link]: https://www.python.org/
 [license-shield]: https://img.shields.io/badge/license-MIT-b0e8ff?style=flat-square&labelColor=0a0e14
 [license-link]: https://github.com/milla-jovovich/mempalace/blob/main/LICENSE
-[discord-shield]: https://img.shields.io/badge/discord-join-5865F2?style=flat-square&labelColor=0a0e14&logo=discord&logoColor=5865F2
-[discord-link]: https://discord.com/invite/ycTQQCu6kn

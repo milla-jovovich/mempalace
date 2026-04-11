@@ -9,7 +9,7 @@ Two ways to ingest:
 Same palace. Same search. Different ingest strategies.
 
 Commands:
-    mempalace init <dir>                  Detect rooms from folder structure
+    mempalace init [dir]                  Detect rooms from folder structure
     mempalace split <dir>                 Split concatenated mega-files into per-session files
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
@@ -20,6 +20,7 @@ Commands:
     mempalace status                      Show what's been filed
 
 Examples:
+    mempalace init
     mempalace init ~/projects/my_app
     mempalace mine ~/projects/my_app
     mempalace mine ~/chats/claude-sessions --mode convos
@@ -299,7 +300,7 @@ def cmd_compress(args):
         col = client.get_collection("mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
-        print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        print("  Run: mempalace init [dir] then mempalace mine <dir>")
         sys.exit(1)
 
     # Query drawers in batches to avoid SQLite variable limit (~999)
@@ -340,27 +341,28 @@ def cmd_compress(args):
     )
     print()
 
-    total_original = 0
-    total_compressed = 0
+    total_original_tokens = 0
+    total_summary_tokens = 0
     compressed_entries = []
 
     for doc, meta, doc_id in zip(docs, metas, ids):
         compressed = dialect.compress(doc, metadata=meta)
         stats = dialect.compression_stats(doc, compressed)
+        original_tokens = stats["original_tokens_est"]
+        summary_tokens = stats["summary_tokens_est"]
+        size_ratio = stats["size_ratio"]
 
-        total_original += stats["original_chars"]
-        total_compressed += stats["compressed_chars"]
+        total_original_tokens += original_tokens
+        total_summary_tokens += summary_tokens
 
-        compressed_entries.append((doc_id, compressed, meta, stats))
+        compressed_entries.append((doc_id, compressed, meta, original_tokens, summary_tokens, size_ratio))
 
         if args.dry_run:
             wing_name = meta.get("wing", "?")
             room_name = meta.get("room", "?")
             source = Path(meta.get("source_file", "?")).name
             print(f"  [{wing_name}/{room_name}] {source}")
-            print(
-                f"    {stats['original_tokens']}t -> {stats['compressed_tokens']}t ({stats['ratio']:.1f}x)"
-            )
+            print(f"    {original_tokens}t -> {summary_tokens}t ({size_ratio:.1f}x)")
             print(f"    {compressed}")
             print()
 
@@ -368,10 +370,11 @@ def cmd_compress(args):
     if not args.dry_run:
         try:
             comp_col = client.get_or_create_collection("mempalace_compressed")
-            for doc_id, compressed, meta, stats in compressed_entries:
+            for doc_id, compressed, meta, original_tokens, summary_tokens, size_ratio in compressed_entries:
                 comp_meta = dict(meta)
-                comp_meta["compression_ratio"] = round(stats["ratio"], 1)
-                comp_meta["original_tokens"] = stats["original_tokens"]
+                comp_meta["compression_ratio"] = size_ratio
+                comp_meta["original_tokens"] = original_tokens
+                comp_meta["summary_tokens"] = summary_tokens
                 comp_col.upsert(
                     ids=[doc_id],
                     documents=[compressed],
@@ -385,10 +388,10 @@ def cmd_compress(args):
             sys.exit(1)
 
     # Summary
-    ratio = total_original / max(total_compressed, 1)
-    orig_tokens = Dialect.count_tokens("x" * total_original)
-    comp_tokens = Dialect.count_tokens("x" * total_compressed)
-    print(f"  Total: {orig_tokens:,}t -> {comp_tokens:,}t ({ratio:.1f}x compression)")
+    ratio = total_original_tokens / max(total_summary_tokens, 1)
+    print(
+        f"  Total: {total_original_tokens:,}t -> {total_summary_tokens:,}t ({ratio:.1f}x compression)"
+    )
     if args.dry_run:
         print("  (dry run -- nothing stored)")
 
@@ -409,7 +412,12 @@ def main():
 
     # init
     p_init = sub.add_parser("init", help="Detect rooms from your folder structure")
-    p_init.add_argument("dir", help="Project directory to set up")
+    p_init.add_argument(
+        "dir",
+        nargs="?",
+        default=".",
+        help="Project directory to set up (default: current directory)",
+    )
     p_init.add_argument(
         "--yes", action="store_true", help="Auto-accept all detected entities (non-interactive)"
     )

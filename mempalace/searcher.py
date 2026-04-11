@@ -28,7 +28,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         col = client.get_collection("mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
-        print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        print("  Run: mempalace init [dir] then mempalace mine <dir>")
         raise SearchError(f"No palace found at {palace_path}")
 
     # Build where filter
@@ -104,7 +104,7 @@ def search_memories(
         logger.error("No palace found at %s: %s", palace_path, e)
         return {
             "error": "No palace found",
-            "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
+            "hint": "Run: mempalace init [dir] && mempalace mine <dir>",
         }
 
     # Build where filter
