@@ -297,6 +297,61 @@ def test_claude_ai_privacy_export_non_dict_items():
     assert result is not None
 
 
+def test_claude_ai_privacy_export_sender_field():
+    """Real claude.ai privacy export uses 'sender' rather than 'role'."""
+    data = [
+        {
+            "uuid": "convo-1",
+            "chat_messages": [
+                {
+                    "uuid": "msg-1",
+                    "sender": "human",
+                    "content": [{"type": "text", "text": "What is memory?"}],
+                    "text": "What is memory?",
+                },
+                {
+                    "uuid": "msg-2",
+                    "sender": "assistant",
+                    "content": [{"type": "text", "text": "Memory is persistence."}],
+                    "text": "Memory is persistence.",
+                },
+            ],
+        }
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "> What is memory?" in result
+    assert "Memory is persistence." in result
+
+
+def test_claude_ai_privacy_export_text_field_fallback():
+    """Falls back to top-level 'text' when 'content' yields nothing."""
+    data = [
+        {
+            "chat_messages": [
+                {"sender": "human", "content": [], "text": "Q via text"},
+                {"sender": "assistant", "content": [], "text": "A via text"},
+            ]
+        }
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "> Q via text" in result
+    assert "A via text" in result
+
+
+def test_claude_ai_flat_messages_sender_field():
+    """Flat messages list with 'sender' field is also supported."""
+    data = [
+        {"sender": "human", "content": "Hello"},
+        {"sender": "assistant", "content": "Hi there"},
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "> Hello" in result
+    assert "Hi there" in result
+
+
 # ── _try_chatgpt_json ─────────────────────────────────────────────────
 
 
