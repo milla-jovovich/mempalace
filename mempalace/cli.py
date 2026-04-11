@@ -34,6 +34,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .version import __version__
 
 
 def cmd_init(args):
@@ -393,12 +394,25 @@ def cmd_compress(args):
         print("  (dry run -- nothing stored)")
 
 
+def cmd_version(args):
+    del args
+    print(f"mempalace {__version__}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
+
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="store_true",
+        help="Show installed version and exit",
+    )
+
     parser.add_argument(
         "--palace",
         default=None,
@@ -553,6 +567,10 @@ def main():
     sub.add_parser("status", help="Show what's been filed")
 
     args = parser.parse_args()
+
+    if args.version:
+        cmd_version(args)
+        return
 
     if not args.command:
         parser.print_help()

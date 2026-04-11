@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mempalace import __version__
 from mempalace.cli import (
     cmd_compress,
     cmd_hook,
@@ -17,9 +18,27 @@ from mempalace.cli import (
     cmd_search,
     cmd_split,
     cmd_status,
+    cmd_version,
     cmd_wakeup,
     main,
 )
+
+# ── cmd_version ─────────────────────────────────────────────────────────
+
+
+def test_cmd_version(capsys):
+    cmd_version(argparse.Namespace())
+    out = capsys.readouterr().out.strip()
+    assert out == f"mempalace {__version__}"
+
+
+@pytest.mark.parametrize("flag", ["-v", "--version"])
+def test_main_version_flag(flag, capsys):
+    with patch.object(sys, "argv", ["mempalace", flag]):
+        main()
+
+    out = capsys.readouterr().out.strip()
+    assert out == f"mempalace {__version__}"
 
 
 # ── cmd_status ─────────────────────────────────────────────────────────
