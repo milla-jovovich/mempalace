@@ -4,6 +4,11 @@ test_searcher.py — Tests for the programmatic search_memories API.
 Tests the library-facing search interface (not the CLI print variant).
 """
 
+import json
+
+import pytest
+
+from mempalace.compat import meta_path
 from mempalace.searcher import search_memories
 
 
@@ -43,3 +48,14 @@ class TestSearchMemories:
         assert "source_file" in hit
         assert "similarity" in hit
         assert isinstance(hit["similarity"], float)
+
+    def test_mismatched_chroma_major_raises(self, palace_path, seeded_collection):
+        """ensure_palace_safe blocks search when Chroma major doesn't match."""
+        path = meta_path(palace_path)
+        path.write_text(json.dumps({
+            "mempalace_version": "0.0.0",
+            "chromadb_version": "999.0.0",
+            "chromadb_major": 999,
+        }))
+        with pytest.raises(RuntimeError, match="Refusing to proceed"):
+            search_memories("anything", palace_path)
