@@ -702,7 +702,7 @@ mempalace/
 ## Requirements
 
 - Python 3.9+
-- `chromadb>=0.4.0`
+- `chromadb>=0.5.0`
 - `pyyaml>=6.0`
 
 No API key. No internet after install. Everything local.

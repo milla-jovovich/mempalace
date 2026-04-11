@@ -12,7 +12,7 @@ class TestLoadKnownNames:
     def test_returns_names_from_registry(self):
         mock_reg = MagicMock()
         mock_reg._data = {
-            "entities": {
+            "people": {
                 "e1": {"canonical": "Alice", "aliases": ["ali"]},
                 "e2": {"canonical": "Bob", "aliases": []},
             }
