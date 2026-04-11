@@ -36,7 +36,15 @@ Both hooks now have **two-layer capture**:
 
 2. **Updated reason messages**: The block reason now explicitly tells the AI to save tool output verbatim — not just topics and decisions.
 
-### 4. Configuration
+### 4. Backfill past conversations (one-time)
+
+The hooks capture conversations going forward, but you probably have months of past sessions. Run this once to mine them all:
+
+```bash
+mempalace mine ~/.claude/projects/ --mode convos
+```
+
+### 5. Configuration
 
 - **`SAVE_INTERVAL=15`** — How many human messages between saves
 - **`MEMPALACE_PYTHON`** — Python interpreter with mempalace + chromadb. Auto-detects: env var → repo venv → system python3

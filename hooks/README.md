@@ -142,6 +142,23 @@ Example output:
 [14:40:01] Session abc123: 18 exchanges, 3 since last save
 ```
 
+## Backfill Past Conversations
+
+The hooks only capture conversations going forward. To mine **past** Claude Code sessions into your palace, run a one-time backfill:
+
+```bash
+mempalace mine ~/.claude/projects/ --mode convos
+```
+
+This scans all JSONL transcripts from previous sessions and files them into the `conversations` wing. On a typical developer machine with months of history, this can yield 50K–200K drawers.
+
+For Codex CLI sessions:
+```bash
+mempalace mine ~/.codex/sessions/ --mode convos
+```
+
+This only needs to be done once — after that, the hooks auto-mine each session as you go.
+
 ## Cost
 
 **Zero extra API tokens.** The hooks are bash scripts that run locally. They don't call any API. The auto-mining uses the local ChromaDB instance. The only "cost" is:
