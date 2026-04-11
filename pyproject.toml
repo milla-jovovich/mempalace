@@ -54,10 +54,14 @@ packages = ["mempalace"]
 [tool.ruff]
 line-length = 100
 target-version = "py39"
+extend-exclude = ["benchmarks"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W"]
+select = ["E", "F", "W", "C901"]
 ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 25
 
 [tool.ruff.format]
 quote-style = "double"
