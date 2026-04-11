@@ -597,7 +597,7 @@ def mine(
             agent=agent,
             dry_run=dry_run,
         )
-        if drawers == 0 and not dry_run:
+        if drawers == 0:
             files_skipped += 1
         else:
             total_drawers += drawers
