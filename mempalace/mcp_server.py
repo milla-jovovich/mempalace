@@ -15,6 +15,10 @@ Tools (read):
 Tools (write):
   mempalace_add_drawer      — file verbatim content into a wing/room
   mempalace_delete_drawer   — remove a drawer by ID
+  mempalace_archive_wing    — hide a wing from default search (status lists it)
+  mempalace_unarchive_wing  — restore a wing to default search
+  mempalace_archive_room    — hide a room within a wing from search (data kept)
+  mempalace_unarchive_room  — restore a room to default search
 """
 
 import argparse
@@ -156,6 +160,12 @@ def tool_status():
         "total_drawers": count,
         "wings": wings,
         "rooms": rooms,
+        "archived_wings": sorted(_config.get_archived_wings()),
+        "archived_rooms": {
+            wing: sorted(_config.get_archived_rooms(wing))
+            for wing in _config.load_wing_config()
+            if _config.get_archived_rooms(wing)
+        },
         "palace_path": _config.palace_path,
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
@@ -246,14 +256,45 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+def tool_search(
+    query: str,
+    limit: int = 5,
+    wing: str = None,
+    room: str = None,
+    include_archived: bool = False,
+):
     return search_memories(
         query,
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
+        include_archived=include_archived,
     )
+
+
+def tool_archive_wing(wing: str):
+    """Mark a wing as archived — excluded from broad search until unarchived."""
+    changed = _config.archive_wing(wing)
+    return {"success": True, "wing": wing, "archived": True, "state_changed": changed}
+
+
+def tool_unarchive_wing(wing: str):
+    """Remove archived flag so the wing appears in broad search again."""
+    changed = _config.unarchive_wing(wing)
+    return {"success": True, "wing": wing, "archived": False, "state_changed": changed}
+
+
+def tool_archive_room(wing: str, room: str):
+    """Archive a specific room within a wing."""
+    state_changed = _config.archive_room(wing, room)
+    return {"wing": wing, "room": room, "archived": True, "state_changed": state_changed}
+
+
+def tool_unarchive_room(wing: str, room: str):
+    """Restore a room to active search results."""
+    state_changed = _config.unarchive_room(wing, room)
+    return {"wing": wing, "room": room, "archived": False, "state_changed": state_changed}
 
 
 def tool_check_duplicate(content: str, threshold: float = 0.9):
@@ -734,7 +775,7 @@ TOOLS = {
         "handler": tool_graph_stats,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
+        "description": "Semantic search. Returns verbatim drawer content with similarity scores. Archived wings are omitted from broad search unless include_archived is true or wing is set.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -742,10 +783,60 @@ TOOLS = {
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "include_archived": {
+                    "type": "boolean",
+                    "description": "Include drawers in archived wings when not filtering by wing (default: false)",
+                },
             },
             "required": ["query"],
         },
         "handler": tool_search,
+    },
+    "mempalace_archive_wing": {
+        "description": "Archive a wing — drawers remain in the palace but are excluded from broad semantic search until unarchived.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Wing name to archive"},
+            },
+            "required": ["wing"],
+        },
+        "handler": tool_archive_wing,
+    },
+    "mempalace_unarchive_wing": {
+        "description": "Unarchive a wing — include it in broad search again.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Wing name to restore"},
+            },
+            "required": ["wing"],
+        },
+        "handler": tool_unarchive_wing,
+    },
+    "mempalace_archive_room": {
+        "description": "Archive a specific room within a wing — excludes it from search without deleting data.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Wing containing the room"},
+                "room": {"type": "string", "description": "Room name to archive"},
+            },
+            "required": ["wing", "room"],
+        },
+        "handler": tool_archive_room,
+    },
+    "mempalace_unarchive_room": {
+        "description": "Restore an archived room to active search results.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Wing containing the room"},
+                "room": {"type": "string", "description": "Room name to unarchive"},
+            },
+            "required": ["wing", "room"],
+        },
+        "handler": tool_unarchive_room,
     },
     "mempalace_check_duplicate": {
         "description": "Check if content already exists in the palace before filing",
