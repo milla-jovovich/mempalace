@@ -565,6 +565,7 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     out = capsys.readouterr().out
     assert "dry run" in out.lower()
     assert "Compressing" in out
+    assert "Total:" in out
 
 
 @patch("mempalace.cli.MempalaceConfig")
@@ -638,24 +639,8 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
         cmd_compress(args)
     out = capsys.readouterr().out
     assert "Stored" in out
+    assert "Total:" in out
     mock_comp_col.upsert.assert_called_once()
-
-
-def test_compression_stats_keys_match_dialect():
-    """Verify cmd_compress uses the same keys that Dialect.compression_stats() returns."""
-    from mempalace.dialect import Dialect
-
-    d = Dialect()
-    stats = d.compression_stats("hello world this is a test", "HW:test")
-    expected_keys = {
-        "original_chars",
-        "summary_chars",
-        "original_tokens_est",
-        "summary_tokens_est",
-        "size_ratio",
-        "note",
-    }
-    assert set(stats.keys()) == expected_keys
 
 
 def test_cmd_repair_trailing_slash_does_not_recurse():
