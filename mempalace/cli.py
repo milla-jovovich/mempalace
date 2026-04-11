@@ -165,8 +165,122 @@ def cmd_status(args):
     status(palace_path=palace_path)
 
 
+def cmd_purge(args):
+    """Delete drawers by wing and/or room.
+
+    Extracts the drawers to *keep*, nukes the palace directory, and
+    re-inserts them into a fresh ChromaDB.  This avoids HNSW ghost entries
+    that ChromaDB’s in-place ``collection.delete()`` leaves behind, which
+    cause segfaults on subsequent queries or inserts.
+    """
+    import chromadb
+    import shutil
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    try:
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection("mempalace_drawers")
+    except Exception:
+        print(f"\n  No palace found at {palace_path}")
+        return
+
+    where = {}
+    if args.wing and args.room:
+        where = {"$and": [{"wing": args.wing}, {"room": args.room}]}
+    elif args.wing:
+        where = {"wing": args.wing}
+    elif args.room:
+        where = {"room": args.room}
+    else:
+        print("  Error: specify --wing and/or --room")
+        return
+
+    total = col.count()
+
+    # Count matching drawers
+    match_ids = set()
+    offset = 0
+    while True:
+        batch = col.get(limit=10000, offset=offset, where=where, include=[])
+        if not batch["ids"]:
+            break
+        match_ids.update(batch["ids"])
+        offset += len(batch["ids"])
+
+    if not match_ids:
+        label = f"wing={args.wing}" if args.wing else ""
+        if args.room:
+            label = f"{label} room={args.room}" if label else f"room={args.room}"
+        print(f"\n  No drawers found matching {label}\n")
+        return
+
+    label = f"wing={args.wing}" if args.wing else ""
+    if args.room:
+        label = f"{label} room={args.room}" if label else f"room={args.room}"
+    keep_count = total - len(match_ids)
+    print(f"\n  Found {len(match_ids):,} drawers matching {label}")
+    print(f"  Will keep {keep_count:,} drawers, rebuild index")
+
+    if not args.yes:
+        confirm = input(f"  Purge {len(match_ids):,} drawers? [y/N] ").strip().lower()
+        if confirm not in ("y", "yes"):
+            print("  Aborted.")
+            return
+
+    # Extract drawers to keep (everything NOT matching the filter)
+    print("  Extracting drawers to keep...")
+    keep_ids, keep_docs, keep_metas = [], [], []
+    offset = 0
+    batch_size = 5000
+    while offset < total:
+        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        if not batch["ids"]:
+            break
+        for i, doc_id in enumerate(batch["ids"]):
+            if doc_id not in match_ids:
+                keep_ids.append(doc_id)
+                keep_docs.append(batch["documents"][i])
+                keep_metas.append(batch["metadatas"][i])
+        offset += len(batch["ids"])
+    print(f"  Extracted {len(keep_ids):,} drawers to keep")
+
+    # Release client before nuking — ChromaDB holds open file handles
+    del col, client
+
+    # Nuke and rebuild with clean HNSW index
+    palace_path = palace_path.rstrip(os.sep)
+    print("  Rebuilding palace...")
+    shutil.rmtree(palace_path)
+    os.makedirs(palace_path, mode=0o700)
+
+    new_client = chromadb.PersistentClient(path=palace_path)
+    new_col = new_client.create_collection(
+        "mempalace_drawers", metadata={"hnsw:space": "cosine"}
+    )
+
+    filed = 0
+    for i in range(0, len(keep_ids), batch_size):
+        end = min(i + batch_size, len(keep_ids))
+        new_col.add(
+            documents=keep_docs[i:end],
+            ids=keep_ids[i:end],
+            metadatas=keep_metas[i:end],
+        )
+        filed += end - i
+        print(f"  Re-filed {filed:,} / {len(keep_ids):,}...", flush=True)
+
+    print(f"\n  Purged {len(match_ids):,} drawers. Remaining: {new_col.count():,}\n")
+
+
 def cmd_repair(args):
-    """Rebuild palace vector index from SQLite metadata."""
+    """Rebuild palace vector index by nuking and recreating the database.
+
+    ChromaDB’s HNSW index can become corrupted after bulk deletes (ghost
+    entries cause segfaults on query).  A same-process delete_collection +
+    create_collection is NOT sufficient — the PersistentClient reuses
+    corrupted state.  This command extracts all drawers, deletes the entire
+    palace directory, creates a fresh PersistentClient, and re-inserts.
+    """
     import chromadb
     import shutil
 
@@ -189,7 +303,7 @@ def cmd_repair(args):
         print(f"  Drawers found: {total}")
     except Exception as e:
         print(f"  Error reading palace: {e}")
-        print("  Cannot recover — palace may need to be re-mined from source files.")
+        print("  Cannot recover \u2014 palace may need to be re-mined from source files.")
         return
 
     if total == 0:
@@ -205,13 +319,20 @@ def cmd_repair(args):
     offset = 0
     while offset < total:
         batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        if not batch["ids"]:
+            break
         all_ids.extend(batch["ids"])
         all_docs.extend(batch["documents"])
         all_metas.extend(batch["metadatas"])
-        offset += batch_size
+        offset += len(batch["ids"])
     print(f"  Extracted {len(all_ids)} drawers")
 
-    # Backup and rebuild
+    # Release the old client before nuking the directory — ChromaDB holds
+    # open file handles (WAL journal, HNSW mmap) that block rmtree on Windows
+    # and some Linux FS.
+    del col, client
+
+    # Backup the entire palace directory
     palace_path = palace_path.rstrip(os.sep)
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
@@ -219,18 +340,34 @@ def cmd_repair(args):
     print(f"  Backing up to {backup_path}...")
     shutil.copytree(palace_path, backup_path)
 
-    print("  Rebuilding collection...")
-    client.delete_collection("mempalace_drawers")
-    new_col = client.create_collection("mempalace_drawers")
+    # Nuke and recreate — fresh PersistentClient gets a clean HNSW index
+    print("  Rebuilding from scratch...")
+    shutil.rmtree(palace_path)
+    os.makedirs(palace_path, mode=0o700)
+
+    new_client = chromadb.PersistentClient(path=palace_path)
+    new_col = new_client.create_collection(
+        "mempalace_drawers", metadata={"hnsw:space": "cosine"}
+    )
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
-        batch_ids = all_ids[i : i + batch_size]
-        batch_docs = all_docs[i : i + batch_size]
-        batch_metas = all_metas[i : i + batch_size]
-        new_col.add(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
-        filed += len(batch_ids)
+        end = min(i + batch_size, len(all_ids))
+        new_col.add(
+            documents=all_docs[i:end],
+            ids=all_ids[i:end],
+            metadatas=all_metas[i:end],
+        )
+        filed += end - i
         print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
+
+    # Verify the new index works
+    try:
+        new_col.query(query_texts=["test"], n_results=1, include=["documents"])
+        print("  Index verification: OK")
+    except Exception as e:
+        print(f"  Index verification FAILED: {e}")
+        print(f"  Restore from backup: mv {backup_path} {palace_path}")
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print(f"  Backup saved at {backup_path}")
@@ -550,6 +687,11 @@ def main():
         help="Show what would be migrated without changing anything",
     )
 
+    p_purge = sub.add_parser("purge", help="Delete drawers by wing and/or room (rebuilds index)")
+    p_purge.add_argument("--wing", help="Wing to purge")
+    p_purge.add_argument("--room", help="Room to purge (without --wing, purges across ALL wings)")
+    p_purge.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
+
     sub.add_parser("status", help="Show what's been filed")
 
     args = parser.parse_args()
@@ -585,6 +727,7 @@ def main():
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
         "migrate": cmd_migrate,
+        "purge": cmd_purge,
         "status": cmd_status,
     }
     dispatch[args.command](args)
