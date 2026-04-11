@@ -92,6 +92,13 @@ class TestHandleRequest:
         resp = handle_request({"method": "notifications/initialized", "id": None, "params": {}})
         assert resp is None
 
+    def test_ping_returns_empty_result(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request({"method": "ping", "id": 11, "params": {}})
+        assert resp["id"] == 11
+        assert resp["result"] == {}
+
     def test_tools_list(self):
         from mempalace.mcp_server import handle_request
 

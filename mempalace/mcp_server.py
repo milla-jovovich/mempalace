@@ -951,6 +951,8 @@ def handle_request(request):
                 "serverInfo": {"name": "mempalace", "version": __version__},
             },
         }
+    elif method == "ping":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
     elif method == "notifications/initialized":
         return None
     elif method == "tools/list":
