@@ -60,6 +60,7 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
+DEFAULT_EMBEDDING_MODEL = None  # None = use ChromaDB built-in (all-MiniLM-L6-v2)
 
 DEFAULT_TOPIC_WINGS = [
     "emotions",
@@ -151,6 +152,21 @@ class MempalaceConfig:
     def collection_name(self):
         """ChromaDB collection name."""
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
+
+    @property
+    def embedding_model(self):
+        """SentenceTransformer model name for embeddings.
+
+        Set to a multilingual model (e.g. "paraphrase-multilingual-MiniLM-L12-v2")
+        to improve search quality for non-English content.
+        None means use ChromaDB's built-in default (all-MiniLM-L6-v2, English-only).
+
+        Can also be set via the MEMPALACE_EMBEDDING_MODEL environment variable.
+        """
+        env_val = os.environ.get("MEMPALACE_EMBEDDING_MODEL")
+        if env_val:
+            return env_val or None
+        return self._file_config.get("embedding_model", DEFAULT_EMBEDDING_MODEL)
 
     @property
     def people_map(self):
