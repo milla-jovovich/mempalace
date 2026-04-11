@@ -11,6 +11,11 @@ Public repo:
 
 - `https://github.com/grtninja/mx3-public-shim`
 
+## Hardware required
+
+This setup requires a MemryX MX3 accelerator in an M.2 slot behind the configured public-shim
+endpoint.
+
 ## Install
 
 ```bash
