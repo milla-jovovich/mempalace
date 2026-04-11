@@ -173,6 +173,11 @@ class MempalaceConfig:
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
+    @property
+    def time_decay_half_life_days(self):
+        """Half-life in days for time-decay scoring. 0 = disabled."""
+        return self._file_config.get("time_decay_half_life_days", 90)
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
