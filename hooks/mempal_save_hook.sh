@@ -61,6 +61,16 @@ mkdir -p "$STATE_DIR"
 # Leave empty to skip auto-ingest (AI handles saving via the block reason).
 MEMPAL_DIR=""
 
+# Python interpreter with mempalace + chromadb installed.
+# Auto-detects: MEMPAL_PYTHON env var → repo venv → system python3
+if [ -n "$MEMPAL_PYTHON" ]; then
+    MP_PYTHON="$MEMPAL_PYTHON"
+elif [ -f "$(dirname "$(dirname "${BASH_SOURCE[0]}")")/venv/bin/python3" ]; then
+    MP_PYTHON="$(dirname "$(dirname "${BASH_SOURCE[0]}")")/venv/bin/python3"
+else
+    MP_PYTHON="python3"
+fi
+
 # Read JSON input from stdin
 INPUT=$(cat)
 
@@ -137,7 +147,53 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
     if [ -n "$MEMPAL_DIR" ] && [ -d "$MEMPAL_DIR" ]; then
         SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         REPO_DIR="$(dirname "$SCRIPT_DIR")"
-        python3 -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
+        "$MP_PYTHON" -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
+    fi
+
+    # Auto-mine the transcript — captures tool output that the AI would summarize away
+    if [ -f "$TRANSCRIPT_PATH" ]; then
+        "$MP_PYTHON" - "$TRANSCRIPT_PATH" <<'PYMINE'
+import sys
+try:
+    import hashlib
+    from datetime import datetime
+    from mempalace.normalize import normalize
+    from mempalace.convo_miner import chunk_exchanges, detect_convo_room
+    from mempalace.palace import get_collection
+    from mempalace.config import MempalaceConfig
+    palace = MempalaceConfig().palace_path
+    content = normalize(sys.argv[1])
+    if content and len(content.strip()) >= 50:
+        collection = get_collection(palace)
+        source = sys.argv[1]
+        # No file_already_mined check — transcript grows during session.
+        # upsert is idempotent: same chunk_index → same ID → overwrite.
+        chunks = chunk_exchanges(content)
+        if chunks:
+            room = detect_convo_room(content) or "session"
+            wing = "conversations"
+            docs, ids, metas = [], [], []
+            for chunk in chunks:
+                cid = hashlib.sha256(
+                    (source + str(chunk["chunk_index"])).encode()
+                ).hexdigest()[:24]
+                docs.append(chunk["content"])
+                ids.append(f"drawer_{wing}_{room}_{cid}")
+                metas.append({
+                    "wing": wing, "room": room, "source_file": source,
+                    "chunk_index": chunk["chunk_index"],
+                    "added_by": "hook", "filed_at": datetime.now().isoformat(),
+                    "ingest_mode": "convos", "extract_mode": "exchange",
+                })
+            for i in range(0, len(docs), 100):
+                collection.upsert(
+                    documents=docs[i:i+100], ids=ids[i:i+100],
+                    metadatas=metas[i:i+100],
+                )
+except Exception:
+    pass  # Hook must never crash the AI
+PYMINE
+        >> "$STATE_DIR/hook.log" 2>&1
     fi
 
     # Block the AI and tell it to save
@@ -145,7 +201,7 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
     cat << 'HOOKJSON'
 {
   "decision": "block",
-  "reason": "AUTO-SAVE checkpoint. Save key topics, decisions, quotes, and code from this session to your memory system. Organize into appropriate categories. Use verbatim quotes where possible. Continue conversation after saving."
+  "reason": "AUTO-SAVE checkpoint. Save key topics, decisions, quotes, and code from this session to your memory system. IMPORTANT: Save tool output VERBATIM — Bash command results, probe findings, search results, build output, error messages. These are lost on compaction and exist nowhere else. Also save key topics, decisions, and quotes. Organize into appropriate categories. Continue conversation after saving."
 }
 HOOKJSON
 else
