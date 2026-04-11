@@ -237,13 +237,6 @@ def cmd_repair(args):
     print(f"\n{'=' * 55}\n")
 
 
-def cmd_mcp(args):
-    """Launch the MemPalace MCP server (reads/writes via JSON-RPC on stdio)."""
-    from .mcp_server import main as mcp_main
-
-    mcp_main()
-
-
 def cmd_hook(args):
     """Run hook logic: reads JSON from stdin, outputs JSON to stdout."""
     from .hooks_cli import run_hook
@@ -533,12 +526,6 @@ def main():
     for instr_name in ["init", "search", "mine", "help", "status"]:
         instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
 
-    # mcp
-    sub.add_parser(
-        "mcp",
-        help="Start the MemPalace MCP server (for Claude Desktop, Cursor, ChatGPT etc.)",
-    )
-
     # repair
     sub.add_parser(
         "repair",
@@ -599,7 +586,6 @@ def main():
         "repair": cmd_repair,
         "migrate": cmd_migrate,
         "status": cmd_status,
-        "mcp": cmd_mcp,
     }
     dispatch[args.command](args)
 
