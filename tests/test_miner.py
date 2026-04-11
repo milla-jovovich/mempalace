@@ -6,7 +6,16 @@ from pathlib import Path
 import chromadb
 import yaml
 
-from mempalace.miner import mine, scan_project, status
+from mempalace.miner import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    MIN_CHUNK_SIZE,
+    chunk_text,
+    detect_room,
+    mine,
+    scan_project,
+    status,
+)
 from mempalace.palace import file_already_mined
 
 
@@ -296,3 +305,197 @@ def test_status_missing_palace_does_not_create_empty_collection(tmp_path, capsys
     out = capsys.readouterr().out
     assert "No palace found" in out
     assert not palace_path.exists()
+
+
+# =============================================================================
+# detect_room tests
+# =============================================================================
+
+SAMPLE_ROOMS = [
+    {"name": "backend", "description": "Backend code", "keywords": ["api", "server"]},
+    {"name": "frontend", "description": "Frontend code", "keywords": ["ui", "component"]},
+    {"name": "tests", "description": "Test files", "keywords": ["test", "spec"]},
+]
+
+
+def _detect(relpath: str, content: str = "", rooms: list = None):
+    """Helper: call detect_room with a fake project path."""
+    project = Path("/fake/project")
+    filepath = project / relpath
+    return detect_room(filepath, content, rooms or SAMPLE_ROOMS, project)
+
+
+def test_detect_room_priority1_exact_folder_match():
+    """Folder named exactly 'backend' routes to backend room."""
+    assert _detect("backend/app.py") == "backend"
+
+
+def test_detect_room_priority1_keyword_folder_match():
+    """Folder named exactly 'api' routes to backend room (keyword match)."""
+    assert _detect("api/routes.py") == "backend"
+
+
+def test_detect_room_priority1_no_substring_match():
+    """Folder 'components' must NOT match room 'component' keyword via substring."""
+    assert _detect("components/button.py") != "frontend"
+
+
+def test_detect_room_priority1_no_short_name_false_positive():
+    """Folder 'src' must NOT match any room just because 'src' is a substring of something."""
+    result = _detect("src/main.py", content="unrelated stuff")
+    assert result == "general"
+
+
+def test_detect_room_priority2_exact_filename_match():
+    """Filename 'backend.py' (stem='backend') routes to backend room."""
+    assert _detect("lib/backend.py") == "backend"
+
+
+def test_detect_room_priority2_keyword_filename_match():
+    """Filename 'api.py' (stem='api') routes to backend via keyword."""
+    assert _detect("lib/api.py") == "backend"
+
+
+def test_detect_room_priority2_no_substring_match():
+    """Filename 'testing.py' must NOT match 'tests' room via substring."""
+    result = _detect("lib/testing.py", content="unrelated stuff")
+    assert result != "tests"
+
+
+def test_detect_room_priority3_keyword_scoring():
+    """Content with repeated 'api' keyword routes to backend room."""
+    content = "the api handles requests. api calls are fast. api is great."
+    assert _detect("misc/readme.txt", content=content) == "backend"
+
+
+def test_detect_room_priority3_word_boundary():
+    """'test' inside 'testing'/'latest'/'contest' must NOT count as keyword hits."""
+    # Only has 'test' embedded in other words, never standalone
+    content = "testing the latest contest results for attestation"
+    result = _detect("misc/notes.txt", content=content)
+    assert result != "tests"
+
+
+def test_detect_room_priority3_word_boundary_standalone():
+    """Standalone 'test' words DO count as keyword hits."""
+    content = "run the test suite. each test verifies correctness. test passed."
+    assert _detect("misc/notes.txt", content=content) == "tests"
+
+
+def test_detect_room_priority4_fallback_general():
+    """No matches at all falls back to 'general'."""
+    assert _detect("misc/random.txt", content="nothing relevant here") == "general"
+
+
+def test_detect_room_priority4_empty_content():
+    """Empty content with no path/filename match falls back to 'general'."""
+    assert _detect("misc/random.txt", content="") == "general"
+
+
+def test_detect_room_folder_beats_content():
+    """Priority 1 (folder) wins even when content strongly matches another room."""
+    content = "test test test test test test test"
+    assert _detect("backend/app.py", content=content) == "backend"
+
+
+def test_detect_room_filename_beats_content():
+    """Priority 2 (filename) wins even when content strongly matches another room."""
+    content = "test test test test test test test"
+    assert _detect("misc/backend.py", content=content) == "backend"
+
+
+# =============================================================================
+# chunk_text tests
+# =============================================================================
+
+
+def test_chunk_text_short_content():
+    """Content shorter than CHUNK_SIZE produces a single chunk."""
+    content = "a" * (CHUNK_SIZE - 1)
+    chunks = chunk_text(content, "/fake/file.py")
+    assert len(chunks) == 1
+    assert chunks[0]["content"] == content
+    assert chunks[0]["chunk_index"] == 0
+
+
+def test_chunk_text_exact_chunk_size():
+    """Content exactly CHUNK_SIZE long produces a single chunk."""
+    content = "a" * CHUNK_SIZE
+    chunks = chunk_text(content, "/fake/file.py")
+    assert len(chunks) == 1
+    assert chunks[0]["content"] == content
+
+
+def test_chunk_text_two_chunks():
+    """Content slightly over CHUNK_SIZE produces two chunks with overlap."""
+    content = "a" * (CHUNK_SIZE + 1)
+    chunks = chunk_text(content, "/fake/file.py")
+    assert len(chunks) == 2
+
+
+def test_chunk_text_overlap_content():
+    """The second chunk starts at CHUNK_SIZE - CHUNK_OVERLAP (overlap region)."""
+    # Use digits so each position is unique and verifiable
+    content = "".join(str(i % 10) for i in range(CHUNK_SIZE + 200))
+    chunks = chunk_text(content, "/fake/file.py")
+    assert len(chunks) >= 2
+    # The overlap means the second chunk's content starts from the overlap region
+    expected_start = CHUNK_SIZE - CHUNK_OVERLAP
+    assert chunks[1]["content"].startswith(content[expected_start : expected_start + 10])
+
+
+def test_chunk_text_chunk_indices():
+    """chunk_index values increment sequentially starting from 0."""
+    content = "a" * (CHUNK_SIZE * 3)
+    chunks = chunk_text(content, "/fake/file.py")
+    assert len(chunks) >= 3
+    for i, chunk in enumerate(chunks):
+        assert chunk["chunk_index"] == i
+
+
+def test_chunk_text_empty_content():
+    """Empty string returns an empty list."""
+    chunks = chunk_text("", "/fake/file.py")
+    assert chunks == []
+
+
+def test_chunk_text_below_min_size():
+    """Content below MIN_CHUNK_SIZE returns an empty list."""
+    content = "a" * (MIN_CHUNK_SIZE - 1)
+    chunks = chunk_text(content, "/fake/file.py")
+    assert chunks == []
+
+
+def test_chunk_text_whitespace_only():
+    """Whitespace-only content returns an empty list (stripped to empty)."""
+    chunks = chunk_text("   \n\n\t  \n  ", "/fake/file.py")
+    assert chunks == []
+
+def test_chunk_text_many_chunks():
+    """Very long content (10x CHUNK_SIZE) produces the correct number of chunks."""
+    content = "a" * (CHUNK_SIZE * 10)
+    chunks = chunk_text(content, "/fake/file.py")
+    # With overlap, each chunk after the first starts CHUNK_SIZE - CHUNK_OVERLAP ahead.
+    # So we need ceil((total_len - CHUNK_OVERLAP) / (CHUNK_SIZE - CHUNK_OVERLAP)) chunks,
+    # but the exact count depends on boundary logic. Just verify it's reasonable.
+    total_len = len(content)
+    step = CHUNK_SIZE - CHUNK_OVERLAP
+    expected_min = total_len // CHUNK_SIZE  # at least this many
+    expected_max = (total_len // step) + 1  # at most this many
+    assert expected_min <= len(chunks) <= expected_max
+
+
+def test_chunk_text_preserves_content():
+    """All original content is covered by the union of chunks (nothing lost)."""
+    # Use position-unique tokens so we can verify each segment appears in a chunk
+    tokens = [f"[T{i:04d}]" for i in range(300)]
+    content = " ".join(tokens)
+    chunks = chunk_text(content, "/fake/file.py")
+    assert len(chunks) >= 2
+    # Every unique token must appear in at least one chunk
+    all_chunk_text = "".join(c["content"] for c in chunks)
+    for token in tokens:
+        assert token in all_chunk_text, f"Token '{token}' not found in any chunk"
+    # The joined chunks should contain at least as many characters as the original
+    # (overlap means more, confirming nothing is dropped)
+    assert len(all_chunk_text) >= len(content)

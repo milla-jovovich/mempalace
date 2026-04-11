@@ -194,6 +194,21 @@ class MempalaceConfig:
         except OSError:
             pass
 
+    @property
+    def chunk_size(self):
+        """Characters per drawer chunk."""
+        return self._file_config.get("chunk_size", 800)
+
+    @property
+    def chunk_overlap(self):
+        """Overlap between adjacent chunks."""
+        return self._file_config.get("chunk_overlap", 100)
+
+    @property
+    def min_chunk_size(self):
+        """Minimum chunk size — skip smaller chunks."""
+        return self._file_config.get("min_chunk_size", 50)
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
@@ -208,6 +223,9 @@ class MempalaceConfig:
                 "collection_name": DEFAULT_COLLECTION_NAME,
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,
+                "chunk_size": 800,
+                "chunk_overlap": 100,
+                "min_chunk_size": 50,
             }
             with open(self._config_file, "w") as f:
                 json.dump(default_config, f, indent=2)
