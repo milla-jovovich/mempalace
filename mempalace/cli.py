@@ -399,36 +399,40 @@ def cmd_compress(args):
 def _load_drawer_ids(col, where=None, batch_size: int = 500):
     """Collect drawer IDs matching a filter to enable safe bulk deletion."""
     ids = []
-    seen = set()
     offset = 0
-    use_offset = True
+
+    def _offset_unsupported(error: Exception) -> bool:
+        msg = str(error).lower()
+        return "offset" in msg and (
+            "unexpected keyword" in msg
+            or "not supported" in msg
+            or "unsupported" in msg
+            or "unknown" in msg
+        )
+
     while True:
-        kwargs = {"include": [], "limit": batch_size}
-        if use_offset:
-            kwargs["offset"] = offset
+        kwargs = {"include": [], "limit": batch_size, "offset": offset}
         if where:
             kwargs["where"] = where
         try:
             batch = col.get(**kwargs)
         except Exception as e:
-            if use_offset:
-                use_offset = False
-                continue
+            if offset == 0 and _offset_unsupported(e):
+                fallback_kwargs = {"include": []}
+                if where:
+                    fallback_kwargs["where"] = where
+                try:
+                    return col.get(**fallback_kwargs).get("ids") or []
+                except Exception as no_offset_error:
+                    raise RuntimeError(f"failed to list drawer IDs: {no_offset_error}") from no_offset_error
             raise RuntimeError(f"failed to list drawer IDs: {e}") from e
 
         batch_ids = batch.get("ids") or []
         if not batch_ids:
             break
-        new_ids = batch_ids if use_offset else [i for i in batch_ids if i not in seen]
-        if not new_ids:
-            break
-        ids.extend(new_ids)
-        seen.update(new_ids)
-        if use_offset:
-            offset += len(batch_ids)
-            if len(batch_ids) < batch_size:
-                break
-        elif len(batch_ids) < batch_size:
+        ids.extend(batch_ids)
+        offset += len(batch_ids)
+        if len(batch_ids) < batch_size:
             break
     return ids
 
@@ -499,7 +503,7 @@ def _confirm_bulk(args, count: int):
 
 
 def _confirm_delete_all_wings(args, count: int):
-    if args.delete_target != "wing" or not args.all or args.dry_run or count == 0:
+    if args.delete_target != "wing" or not args.all or args.name or args.dry_run or count == 0:
         return
 
     is_interactive = getattr(sys.stdin, "isatty", lambda: False)()
@@ -515,6 +519,7 @@ def _confirm_delete_all_wings(args, count: int):
     if confirm != "delete all":
         print("\n  Cancelled.")
         sys.exit(1)
+    args.yes = True
 
 
 def _load_ids(args, col, filters):
