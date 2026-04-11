@@ -34,6 +34,24 @@ from mempalace.config import MempalaceConfig  # noqa: E402
 from mempalace.knowledge_graph import KnowledgeGraph  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _reset_mcp_cache():
+    """Reset the MCP server's cached ChromaDB client/collection between tests."""
+
+    def _clear_cache():
+        try:
+            from mempalace import mcp_server
+
+            mcp_server._client_cache = None
+            mcp_server._collection_cache = None
+        except (ImportError, AttributeError):
+            pass
+
+    _clear_cache()
+    yield
+    _clear_cache()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_home():
     """Ensure HOME points to a temp dir for the entire test session.
@@ -84,7 +102,9 @@ def collection(palace_path):
     """A ChromaDB collection pre-seeded in the temp palace."""
     client = chromadb.PersistentClient(path=palace_path)
     col = client.get_or_create_collection("mempalace_drawers")
-    return col
+    yield col
+    client.delete_collection("mempalace_drawers")
+    del client
 
 
 @pytest.fixture

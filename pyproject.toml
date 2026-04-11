@@ -1,6 +1,6 @@
 [project]
 name = "mempalace"
-version = "3.0.0"
+version = "3.1.0"
 description = "Give your AI a memory — mine projects and conversations into a searchable palace. No API key required."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -26,7 +26,7 @@ classifiers = [
 ]
 dependencies = [
     "chromadb>=0.5.0,<0.7",
-    "pyyaml>=6.0",
+    "pyyaml>=6.0,<7",
 ]
 
 [project.urls]
@@ -38,11 +38,11 @@ Repository = "https://github.com/milla-jovovich/mempalace"
 mempalace = "mempalace:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.4.0"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
 spellcheck = ["autocorrect>=2.0"]
 
 [dependency-groups]
-dev = ["pytest>=7.0", "ruff>=0.4.0"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
 
 [build-system]
 requires = ["hatchling"]
@@ -54,13 +54,35 @@ packages = ["mempalace"]
 [tool.ruff]
 line-length = 100
 target-version = "py39"
+extend-exclude = ["benchmarks"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W"]
+select = ["E", "F", "W", "C901"]
 ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 25
 
 [tool.ruff.format]
 quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-m 'not benchmark and not slow and not stress'"
+markers = [
+    "benchmark: scale/performance benchmark tests",
+    "slow: tests that take more than 30 seconds",
+    "stress: destructive scale tests (100K+ drawers)",
+]
+
+[tool.coverage.run]
+source = ["mempalace"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+exclude_lines = [
+    "if __name__",
+    "pragma: no cover",
+]
