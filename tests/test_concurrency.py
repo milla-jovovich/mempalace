@@ -8,7 +8,6 @@ These tests exercise concurrent access to shared state:
 
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from unittest.mock import MagicMock, patch
 
 import chromadb
 import pytest

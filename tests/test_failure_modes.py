@@ -10,7 +10,7 @@ Tests error paths, corrupted data, and edge conditions in:
 
 import json
 import os
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -65,14 +65,9 @@ class TestConfigFailures:
         catches the exception and falls back to defaults."""
         (tmp_path / "config.json").write_text("[1, 2, 3]", encoding="utf-8")
         cfg = MempalaceConfig(config_dir=str(tmp_path))
-        # _file_config will be [1,2,3] — accessing .get() raises AttributeError
-        # The config is loaded successfully but properties that call .get() may fail.
-        # Verify the property doesn't crash at construction time.
+        # Non-dict JSON is now treated as empty config — properties return defaults
         assert cfg is not None
-        # Accessing collection_name will call list.get() which raises.
-        # This reveals the config doesn't guard against non-dict JSON.
-        with pytest.raises(AttributeError):
-            _ = cfg.collection_name
+        assert cfg.collection_name == "mempalace_drawers"
 
     def test_people_map_file_is_array(self, tmp_path):
         """people_map.json containing a list should fallback gracefully."""

@@ -1,8 +1,6 @@
 import re
 from pathlib import Path
 
-import pytest
-
 from mempalace import __version__
 from mempalace.version import __version__ as version_module_version
 from mempalace.mcp_server import handle_request

@@ -79,7 +79,7 @@ else:
     _kg = KnowledgeGraph()
 
 
-# ==================== WRITE-AHEAD LOG ==
+# ==================== WRITE-AHEAD LOG ====================
 # Every write operation is logged to a JSONL file before execution.
 # This provides an audit trail for detecting memory poisoning and
 # enables review/rollback of writes from external or untrusted sources.

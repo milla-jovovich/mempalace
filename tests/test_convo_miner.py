@@ -1,8 +1,6 @@
 """Tests for convo_miner integration — mine_convos and scan_convos."""
 
 import os
-import tempfile
-import shutil
 
 import chromadb
 
