@@ -378,6 +378,97 @@ class TestWriteTools:
         )
         assert result["is_duplicate"] is False
 
+    def test_get_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_get_drawer
+
+        result = tool_get_drawer("drawer_proj_backend_aaa")
+        assert result["drawer_id"] == "drawer_proj_backend_aaa"
+        assert result["wing"] == "project"
+        assert result["room"] == "backend"
+        assert "JWT tokens" in result["content"]
+
+    def test_get_drawer_not_found(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_get_drawer
+
+        result = tool_get_drawer("nonexistent_drawer")
+        assert "error" in result
+
+    def test_list_drawers(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers()
+        assert result["count"] == 4
+        assert len(result["drawers"]) == 4
+
+    def test_list_drawers_with_wing_filter(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(wing="project")
+        assert result["count"] == 3
+        assert all(d["wing"] == "project" for d in result["drawers"])
+
+    def test_list_drawers_with_room_filter(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(wing="project", room="backend")
+        assert result["count"] == 2
+        assert all(d["room"] == "backend" for d in result["drawers"])
+
+    def test_list_drawers_pagination(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(limit=2, offset=0)
+        assert result["count"] == 2
+        assert result["limit"] == 2
+        assert result["offset"] == 0
+
+    def test_list_drawers_negative_offset_clamped(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(offset=-5)
+        assert result["offset"] == 0
+
+    def test_update_drawer_content(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer, tool_get_drawer
+
+        result = tool_update_drawer("drawer_proj_backend_aaa", content="Updated content about auth.")
+        assert result["success"] is True
+
+        fetched = tool_get_drawer("drawer_proj_backend_aaa")
+        assert fetched["content"] == "Updated content about auth."
+
+    def test_update_drawer_wing_and_room(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer
+
+        result = tool_update_drawer("drawer_proj_backend_aaa", wing="new_wing", room="new_room")
+        assert result["success"] is True
+        assert result["wing"] == "new_wing"
+        assert result["room"] == "new_room"
+
+    def test_update_drawer_not_found(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer
+
+        result = tool_update_drawer("nonexistent_drawer", content="hello")
+        assert result["success"] is False
+
+    def test_update_drawer_noop(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer
+
+        result = tool_update_drawer("drawer_proj_backend_aaa")
+        assert result["success"] is True
+        assert result.get("noop") is True
+
 
 # ── KG Tools ────────────────────────────────────────────────────────────
 

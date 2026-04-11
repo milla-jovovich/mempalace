@@ -503,6 +503,143 @@ def tool_delete_drawer(drawer_id: str):
         return {"success": False, "error": str(e)}
 
 
+def tool_get_drawer(drawer_id: str):
+    """Fetch a single drawer by ID. Returns full content and metadata."""
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+    try:
+        result = col.get(ids=[drawer_id], include=["documents", "metadatas"])
+        if not result["ids"]:
+            return {"error": f"Drawer not found: {drawer_id}"}
+        meta = result["metadatas"][0]
+        doc = result["documents"][0]
+        return {
+            "drawer_id": drawer_id,
+            "content": doc,
+            "wing": meta.get("wing", ""),
+            "room": meta.get("room", ""),
+            "metadata": meta,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offset: int = 0):
+    """List drawers with pagination. Optional wing/room filter."""
+    limit = max(1, min(limit, _MAX_RESULTS))
+    offset = max(0, offset)
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+    try:
+        where = None
+        conditions = []
+        if wing:
+            conditions.append({"wing": wing})
+        if room:
+            conditions.append({"room": room})
+        if len(conditions) == 1:
+            where = conditions[0]
+        elif len(conditions) > 1:
+            where = {"$and": conditions}
+
+        kwargs = {"include": ["documents", "metadatas"], "limit": limit, "offset": offset}
+        if where:
+            kwargs["where"] = where
+        result = col.get(**kwargs)
+
+        drawers = []
+        for i, did in enumerate(result["ids"]):
+            meta = result["metadatas"][i]
+            doc = result["documents"][i]
+            drawers.append(
+                {
+                    "drawer_id": did,
+                    "wing": meta.get("wing", ""),
+                    "room": meta.get("room", ""),
+                    "content_preview": doc[:200] + "..." if len(doc) > 200 else doc,
+                }
+            )
+        return {
+            "drawers": drawers,
+            "count": len(drawers),
+            "offset": offset,
+            "limit": limit,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, room: str = None):
+    """Update an existing drawer's content and/or metadata."""
+    global _metadata_cache
+
+    if content is None and wing is None and room is None:
+        return {"success": True, "drawer_id": drawer_id, "noop": True}
+
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+    try:
+        existing = col.get(ids=[drawer_id], include=["documents", "metadatas"])
+        if not existing["ids"]:
+            return {"success": False, "error": f"Drawer not found: {drawer_id}"}
+
+        old_meta = existing["metadatas"][0]
+        old_doc = existing["documents"][0]
+
+        new_doc = old_doc
+        if content is not None:
+            try:
+                new_doc = sanitize_content(content)
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+
+        new_meta = dict(old_meta)
+        if wing is not None:
+            try:
+                new_meta["wing"] = sanitize_name(wing, "wing")
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+        if room is not None:
+            try:
+                new_meta["room"] = sanitize_name(room, "room")
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+
+        _wal_log(
+            "update_drawer",
+            {
+                "drawer_id": drawer_id,
+                "old_wing": old_meta.get("wing", ""),
+                "old_room": old_meta.get("room", ""),
+                "new_wing": new_meta.get("wing", ""),
+                "new_room": new_meta.get("room", ""),
+                "content_changed": content is not None,
+                "content_preview": new_doc[:200] if content is not None else None,
+            },
+        )
+
+        update_kwargs = {"ids": [drawer_id]}
+        if content is not None:
+            update_kwargs["documents"] = [new_doc]
+        update_kwargs["metadatas"] = [new_meta]
+        col.update(**update_kwargs)
+
+        _metadata_cache = None
+
+        logger.info(f"Updated drawer: {drawer_id}")
+        return {
+            "success": True,
+            "drawer_id": drawer_id,
+            "wing": new_meta.get("wing", ""),
+            "room": new_meta.get("room", ""),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # ==================== KNOWLEDGE GRAPH ====================
 
 
@@ -676,6 +813,71 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+def tool_hook_settings(silent_save: bool = None, desktop_toast: bool = None):
+    """
+    Get or set hook behavior settings.
+
+    - silent_save: True = stop hook saves directly (no MCP clutter),
+      False = legacy blocking MCP calls. Default: True.
+    - desktop_toast: True = show notify-send desktop toast on save,
+      False = terminal-only notification. Default: False.
+
+    Call with no arguments to see current settings.
+    """
+    from .config import MempalaceConfig
+
+    try:
+        config = MempalaceConfig()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    changed = []
+    if silent_save is not None:
+        config.set_hook_setting("silent_save", silent_save)
+        changed.append(f"silent_save → {silent_save}")
+    if desktop_toast is not None:
+        config.set_hook_setting("desktop_toast", desktop_toast)
+        changed.append(f"desktop_toast → {desktop_toast}")
+
+    # Re-read to return current state
+    try:
+        config = MempalaceConfig()
+    except Exception:
+        pass
+
+    result = {
+        "success": True,
+        "settings": {
+            "silent_save": config.hook_silent_save,
+            "desktop_toast": config.hook_desktop_toast,
+        },
+    }
+    if changed:
+        result["updated"] = changed
+    return result
+
+
+def tool_memories_filed_away():
+    """Acknowledge the latest silent checkpoint. Returns a short summary."""
+    state_dir = Path.home() / ".mempalace" / "hook_state"
+    ack_file = state_dir / "last_checkpoint"
+    if not ack_file.is_file():
+        return {"status": "quiet", "message": "No recent journal entry", "count": 0, "timestamp": None}
+    try:
+        data = json.loads(ack_file.read_text(encoding="utf-8"))
+        ack_file.unlink(missing_ok=True)
+        msgs = data.get("msgs", 0)
+        return {
+            "status": "ok",
+            "message": f"\u2726 {msgs} messages tucked into drawers",
+            "count": msgs,
+            "timestamp": data.get("ts", None),
+        }
+    except (json.JSONDecodeError, OSError):
+        ack_file.unlink(missing_ok=True)
+        return {"status": "error", "message": "\u2726 Journal entry filed in the palace", "count": 0, "timestamp": None}
 
 
 # ==================== MCP PROTOCOL ====================
@@ -899,6 +1101,62 @@ TOOLS = {
         },
         "handler": tool_delete_drawer,
     },
+    "mempalace_get_drawer": {
+        "description": "Fetch a single drawer by ID — returns full content and metadata.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "drawer_id": {"type": "string", "description": "ID of the drawer to fetch"},
+            },
+            "required": ["drawer_id"],
+        },
+        "handler": tool_get_drawer,
+    },
+    "mempalace_list_drawers": {
+        "description": "List drawers with pagination. Optional wing/room filter. Returns IDs, wings, rooms, and content previews.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Filter by wing (optional)"},
+                "room": {"type": "string", "description": "Filter by room (optional)"},
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results per page (default 20, max 100)",
+                    "minimum": 1,
+                    "maximum": 100,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Offset for pagination (default 0)",
+                    "minimum": 0,
+                },
+            },
+        },
+        "handler": tool_list_drawers,
+    },
+    "mempalace_update_drawer": {
+        "description": "Update an existing drawer's content and/or metadata (wing, room). Fetches existing drawer first; returns error if not found.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "drawer_id": {"type": "string", "description": "ID of the drawer to update"},
+                "content": {
+                    "type": "string",
+                    "description": "New content (optional — omit to keep existing)",
+                },
+                "wing": {
+                    "type": "string",
+                    "description": "New wing (optional — omit to keep existing)",
+                },
+                "room": {
+                    "type": "string",
+                    "description": "New room (optional — omit to keep existing)",
+                },
+            },
+            "required": ["drawer_id"],
+        },
+        "handler": tool_update_drawer,
+    },
     "mempalace_diary_write": {
         "description": "Write to your personal agent diary in AAAK format. Your observations, thoughts, what you worked on, what matters. Each agent has their own diary with full history. Write in AAAK for compression — e.g. 'SESSION:2026-04-04|built.palace.graph+diary.tools|ALC.req:agent.diaries.in.aaak|★★★'. Use entity codes from the AAAK spec.",
         "input_schema": {
@@ -938,6 +1196,32 @@ TOOLS = {
             "required": ["agent_name"],
         },
         "handler": tool_diary_read,
+    },
+    "mempalace_hook_settings": {
+        "description": (
+            "Get or set hook behavior. silent_save: True = save directly "
+            "(no MCP clutter), False = legacy blocking. desktop_toast: "
+            "True = show desktop notification. Call with no args to view."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "silent_save": {
+                    "type": "boolean",
+                    "description": "True = silent direct save, False = blocking MCP calls",
+                },
+                "desktop_toast": {
+                    "type": "boolean",
+                    "description": "True = show desktop toast via notify-send",
+                },
+            },
+        },
+        "handler": tool_hook_settings,
+    },
+    "mempalace_memories_filed_away": {
+        "description": "Check if a recent palace checkpoint was saved. Returns message count and timestamp.",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_memories_filed_away,
     },
 }
 
