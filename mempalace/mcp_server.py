@@ -239,6 +239,7 @@ def _folder_to_wing(folder_name: str) -> str:
     'プロジェクトA' -> 'wing_プロジェクトa'
     """
     slug = folder_name.lower()
+    # Keep word characters (Unicode-aware), hyphens, digits
     slug = re.sub(r'[^\w\-]+', '_', slug)
     slug = slug.strip('_-')
     if not slug:
@@ -369,11 +370,10 @@ def _sanitize_optional_name(value: str = None, field_name: str = "name") -> str:
 # ==================== READ TOOLS ====================
 
 def tool_status():
+    # Return cached auto-discovered wings (no rescan, no I/O)
     _sync_wings_from_root(force=False)
     col = _get_collection()
     if not col:
-
-
         return _no_palace()
     count = col.count()
     wings = {}
@@ -1748,7 +1748,6 @@ def main():
     logger.info("MemPalace MCP Server starting...")
     _sync_wings_from_root()
     while True:
-
         try:
             line = sys.stdin.readline()
             if not line:

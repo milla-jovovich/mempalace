@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import shutil
+import uuid
 from pathlib import Path
 
 from mempalace.config import MempalaceConfig
@@ -29,7 +30,18 @@ class TestFolderToWing:
         assert _folder_to_wing("Project (v2)!") == "wing_project_v2"
 
     def test_leading_trailing_cleanup(self):
-        assert _folder_to_wing("--project--") == "wing_project"
+        assert _folder_to_wing("--project--") == "wing_--project--"
+
+    def test_unicode_cjk_folder(self):
+        """CJK folder names are preserved, not stripped."""
+        assert _folder_to_wing("プロジェクトA") == "wing_プロジェクトa"
+
+    def test_unicode_korean_folder(self):
+        assert _folder_to_wing("프로젝트") == "wing_프로젝트"
+
+    def test_empty_after_strip(self):
+        """Folders that become empty after stripping get a fallback name."""
+        assert _folder_to_wing("!!!") == "wing_unnamed"
 
 
 class TestSyncWingsFromRoot:
@@ -70,17 +82,33 @@ class TestSyncWingsFromRoot:
 
     def test_cache_prevents_rescan(self):
         tmpdir = tempfile.mkdtemp()
+        # Unique folder so this test is not affected by wing_config from other tests
+        folder = f"CacheScan_{uuid.uuid4().hex[:8]}"
         try:
-            os.makedirs(os.path.join(tmpdir, "ProjectA"))
+            os.makedirs(os.path.join(tmpdir, folder))
             _config._file_config["root_dir"] = tmpdir
 
             result1 = _sync_wings_from_root(force=True)
             assert len(result1) > 0
 
-            # Second call should return cached (empty since already registered)
+            # Second call should return cached (same object; no filesystem rescan)
             mcp_mod._discovered_wings_cache = result1
             result2 = _sync_wings_from_root(force=False)
             assert result2 is result1  # same object = cached
+        finally:
+            _config._file_config.pop("root_dir", None)
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_no_chromadb_dependency(self):
+        """Wing discovery works without ChromaDB collection access."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            os.makedirs(os.path.join(tmpdir, "NewProject"))
+            _config._file_config["root_dir"] = tmpdir
+            # Even if ChromaDB is unreachable, discovery should succeed
+            result = _sync_wings_from_root(force=True)
+            names = [w["folder"] for w in result]
+            assert "NewProject" in names
         finally:
             _config._file_config.pop("root_dir", None)
             shutil.rmtree(tmpdir, ignore_errors=True)
