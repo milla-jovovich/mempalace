@@ -84,6 +84,18 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 
 ---
 
+## An important follow up note regarding fake MemPalace websites - April 11, 2026
+
+Several Community Members (#267, #326, #506) have pointed out there are fake MemPalace websites popping up, including ones with Malware.
+
+To be super clear, MemPalace *has no website* (at least for now), so anything claiming to be one is false.
+
+Thanks to our Community Members for letting us know about the problem.
+
+Stay safe out there.
+
+---
+
 ## Quick Start
 
 ```bash
