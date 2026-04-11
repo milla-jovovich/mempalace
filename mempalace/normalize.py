@@ -94,6 +94,8 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
             continue
         msg_type = entry.get("type", "")
         message = entry.get("message", {})
+        if not isinstance(message, dict):
+            continue
         msg_content = message.get("content", "")
 
         # Build tool_use_map from assistant messages
@@ -350,7 +352,10 @@ def _format_tool_use(block: dict) -> str:
         offset = inp.get("offset")
         limit = inp.get("limit")
         if offset is not None and limit is not None:
-            return f"[Read {path}:{offset}-{offset + limit}]"
+            try:
+                return f"[Read {path}:{offset}-{int(offset) + int(limit)}]"
+            except (ValueError, TypeError):
+                return f"[Read {path}:{offset}+{limit}]"
         return f"[Read {path}]"
 
     if name == "Grep":
