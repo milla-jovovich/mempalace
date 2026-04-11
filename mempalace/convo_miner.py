@@ -355,7 +355,7 @@ def mine_convos(
                 "content_hash": file_hash,
             }
             try:
-                collection.add(
+                collection.upsert(
                     documents=[chunk["content"]],
                     ids=[drawer_id],
                     metadatas=[meta],
