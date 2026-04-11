@@ -25,5 +25,6 @@
     "palace",
     "search"
   ],
-  "repository": "https://github.com/milla-jovovich/mempalace"
+  "repository": "https://github.com/milla-jovovich/mempalace",
+  "_windows_note": "On Windows, change 'command' to 'py' if python3 is not on PATH"
 }
