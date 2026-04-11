@@ -450,9 +450,7 @@ Letta charges $20–200/mo for agent-managed memory. MemPalace does it with a wi
 ## MCP Server
 
 ```bash
-## MCP Server
 
-The MemPalace system exposes its functionality through a Model Context Protocol (MCP) server that integrates with Claude, ChatGPT, Cursor, LM Studio, and other MCP-compatible tools.
 
 ### 19 Tools
 
@@ -500,7 +498,7 @@ Add to your MCP config:
 }
 ```
 
-**Prerequisites:** Install [uv](https://github.com/astral-sh/uv) first (`pip install uv`). Ensure `uvx` is on your system PATH.
+**Prerequisites:** **Prerequisites:** Install [uv](https://github.com/astral-sh/uv) first. On Windows: `winget install astral-sh.uv`. On macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`. Ensure `uvx` is on your system PATH.
 
 **Config file locations:**
 
