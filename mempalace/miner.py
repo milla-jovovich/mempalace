@@ -10,6 +10,7 @@ Stores verbatim chunks as drawers. No summaries. Ever.
 import os
 import sys
 import json
+import time
 import hashlib
 import fnmatch
 from pathlib import Path
@@ -62,13 +63,20 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
 # EPOCH TRACKING
 # =============================================================================
 #
-# Each mine run increments a monotonic epoch counter stored in
-# {palace}/epoch.json. Every chunk is tagged with its mine_epoch in metadata,
-# giving every drawer a "generation number" that identifies which mine run
-# produced it. This enables:
-#   - Knowing how stale a chunk is (current_epoch - chunk.mine_epoch)
-#   - Reconstructing the palace state at any previous epoch
-#   - Auditing which mine run introduced any given piece of content
+# Each mine run stamps every chunk with a mine_epoch — the Unix timestamp
+# (seconds) of the mine run. The current epoch is persisted to
+# {palace}/epoch.json so it survives process restarts. Epochs are guaranteed
+# monotonic: if two mines fire in the same second, the second one is bumped
+# to previous + 1 so comparisons are always strict.
+#
+# Benefits of using Unix time as the epoch value:
+#   - Cross-palace comparable (useful for multi-machine setups or re-imports)
+#   - Survives cmd_purge rebuilds automatically — a new palace's first epoch
+#     is always greater than any old palace's last epoch, because time only
+#     moves forward
+#   - The epoch value IS a timestamp — no separate field needed to know WHEN
+#     a chunk was filed
+#   - Enables time-based retention policies on revision history
 #
 # REVISION SNAPSHOTS
 # ------------------
@@ -77,6 +85,33 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
 # avoids hnswlib segfaults but also destroys the previous version of the file.
 # _snapshot_revisions() runs just before that delete, capturing the chunks to
 # {palace}/revisions.jsonl so the previous version can still be retrieved.
+#
+# The revisions file uses time-based retention (default 90 days, configurable
+# via MEMPALACE_REVISION_RETENTION_DAYS env var) with MAX_REVISIONS as a hard
+# safety cap. Truncation only runs when the hard cap is exceeded; the common
+# path stays append-only. When truncation runs, both filters apply in one
+# rewrite pass: records older than the retention window are dropped first,
+# then the remainder is capped at MAX_REVISIONS.
+#
+# EPHEMERAL FILES
+# ---------------
+# epoch.json and revisions.jsonl live inside the palace directory but are
+# runtime artifacts, not content. If your palace dir is version-controlled
+# or synced across machines, add these to .gitignore (or equivalent):
+#   /epoch.json
+#   /revisions.jsonl
+# They'll be recreated on the next mine run.
+
+
+# Soft time-based retention for revisions.jsonl (seconds). Configurable via
+# MEMPALACE_REVISION_RETENTION_DAYS env var. Default: 90 days.
+REVISION_RETENTION_SECONDS = int(
+    os.environ.get("MEMPALACE_REVISION_RETENTION_DAYS", "90")
+) * 86400
+
+# Hard safety cap on revisions.jsonl line count. Applied after the time
+# filter so we can't blow up on pathologically active palaces.
+MAX_REVISIONS = 50000
 
 
 def _load_epoch(palace_path: str) -> int:
@@ -108,6 +143,11 @@ def _snapshot_revisions(palace_path: str, collection, source_file: str, mine_epo
     can be reconstructed or queried later. Called just before upstream's
     delete-before-insert purge in process_file() so that the snapshot records
     exactly what is about to be discarded.
+
+    After appending the new records, enforces a soft cap of MAX_REVISIONS
+    lines via tail truncation (oldest records dropped first). This keeps
+    long-running palaces from growing unbounded. The fast path is a simple
+    append — truncation only rewrites the file when the cap is exceeded.
     """
     revisions_path = os.path.join(palace_path, "revisions.jsonl")
     existing = collection.get(
@@ -133,6 +173,33 @@ def _snapshot_revisions(palace_path: str, collection, source_file: str, mine_epo
                 "room": meta.get("room", ""),
             }
             f.write(json.dumps(record) + "\n")
+
+    # Tail-truncate if we've exceeded the soft cap. Applies both the time
+    # retention window AND the hard count cap in one rewrite pass. The
+    # fast path (append, above) stays untouched; rewriting only happens
+    # when we're actually over-budget.
+    try:
+        with open(revisions_path, "rb") as f:
+            line_count = sum(1 for _ in f)
+        if line_count > MAX_REVISIONS:
+            cutoff = int(time.time()) - REVISION_RETENTION_SECONDS
+            kept = []
+            with open(revisions_path) as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        if rec.get("superseded_by_epoch", 0) >= cutoff:
+                            kept.append(line)
+                    except json.JSONDecodeError:
+                        continue
+            if len(kept) > MAX_REVISIONS:
+                kept = kept[-MAX_REVISIONS:]
+            with open(revisions_path, "w") as f:
+                f.writelines(kept)
+    except Exception:
+        pass  # truncation is best-effort — never break mining over it
 
 
 # =============================================================================
@@ -661,11 +728,14 @@ def mine(
     if limit > 0:
         files = files[:limit]
 
-    # Increment the mine epoch for this run — every chunk filed below will
-    # carry this epoch number in its metadata, and revisions.jsonl records
-    # will use it as the "superseded_by_epoch" marker.
+    # Compute the mine epoch for this run. Epoch is int(time.time()) — the
+    # Unix timestamp (seconds) of the mine run. If two mines fire in the
+    # same second we bump to previous + 1 to preserve strict monotonicity.
+    # Every chunk filed below carries this epoch in its metadata, and
+    # revisions.jsonl records use it as the "superseded_by_epoch" marker.
     if not dry_run:
-        mine_epoch = _load_epoch(palace_path) + 1
+        previous = _load_epoch(palace_path)
+        mine_epoch = max(int(time.time()), previous + 1)
         _save_epoch(palace_path, mine_epoch)
     else:
         mine_epoch = 0
