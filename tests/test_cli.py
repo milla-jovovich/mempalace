@@ -191,6 +191,7 @@ def test_load_drawer_ids_falls_back_without_offset():
         "where": {"wing": "wing-a"},
         "include": [],
     }
+    assert "limit" not in mock_col.get.call_args_list[1].kwargs
 
 
 def test_load_drawer_ids_non_offset_error_raises():
