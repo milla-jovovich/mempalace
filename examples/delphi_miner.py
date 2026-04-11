@@ -118,8 +118,26 @@ class DelphiClient:
 # ---------------------------------------------------------------------------
 
 
-def get_collection(palace_path: str, collection_name: str = "mempalace_drawers"):
-    """Get or create the ChromaDB collection (same as mempalace.palace)."""
+def load_palace_config() -> dict:
+    """Read ~/.mempalace/config.json if it exists."""
+    config_path = Path.home() / ".mempalace" / "config.json"
+    if config_path.exists():
+        try:
+            return json.loads(config_path.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def get_collection(palace_path: str, collection_name: str = None):
+    """Get or create the ChromaDB collection (same as mempalace.palace).
+
+    If collection_name is None, reads from ~/.mempalace/config.json
+    (key: "collection_name"), falling back to "mempalace_drawers".
+    """
+    if collection_name is None:
+        config = load_palace_config()
+        collection_name = config.get("collection_name", "mempalace_drawers")
     os.makedirs(palace_path, exist_ok=True)
     client = chromadb.PersistentClient(path=palace_path)
     try:
@@ -202,6 +220,18 @@ def signal_to_document(signal: dict) -> str:
     return "\n".join(parts)
 
 
+def _signal_is_expired(signal: dict) -> bool:
+    """Check if a signal's expires field is in the past."""
+    expires = signal.get("expires")
+    if not expires:
+        return False
+    try:
+        exp_dt = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+        return exp_dt < datetime.now(exp_dt.tzinfo)
+    except (ValueError, TypeError):
+        return False
+
+
 def build_metadata(signal: dict, room: str) -> dict:
     """Build ChromaDB metadata dict matching MemPalace conventions."""
     meta = {
@@ -213,6 +243,10 @@ def build_metadata(signal: dict, room: str) -> dict:
         "filed_at": datetime.now().isoformat(),
         "ingest_mode": "delphi",
     }
+
+    # Auto-archive expired signals (see MemPalace #332)
+    if _signal_is_expired(signal):
+        meta["status"] = "archived"
 
     # Preserve signal metadata for downstream queries
     for key in ("signal_id", "type", "severity", "confidence", "source", "timestamp", "expires"):
@@ -232,12 +266,13 @@ def mine_signals(
     signals: list,
     palace_path: str,
     dry_run: bool = False,
+    collection_name: str = None,
 ) -> dict:
     """File a list of Delphi signals into the palace.
 
     Returns summary stats dict.
     """
-    collection = get_collection(palace_path) if not dry_run else None
+    collection = get_collection(palace_path, collection_name) if not dry_run else None
 
     stats = {"total": len(signals), "filed": 0, "skipped": 0, "rooms": {}}
 
@@ -306,6 +341,11 @@ def main():
         type=int,
         default=50,
         help="Max signals to fetch per query (default: 50)",
+    )
+    parser.add_argument(
+        "--collection",
+        default=None,
+        help="ChromaDB collection name (default: reads from ~/.mempalace/config.json, else 'mempalace_drawers')",
     )
     parser.add_argument(
         "--x402-payment",
@@ -379,7 +419,7 @@ def main():
 
     # Step 3: File into palace
     print(f"\n  Filing {len(signals)} signals into palace...\n")
-    stats = mine_signals(signals, palace_path, dry_run=args.dry_run)
+    stats = mine_signals(signals, palace_path, dry_run=args.dry_run, collection_name=args.collection)
 
     print(f"\n{'=' * 60}")
     print("  Done.")
