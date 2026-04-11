@@ -1259,7 +1259,7 @@ def handle_request(request):
         return {"jsonrpc": "2.0", "id": req_id, "result": {}}
     elif method.startswith("notifications/"):
         # Notifications (no id) never get a response per JSON-RPC spec
-        return None        return None
+        return None
     elif method == "tools/list":
         return {
             "jsonrpc": "2.0",

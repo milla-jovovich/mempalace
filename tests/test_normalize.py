@@ -789,7 +789,7 @@ def test_claude_code_jsonl_tool_only_user_message_not_counted():
     result = _try_claude_code_jsonl("\n".join(lines))
     assert result is not None
     # Only one user turn marker — the original "Do it"
-    user_turns = [l for l in result.split("\n") if l.strip().startswith(">")]
+    user_turns = [line for line in result.split("\n") if line.strip().startswith(">")]
     assert len(user_turns) == 1
     assert "> Do it" in result
 
