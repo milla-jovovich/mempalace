@@ -223,14 +223,11 @@ def cmd_repair(args):
     client.delete_collection("mempalace_drawers")
     new_col = client.create_collection("mempalace_drawers")
 
-    filed = 0
-    for i in range(0, len(all_ids), batch_size):
-        batch_ids = all_ids[i : i + batch_size]
-        batch_docs = all_docs[i : i + batch_size]
-        batch_metas = all_metas[i : i + batch_size]
-        new_col.add(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
-        filed += len(batch_ids)
-        print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
+    from .miner import chunked_add
+
+    chunked_add(new_col, documents=all_docs, ids=all_ids, metadatas=all_metas)
+    filed = len(all_ids)
+    print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print(f"  Backup saved at {backup_path}")
