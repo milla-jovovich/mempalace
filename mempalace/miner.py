@@ -86,12 +86,15 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
 # _snapshot_revisions() runs just before that delete, capturing the chunks to
 # {palace}/revisions.jsonl so the previous version can still be retrieved.
 #
-# The revisions file uses time-based retention (default 90 days, configurable
-# via MEMPALACE_REVISION_RETENTION_DAYS env var) with MAX_REVISIONS as a hard
-# safety cap. Truncation only runs when the hard cap is exceeded; the common
-# path stays append-only. When truncation runs, both filters apply in one
-# rewrite pass: records older than the retention window are dropped first,
-# then the remainder is capped at MAX_REVISIONS.
+# The revisions file is kept bounded by two limits. Each line is ONE
+# chunk snapshot (not one whole-file revision), so a file with N chunks
+# that gets re-mined produces N lines. Truncation runs whenever the line
+# count exceeds MAX_REVISIONS (default 50,000, configurable via
+# MEMPALACE_MAX_REVISIONS env var). When it runs:
+#   1. Lines older than REVISION_RETENTION_SECONDS (default 90 days,
+#      configurable via MEMPALACE_REVISION_RETENTION_DAYS) are dropped.
+#   2. The remainder is then capped at MAX_REVISIONS newest entries.
+# The common path stays append-only; a rewrite happens only on overflow.
 #
 # EPHEMERAL FILES
 # ---------------
@@ -109,9 +112,14 @@ REVISION_RETENTION_SECONDS = int(
     os.environ.get("MEMPALACE_REVISION_RETENTION_DAYS", "90")
 ) * 86400
 
-# Hard safety cap on revisions.jsonl line count. Applied after the time
-# filter so we can't blow up on pathologically active palaces.
-MAX_REVISIONS = 50000
+# Hard safety cap on revisions.jsonl line count. Each line is a single
+# CHUNK snapshot, not a whole-file revision — a file with N chunks that
+# gets re-mined once produces N lines. So 50,000 lines ≈ roughly 1,600
+# file re-mines at 30 chunks/file, ~60 MB on disk. Configurable via
+# MEMPALACE_MAX_REVISIONS env var. When exceeded, truncation runs with
+# (a) time filter first (drops > REVISION_RETENTION_SECONDS old), then
+# (b) newest-N cap at MAX_REVISIONS lines.
+MAX_REVISIONS = int(os.environ.get("MEMPALACE_MAX_REVISIONS", "50000"))
 
 
 def _load_epoch(palace_path: str) -> int:
