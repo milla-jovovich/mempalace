@@ -1,6 +1,7 @@
 """Tests for mempalace.cli — the main CLI dispatcher."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,6 +13,7 @@ from mempalace.cli import (
     cmd_hook,
     cmd_init,
     cmd_instructions,
+    cmd_mcp_run,
     cmd_mine,
     cmd_repair,
     cmd_search,
@@ -333,11 +335,7 @@ def test_mcp_command_prints_setup_guidance(monkeypatch, capsys):
     main()
 
     captured = capsys.readouterr()
-    assert "MemPalace MCP quick setup:" in captured.out
-    assert "claude mcp add mempalace -- python -m mempalace.mcp_server" in captured.out
-    assert "\nOptional custom palace:\n" in captured.out
-    assert "python -m mempalace.mcp_server --palace /path/to/palace" in captured.out
-    assert "[--palace /path/to/palace]" not in captured.out
+    assert "mempalace mcp run" in captured.out
     assert captured.err == ""
 
 
@@ -349,11 +347,41 @@ def test_mcp_command_uses_custom_palace_path_when_provided(monkeypatch, capsys):
     captured = capsys.readouterr()
     expanded = str(Path("~/tmp/my palace").expanduser())
 
-    assert "python -m mempalace.mcp_server --palace" in captured.out
+    assert "mempalace mcp run --palace" in captured.out
     assert expanded in captured.out
-    assert "Optional custom palace:" not in captured.out
-    assert "[--palace /path/to/palace]" not in captured.out
     assert captured.err == ""
+
+
+def test_mcp_run_dispatches():
+    """'mempalace mcp run' calls cmd_mcp_run."""
+    with (
+        patch("sys.argv", ["mempalace", "mcp", "run"]),
+        patch("mempalace.cli.cmd_mcp_run") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+
+
+def test_mcp_run_starts_server():
+    """cmd_mcp_run imports and calls mcp_server.main."""
+    mock_server_main = MagicMock()
+    args = argparse.Namespace(palace=None)
+    with patch.dict("sys.modules", {"mempalace.mcp_server": MagicMock(main=mock_server_main)}):
+        cmd_mcp_run(args)
+    mock_server_main.assert_called_once()
+
+
+def test_mcp_run_sets_palace_env(monkeypatch, tmp_path):
+    """cmd_mcp_run sets MEMPALACE_PALACE_PATH when --palace is given."""
+    palace_dir = str(tmp_path / "custom_palace")
+    mock_server_main = MagicMock()
+    args = argparse.Namespace(palace=palace_dir)
+    monkeypatch.delenv("MEMPALACE_PALACE_PATH", raising=False)
+    with patch.dict(os.environ, {}, clear=False):
+        with patch.dict("sys.modules", {"mempalace.mcp_server": MagicMock(main=mock_server_main)}):
+            cmd_mcp_run(args)
+        mock_server_main.assert_called_once()
+        assert os.environ.get("MEMPALACE_PALACE_PATH") == os.path.abspath(palace_dir)
 
 
 def test_main_hook_no_subcommand_prints_help(capsys):
