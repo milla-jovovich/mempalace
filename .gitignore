@@ -1,7 +1,32 @@
-*.egg-info/
+```
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.local
+.env.*
+
+# Build outputs
 dist/
 build/
+.next/
+
+# Logs
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE specific
+.vscode/
+.idea/
+
+# Python
 __pycache__/
 *.pyc
-.pytest_cache/
-mempal.yaml
+*.pyo
+*.pyd
+.Python
+```
