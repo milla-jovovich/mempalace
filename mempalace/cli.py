@@ -152,6 +152,14 @@ def cmd_split(args):
         sys.argv = old_argv
 
 
+def cmd_migrate(args):
+    """Migrate palace from a different ChromaDB version."""
+    from .migrate import migrate
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    migrate(palace_path=palace_path, dry_run=args.dry_run)
+
+
 def cmd_status(args):
     from .miner import status
 
@@ -538,6 +546,17 @@ def build_parser():
     )
 
     # status
+    # migrate
+    p_migrate = sub.add_parser(
+        "migrate",
+        help="Migrate palace from a different ChromaDB version (fixes 3.0.0 → 3.1.0 upgrade)",
+    )
+    p_migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be migrated without changing anything",
+    )
+
     sub.add_parser("status", help="Show what's been filed")
 
     return parser
@@ -577,6 +596,7 @@ def main(argv=None):
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
+        "migrate": cmd_migrate,
         "status": cmd_status,
     }
     dispatch[args.command](args)

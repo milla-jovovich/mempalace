@@ -334,7 +334,7 @@ def mine_convos(
                 room_counts[chunk_room] += 1
             drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
             try:
-                collection.add(
+                collection.upsert(
                     documents=[chunk["content"]],
                     ids=[drawer_id],
                     metadatas=[
