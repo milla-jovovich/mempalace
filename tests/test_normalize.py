@@ -297,6 +297,76 @@ def test_claude_ai_privacy_export_non_dict_items():
     assert result is not None
 
 
+def test_claude_ai_multi_convo_with_messages_key():
+    """Multi-conversation export using 'messages' key (not 'chat_messages')."""
+    data = [
+        {
+            "uuid": "convo-1",
+            "messages": [
+                {"role": "user", "content": "First question"},
+                {"role": "assistant", "content": "First answer"},
+            ],
+        },
+        {
+            "uuid": "convo-2",
+            "messages": [
+                {"role": "user", "content": "Second question"},
+                {"role": "assistant", "content": "Second answer"},
+            ],
+        },
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "> First question" in result
+    assert "> Second question" in result
+
+
+def test_claude_ai_multi_convo_per_conversation_separation():
+    """Each conversation produces a separate transcript section."""
+    data = [
+        {
+            "chat_messages": [
+                {"role": "human", "content": "Conv1 Q"},
+                {"role": "ai", "content": "Conv1 A"},
+            ]
+        },
+        {
+            "chat_messages": [
+                {"role": "human", "content": "Conv2 Q"},
+                {"role": "ai", "content": "Conv2 A"},
+            ]
+        },
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "> Conv1 Q" in result
+    assert "> Conv2 Q" in result
+    # Both conversations should be present as separate sections
+    assert result.count("> Conv1 Q") == 1
+    assert result.count("> Conv2 Q") == 1
+
+
+def test_claude_ai_multi_convo_skips_short_conversations():
+    """Conversations with fewer than 2 messages are skipped."""
+    data = [
+        {
+            "messages": [
+                {"role": "user", "content": "Only one message"},
+            ],
+        },
+        {
+            "messages": [
+                {"role": "user", "content": "Good question"},
+                {"role": "assistant", "content": "Good answer"},
+            ],
+        },
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "Only one message" not in result
+    assert "> Good question" in result
+
+
 # ── _try_chatgpt_json ─────────────────────────────────────────────────
 
 

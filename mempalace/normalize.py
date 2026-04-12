@@ -160,24 +160,30 @@ def _try_claude_ai_json(data) -> Optional[str]:
     if not isinstance(data, list):
         return None
 
-    # Privacy export: array of conversation objects with chat_messages inside each
-    if data and isinstance(data[0], dict) and "chat_messages" in data[0]:
-        all_messages = []
+    # Multi-conversation export: array of conversation objects with messages inside each.
+    # Claude.ai uses "chat_messages" (privacy export) or "messages" (standard export).
+    if data and isinstance(data[0], dict) and ("chat_messages" in data[0] or "messages" in data[0]):
+        transcripts = []
         for convo in data:
             if not isinstance(convo, dict):
                 continue
-            chat_msgs = convo.get("chat_messages", [])
+            chat_msgs = convo.get("chat_messages") or convo.get("messages", [])
+            if not isinstance(chat_msgs, list):
+                continue
+            convo_messages = []
             for item in chat_msgs:
                 if not isinstance(item, dict):
                     continue
                 role = item.get("role", "")
                 text = _extract_content(item.get("content", ""))
                 if role in ("user", "human") and text:
-                    all_messages.append(("user", text))
+                    convo_messages.append(("user", text))
                 elif role in ("assistant", "ai") and text:
-                    all_messages.append(("assistant", text))
-        if len(all_messages) >= 2:
-            return _messages_to_transcript(all_messages)
+                    convo_messages.append(("assistant", text))
+            if len(convo_messages) >= 2:
+                transcripts.append(_messages_to_transcript(convo_messages))
+        if transcripts:
+            return "\n\n".join(transcripts)
         return None
 
     # Flat messages list

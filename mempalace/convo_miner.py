@@ -28,7 +28,7 @@ CONVO_EXTENSIONS = {
 }
 
 MIN_CHUNK_SIZE = 30
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB — claude.ai exports routinely exceed 10 MB
 
 
 # =============================================================================
@@ -216,7 +216,9 @@ def scan_convos(convo_dir: str) -> list:
                 if filepath.is_symlink():
                     continue
                 try:
-                    if filepath.stat().st_size > MAX_FILE_SIZE:
+                    fsize = filepath.stat().st_size
+                    if fsize > MAX_FILE_SIZE:
+                        print(f"  ⚠ Skipping {filepath.name} ({fsize // (1024*1024)} MB > {MAX_FILE_SIZE // (1024*1024)} MB limit)")
                         continue
                 except OSError:
                     continue
