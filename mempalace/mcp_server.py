@@ -783,19 +783,22 @@ def tool_wake_up(wing: str = None):
 
         # ── Auto-declare predicates, classes, intent types, and top entities ──
         from .knowledge_graph import normalize_entity_name
+        _DESC_LIMIT = 100
+        def _trim(s: str) -> str:
+            return s[:_DESC_LIMIT] + "…" if len(s) > _DESC_LIMIT else s
         auto_declared = {"predicates": [], "classes": [], "entities": []}
 
         # 1. Auto-declare ALL canonical predicates (kind=predicate)
         predicates = _kg.list_entities(status="active", kind="predicate")
         for p in predicates:
             _declared_entities.add(p["id"])
-            auto_declared["predicates"].append({"id": p["id"], "description": p["description"][:100]})
+            auto_declared["predicates"].append({"id": p["id"], "description": _trim(p["description"])})
 
         # 2. Auto-declare ALL domain type classes (kind=class)
         classes = _kg.list_entities(status="active", kind="class")
         for c in classes:
             _declared_entities.add(c["id"])
-            auto_declared["classes"].append({"id": c["id"], "description": c["description"][:100]})
+            auto_declared["classes"].append({"id": c["id"], "description": _trim(c["description"])})
 
         # 3. Auto-declare intent types — walk is-a tree from intent_type class
         from .layers import compute_decay_score
@@ -839,7 +842,7 @@ def tool_wake_up(wing: str = None):
             _declared_entities.add(e["id"])
             auto_declared["intent_types"].append({
                 "id": e["id"],
-                "description": e["description"][:100],
+                "description": _trim(e["description"]),
                 "importance": e["importance"],
             })
 
@@ -853,7 +856,7 @@ def tool_wake_up(wing: str = None):
                 _declared_entities.add(e["id"])
                 auto_declared["entities"].append({
                     "id": e["id"],
-                    "description": e["description"][:100],
+                    "description": _trim(e["description"]),
                     "importance": e["importance"],
                 })
 
