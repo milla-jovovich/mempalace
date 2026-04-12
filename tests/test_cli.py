@@ -146,6 +146,29 @@ def test_cmd_init_with_entities_zero_total(mock_config_cls, tmp_path, capsys):
     assert "No entities detected" in out
 
 
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_init_yes_skips_interactive_prompts(mock_config_cls, tmp_path):
+    """init --yes must not call input(), so agents don't hit EOFError."""
+    fake_files = [tmp_path / "a.txt"]
+    detected = {
+        "people": [{"name": "Alice", "confidence": 0.9, "signals": ["dialogue"]}],
+        "projects": [],
+        "uncertain": [{"name": "Bob", "frequency": 5, "signals": ["appears 5x"]}],
+    }
+    confirmed = {"people": ["Alice"], "projects": []}
+    args = argparse.Namespace(dir=str(tmp_path), yes=True)
+    with (
+        patch("mempalace.entity_detector.scan_for_detection", return_value=fake_files),
+        patch("mempalace.entity_detector.detect_entities", return_value=detected),
+        patch("mempalace.entity_detector.confirm_entities", return_value=confirmed) as mock_confirm,
+        patch("mempalace.room_detector_local.detect_rooms_local"),
+        patch("builtins.open", MagicMock()),
+    ):
+        cmd_init(args)
+        # Verify yes=True was passed through to confirm_entities
+        mock_confirm.assert_called_once_with(detected, yes=True)
+
+
 # ── cmd_mine ───────────────────────────────────────────────────────────
 
 
@@ -264,6 +287,13 @@ def test_cmd_split_all_options():
 
 
 # ── main() argparse dispatch ──────────────────────────────────────────
+
+
+def test_main_version_flag(capsys):
+    with patch("sys.argv", ["mempalace", "--version"]), pytest.raises(SystemExit, match="0"):
+        main()
+    out = capsys.readouterr().out
+    assert "mempalace" in out
 
 
 def test_main_no_args_prints_help(capsys):

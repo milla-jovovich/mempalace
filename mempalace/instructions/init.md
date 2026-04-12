@@ -41,7 +41,11 @@ before continuing.
 
 ## Step 5: Initialize the palace
 
-Run `mempalace init <dir>` where `<dir>` is the directory from Step 4.
+Run `mempalace init --yes <dir>` where `<dir>` is the directory from Step 4.
+
+The `--yes` flag is required in agent/non-interactive contexts to auto-accept
+detected entities and rooms without prompting. Without it, the command will
+crash with EOFError when stdin is not a terminal.
 
 If this fails, report the error and stop.
 
