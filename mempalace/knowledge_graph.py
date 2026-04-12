@@ -38,12 +38,54 @@ Usage:
 import hashlib
 import json
 import os
+import re
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
 
 DEFAULT_KG_PATH = os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
+
+
+def normalize_entity_name(name: str) -> str:
+    """Aggressive entity name normalization for dedup.
+
+    Collapses: hyphens, underscores, dots, spaces, colons, slashes,
+    backslashes, CamelCase boundaries, leading articles.
+
+    Does NOT collapse: plurals, abbreviations (handled by semantic
+    similarity on entity descriptions instead).
+
+    Examples:
+        "The Flowsev Repository" -> "flowsev-repository"
+        "flowsev_repository"     -> "flowsev-repository"
+        "FlowsevRepository"      -> "flowsev-repository"
+        "D:\\Flowsev\\repo"      -> "d-flowsev-repo"
+        "paperclip-server"       -> "paperclip-server"
+        "paperclip_server"       -> "paperclip-server"
+        "the GA agent"           -> "ga-agent"
+    """
+    if not isinstance(name, str) or not name.strip():
+        return "unknown"
+    s = name.strip()
+    # Split CamelCase: "FlowsevRepo" -> "Flowsev Repo"
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)
+    # Also split "HTTPServer" -> "HTTP Server"
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
+    # Lowercase
+    s = s.lower()
+    # Replace ALL non-alphanumeric with hyphen
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    # Collapse repeated hyphens
+    s = re.sub(r"-+", "-", s)
+    # Strip leading/trailing hyphens
+    s = s.strip("-")
+    # Strip leading articles
+    for article in ("the-", "a-", "an-"):
+        if s.startswith(article):
+            s = s[len(article):]
+            break
+    return s or "unknown"
 
 
 class KnowledgeGraph:
@@ -63,6 +105,11 @@ class KnowledgeGraph:
                 name TEXT NOT NULL,
                 type TEXT DEFAULT 'unknown',
                 properties TEXT DEFAULT '{}',
+                description TEXT DEFAULT '',
+                importance INTEGER DEFAULT 3,
+                last_touched TEXT DEFAULT '',
+                status TEXT DEFAULT 'active',
+                merged_into TEXT DEFAULT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -81,12 +128,40 @@ class KnowledgeGraph:
                 FOREIGN KEY (object) REFERENCES entities(id)
             );
 
+            CREATE TABLE IF NOT EXISTS entity_aliases (
+                alias TEXT PRIMARY KEY,
+                canonical_id TEXT NOT NULL,
+                merged_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (canonical_id) REFERENCES entities(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(subject);
             CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
             CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
             CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);
+            CREATE INDEX IF NOT EXISTS idx_entities_status ON entities(status);
+            CREATE INDEX IF NOT EXISTS idx_entity_aliases_canonical ON entity_aliases(canonical_id);
         """)
+        # Migrate existing databases that don't have the new columns
+        self._migrate_schema(conn)
         conn.commit()
+
+    def _migrate_schema(self, conn):
+        """Add new columns to existing databases (backward compatible)."""
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(entities)").fetchall()}
+        migrations = [
+            ("description", "ALTER TABLE entities ADD COLUMN description TEXT DEFAULT ''"),
+            ("importance", "ALTER TABLE entities ADD COLUMN importance INTEGER DEFAULT 3"),
+            ("last_touched", "ALTER TABLE entities ADD COLUMN last_touched TEXT DEFAULT ''"),
+            ("status", "ALTER TABLE entities ADD COLUMN status TEXT DEFAULT 'active'"),
+            ("merged_into", "ALTER TABLE entities ADD COLUMN merged_into TEXT DEFAULT NULL"),
+        ]
+        for col_name, sql in migrations:
+            if col_name not in existing_cols:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists (race condition)
 
     def _conn(self):
         if self._connection is None:
@@ -102,21 +177,113 @@ class KnowledgeGraph:
             self._connection = None
 
     def _entity_id(self, name: str) -> str:
-        return name.lower().replace(" ", "_").replace("'", "")
+        """Normalize an entity name to a canonical ID.
+
+        Uses aggressive normalization (hyphens, underscores, CamelCase, articles
+        all collapsed). Also checks the alias table for merged entities.
+        """
+        normalized = normalize_entity_name(name)
+        # Check if this normalized name is an alias for a merged entity
+        conn = self._conn()
+        alias_row = conn.execute(
+            "SELECT canonical_id FROM entity_aliases WHERE alias = ?", (normalized,)
+        ).fetchone()
+        if alias_row:
+            return alias_row["canonical_id"]
+        return normalized
+
+    def _touch_entity(self, entity_id: str):
+        """Update last_touched timestamp on an entity."""
+        conn = self._conn()
+        now = datetime.now().isoformat()
+        conn.execute(
+            "UPDATE entities SET last_touched = ? WHERE id = ?", (now, entity_id)
+        )
 
     # ── Write operations ──────────────────────────────────────────────────
 
-    def add_entity(self, name: str, entity_type: str = "unknown", properties: dict = None):
+    def add_entity(
+        self,
+        name: str,
+        entity_type: str = "unknown",
+        properties: dict = None,
+        description: str = "",
+        importance: int = 3,
+    ):
         """Add or update an entity node."""
         eid = self._entity_id(name)
         props = json.dumps(properties or {})
+        now = datetime.now().isoformat()
         conn = self._conn()
         with conn:
             conn.execute(
-                "INSERT OR REPLACE INTO entities (id, name, type, properties) VALUES (?, ?, ?, ?)",
-                (eid, name, entity_type, props),
+                """INSERT INTO entities (id, name, type, properties, description, importance, last_touched, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+                   ON CONFLICT(id) DO UPDATE SET
+                       name = excluded.name,
+                       type = excluded.type,
+                       properties = excluded.properties,
+                       description = CASE WHEN excluded.description != '' THEN excluded.description ELSE entities.description END,
+                       importance = CASE WHEN excluded.importance != 3 THEN excluded.importance ELSE entities.importance END,
+                       last_touched = excluded.last_touched
+                """,
+                (eid, name, entity_type, props, description, importance, now),
             )
         return eid
+
+    def merge_entities(self, source_name: str, target_name: str, update_description: str = None):
+        """Merge source entity into target. All edges rewritten. Source becomes alias.
+
+        Returns dict with counts of edges_moved, aliases_created.
+        """
+        source_id = normalize_entity_name(source_name)
+        target_id = self._entity_id(target_name)  # resolves aliases
+        if source_id == target_id:
+            return {"error": "source and target resolve to the same entity"}
+
+        conn = self._conn()
+        with conn:
+            # Rewrite triples: subject
+            r1 = conn.execute(
+                "UPDATE triples SET subject = ? WHERE subject = ?", (target_id, source_id)
+            )
+            # Rewrite triples: object
+            r2 = conn.execute(
+                "UPDATE triples SET object = ? WHERE object = ?", (target_id, source_id)
+            )
+            edges_moved = r1.rowcount + r2.rowcount
+
+            # Register alias
+            now = datetime.now().isoformat()
+            conn.execute(
+                "INSERT OR REPLACE INTO entity_aliases (alias, canonical_id, merged_at) VALUES (?, ?, ?)",
+                (source_id, target_id, now),
+            )
+
+            # Soft-delete source
+            conn.execute(
+                "UPDATE entities SET status = 'merged', merged_into = ? WHERE id = ?",
+                (target_id, source_id),
+            )
+
+            # Update target description if provided
+            if update_description:
+                conn.execute(
+                    "UPDATE entities SET description = ?, last_touched = ? WHERE id = ?",
+                    (update_description, now, target_id),
+                )
+
+            # Touch target
+            conn.execute(
+                "UPDATE entities SET last_touched = ? WHERE id = ?", (now, target_id)
+            )
+
+        return {
+            "source": source_id,
+            "target": target_id,
+            "edges_moved": edges_moved,
+            "aliases_created": 1,
+        }
 
     def add_triple(
         self,
@@ -175,6 +342,9 @@ class KnowledgeGraph:
                     source_file,
                 ),
             )
+        # Touch both entities (update last_touched for decay scoring)
+        self._touch_entity(sub_id)
+        self._touch_entity(obj_id)
         return triple_id
 
     def invalidate(self, subject: str, predicate: str, obj: str, ended: str = None):
@@ -190,6 +360,71 @@ class KnowledgeGraph:
                 "UPDATE triples SET valid_to=? WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
                 (ended, sub_id, pred, obj_id),
             )
+
+    def get_entity(self, name: str):
+        """Get entity details by name. Returns dict or None if not found."""
+        eid = self._entity_id(name)
+        conn = self._conn()
+        row = conn.execute("SELECT * FROM entities WHERE id = ? AND status = 'active'", (eid,)).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "type": row["type"],
+            "description": row["description"] or "",
+            "importance": row["importance"] or 3,
+            "last_touched": row["last_touched"] or "",
+            "status": row["status"],
+            "properties": json.loads(row["properties"]) if row["properties"] else {},
+        }
+
+    def list_entities(self, status: str = "active"):
+        """List all entities with the given status."""
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT * FROM entities WHERE status = ? ORDER BY importance DESC, last_touched DESC",
+            (status,),
+        ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "type": row["type"],
+                "description": row["description"] or "",
+                "importance": row["importance"] or 3,
+                "last_touched": row["last_touched"] or "",
+            }
+            for row in rows
+        ]
+
+    def update_entity_description(self, name: str, description: str, importance: int = None):
+        """Update an entity's description (and optionally importance). Returns the entity."""
+        eid = self._entity_id(name)
+        now = datetime.now().isoformat()
+        conn = self._conn()
+        with conn:
+            if importance is not None:
+                conn.execute(
+                    "UPDATE entities SET description = ?, importance = ?, last_touched = ? WHERE id = ?",
+                    (description, importance, now, eid),
+                )
+            else:
+                conn.execute(
+                    "UPDATE entities SET description = ?, last_touched = ? WHERE id = ?",
+                    (description, now, eid),
+                )
+        return self.get_entity(name)
+
+    def entity_edge_count(self, name: str) -> int:
+        """Count active edges (triples) involving an entity."""
+        eid = self._entity_id(name)
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT COUNT(*) as n FROM triples WHERE (subject = ? OR object = ?) AND valid_to IS NULL",
+            (eid, eid),
+        ).fetchone()
+        return row["n"] if row else 0
 
     # ── Query operations ──────────────────────────────────────────────────
 

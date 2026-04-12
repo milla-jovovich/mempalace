@@ -880,6 +880,418 @@ def tool_kg_stats():
     return _kg.stats()
 
 
+# ==================== ENTITY DECLARATION ====================
+
+ENTITY_SIMILARITY_THRESHOLD = 0.85
+ENTITY_COLLECTION_NAME = "mempalace_entities"
+
+# Session-level declared entities (in-memory for current process)
+_declared_entities: set = set()
+_session_id: str = ""
+
+
+def _get_entity_collection(create: bool = True):
+    """Get or create the mempalace_entities ChromaDB collection for description similarity."""
+    try:
+        client = chromadb.PersistentClient(path=_config.palace_path)
+        if create:
+            return client.get_or_create_collection(ENTITY_COLLECTION_NAME)
+        else:
+            return client.get_collection(ENTITY_COLLECTION_NAME)
+    except Exception:
+        if create:
+            try:
+                client = chromadb.PersistentClient(path=_config.palace_path)
+                return client.create_collection(ENTITY_COLLECTION_NAME)
+            except Exception:
+                return None
+        return None
+
+
+def _reset_declared_entities():
+    """Reset the session's declared entities set (called on compact/clear/restart)."""
+    global _declared_entities, _session_id
+    _declared_entities = set()
+    _session_id = ""
+
+
+def _check_entity_similarity(description: str, exclude_id: str = None, threshold: float = None):
+    """Check if a description is semantically similar to existing entities.
+
+    Returns list of similar entities above threshold.
+    """
+    threshold = threshold or ENTITY_SIMILARITY_THRESHOLD
+    ecol = _get_entity_collection(create=False)
+    if not ecol:
+        return []
+    try:
+        count = ecol.count()
+        if count == 0:
+            return []
+        results = ecol.query(
+            query_texts=[description],
+            n_results=min(5, count),
+            include=["documents", "metadatas", "distances"],
+        )
+        similar = []
+        if results["ids"] and results["ids"][0]:
+            for i, eid in enumerate(results["ids"][0]):
+                if eid == exclude_id:
+                    continue
+                dist = results["distances"][0][i]
+                similarity = round(1 - dist, 3)
+                if similarity >= threshold:
+                    meta = results["metadatas"][0][i]
+                    doc = results["documents"][0][i]
+                    similar.append({
+                        "entity_id": eid,
+                        "name": meta.get("name", eid),
+                        "description": doc,
+                        "similarity": similarity,
+                        "importance": meta.get("importance", 3),
+                    })
+        return similar
+    except Exception:
+        return []
+
+
+def _sync_entity_to_chromadb(entity_id: str, name: str, description: str, entity_type: str, importance: int):
+    """Sync an entity's description to the ChromaDB collection for similarity search."""
+    ecol = _get_entity_collection(create=True)
+    if not ecol:
+        return
+    ecol.upsert(
+        ids=[entity_id],
+        documents=[description],
+        metadatas=[{
+            "name": name,
+            "entity_type": entity_type,
+            "importance": importance,
+            "last_touched": datetime.now().isoformat(),
+        }],
+    )
+
+
+def tool_kg_declare_entity(
+    name: str,
+    description: str,
+    entity_type: str = "concept",
+    importance: int = 3,
+):
+    """Declare an entity before using it in KG edges. REQUIRED per session.
+
+    Every entity used in kg_add (subject or object) must be declared first.
+    Declaration triggers similarity check against existing entities. If a
+    collision is found (similarity > 0.85), the entity is BLOCKED — you
+    cannot use it until you either merge it with the colliding entity
+    (kg_merge_entities) or update descriptions to make them semantically
+    distinct (kg_update_entity_description).
+
+    Args:
+        name: Entity name. Will be aggressively normalized (hyphens,
+              underscores, CamelCase, articles all collapsed).
+              "The Flowsev Repository" and "flowsev_repository" both
+              normalize to "flowsev-repository".
+        description: Precise, unambiguous description of this entity.
+              BAD:  "a server" (too generic, will collide with many entities)
+              BAD:  "the database" (which database?)
+              GOOD: "The DSpot paperclip platform server process, started
+                     via pnpm dev:once, listening on port 3100, connecting
+                     to Docker postgres on port 5432"
+              GOOD: "The production PostgreSQL database for DSpot paperclip,
+                     running in Docker container paperclip-db-1 on port 5432,
+                     password-isolated from agent dev servers since 2026-04-09"
+        entity_type: Category. One of: concept, system, person, project,
+                     file, rule, tool, agent, process.
+        importance: 1-5. 5=critical (production systems, hard rules),
+                    4=canonical, 3=default, 2=low, 1=junk.
+
+    Returns:
+        status "created" — new entity, registered in session declared set.
+        status "exists"  — entity already exists, registered in session.
+        status "collision" — similar entities found, NOT registered.
+                            You MUST resolve before using this entity.
+    """
+    from .knowledge_graph import normalize_entity_name
+
+    try:
+        description = sanitize_content(description, max_length=5000)
+        importance = _validate_importance(importance)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    normalized = normalize_entity_name(name)
+    if not normalized or normalized == "unknown":
+        return {"success": False, "error": f"Entity name '{name}' normalizes to nothing. Use a more descriptive name."}
+
+    # Check for exact match (already exists)
+    existing = _kg.get_entity(normalized)
+    if existing:
+        # Check for collisions with OTHER entities (not self)
+        similar = _check_entity_similarity(description, exclude_id=normalized)
+        if similar:
+            return {
+                "success": False,
+                "status": "collision",
+                "entity_id": normalized,
+                "message": (
+                    f"Entity '{normalized}' exists but its description collides with other entities. "
+                    f"Disambiguate by updating descriptions (kg_update_entity_description) or "
+                    f"merge (kg_merge_entities) before using."
+                ),
+                "collisions": similar,
+            }
+        # No collisions — register in session
+        _declared_entities.add(normalized)
+        # Update description + importance if provided and different
+        if description and description != existing.get("description", ""):
+            _kg.update_entity_description(normalized, description, importance)
+            _sync_entity_to_chromadb(normalized, name, description, entity_type, importance or 3)
+        return {
+            "success": True,
+            "status": "exists",
+            "entity_id": normalized,
+            "description": existing.get("description") or description,
+            "importance": existing.get("importance", 3),
+            "edge_count": _kg.entity_edge_count(normalized),
+        }
+
+    # New entity — check for collisions via description similarity
+    similar = _check_entity_similarity(description)
+    if similar:
+        return {
+            "success": False,
+            "status": "collision",
+            "entity_id": normalized,
+            "message": (
+                f"Cannot create entity '{normalized}': its description is too similar to existing entities. "
+                f"Either (1) merge with the matching entity via kg_merge_entities(source='{normalized}', "
+                f"target='{similar[0]['entity_id']}'), or (2) rewrite your description to be more "
+                f"specific and re-declare. The entity is NOT usable until resolved."
+            ),
+            "collisions": similar,
+        }
+
+    # No collisions — create the entity
+    _kg.add_entity(name, entity_type=entity_type, description=description, importance=importance or 3)
+    _sync_entity_to_chromadb(normalized, name, description, entity_type, importance or 3)
+    _declared_entities.add(normalized)
+
+    _wal_log("kg_declare_entity", {
+        "entity_id": normalized,
+        "name": name,
+        "description": description[:200],
+        "entity_type": entity_type,
+        "importance": importance,
+    })
+
+    return {
+        "success": True,
+        "status": "created",
+        "entity_id": normalized,
+        "description": description,
+        "importance": importance or 3,
+        "entity_type": entity_type,
+    }
+
+
+def tool_kg_update_entity_description(
+    entity: str,
+    new_description: str,
+    check_against: str = None,
+):
+    """Update an entity's description and check distance from colliding entities.
+
+    Use after kg_declare_entity returns 'collision'. Update the description
+    to make it semantically distinct from the colliding entity, then re-declare.
+
+    Args:
+        entity: The entity to update.
+        new_description: The improved, more specific description.
+        check_against: Entity to measure distance from (optional).
+                       If not provided, checks against all entities above threshold.
+
+    Returns:
+        Distance checks with similarity scores and is_distinct flags.
+    """
+    from .knowledge_graph import normalize_entity_name
+
+    try:
+        new_description = sanitize_content(new_description, max_length=5000)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    normalized = normalize_entity_name(entity)
+    existing = _kg.get_entity(normalized)
+    if not existing:
+        return {"success": False, "error": f"Entity '{normalized}' not found."}
+
+    # Update in SQLite + ChromaDB
+    updated = _kg.update_entity_description(normalized, new_description)
+    _sync_entity_to_chromadb(
+        normalized, existing["name"], new_description,
+        existing.get("type", "concept"), existing.get("importance", 3)
+    )
+
+    # Distance checks
+    distance_checks = []
+    if check_against:
+        check_id = normalize_entity_name(check_against)
+        check_entity = _kg.get_entity(check_id)
+        if check_entity:
+            similar = _check_entity_similarity(new_description, exclude_id=normalized, threshold=0.0)
+            for s in similar:
+                if s["entity_id"] == check_id:
+                    distance_checks.append({
+                        "compared_to": check_id,
+                        "similarity": s["similarity"],
+                        "is_distinct": s["similarity"] < ENTITY_SIMILARITY_THRESHOLD,
+                        "threshold": ENTITY_SIMILARITY_THRESHOLD,
+                    })
+                    break
+            else:
+                distance_checks.append({
+                    "compared_to": check_id,
+                    "similarity": 0.0,
+                    "is_distinct": True,
+                    "threshold": ENTITY_SIMILARITY_THRESHOLD,
+                })
+    else:
+        # Check against all entities above a low threshold
+        similar = _check_entity_similarity(new_description, exclude_id=normalized, threshold=0.7)
+        for s in similar:
+            distance_checks.append({
+                "compared_to": s["entity_id"],
+                "similarity": s["similarity"],
+                "is_distinct": s["similarity"] < ENTITY_SIMILARITY_THRESHOLD,
+                "threshold": ENTITY_SIMILARITY_THRESHOLD,
+            })
+
+    all_distinct = all(d["is_distinct"] for d in distance_checks) if distance_checks else True
+
+    return {
+        "success": True,
+        "entity_id": normalized,
+        "description_updated": True,
+        "new_description": new_description,
+        "distance_checks": distance_checks,
+        "all_distinct": all_distinct,
+        "hint": "All clear — re-declare this entity to register it." if all_distinct
+                else "Still too similar to some entities. Make your description more specific.",
+    }
+
+
+def tool_kg_merge_entities(source: str, target: str, update_description: str = None):
+    """Merge source entity into target. All edges rewritten. Source becomes alias.
+
+    Use when kg_declare_entity returns 'collision' and the entities are
+    actually the same thing. All triples from source are moved to target.
+    Source name becomes an alias that auto-resolves to target in future queries.
+
+    Args:
+        source: Entity to merge FROM (will be soft-deleted).
+        target: Entity to merge INTO (will be kept, edges grow).
+        update_description: Optional new description for the merged entity.
+    """
+    _wal_log("kg_merge_entities", {
+        "source": source,
+        "target": target,
+        "update_description": update_description[:200] if update_description else None,
+    })
+
+    result = _kg.merge_entities(source, target, update_description)
+    if "error" in result:
+        return {"success": False, "error": result["error"]}
+
+    # Update ChromaDB: remove source, update target
+    from .knowledge_graph import normalize_entity_name
+    source_id = normalize_entity_name(source)
+    target_id = normalize_entity_name(target)
+
+    ecol = _get_entity_collection(create=False)
+    if ecol:
+        try:
+            ecol.delete(ids=[source_id])
+        except Exception:
+            pass
+        target_entity = _kg.get_entity(target_id)
+        if target_entity:
+            _sync_entity_to_chromadb(
+                target_id, target_entity["name"],
+                target_entity["description"], target_entity.get("type", "concept"),
+                target_entity.get("importance", 3)
+            )
+
+    # Register target as declared (source is now alias for target)
+    _declared_entities.discard(source_id)
+    _declared_entities.add(target_id)
+
+    return {
+        "success": True,
+        "source": result["source"],
+        "target": result["target"],
+        "edges_moved": result["edges_moved"],
+        "aliases_created": result["aliases_created"],
+    }
+
+
+def tool_kg_list_declared():
+    """List all entities declared in this session."""
+    results = []
+    for eid in sorted(_declared_entities):
+        entity = _kg.get_entity(eid)
+        if entity:
+            results.append({
+                "entity_id": eid,
+                "name": entity["name"],
+                "description": entity["description"],
+                "importance": entity["importance"],
+                "last_touched": entity["last_touched"],
+                "edge_count": _kg.entity_edge_count(eid),
+            })
+    return {
+        "declared_count": len(results),
+        "entities": results,
+    }
+
+
+def tool_kg_entity_info(entity: str):
+    """Get full details for an entity: description, edges, linked drawers.
+
+    Entity must be declared in this session to query.
+    """
+    from .knowledge_graph import normalize_entity_name
+    normalized = normalize_entity_name(entity)
+
+    if normalized not in _declared_entities:
+        return {
+            "success": False,
+            "error": (
+                f"Entity '{normalized}' has not been declared in this session. "
+                f"Call kg_declare_entity(name='{entity}', description='...') first. "
+                f"All entities must be declared before use."
+            ),
+        }
+
+    info = _kg.get_entity(normalized)
+    if not info:
+        return {"success": False, "error": f"Entity '{normalized}' not found in KG."}
+
+    edges = _kg.query_entity(normalized, direction="both")
+    return {
+        "success": True,
+        "entity_id": normalized,
+        "name": info["name"],
+        "description": info["description"],
+        "type": info["type"],
+        "importance": info["importance"],
+        "last_touched": info["last_touched"],
+        "status": info["status"],
+        "edge_count": len(edges),
+        "edges": edges,
+    }
+
+
 # ==================== AGENT DIARY ====================
 
 
@@ -1129,6 +1541,73 @@ TOOLS = {
         "description": "Knowledge graph overview: entities, triples, current vs expired facts, relationship types.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_kg_stats,
+    },
+    "mempalace_kg_declare_entity": {
+        "description": "REQUIRED before using any entity in kg_add. Declare an entity with a precise description. Triggers similarity check — if collision found (>0.85), entity is BLOCKED until disambiguated via kg_update_entity_description or merged via kg_merge_entities. Entities must be declared per session (reset on compact/clear/restart).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Entity name (will be normalized: hyphens/underscores/CamelCase all collapsed)"},
+                "description": {
+                    "type": "string",
+                    "description": "Precise description. BAD: 'a server'. GOOD: 'The DSpot paperclip platform server, started via pnpm dev:once, listening on port 3100, connecting to Docker postgres on port 5432'. Generic descriptions will collide with many entities, forcing disambiguation.",
+                },
+                "entity_type": {
+                    "type": "string",
+                    "description": "Category: concept, system, person, project, file, rule, tool, agent, process (default: concept)",
+                },
+                "importance": {
+                    "type": "integer",
+                    "description": "1-5. 5=critical production system, 4=canonical, 3=default, 2=low, 1=junk.",
+                    "minimum": 1,
+                    "maximum": 5,
+                },
+            },
+            "required": ["name", "description"],
+        },
+        "handler": tool_kg_declare_entity,
+    },
+    "mempalace_kg_update_entity_description": {
+        "description": "Update an entity's description to disambiguate from colliding entities. Use after kg_declare_entity returns 'collision'. Returns distance checks showing whether the entities are now distinct enough.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entity": {"type": "string", "description": "Entity to update"},
+                "new_description": {"type": "string", "description": "Improved, more specific description"},
+                "check_against": {"type": "string", "description": "Entity to measure distance from (optional — auto-checks all if omitted)"},
+            },
+            "required": ["entity", "new_description"],
+        },
+        "handler": tool_kg_update_entity_description,
+    },
+    "mempalace_kg_merge_entities": {
+        "description": "Merge source entity into target. All edges rewritten, source becomes alias. Use when kg_declare_entity returns 'collision' and the entities are actually the same thing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "description": "Entity to merge FROM (will be soft-deleted)"},
+                "target": {"type": "string", "description": "Entity to merge INTO (will be kept)"},
+                "update_description": {"type": "string", "description": "Optional new description for the merged entity"},
+            },
+            "required": ["source", "target"],
+        },
+        "handler": tool_kg_merge_entities,
+    },
+    "mempalace_kg_list_declared": {
+        "description": "List all entities declared in this session with their details (description, importance, edge count).",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_kg_list_declared,
+    },
+    "mempalace_kg_entity_info": {
+        "description": "Full details for a declared entity: description, importance, all edges (in+out), type. Entity must be declared this session.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entity": {"type": "string", "description": "Entity name to inspect"},
+            },
+            "required": ["entity"],
+        },
+        "handler": tool_kg_entity_info,
     },
     "mempalace_traverse": {
         "description": "Walk the palace graph from a room. Shows connected ideas across wings — the tunnels. Like following a thread through the palace: start at 'chromadb-setup' in wing_code, discover it connects to wing_myproject (planning) and wing_user (feelings about it).",
