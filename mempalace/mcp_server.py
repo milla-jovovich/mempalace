@@ -781,7 +781,8 @@ def tool_wake_up(wing: str = None):
         text = stack.wake_up(wing=wing)
         token_estimate = len(text) // 4
 
-        # ── Auto-declare predicates, classes, and top entities ──
+        # ── Auto-declare predicates, classes, intent types, and top entities ──
+        from .knowledge_graph import normalize_entity_name
         auto_declared = {"predicates": [], "classes": [], "entities": []}
 
         # 1. Auto-declare ALL canonical predicates (kind=predicate)
@@ -796,13 +797,30 @@ def tool_wake_up(wing: str = None):
             _declared_entities.add(c["id"])
             auto_declared["classes"].append({"id": c["id"], "description": c["description"][:100]})
 
-        # 3. Auto-declare top entities for this wing (by importance+decay)
+        # 3. Auto-declare intent types (entities that is-a intent_type)
+        auto_declared["intent_types"] = []
+        entities = _kg.list_entities(status="active", kind="entity")
+        for e in entities:
+            edges = _kg.query_entity(e["id"], direction="outgoing")
+            is_intent = any(
+                edge["predicate"] in ("is-a", "is_a") and edge["current"]
+                and normalize_entity_name(edge["object"]) in ("intent_type", "inspect", "modify", "execute", "communicate")
+                for edge in edges
+            )
+            if is_intent:
+                _declared_entities.add(e["id"])
+                auto_declared["intent_types"].append({
+                    "id": e["id"],
+                    "description": e["description"][:100],
+                    "importance": e["importance"],
+                })
+
+        # 4. Auto-declare top entities for this wing (by importance+decay)
         if wing:
-            # Get entities that have has_memory edges to drawers in this wing
             # For now: list all active entities of kind=entity, sorted by importance
-            entities = _kg.list_entities(status="active", kind="entity")
-            # Take top 20 by importance (decay scoring would need date, defer for now)
-            top_entities = entities[:20]
+            # Exclude intent types (already declared above)
+            intent_ids = {it["id"] for it in auto_declared["intent_types"]}
+            top_entities = [e for e in entities if e["id"] not in intent_ids][:20]
             for e in top_entities:
                 _declared_entities.add(e["id"])
                 auto_declared["entities"].append({
@@ -1792,6 +1810,393 @@ def tool_kg_entity_info(entity: str):
     }
 
 
+# ==================== INTENT DECLARATION ====================
+
+_active_intent = None  # Session-level: only one active intent at a time
+
+
+def _resolve_intent_profile(intent_type_id: str):
+    """Walk is-a hierarchy to resolve effective slots and tool_permissions.
+
+    Returns (slots, tool_permissions) where:
+    - slots: merged from child to parent (child wins on conflict)
+    - tool_permissions: from most specific type that defines them
+    """
+    from .knowledge_graph import normalize_entity_name
+
+    visited = set()
+    current = intent_type_id
+    found_permissions = None
+    merged_slots = {}
+
+    # Walk upward through is-a chain (max 5 hops)
+    for _ in range(5):
+        if current in visited:
+            break
+        visited.add(current)
+
+        entity = _kg.get_entity(current)
+        if not entity:
+            break
+
+        props = entity.get("properties", {})
+        if isinstance(props, str):
+            import json as _json
+            try:
+                props = _json.loads(props)
+            except Exception:
+                props = {}
+
+        profile = props.get("rules_profile", {})
+
+        # Slots: merge (child wins, so only add parent slots not already defined)
+        for slot_name, slot_def in profile.get("slots", {}).items():
+            if slot_name not in merged_slots:
+                merged_slots[slot_name] = slot_def
+
+        # Tool permissions: take from most specific (first found)
+        if found_permissions is None and "tool_permissions" in profile:
+            found_permissions = profile["tool_permissions"]
+
+        # Walk to parent via is-a
+        edges = _kg.query_entity(current, direction="outgoing")
+        parent = None
+        for e in edges:
+            if e["predicate"] in ("is-a", "is_a") and e["current"]:
+                parent_id = normalize_entity_name(e["object"])
+                # Skip if parent is a class (intent_type, thing) — stop at intent types
+                parent_entity = _kg.get_entity(parent_id)
+                if parent_entity and parent_entity.get("kind") == "entity":
+                    parent = parent_id
+                break
+        if not parent:
+            break
+        current = parent
+
+    return merged_slots, found_permissions or []
+
+
+def _is_intent_type(entity_id: str) -> bool:
+    """Check if an entity is-a intent_type (direct or inherited)."""
+    from .knowledge_graph import normalize_entity_name
+
+    edges = _kg.query_entity(entity_id, direction="outgoing")
+    for e in edges:
+        if e["predicate"] in ("is-a", "is_a") and e["current"]:
+            obj = normalize_entity_name(e["object"])
+            if obj == "intent_type":
+                return True
+            # Check parent (one level — e.g., edit_file is-a modify is-a intent_type)
+            parent_edges = _kg.query_entity(obj, direction="outgoing")
+            for pe in parent_edges:
+                if pe["predicate"] in ("is-a", "is_a") and pe["current"]:
+                    if normalize_entity_name(pe["object"]) == "intent_type":
+                        return True
+    return False
+
+
+def tool_declare_intent(
+    intent_type: str,
+    slots: dict,
+    description: str = "",
+):
+    """Declare what you intend to do BEFORE doing it. Returns permissions + context.
+
+    One active intent at a time — declaring a new intent expires the previous.
+    mempalace_* tools are always allowed (not gated by intent).
+
+    Args:
+        intent_type: A declared intent type entity (is-a intent_type).
+            Built-in types: inspect, modify, execute, communicate.
+            Domain-specific: edit_file, write_tests, deploy, run_tests, etc.
+            Declare new types via kg_declare_entity with is-a <parent_intent_type>.
+
+        slots: Named slots filled with entity names. Each intent type defines
+            expected slots with class constraints. Example:
+            For edit_file:  {"files": ["auth.test.ts", "auth.utils.ts"]}
+            For deploy:     {"target": ["flowsev_repository"], "environment": ["staging"]}
+            For inspect:    {"subject": ["paperclip_server"]}
+
+            Slot definitions are stored in the intent type's rules_profile.slots.
+            Each slot has: classes (accepted entity classes), required (bool),
+            multiple (bool — accepts list vs single entity).
+
+        description: Free-text description of what you plan to do and why.
+
+    Returns:
+        permissions: Which tools are allowed and their scope (scoped to slots or unrestricted).
+        context: Facts about slot entities, rules on the intent type, relevant memories.
+        previous_expired: ID of the previous active intent if one was replaced.
+
+    If intent_type is not declared or not is-a intent_type, returns an error
+    with instructions on how to declare it. Same pattern as predicate constraints.
+    """
+    global _active_intent
+    from .knowledge_graph import normalize_entity_name
+
+    # ── Validate intent_type ──
+    try:
+        intent_type = sanitize_name(intent_type, "intent_type")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    intent_id = normalize_entity_name(intent_type)
+
+    if intent_id not in _declared_entities:
+        return {
+            "success": False,
+            "error": (
+                f"Intent type '{intent_id}' not declared in this session. "
+                f"Call kg_declare_entity(name='{intent_type}', description='...', kind='entity') "
+                f"and then kg_add(subject='{intent_type}', predicate='is_a', object='<parent_intent_type>') "
+                f"to make it an intent type. Built-in types (inspect, modify, execute, communicate) "
+                f"are auto-declared at wake-up."
+            ),
+        }
+
+    if not _is_intent_type(intent_id):
+        return {
+            "success": False,
+            "error": (
+                f"'{intent_id}' is not an intent type (no is-a intent_type edge). "
+                f"Add: kg_add(subject='{intent_id}', predicate='is_a', object='modify') "
+                f"(or inspect/execute/communicate). Intent types must be classified "
+                f"in the intent_type hierarchy."
+            ),
+        }
+
+    # ── Resolve effective profile via inheritance ──
+    effective_slots, effective_permissions = _resolve_intent_profile(intent_id)
+
+    if not effective_slots:
+        return {
+            "success": False,
+            "error": (
+                f"Intent type '{intent_id}' has no slots defined in its rules_profile. "
+                f"Update its properties to include rules_profile.slots. Example: "
+                f'{{"slots": {{"files": {{"classes": ["file"], "required": true, "multiple": true}}}}}}'
+            ),
+        }
+
+    # ── Validate slots ──
+    if not isinstance(slots, dict):
+        return {
+            "success": False,
+            "error": (
+                f"slots must be a dict mapping slot names to entity names. "
+                f"Expected slots for '{intent_id}': {list(effective_slots.keys())}. "
+                f"Example: {{{', '.join(f'\"{k}\": [\"entity_name\"]' for k in effective_slots)}}}"
+            ),
+        }
+
+    slot_errors = []
+    resolved_slots = {}  # slot_name -> list of normalized entity IDs
+
+    # Check required slots are present
+    for slot_name, slot_def in effective_slots.items():
+        if slot_def.get("required", False) and slot_name not in slots:
+            slot_errors.append(
+                f"Required slot '{slot_name}' not provided. "
+                f"Accepted classes: {slot_def.get('classes', ['thing'])}."
+            )
+
+    # Check provided slots are valid
+    for slot_name, slot_values in slots.items():
+        if slot_name not in effective_slots:
+            slot_errors.append(
+                f"Unknown slot '{slot_name}'. Valid slots: {list(effective_slots.keys())}."
+            )
+            continue
+
+        slot_def = effective_slots[slot_name]
+
+        # Normalize to list
+        if isinstance(slot_values, str):
+            slot_values = [slot_values]
+        if not isinstance(slot_values, list):
+            slot_errors.append(f"Slot '{slot_name}' must be a string or list of strings.")
+            continue
+
+        # Check multiple
+        if not slot_def.get("multiple", False) and len(slot_values) > 1:
+            slot_errors.append(
+                f"Slot '{slot_name}' accepts only one entity (multiple=false), got {len(slot_values)}."
+            )
+            continue
+
+        # Validate each entity in slot
+        normalized_values = []
+        for val in slot_values:
+            val_id = normalize_entity_name(val)
+            if val_id not in _declared_entities:
+                slot_errors.append(
+                    f"Entity '{val_id}' in slot '{slot_name}' not declared. "
+                    f"Call kg_declare_entity first."
+                )
+                continue
+
+            # Check class constraint via is-a + inheritance
+            allowed_classes = slot_def.get("classes", ["thing"])
+            if "thing" not in allowed_classes:
+                entity_classes = [
+                    e["object"] for e in _kg.query_entity(val_id, direction="outgoing")
+                    if e["predicate"] in ("is-a", "is_a") and e["current"]
+                ]
+                if entity_classes:
+                    # Reuse the BFS subclass check from kg_add
+                    from .knowledge_graph import normalize_entity_name as _norm
+                    norm_classes = [_norm(c) for c in entity_classes]
+                    norm_allowed = [_norm(c) for c in allowed_classes]
+
+                    def _check_subclass(classes, allowed, depth=5):
+                        if any(c in allowed for c in classes):
+                            return True
+                        visited = set(classes)
+                        frontier = list(classes)
+                        for _ in range(depth):
+                            nxt = []
+                            for cls in frontier:
+                                for e in _kg.query_entity(cls, direction="outgoing"):
+                                    if e["predicate"] in ("is-a", "is_a") and e["current"]:
+                                        p = _norm(e["object"])
+                                        if p in allowed:
+                                            return True
+                                        if p not in visited:
+                                            visited.add(p)
+                                            nxt.append(p)
+                            frontier = nxt
+                            if not frontier:
+                                break
+                        return False
+
+                    if not _check_subclass(norm_classes, norm_allowed):
+                        slot_errors.append(
+                            f"Entity '{val_id}' in slot '{slot_name}' is-a {entity_classes}, "
+                            f"but slot requires classes {allowed_classes}."
+                        )
+                        continue
+
+            normalized_values.append(val_id)
+        resolved_slots[slot_name] = normalized_values
+
+    if slot_errors:
+        return {
+            "success": False,
+            "error": "Slot validation failed for declare_intent.",
+            "slot_issues": slot_errors,
+            "expected_slots": {
+                name: {
+                    "classes": d.get("classes", ["thing"]),
+                    "required": d.get("required", False),
+                    "multiple": d.get("multiple", False),
+                }
+                for name, d in effective_slots.items()
+            },
+        }
+
+    # ── Build permissions ──
+    permissions = []
+    all_slot_entities = []
+    for slot_name, entities in resolved_slots.items():
+        all_slot_entities.extend(entities)
+        for perm in effective_permissions:
+            scope = perm.get("scope", "*")
+            if f"{{{slot_name}}}" in scope:
+                # Replace slot reference with actual entity values
+                for entity_id in entities:
+                    entity = _kg.get_entity(entity_id)
+                    entity_name = entity["name"] if entity else entity_id
+                    permissions.append({
+                        "tool": perm["tool"],
+                        "scope": scope.replace(f"{{{slot_name}}}", entity_name),
+                        "slot": slot_name,
+                        "entity": entity_id,
+                    })
+            elif scope == "*":
+                if not any(p["tool"] == perm["tool"] and p["scope"] == "*" for p in permissions):
+                    permissions.append({"tool": perm["tool"], "scope": "*"})
+
+    # ── Collect context ──
+    context = {"target_facts": [], "intent_rules": [], "relevant_memories": []}
+
+    # Facts about all slot entities
+    for entity_id in all_slot_entities:
+        edges = _kg.query_entity(entity_id, direction="both")
+        for e in edges:
+            if e.get("current", True):
+                context["target_facts"].append(
+                    f"{e.get('subject', entity_id)} -> {e['predicate']} -> {e.get('object', '?')}"
+                )
+
+    # Rules on the intent type itself
+    intent_edges = _kg.query_entity(intent_id, direction="outgoing")
+    for e in intent_edges:
+        if e.get("current", True) and e["predicate"] not in ("is-a", "is_a"):
+            context["intent_rules"].append(
+                f"{intent_id} -> {e['predicate']} -> {e.get('object', '?')}"
+            )
+
+    # Relevant memories via search (deduped against prior injections)
+    already_injected = set()
+    if _active_intent:
+        already_injected = _active_intent.get("injected_drawer_ids", set())
+
+    for entity_id in all_slot_entities:
+        entity = _kg.get_entity(entity_id)
+        search_query = entity["name"] if entity else entity_id
+        try:
+            search_result = search_memories(
+                search_query, palace_path=_config.palace_path, n_results=3
+            )
+            if isinstance(search_result, dict) and search_result.get("results"):
+                for r in search_result["results"]:
+                    drawer_id = r.get("id", "")
+                    if drawer_id not in already_injected:
+                        already_injected.add(drawer_id)
+                        context["relevant_memories"].append({
+                            "drawer_id": drawer_id,
+                            "snippet": (r.get("text") or "")[:200],
+                            "for_entity": entity_id,
+                        })
+        except Exception:
+            pass  # Non-fatal — context injection is best-effort
+
+    # ── Expire previous intent, set new ──
+    previous_expired = None
+    if _active_intent:
+        previous_expired = _active_intent.get("intent_id")
+
+    import hashlib
+    intent_hash = hashlib.md5(f"{intent_id}:{description}:{datetime.now().isoformat()}".encode()).hexdigest()[:12]
+    new_intent_id = f"intent_{intent_id}_{intent_hash}"
+
+    _active_intent = {
+        "intent_id": new_intent_id,
+        "intent_type": intent_id,
+        "slots": resolved_slots,
+        "effective_permissions": permissions,
+        "injected_drawer_ids": already_injected,
+        "description": description,
+    }
+
+    _wal_log("declare_intent", {
+        "intent_id": new_intent_id,
+        "intent_type": intent_id,
+        "slots": {k: v for k, v in resolved_slots.items()},
+        "description": description[:200],
+    })
+
+    return {
+        "success": True,
+        "intent_id": new_intent_id,
+        "intent_type": intent_id,
+        "slots": resolved_slots,
+        "permissions": permissions,
+        "context": context,
+        "previous_expired": previous_expired,
+    }
+
+
 # ==================== AGENT DIARY ====================
 
 
@@ -2151,6 +2556,49 @@ TOOLS = {
             "required": ["entity"],
         },
         "handler": tool_kg_entity_info,
+    },
+    "mempalace_declare_intent": {
+        "description": (
+            "Declare what you intend to do BEFORE doing it. Returns permissions + context. "
+            "One active intent at a time — new intent expires the previous. "
+            "mempalace_* tools are always allowed regardless of intent.\n\n"
+            "Built-in intent types (auto-declared at wake-up):\n"
+            "  inspect:     read-only (Read, Grep, Glob). Slots: subject\n"
+            "  modify:      edit files (Edit, Write scoped to files). Slots: files\n"
+            "  execute:     run commands (Bash). Slots: target\n"
+            "  communicate: external ops (Bash scoped). Slots: target, audience\n\n"
+            "Domain-specific types inherit from these: edit_file, write_tests, deploy, etc. "
+            "Declare new types via kg_declare_entity + is_a edge to a parent intent type.\n\n"
+            "Slots are filled with declared entity names. Each slot has class constraints "
+            "validated via is-a inheritance (same as predicate constraints)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intent_type": {
+                    "type": "string",
+                    "description": (
+                        "The intent type to declare (must be is-a intent_type). "
+                        "Examples: 'inspect', 'modify', 'edit_file', 'deploy', 'run_tests'"
+                    ),
+                },
+                "slots": {
+                    "type": "object",
+                    "description": (
+                        "Named slots filled with entity names. Each intent type defines its slots. "
+                        "Example for edit_file: {\"files\": [\"auth.test.ts\"]}. "
+                        "Example for deploy: {\"target\": [\"my_project\"], \"environment\": [\"staging\"]}. "
+                        "Values can be a string (single entity) or list (multiple entities if slot allows)."
+                    ),
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Free-text description of what you plan to do and why",
+                },
+            },
+            "required": ["intent_type", "slots"],
+        },
+        "handler": tool_declare_intent,
     },
     "mempalace_traverse": {
         "description": "Walk the palace graph from a room. Shows connected ideas across wings — the tunnels. Like following a thread through the palace: start at 'chromadb-setup' in wing_code, discover it connects to wing_myproject (planning) and wing_user (feelings about it).",
