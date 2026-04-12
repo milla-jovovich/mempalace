@@ -225,8 +225,8 @@ class KnowledgeGraph:
 
         # ── Predicates (kind=predicate) with constraints ──
         predicates = [
-            ("is_a", "Taxonomic classification: subject is an instance of object class", 5,
-             {"subject_kinds": ["entity"], "object_kinds": ["class"], "subject_classes": ["thing"], "object_classes": ["thing"], "cardinality": "many-to-many"}),
+            ("is_a", "Taxonomic classification: subject is an instance of object class, or a subtype of another entity in a hierarchy", 5,
+             {"subject_kinds": ["entity"], "object_kinds": ["class", "entity"], "subject_classes": ["thing"], "object_classes": ["thing"], "cardinality": "many-to-many"}),
             ("has_value", "Subject has a specific attribute value as object", 4,
              {"subject_kinds": ["entity"], "object_kinds": ["entity", "literal"], "subject_classes": ["thing"], "object_classes": ["thing"], "cardinality": "many-to-many"}),
             ("has_property", "Subject has a named property described by object", 4,
