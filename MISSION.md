@@ -31,15 +31,4 @@ Stripping all this off the page — moving the diary writes, the palace filing, 
 
 Your data is already stored in JSON by Claude and the background pipeline extracts it into readable markdown, the key topics get compressed into AAAK format and saved into closets which then point to the exact drawer where your day's session lives.
 
-**What's new in v4:**
-
-- **8 languages** — MemPalace now has i18n support for English, French, Korean, Japanese, Spanish, German, Simplified Chinese and Traditional Chinese. Each language has its own AAAK compression rules and regex patterns so the offline processing works natively, not just in English. Contributors can add new languages by translating a single JSON file.
-
-- **Pluggable storage backends** — thanks to @skuznetsov's backend seam (PR #413), MemPalace is no longer locked to ChromaDB. The community is already building alternative backends including Qdrant (PR #700). If you prefer PostgreSQL or SQLite, you can use those instead without ever installing ChromaDB.
-
-- **Deep security review** — @igorls did a thorough 12-issue review covering everything from hardcoded paths to command injection risks. All 12 issues were fixed and pushed. This kind of independent scrutiny is exactly what makes open source work and we're grateful for it.
-
-- **Background everything** — hooks now handle timestamps, pipeline checks, session backups, and diary filing. Nothing interrupts your conversation. The pipeline runs at session start and re-triggers every 30 minutes automatically.
-
 And please, always remember, these are brand new tools, please NEVER use critical files to test! Just run it with something easy first before you put your entire data set into it!✨
-
