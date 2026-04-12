@@ -42,7 +42,7 @@ features:
     details: Temporal entity-relationship triples in SQLite. Facts can be added, queried, and invalidated over time.
   - icon:
       src: /icons/wrench.svg
-      alt: 19 MCP Tools
+      alt: 24 MCP Tools
     title: 24 MCP Tools
     details: MCP tools expose search, filing, knowledge graph, graph navigation, diary, and settings operations to compatible clients.
   - icon:

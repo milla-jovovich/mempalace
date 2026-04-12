@@ -59,7 +59,9 @@ Semantic search. Returns verbatim drawer content with similarity scores.
 | `max_distance` | number | No | Max cosine distance threshold (0=identical, 2=opposite). Results further than this are dropped. Default 1.5. Set to 0 to disable. |
 | `context` | string | No | Background context for the search. Not used for embedding — only for future re-ranking. |
 
-**Returns:** `{ query, filters, results: [{ text, wing, room, source_file, similarity, distance }] }`
+**Returns:** `{ query, filters, keyword_fallback, total_before_filter, results: [{ text, wing, room, source_file, similarity, distance }] }`
+
+May also include `query_sanitized` and `sanitizer` if the query was cleaned, and `context_received` if context was provided.
 
 ---
 
@@ -124,7 +126,9 @@ Fetch a single drawer by ID — returns full content and metadata.
 |-----------|------|----------|-------------|
 | `drawer_id` | string | **Yes** | ID of the drawer to fetch |
 
-**Returns:** `{ drawer_id, content, wing, room, source_file, metadata }`
+**Returns:** `{ drawer_id, content, wing, room, metadata }`
+
+`source_file` is inside the `metadata` object, not a top-level field.
 
 ---
 
@@ -139,7 +143,7 @@ List drawers with pagination. Optional wing/room filter. Returns IDs, wings, roo
 | `limit` | integer | No | Max results per page (default: 20, max: 100) |
 | `offset` | integer | No | Offset for pagination (default: 0) |
 
-**Returns:** `{ drawers: [{ id, wing, room, preview }], total, offset, limit }`
+**Returns:** `{ drawers: [{ drawer_id, wing, room, content_preview }], count, offset, limit }`
 
 ---
 
@@ -154,7 +158,7 @@ Update an existing drawer's content and/or metadata (wing, room). Returns error 
 | `wing` | string | No | New wing (omit to keep existing) |
 | `room` | string | No | New room (omit to keep existing) |
 
-**Returns:** `{ success, drawer_id, updated_fields }`
+**Returns:** `{ success, drawer_id, wing, room }` — or `{ success, drawer_id, noop: true }` when called with no fields to update.
 
 ---
 
@@ -169,7 +173,7 @@ Get or set hook behavior. Call with no arguments to view current settings.
 | `silent_save` | boolean | No | True = silent direct save, False = legacy blocking MCP calls |
 | `desktop_toast` | boolean | No | True = show desktop notification via notify-send |
 
-**Returns:** `{ silent_save, desktop_toast }`
+**Returns:** `{ success, settings: { silent_save, desktop_toast } }` — includes `updated` array when settings were changed.
 
 ---
 
@@ -179,7 +183,7 @@ Check if a recent palace checkpoint was saved. Returns message count and timesta
 
 **Parameters:** None
 
-**Returns:** `{ last_save, message_count, timestamp }`
+**Returns:** `{ status, message, count, timestamp }`
 
 ---
 
