@@ -5,7 +5,7 @@ Thanks for wanting to help. MemPalace is open source and we welcome contribution
 ## Getting Started
 
 ```bash
-git clone https://github.com/milla-jovovich/mempalace.git
+git clone https://github.com/MemPalace/mempalace.git
 cd mempalace
 pip install -e ".[dev]"    # installs with dev dependencies (pytest, build, twine)
 ```
@@ -52,7 +52,7 @@ assets/             ← logo + brand
    - `fix: handle empty transcript files`
    - `docs: update MCP tool descriptions`
    - `bench: add LoCoMo turn-level metrics`
-6. Push to your fork and open a PR against `main`
+6. Push to your fork and open a PR against `develop`
 
 ## Code Style
 
@@ -64,7 +64,7 @@ assets/             ← logo + brand
 
 ## Good First Issues
 
-Check the [Issues](https://github.com/milla-jovovich/mempalace/issues) tab. Great starting points:
+Check the [Issues](https://github.com/MemPalace/mempalace/issues) tab. Great starting points:
 
 - **New chat formats**: Add import support for Cursor, Copilot, or other AI tool exports
 - **Room detection**: Improve pattern matching in `room_detector_local.py`
