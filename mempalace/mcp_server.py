@@ -62,9 +62,7 @@ _config = MempalaceConfig()
 # Only override KG path when --palace is explicitly provided; otherwise use
 # KnowledgeGraph's default (~/.mempalace/knowledge_graph.sqlite3).
 if _args.palace:
-    _kg = KnowledgeGraph(
-        db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3")
-    )
+    _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
 else:
     _kg = KnowledgeGraph()
 
@@ -105,9 +103,7 @@ def _wal_log(operation: str, params: dict, result: dict = None):
     safe_params = {}
     for k, v in params.items():
         if k in _WAL_REDACT_KEYS:
-            safe_params[k] = (
-                f"[REDACTED {len(v)} chars]" if isinstance(v, str) else "[REDACTED]"
-            )
+            safe_params[k] = f"[REDACTED {len(v)} chars]" if isinstance(v, str) else "[REDACTED]"
         else:
             safe_params[k] = v
     entry = {
@@ -517,12 +513,8 @@ def tool_delete_drawer(drawer_id: str):
         return {"success": False, "error": f"Drawer not found: {drawer_id}"}
 
     # Log the deletion with the content being removed for audit trail
-    deleted_content = (
-        existing.get("documents", [""])[0] if existing.get("documents") else ""
-    )
-    deleted_meta = (
-        existing.get("metadatas", [{}])[0] if existing.get("metadatas") else {}
-    )
+    deleted_content = existing.get("documents", [""])[0] if existing.get("documents") else ""
+    deleted_meta = existing.get("metadatas", [{}])[0] if existing.get("metadatas") else {}
     _wal_log(
         "delete_drawer",
         {
@@ -563,9 +555,7 @@ def tool_get_drawer(drawer_id: str):
         return {"error": str(e)}
 
 
-def tool_list_drawers(
-    wing: str = None, room: str = None, limit: int = 20, offset: int = 0
-):
+def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offset: int = 0):
     """List drawers with pagination. Optional wing/room filter."""
     limit = max(1, min(limit, _MAX_RESULTS))
     offset = max(0, offset)
@@ -615,9 +605,7 @@ def tool_list_drawers(
         return {"error": str(e)}
 
 
-def tool_update_drawer(
-    drawer_id: str, content: str = None, wing: str = None, room: str = None
-):
+def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, room: str = None):
     """Update an existing drawer's content and/or metadata."""
     global _metadata_cache
 
@@ -1490,9 +1478,7 @@ def main():
             request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(
-                    json.dumps(response, ensure_ascii=False, errors="replace") + "\n"
-                )
+                sys.stdout.write(json.dumps(response, ensure_ascii=False, errors="replace") + "\n")
                 sys.stdout.flush()
         except KeyboardInterrupt:
             break
