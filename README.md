@@ -1,5 +1,8 @@
 <div align="center">
 
+<!-- Social preview: assets/social-preview.png (1280x640) — set in GitHub repo Settings > Social preview -->
+<!-- OG image: assets/og-image.png (1200x630) -->
+
 <img src="assets/mempalace_logo.png" alt="MemPalace" width="280">
 
 # MemPalace
