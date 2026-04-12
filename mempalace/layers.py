@@ -95,33 +95,100 @@ def compute_decay_score(importance: float, date_added_iso: str) -> float:
 
 class Layer0:
     """
-    ~100 tokens. Always loaded.
-    Reads from ~/.mempalace/identity.txt — a plain-text file the user writes.
+    ~100-300 tokens. Always loaded.
 
-    Example identity.txt:
-        I am Atlas, a personal AI assistant for Alice.
-        Traits: warm, direct, remembers everything.
-        People: Alice (creator), Bob (Alice's partner).
-        Project: A journaling app that helps people process emotions.
+    Identity is derived from the KG entity graph: finds the agent entity's
+    described-by drawers and loads them as identity text. Falls back to
+    ~/.mempalace/identity.txt if no KG identity is found.
+
+    The agent entity is determined by the wing parameter: wing="ga" looks up
+    entity "ga-agent", wing="pfe" looks up entity "pfe", etc.
     """
 
-    def __init__(self, identity_path: str = None):
+    def __init__(self, identity_path: str = None, palace_path: str = None, wing: str = None):
         if identity_path is None:
             identity_path = os.path.expanduser("~/.mempalace/identity.txt")
         self.path = identity_path
+        self.palace_path = palace_path
+        self.wing = wing
         self._text = None
 
+    def _load_from_kg(self) -> str:
+        """Try to load identity from KG entity's described-by drawers."""
+        if not self.wing or not self.palace_path:
+            return None
+        try:
+            from .knowledge_graph import KnowledgeGraph, normalize_entity_name
+            kg = KnowledgeGraph()
+
+            # Determine agent entity: wing "ga" -> "ga-agent", others -> wing name
+            agent_entity = f"{self.wing}-agent" if self.wing == "ga" else self.wing
+            agent_id = normalize_entity_name(agent_entity)
+
+            entity = kg.get_entity(agent_id)
+            if not entity:
+                return None
+
+            # Get described-by edges -> load those drawers
+            edges = kg.query_entity(agent_id, direction="outgoing")
+            described_by_ids = [
+                e["object"] for e in edges
+                if e["predicate"] == "described-by" and e["current"]
+            ]
+
+            if not described_by_ids:
+                return None
+
+            # Load drawer content from ChromaDB
+            client = chromadb.PersistentClient(path=self.palace_path)
+            col = client.get_collection("mempalace_drawers")
+
+            # Try both underscore and hyphen forms of IDs
+            all_ids = []
+            for did in described_by_ids:
+                all_ids.append(did)
+                all_ids.append(did.replace("-", "_"))
+
+            result = col.get(ids=all_ids, include=["documents"])
+            if not result["documents"]:
+                return None
+
+            # Build identity text from drawer content
+            parts = [f"## L0 — IDENTITY (from entity: {entity['name']})"]
+            parts.append(f"Description: {entity['description']}")
+            parts.append("")
+            for doc in result["documents"]:
+                if doc:
+                    snippet = doc.strip()
+                    if len(snippet) > 500:
+                        snippet = snippet[:497] + "..."
+                    parts.append(snippet)
+                    parts.append("")
+
+            return "\n".join(parts)
+        except Exception:
+            return None
+
     def render(self) -> str:
-        """Return the identity text, or a sensible default."""
+        """Return identity text from KG, falling back to identity.txt file."""
         if self._text is not None:
             return self._text
 
+        # Try KG-based identity first
+        kg_identity = self._load_from_kg()
+        if kg_identity:
+            self._text = kg_identity
+            return self._text
+
+        # Fall back to file
         if os.path.exists(self.path):
             with open(self.path, "r") as f:
                 self._text = f.read().strip()
         else:
             self._text = (
-                "## L0 — IDENTITY\nNo identity configured. Create ~/.mempalace/identity.txt"
+                "## L0 — IDENTITY\nNo identity configured. "
+                "Declare an agent entity with described-by drawers, "
+                "or create ~/.mempalace/identity.txt"
             )
 
         return self._text
@@ -453,7 +520,7 @@ class MemoryStack:
         self.palace_path = palace_path or cfg.palace_path
         self.identity_path = identity_path or os.path.expanduser("~/.mempalace/identity.txt")
 
-        self.l0 = Layer0(self.identity_path)
+        self.l0 = Layer0(self.identity_path, palace_path=self.palace_path)
         self.l1 = Layer1(self.palace_path)
         self.l2 = Layer2(self.palace_path)
         self.l3 = Layer3(self.palace_path)
@@ -468,7 +535,8 @@ class MemoryStack:
         """
         parts = []
 
-        # L0: Identity
+        # L0: Identity (pass wing so it can find agent entity)
+        self.l0.wing = wing
         parts.append(self.l0.render())
         parts.append("")
 
