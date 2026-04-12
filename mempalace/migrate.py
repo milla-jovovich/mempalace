@@ -179,6 +179,12 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
     print(f"  Source:    ChromaDB {source_version}")
     print(f"  Target:    ChromaDB {target_version}")
 
+    # Capture expected schema from current ChromaDB version
+    from .schema import create_reference_schema, validate_and_patch
+
+    print("  Capturing reference schema...")
+    reference_schema = create_reference_schema()
+
     # Try reading with current chromadb first
     try:
         col = ChromaBackend().get_collection(palace_path, "mempalace_drawers")
@@ -251,6 +257,17 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
     final_count = col.count()
     del col
     del fresh_backend
+
+    # Validate schema before swapping
+    temp_db = os.path.join(temp_palace, "chroma.sqlite3")
+    print("  Validating migrated schema...")
+    valid, actions = validate_and_patch(temp_db, reference=reference_schema)
+    for action in actions:
+        print(f"    {action}")
+    if not valid:
+        print("\n  ERROR: Schema validation failed. Aborting.")
+        print(f"  Temp palace preserved at: {temp_palace}")
+        return False
 
     # Swap: rename old palace aside, then move new one into place.
     # This avoids a window where both old and new are missing.
