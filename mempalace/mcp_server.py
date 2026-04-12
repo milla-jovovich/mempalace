@@ -776,11 +776,44 @@ def tool_wake_up(wing: str = None):
         stack = MemoryStack()
         text = stack.wake_up(wing=wing)
         token_estimate = len(text) // 4
+
+        # ── Auto-declare predicates, classes, and top entities ──
+        auto_declared = {"predicates": [], "classes": [], "entities": []}
+
+        # 1. Auto-declare ALL canonical predicates (kind=predicate)
+        predicates = _kg.list_entities(status="active", kind="predicate")
+        for p in predicates:
+            _declared_entities.add(p["id"])
+            auto_declared["predicates"].append({"id": p["id"], "description": p["description"][:100]})
+
+        # 2. Auto-declare ALL domain type classes (kind=class)
+        classes = _kg.list_entities(status="active", kind="class")
+        for c in classes:
+            _declared_entities.add(c["id"])
+            auto_declared["classes"].append({"id": c["id"], "description": c["description"][:100]})
+
+        # 3. Auto-declare top entities for this wing (by importance+decay)
+        if wing:
+            # Get entities that have has_memory edges to drawers in this wing
+            # For now: list all active entities of kind=entity, sorted by importance
+            entities = _kg.list_entities(status="active", kind="entity")
+            # Take top 20 by importance (decay scoring would need date, defer for now)
+            top_entities = entities[:20]
+            for e in top_entities:
+                _declared_entities.add(e["id"])
+                auto_declared["entities"].append({
+                    "id": e["id"],
+                    "description": e["description"][:100],
+                    "importance": e["importance"],
+                })
+
         return {
             "success": True,
             "wing": wing,
             "text": text,
             "estimated_tokens": token_estimate,
+            "auto_declared": auto_declared,
+            "total_declared": len(_declared_entities),
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
