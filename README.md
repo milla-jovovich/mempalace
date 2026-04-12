@@ -100,7 +100,7 @@ All fork changes submitted as separate focused PRs to [milla-jovovich/mempalace]
 | [#626](https://github.com/milla-jovovich/mempalace/pull/626) | fix | Standalone bug fixes |
 | [#629](https://github.com/milla-jovovich/mempalace/pull/629) | perf | Batch writes, concurrent mining |
 | [#632](https://github.com/milla-jovovich/mempalace/pull/632) | feat | Repair, purge, --version |
-| [#633](https://github.com/milla-jovovich/mempalace/pull/633) | feat | Hook capture, auto-mine transcripts |
+| [#633](https://github.com/milla-jovovich/mempalace/pull/633) | feat | ~~Hook capture~~ — closed, resubmitted as #673 |
 | [#635](https://github.com/milla-jovovich/mempalace/pull/635) | feat | New MCP tools, export — **merged** via [#667](https://github.com/milla-jovovich/mempalace/pull/667) |
 | [#659](https://github.com/milla-jovovich/mempalace/pull/659) | fix | Diary wing parameter |
 | [#660](https://github.com/milla-jovovich/mempalace/pull/660) | perf | L1 importance pre-filter |
@@ -108,6 +108,7 @@ All fork changes submitted as separate focused PRs to [milla-jovovich/mempalace]
 | [#662](https://github.com/milla-jovovich/mempalace/pull/662) | feat | Hybrid search fallback |
 | [#663](https://github.com/milla-jovovich/mempalace/pull/663) | fix | Stale HNSW mtime detection |
 | [#664](https://github.com/milla-jovovich/mempalace/pull/664) | fix | BLOB seq_id migration repair |
+| [#673](https://github.com/milla-jovovich/mempalace/pull/673) | feat | Deterministic hook saves — zero data loss via Python API |
 
 ## License
 

@@ -62,7 +62,7 @@ All fork changes submitted as separate focused PRs targeting `develop`. First PR
 | #626 | open | Standalone bug fixes |
 | #629 | open | Batch writes, concurrent mining |
 | #632 | open | Repair, purge, --version |
-| #633 | open | Hook capture, auto-mine transcripts |
+| #633 | **closed** | Hook capture (superseded, resubmitted as #673) |
 | #635 | **merged** via #667 | New MCP tools, export |
 | #659 | open | Diary wing parameter |
 | #660 | open | L1 importance pre-filter |
@@ -70,6 +70,7 @@ All fork changes submitted as separate focused PRs targeting `develop`. First PR
 | #662 | open | Hybrid search fallback |
 | #663 | open | Stale HNSW mtime detection |
 | #664 | open | BLOB seq_id migration repair |
+| #673 | open | Deterministic hook saves (replaces #633) |
 
 ## Two-Layer Memory Architecture
 
