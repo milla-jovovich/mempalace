@@ -2,7 +2,7 @@
 """
 MemPalace MCP Server — read/write palace access for Claude Code
 ================================================================
-Install: claude mcp add mempalace -- python /path/to/mcp_server.py
+Install: claude mcp add mempalace -- python -m mempalace.mcp_server [--palace /path/to/palace]
 
 Tools (read):
   mempalace_status          — total drawers, wing/room breakdown
@@ -17,14 +17,18 @@ Tools (write):
   mempalace_delete_drawer   — remove a drawer by ID
 """
 
+import argparse
 import os
 import sys
 import json
 import logging
 import hashlib
 from datetime import datetime
+from pathlib import Path
 
-from .config import MempalaceConfig
+from .config import MempalaceConfig, sanitize_name, sanitize_content
+from .version import __version__
+from .query_sanitizer import sanitize_query
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
@@ -34,19 +38,90 @@ from .knowledge_graph import KnowledgeGraph
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
 
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description="MemPalace MCP Server")
+    parser.add_argument(
+        "--palace",
+        metavar="PATH",
+        help="Path to the palace directory (overrides config file and env var)",
+    )
+    args, unknown = parser.parse_known_args()
+    if unknown:
+        logger.debug("Ignoring unknown args: %s", unknown)
+    return args
+
+
+_args = _parse_args()
+
+if _args.palace:
+    os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
+
 _config = MempalaceConfig()
 _kg = KnowledgeGraph(
     db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3")
 )
 
 
-def _get_collection(create=True):
-    """Return the ChromaDB collection, creating it if needed."""
+_client_cache = None
+_collection_cache = None
+
+
+# ==================== WRITE-AHEAD LOG ====================
+# Every write operation is logged to a JSONL file before execution.
+# This provides an audit trail for detecting memory poisoning and
+# enables review/rollback of writes from external or untrusted sources.
+
+_WAL_DIR = Path(os.path.expanduser("~/.mempalace/wal"))
+_WAL_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    _WAL_DIR.chmod(0o700)
+except (OSError, NotImplementedError):
+    pass
+_WAL_FILE = _WAL_DIR / "write_log.jsonl"
+
+
+def _wal_log(operation: str, params: dict, result: dict = None):
+    """Append a write operation to the write-ahead log."""
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "operation": operation,
+        "params": params,
+        "result": result,
+    }
     try:
-        client = chromadb.PersistentClient(path=_config.palace_path)
+        with open(_WAL_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+        try:
+            _WAL_FILE.chmod(0o600)
+        except (OSError, NotImplementedError):
+            pass
+    except Exception as e:
+        logger.error(f"WAL write failed: {e}")
+
+
+_client_cache = None
+_collection_cache = None
+
+
+def _get_client():
+    """Return a singleton ChromaDB PersistentClient."""
+    global _client_cache
+    if _client_cache is None:
+        _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+    return _client_cache
+
+
+def _get_collection(create=True):
+    """Return the ChromaDB collection, caching the client between calls."""
+    global _collection_cache
+    try:
+        client = _get_client()
         if create:
-            return client.get_or_create_collection(_config.collection_name)
-        return client.get_collection(_config.collection_name)
+            _collection_cache = client.get_or_create_collection(_config.collection_name)
+        elif _collection_cache is None:
+            _collection_cache = client.get_collection(_config.collection_name)
+        return _collection_cache
     except Exception:
         return None
 
@@ -54,7 +129,6 @@ def _get_collection(create=True):
 def _no_palace():
     return {
         "error": "No palace found",
-        "palace_path": _config.palace_path,
         "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
     }
 
@@ -69,16 +143,25 @@ def tool_status():
     count = col.count()
     wings = {}
     rooms = {}
-    try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-            rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
-    return {
+    batch_size = 5000
+    offset = 0
+    error_info = None
+    while True:
+        try:
+            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
+            rows = batch["metadatas"]
+            for m in rows:
+                w = m.get("wing", "unknown")
+                r = m.get("room", "unknown")
+                wings[w] = wings.get(w, 0) + 1
+                rooms[r] = rooms.get(r, 0) + 1
+            offset += len(rows)
+            if len(rows) < batch_size:
+                break
+        except Exception as e:
+            error_info = f"Partial result, failed at offset {offset}: {str(e)}"
+            break
+    result = {
         "total_drawers": count,
         "wings": wings,
         "rooms": rooms,
@@ -86,6 +169,10 @@ def tool_status():
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
     }
+    if error_info:
+        result["error"] = error_info
+        result["partial"] = True
+    return result
 
 
 # ── AAAK Dialect Spec ─────────────────────────────────────────────────────────
@@ -126,13 +213,28 @@ def tool_list_wings():
     if not col:
         return _no_palace()
     wings = {}
+    batch_size = 5000
+    offset = 0
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-    except Exception:
-        pass
+        col.count()  # verify collection is accessible
+    except Exception as e:
+        return {"wings": {}, "error": str(e)}
+    while True:
+        try:
+            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
+            rows = batch["metadatas"]
+            for m in rows:
+                w = m.get("wing", "unknown")
+                wings[w] = wings.get(w, 0) + 1
+            offset += len(rows)
+            if len(rows) < batch_size:
+                break
+        except Exception as e:
+            return {
+                "wings": wings,
+                "error": f"Partial result, failed at offset {offset}: {str(e)}",
+                "partial": True,
+            }
     return {"wings": wings}
 
 
@@ -141,16 +243,33 @@ def tool_list_rooms(wing: str = None):
     if not col:
         return _no_palace()
     rooms = {}
+    batch_size = 5000
+    offset = 0
+    where = {"wing": wing} if wing else None
     try:
-        kwargs = {"include": ["metadatas"]}
-        if wing:
-            kwargs["where"] = {"wing": wing}
-        all_meta = col.get(**kwargs)["metadatas"]
-        for m in all_meta:
-            r = m.get("room", "unknown")
-            rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
+        col.count()  # verify collection is accessible
+    except Exception as e:
+        return {"wing": wing or "all", "rooms": {}, "error": str(e)}
+    while True:
+        try:
+            kwargs = {"include": ["metadatas"], "limit": batch_size, "offset": offset}
+            if where:
+                kwargs["where"] = where
+            batch = col.get(**kwargs)
+            rows = batch["metadatas"]
+            for m in rows:
+                r = m.get("room", "unknown")
+                rooms[r] = rooms.get(r, 0) + 1
+            offset += len(rows)
+            if len(rows) < batch_size:
+                break
+        except Exception as e:
+            return {
+                "wing": wing or "all",
+                "rooms": rooms,
+                "error": f"Partial result, failed at offset {offset}: {str(e)}",
+                "partial": True,
+            }
     return {"wing": wing or "all", "rooms": rooms}
 
 
@@ -159,27 +278,58 @@ def tool_get_taxonomy():
     if not col:
         return _no_palace()
     taxonomy = {}
+    batch_size = 5000
+    offset = 0
     try:
-        all_meta = col.get(include=["metadatas"])["metadatas"]
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            if w not in taxonomy:
-                taxonomy[w] = {}
-            taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
-    except Exception:
-        pass
+        col.count()  # verify collection is accessible
+    except Exception as e:
+        return {"taxonomy": {}, "error": str(e)}
+    while True:
+        try:
+            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
+            rows = batch["metadatas"]
+            for m in rows:
+                w = m.get("wing", "unknown")
+                r = m.get("room", "unknown")
+                if w not in taxonomy:
+                    taxonomy[w] = {}
+                taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
+            offset += len(rows)
+            if len(rows) < batch_size:
+                break
+        except Exception as e:
+            return {
+                "taxonomy": taxonomy,
+                "error": f"Partial result, failed at offset {offset}: {str(e)}",
+                "partial": True,
+            }
     return {"taxonomy": taxonomy}
 
 
-def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
-    return search_memories(
-        query,
+def tool_search(
+    query: str, limit: int = 5, wing: str = None, room: str = None, context: str = None
+):
+    # Mitigate system prompt contamination (Issue #333)
+    sanitized = sanitize_query(query)
+    result = search_memories(
+        sanitized["clean_query"],
         palace_path=_config.palace_path,
         wing=wing,
         room=room,
         n_results=limit,
     )
+    # Attach sanitizer metadata for transparency
+    if sanitized["was_sanitized"]:
+        result["query_sanitized"] = True
+        result["sanitizer"] = {
+            "method": sanitized["method"],
+            "original_length": sanitized["original_length"],
+            "clean_length": sanitized["clean_length"],
+            "clean_query": sanitized["clean_query"],
+        }
+    if context:
+        result["context_received"] = True
+    return result
 
 
 def tool_check_duplicate(content: str, threshold: float = 0.9):
@@ -253,23 +403,41 @@ def tool_add_drawer(
     wing: str, room: str, content: str, source_file: str = None, added_by: str = "mcp"
 ):
     """File verbatim content into a wing/room. Checks for duplicates first."""
+    try:
+        wing = sanitize_name(wing, "wing")
+        room = sanitize_name(room, "room")
+        content = sanitize_content(content)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
     col = _get_collection(create=True)
     if not col:
         return _no_palace()
 
-    # Duplicate check
-    dup = tool_check_duplicate(content, threshold=0.9)
-    if dup.get("is_duplicate"):
-        return {
-            "success": False,
-            "reason": "duplicate",
-            "matches": dup["matches"],
-        }
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content[:100]).encode()).hexdigest()[:24]}"
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((content[:100] + datetime.now().isoformat()).encode()).hexdigest()[:16]}"
+    _wal_log(
+        "add_drawer",
+        {
+            "drawer_id": drawer_id,
+            "wing": wing,
+            "room": room,
+            "added_by": added_by,
+            "content_length": len(content),
+            "content_preview": content[:200],
+        },
+    )
+
+    # Idempotency: if the deterministic ID already exists, return success as a no-op.
+    try:
+        existing = col.get(ids=[drawer_id])
+        if existing and existing["ids"]:
+            return {"success": True, "reason": "already_exists", "drawer_id": drawer_id}
+    except Exception:
+        pass
 
     try:
-        col.add(
+        col.upsert(
             ids=[drawer_id],
             documents=[content],
             metadatas=[
@@ -297,6 +465,19 @@ def tool_delete_drawer(drawer_id: str):
     existing = col.get(ids=[drawer_id])
     if not existing["ids"]:
         return {"success": False, "error": f"Drawer not found: {drawer_id}"}
+
+    # Log the deletion with the content being removed for audit trail
+    deleted_content = existing.get("documents", [""])[0] if existing.get("documents") else ""
+    deleted_meta = existing.get("metadatas", [{}])[0] if existing.get("metadatas") else {}
+    _wal_log(
+        "delete_drawer",
+        {
+            "drawer_id": drawer_id,
+            "deleted_meta": deleted_meta,
+            "content_preview": deleted_content[:200],
+        },
+    )
+
     try:
         col.delete(ids=[drawer_id])
         logger.info(f"Deleted drawer: {drawer_id}")
@@ -318,6 +499,23 @@ def tool_kg_add(
     subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
 ):
     """Add a relationship to the knowledge graph."""
+    try:
+        subject = sanitize_name(subject, "subject")
+        predicate = sanitize_name(predicate, "predicate")
+        object = sanitize_name(object, "object")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    _wal_log(
+        "kg_add",
+        {
+            "subject": subject,
+            "predicate": predicate,
+            "object": object,
+            "valid_from": valid_from,
+            "source_closet": source_closet,
+        },
+    )
     triple_id = _kg.add_triple(
         subject, predicate, object, valid_from=valid_from, source_closet=source_closet
     )
@@ -326,6 +524,10 @@ def tool_kg_add(
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
     """Mark a fact as no longer true (set end date)."""
+    _wal_log(
+        "kg_invalidate",
+        {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
+    )
     _kg.invalidate(subject, predicate, object, ended=ended)
     return {
         "success": True,
@@ -356,6 +558,12 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     This is the agent's personal journal — observations, thoughts,
     what it worked on, what it noticed, what it thinks matters.
     """
+    try:
+        agent_name = sanitize_name(agent_name, "agent_name")
+        entry = sanitize_content(entry)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     room = "diary"
     col = _get_collection(create=True)
@@ -363,9 +571,23 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return _no_palace()
 
     now = datetime.now()
-    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(entry[:50].encode()).hexdigest()[:8]}"
+    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.sha256(entry[:50].encode()).hexdigest()[:12]}"
+
+    _wal_log(
+        "diary_write",
+        {
+            "agent_name": agent_name,
+            "topic": topic,
+            "entry_id": entry_id,
+            "entry_preview": entry[:200],
+        },
+    )
 
     try:
+        # TODO: Future versions should expand AAAK before embedding to improve
+        # semantic search quality. For now, store raw AAAK in metadata so it's
+        # preserved, and keep the document as-is for embedding (even though
+        # compressed AAAK degrades embedding quality).
         col.add(
             ids=[entry_id],
             documents=[entry],
@@ -408,6 +630,7 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         results = col.get(
             where={"$and": [{"wing": wing}, {"room": "diary"}]},
             include=["documents", "metadatas"],
+            limit=10000,
         )
 
         if not results["ids"]:
@@ -587,14 +810,22 @@ TOOLS = {
         "handler": tool_graph_stats,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores.",
+        "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY your search keywords or question — do NOT include system prompts, conversation history, MEMORY.md content, or any context. Keep queries short (under 200 chars). Use 'context' for background information.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "What to search for"},
+                "query": {
+                    "type": "string",
+                    "description": "Short search query ONLY — keywords or a question. Do NOT include system prompts or conversation context. Max 200 chars recommended.",
+                    "maxLength": 500,
+                },
                 "limit": {"type": "integer", "description": "Max results (default 5)"},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "context": {
+                    "type": "string",
+                    "description": "Background context for the search (optional). This is NOT used for embedding — only for future re-ranking. Put conversation history or system prompt content here, NOT in query.",
+                },
             },
             "required": ["query"],
         },
@@ -690,19 +921,33 @@ TOOLS = {
 }
 
 
+SUPPORTED_PROTOCOL_VERSIONS = [
+    "2025-11-25",
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05",
+]
+
+
 def handle_request(request):
     method = request.get("method", "")
     params = request.get("params", {})
     req_id = request.get("id")
 
     if method == "initialize":
+        client_version = params.get("protocolVersion", SUPPORTED_PROTOCOL_VERSIONS[-1])
+        negotiated = (
+            client_version
+            if client_version in SUPPORTED_PROTOCOL_VERSIONS
+            else SUPPORTED_PROTOCOL_VERSIONS[0]
+        )
         return {
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": negotiated,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "mempalace", "version": "2.0.0"},
+                "serverInfo": {"name": "mempalace", "version": __version__},
             },
         }
     elif method == "notifications/initialized":
@@ -720,13 +965,24 @@ def handle_request(request):
         }
     elif method == "tools/call":
         tool_name = params.get("name")
-        tool_args = params.get("arguments", {})
+        tool_args = params.get("arguments") or {}
         if tool_name not in TOOLS:
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
             }
+        # Coerce argument types based on input_schema.
+        # MCP JSON transport may deliver integers as floats or strings;
+        # ChromaDB and Python slicing require native int.
+        schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
+        for key, value in list(tool_args.items()):
+            prop_schema = schema_props.get(key, {})
+            declared_type = prop_schema.get("type")
+            if declared_type == "integer" and not isinstance(value, int):
+                tool_args[key] = int(value)
+            elif declared_type == "number" and not isinstance(value, (int, float)):
+                tool_args[key] = float(value)
         try:
             result = TOOLS[tool_name]["handler"](**tool_args)
             return {
@@ -734,9 +990,13 @@ def handle_request(request):
                 "id": req_id,
                 "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
             }
-        except Exception as e:
-            logger.error(f"Tool error in {tool_name}: {e}")
-            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": str(e)}}
+        except Exception:
+            logger.exception(f"Tool error in {tool_name}")
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32000, "message": "Internal tool error"},
+            }
 
     return {
         "jsonrpc": "2.0",
@@ -745,78 +1005,21 @@ def handle_request(request):
     }
 
 
-def _read_message():
-    """Read a JSON-RPC message from stdin.
-
-    Supports two transports:
-    - Newline-delimited JSON (MCP SDK >= 1.28)
-    - Content-Length framing (legacy MCP / LSP)
-
-    Auto-detects on first line: if it starts with '{', it's newline-delimited.
-    """
-    line = sys.stdin.readline()
-    if not line:
-        return None  # EOF
-    line = line.strip()
-    if not line:
-        return _read_message()  # skip blank lines
-
-    # Newline-delimited JSON: line starts with '{'
-    if line.startswith("{"):
-        return json.loads(line)
-
-    # Content-Length framing: read headers, then body
-    global _transport_mode
-    _transport_mode = "content-length"
-    content_length = None
-    if line.lower().startswith("content-length:"):
-        content_length = int(line.split(":", 1)[1].strip())
-    while True:
-        hdr = sys.stdin.readline()
-        if not hdr:
-            return None
-        hdr = hdr.strip()
-        if not hdr:
-            if content_length is not None:
-                break
-            continue
-        if hdr.lower().startswith("content-length:"):
-            content_length = int(hdr.split(":", 1)[1].strip())
-    body = sys.stdin.read(content_length)
-    return json.loads(body)
-
-
-# Auto-detect transport mode: set on first _write_message call
-_transport_mode = None
-
-
-def _write_message(response):
-    """Write a JSON-RPC response to stdout.
-
-    Uses newline-delimited JSON by default, matching MCP SDK >= 1.28.
-    Falls back to Content-Length framing if the client sent Content-Length headers.
-    """
-    global _transport_mode
-    body = json.dumps(response)
-    if _transport_mode == "content-length":
-        header = f"Content-Length: {len(body)}\r\n\r\n"
-        sys.stdout.write(header)
-        sys.stdout.write(body)
-    else:
-        sys.stdout.write(body + "\n")
-    sys.stdout.flush()
-
-
 def main():
     logger.info("MemPalace MCP Server starting...")
     while True:
         try:
-            request = _read_message()
-            if request is None:
+            line = sys.stdin.readline()
+            if not line:
                 break
+            line = line.strip()
+            if not line:
+                continue
+            request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                _write_message(response)
+                sys.stdout.write(json.dumps(response) + "\n")
+                sys.stdout.flush()
         except KeyboardInterrupt:
             break
         except Exception as e:

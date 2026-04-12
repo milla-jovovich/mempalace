@@ -1,3 +1,0 @@
-chromadb>=0.4.0
-pyyaml>=6.0
-regex==2026.4.4

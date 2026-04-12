@@ -72,6 +72,6 @@ fi
 cat << 'HOOKJSON'
 {
   "decision": "block",
-  "reason": "COMPACTION IMMINENT. Save ALL topics, decisions, quotes, code, and important context from this session to your memory system. Be thorough — after compaction, detailed context will be lost. Organize into appropriate categories. Use verbatim quotes where possible. Save everything, then allow compaction to proceed."
+  "reason": "COMPACTION IMMINENT (MemPalace). Save ALL session content before context is lost:\n1. mempalace_diary_write — thorough AAAK-compressed session summary\n2. mempalace_add_drawer — ALL verbatim quotes, decisions, code, context\n3. mempalace_kg_add — entity relationships (optional)\nBe thorough — after compaction, detailed context will be lost. Do NOT write to Claude Code's native auto-memory (.md files). Save everything to MemPalace, then allow compaction to proceed."
 }
 HOOKJSON

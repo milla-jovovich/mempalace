@@ -5,20 +5,22 @@
 Run the MCP server:
 
 ```bash
-python mcp_server.py
+python -m mempalace.mcp_server
 ```
 
-Or add to Claude Code:
+Or add it to Claude Code:
 
 ```bash
-claude mcp add mempal -- python /path/to/mempalace/mcp_server.py
+claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
 ## Available Tools
 
-- **mempal_status** — palace stats (wings, rooms, drawer counts)
-- **mempal_search** — semantic search across all memories
-- **mempal_list_wings** — list all projects in the palace
+The server exposes the full MemPalace MCP toolset. Common entry points include:
+
+- **mempalace_status** — palace stats (wings, rooms, drawer counts)
+- **mempalace_search** — semantic search across all memories
+- **mempalace_list_wings** — list all projects in the palace
 
 ## Usage in Claude Code
 

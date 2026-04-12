@@ -12,9 +12,11 @@ Every conversation you have with an AI — every decision, every debugging sessi
 
 Other memory systems try to fix this by letting AI decide what's worth remembering. It extracts "user prefers Postgres" and throws away the conversation where you explained *why*. MemPalace takes a different approach: **store everything, then make it findable.**
 
-**The Palace** — Ancient Greek orators memorized entire speeches by placing ideas in rooms of an imaginary building. Walk through the building, find the idea. MemPalace applies the same principle to AI memory: your conversations are organized into wings (people and projects), halls (types of memory), and rooms (specific ideas). No AI decides what matters — you keep every word, and the structure makes it searchable. That structure alone improves retrieval by 34%.
+**The Palace** — Ancient Greek orators memorized entire speeches by placing ideas in rooms of an imaginary building. Walk through the building, find the idea. MemPalace applies the same principle to AI memory: your conversations are organized into wings (people and projects), halls (types of memory), and rooms (specific ideas). No AI decides what matters — you keep every word, and the structure gives you a navigable map instead of a flat search index.
 
-**AAAK** — A lossless shorthand dialect designed for AI agents. Not meant to be read by humans — meant to be read by your AI, fast. 30x compression, zero information loss. Your AI loads months of context in ~120 tokens. And because AAAK is just structured text with a universal grammar, it works with **any model that reads text** — Claude, GPT, Gemini, Llama, Mistral. No decoder, no fine-tuning, no cloud API required. Run it against a local model and your entire memory stack stays offline. Nothing else like it exists.
+**Raw verbatim storage** — MemPalace stores your actual exchanges in ChromaDB without summarization or extraction. The 96.6% LongMemEval result comes from this raw mode. We don't burn an LLM to decide what's "worth remembering" — we keep everything and let semantic search find it.
+
+**AAAK (experimental)** — A lossy abbreviation dialect for packing repeated entities into fewer tokens at scale. Readable by any LLM that reads text — Claude, GPT, Gemini, Llama, Mistral — no decoder needed. **AAAK is a separate compression layer, not the storage default**, and on the LongMemEval benchmark it currently regresses vs raw mode (84.2% vs 96.6%). We're iterating. See the [note above](#a-note-from-milla--ben--april-7-2026) for the honest status.
 
 **Local, open, adaptable** — MemPalace runs entirely on your machine, on any data you have locally, without using any external API or services. It has been tested on conversations — but it can be adapted for different types of datastores. This is why we're open-sourcing it.
 
@@ -27,7 +29,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 
 <br>
 
-[Quick Start](#quick-start) · [The Palace](#the-palace) · [AAAK Dialect](#aaak-compression) · [Benchmarks](#benchmarks) · [MCP Tools](#mcp-server)
+[Quick Start](#quick-start) · [The Palace](#the-palace) · [AAAK Dialect](#aaak-dialect-experimental) · [Benchmarks](#benchmarks) · [MCP Tools](#mcp-server)
 
 <br>
 
@@ -35,16 +37,62 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 
 <table>
 <tr>
-<td align="center"><strong>96.6%</strong><br><sub>LongMemEval R@5<br>Zero API calls</sub></td>
-<td align="center"><strong>100%</strong><br><sub>LongMemEval R@5<br>with Haiku rerank</sub></td>
-<td align="center"><strong>+34%</strong><br><sub>Retrieval boost<br>from palace structure</sub></td>
+<td align="center"><strong>96.6%</strong><br><sub>LongMemEval R@5<br><b>raw mode</b>, zero API calls</sub></td>
+<td align="center"><strong>500/500</strong><br><sub>questions tested<br>independently reproduced</sub></td>
 <td align="center"><strong>$0</strong><br><sub>No subscription<br>No cloud. Local only.</sub></td>
 </tr>
 </table>
 
-<sub>Reproducible — runners in <a href="benchmarks/">benchmarks/</a>. <a href="benchmarks/BENCHMARKS.md">Full results</a>.</sub>
+<sub>Reproducible — runners in <a href="benchmarks/">benchmarks/</a>. <a href="benchmarks/BENCHMARKS.md">Full results</a>. The 96.6% is from <b>raw verbatim mode</b>, not AAAK or rooms mode (those score lower — see <a href="#a-note-from-milla--ben--april-7-2026">note above</a>).</sub>
 
 </div>
+
+---
+
+## A Note from Milla & Ben — April 7, 2026
+
+> The community caught real problems in this README within hours of launch and we want to address them directly.
+>
+> **What we got wrong:**
+>
+> - **The AAAK token example was incorrect.** We used a rough heuristic (`len(text)//3`) for token counts instead of an actual tokenizer. Real counts via OpenAI's tokenizer: the English example is 66 tokens, the AAAK example is 73. AAAK does not save tokens at small scales — it's designed for *repeated entities at scale*, and the README example was a bad demonstration of that. We're rewriting it.
+>
+> - **"30x lossless compression" was overstated.** AAAK is a lossy abbreviation system (entity codes, sentence truncation). Independent benchmarks show AAAK mode scores **84.2% R@5 vs raw mode's 96.6%** on LongMemEval — a 12.4 point regression. The honest framing is: AAAK is an experimental compression layer that trades fidelity for token density, and **the 96.6% headline number is from RAW mode, not AAAK**.
+>
+> - **"+34% palace boost" was misleading.** That number compares unfiltered search to wing+room metadata filtering. Metadata filtering is a standard ChromaDB feature, not a novel retrieval mechanism. Real and useful, but not a moat.
+>
+> - **"Contradiction detection"** exists as a separate utility (`fact_checker.py`) but is not currently wired into the knowledge graph operations as the README implied.
+>
+> - **"100% with Haiku rerank"** is real (we have the result files) but the rerank pipeline is not in the public benchmark scripts. We're adding it.
+>
+> **What's still true and reproducible:**
+>
+> - **96.6% R@5 on LongMemEval in raw mode**, on 500 questions, zero API calls — independently reproduced on M2 Ultra in under 5 minutes by [@gizmax](https://github.com/milla-jovovich/mempalace/issues/39).
+> - Local, free, no subscription, no cloud, no data leaving your machine.
+> - The architecture (wings, rooms, closets, drawers) is real and useful, even if it's not a magical retrieval boost.
+>
+> **What we're doing:**
+>
+> 1. Rewriting the AAAK example with real tokenizer counts and a scenario where AAAK actually demonstrates compression
+> 2. Adding `mode raw / aaak / rooms` clearly to the benchmark documentation so the trade-offs are visible
+> 3. Wiring `fact_checker.py` into the KG ops so the contradiction detection claim becomes true
+> 4. Pinning ChromaDB to a tested range (Issue #100), fixing the shell injection in hooks (#110), and addressing the macOS ARM64 segfault (#74)
+>
+> **Thank you to everyone who poked holes in this.** Brutal honest criticism is exactly what makes open source work, and it's what we asked for. Special thanks to [@panuhorsmalahti](https://github.com/milla-jovovich/mempalace/issues/43), [@lhl](https://github.com/milla-jovovich/mempalace/issues/27), [@gizmax](https://github.com/milla-jovovich/mempalace/issues/39), and everyone who filed an issue or a PR in the first 48 hours. We're listening, we're fixing, and we'd rather be right than impressive.
+>
+> — *Milla Jovovich & Ben Sigman*
+
+---
+
+## An important follow up note regarding fake MemPalace websites - April 11, 2026
+
+Several Community Members (#267, #326, #506) have pointed out there are fake MemPalace websites popping up, including ones with Malware.
+
+To be super clear, MemPalace *has no website* (at least for now), so anything claiming to be one is false.
+
+Thanks to our Community Members for letting us know about the problem.
+
+Stay safe out there.
 
 ---
 
@@ -76,7 +124,18 @@ Three mining modes: **projects** (code and docs), **convos** (conversation expor
 
 After the one-time setup (install → init → mine), you don't run MemPalace commands manually. Your AI uses it for you. There are two ways, depending on which AI you use.
 
-### With Claude, ChatGPT, Cursor (MCP-compatible tools)
+### With Claude Code (recommended)
+
+Native marketplace install:
+
+```bash
+claude plugin marketplace add milla-jovovich/mempalace
+claude plugin install --scope user mempalace
+```
+
+Restart Claude Code, then type `/skills` to verify "mempalace" appears.
+
+### With Claude, ChatGPT, Cursor, Gemini (MCP-compatible tools)
 
 ```bash
 # Connect MemPalace once
@@ -88,6 +147,8 @@ Now your AI has 19 tools available through MCP. Ask it anything:
 > *"What did we decide about auth last month?"*
 
 Claude calls `mempalace_search` automatically, gets verbatim results, and answers you. You never type `mempalace search` again. The AI handles it.
+
+MemPalace also works natively with **Gemini CLI** (which handles the server and save hooks automatically) — see the [Gemini CLI Integration Guide](examples/gemini_cli_setup.md).
 
 ### With local models (Llama, Mistral, or any offline LLM)
 
@@ -190,7 +251,7 @@ You say what you're looking for and boom, it already knows which wing to go to. 
 **Rooms** — specific topics within a wing. Auth, billing, deploy — endless rooms.
 **Halls** — connections between related rooms *within* the same wing. If Room A (auth) and Room B (security) are related, a hall links them.
 **Tunnels** — connections *between* wings. When Person A and a Project both have a room about "auth," a tunnel cross-references them automatically.
-**Closets** — compressed summaries that point to the original content. Fast for AI to read.
+**Closets** — summaries that point to the original content. (In v3.0.0 these are plain-text summaries; AAAK-encoded closets are coming in a future update — see [Task #30](https://github.com/milla-jovovich/mempalace/issues/30).)
 **Drawers** — the original verbatim files. The exact words, never summarized.
 
 **Halls** are memory types — the same in every wing, acting as corridors:
@@ -234,30 +295,23 @@ Wings and rooms aren't cosmetic. They're a **34% retrieval improvement**. The pa
 
 Your AI wakes up with L0 + L1 (~170 tokens) and knows your world. Searches only fire when needed.
 
-### AAAK Compression
+### AAAK Dialect (experimental)
 
-AAAK is a lossless dialect — 30x compression, readable by any LLM without a decoder. It works with **Claude, GPT, Gemini, Llama, Mistral** — any model that reads text. Run it against a local Llama model and your whole memory stack stays offline.
+AAAK is a lossy abbreviation system — entity codes, structural markers, and sentence truncation — designed to pack repeated entities and relationships into fewer tokens at scale. It is **readable by any LLM that reads text** (Claude, GPT, Gemini, Llama, Mistral) without a decoder, so a local model can use it without any cloud dependency.
 
-**English (~1000 tokens):**
-```
-Priya manages the Driftwood team: Kai (backend, 3 years), Soren (frontend),
-Maya (infrastructure), and Leo (junior, started last month). They're building
-a SaaS analytics platform. Current sprint: auth migration to Clerk.
-Kai recommended Clerk over Auth0 based on pricing and DX.
-```
+**Honest status (April 2026):**
 
-**AAAK (~120 tokens):**
-```
-TEAM: PRI(lead) | KAI(backend,3yr) SOR(frontend) MAY(infra) LEO(junior,new)
-PROJ: DRIFTWOOD(saas.analytics) | SPRINT: auth.migration→clerk
-DECISION: KAI.rec:clerk>auth0(pricing+dx) | ★★★★
-```
+- **AAAK is lossy, not lossless.** It uses regex-based abbreviation, not reversible compression.
+- **It does not save tokens at small scales.** Short text already tokenizes efficiently. AAAK overhead (codes, separators) costs more than it saves on a few sentences.
+- **It can save tokens at scale** — in scenarios with many repeated entities (a team mentioned hundreds of times, the same project across thousands of sessions), the entity codes amortize.
+- **AAAK currently regresses LongMemEval** vs raw verbatim retrieval (84.2% R@5 vs 96.6%). The 96.6% headline number is from **raw mode**, not AAAK mode.
+- **The MemPalace storage default is raw verbatim text in ChromaDB** — that's where the benchmark wins come from. AAAK is a separate compression layer for context loading, not the storage format.
 
-Same information. 8x fewer tokens. Your AI learns AAAK automatically from the MCP server — no manual setup.
+We're iterating on the dialect spec, adding a real tokenizer for stats, and exploring better break points for when to use it. Track progress in [Issue #43](https://github.com/milla-jovovich/mempalace/issues/43) and [#27](https://github.com/milla-jovovich/mempalace/issues/27).
 
-### Contradiction Detection
+### Contradiction Detection (experimental, not yet wired into KG)
 
-MemPalace catches mistakes before they reach you:
+A separate utility (`fact_checker.py`) can check assertions against entity facts. It's not currently called automatically by the knowledge graph operations — this is being fixed (track in [Issue #27](https://github.com/milla-jovovich/mempalace/issues/27)). When enabled it catches things like:
 
 ```
 Input:  "Soren finished the auth migration"
@@ -408,6 +462,11 @@ Letta charges $20–200/mo for agent-managed memory. MemPalace does it with a wi
 ## MCP Server
 
 ```bash
+# Via plugin (recommended)
+claude plugin marketplace add milla-jovovich/mempalace
+claude plugin install --scope user mempalace
+
+# Or manually
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
@@ -478,6 +537,8 @@ Two hooks for Claude Code that automatically save memories during work:
 }
 ```
 
+**Optional auto-ingest:** Set the `MEMPAL_DIR` environment variable to a directory path and the hooks will automatically run `mempalace mine` on that directory during each save trigger (background on stop, synchronous on precompact).
+
 ---
 
 ## Benchmarks
@@ -536,6 +597,9 @@ mempalace compress --wing myapp                   # AAAK compress
 
 # Status
 mempalace status                                  # palace overview
+
+# MCP
+mempalace mcp                                     # show MCP setup command
 ```
 
 All commands accept `--palace <path>` to override the default location.
@@ -658,7 +722,7 @@ PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
 MIT — see [LICENSE](LICENSE).
 
 <!-- Link Definitions -->
-[version-shield]: https://img.shields.io/badge/version-3.0.0-4dc9f6?style=flat-square&labelColor=0a0e14
+[version-shield]: https://img.shields.io/badge/version-3.1.0-4dc9f6?style=flat-square&labelColor=0a0e14
 [release-link]: https://github.com/milla-jovovich/mempalace/releases
 [python-shield]: https://img.shields.io/badge/python-3.9+-7dd8f8?style=flat-square&labelColor=0a0e14&logo=python&logoColor=7dd8f8
 [python-link]: https://www.python.org/
