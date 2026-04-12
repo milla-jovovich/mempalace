@@ -10,9 +10,7 @@ import logging
 import re
 from pathlib import Path
 
-import chromadb
-
-from .palace import _fix_blob_seq_ids
+from .palace import get_collection
 
 
 # Common words to skip when extracting keywords for fallback search
@@ -66,11 +64,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     Optionally filter by wing (project) or room (aspect).
     """
     try:
-        _fix_blob_seq_ids(palace_path)
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
-    except SearchError:
-        raise
+        col = get_collection(palace_path, create=False)
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
@@ -159,9 +153,7 @@ def search_memories(
             extracted automatically from query when vector results are poor.
     """
     try:
-        _fix_blob_seq_ids(palace_path)
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_collection(palace_path, create=False)
     except Exception as e:
         logger.error("No palace found at %s: %s", palace_path, e)
         return {

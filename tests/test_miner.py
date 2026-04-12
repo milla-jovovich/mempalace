@@ -14,6 +14,7 @@ from mempalace.miner import (
     detect_room,
     mine,
     scan_project,
+    status,
 )
 from mempalace.palace import file_already_mined
 
@@ -463,3 +464,18 @@ def test_chunk_text_preserves_content():
     # The joined chunks should contain at least as many characters as the original
     # (overlap means more, confirming nothing is dropped)
     assert len(all_chunk_text) >= len(content)
+
+
+# =============================================================================
+# status tests (upstream addition)
+# =============================================================================
+
+
+def test_status_missing_palace_does_not_create_empty_collection(tmp_path, capsys):
+    palace_path = tmp_path / "missing-palace"
+
+    status(str(palace_path))
+
+    out = capsys.readouterr().out
+    assert "No palace found" in out
+    assert not palace_path.exists()

@@ -553,6 +553,7 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
         "original_tokens_est": 25,
         "summary_tokens_est": 8,
         "size_ratio": 3.3,
+        "note": "Estimates only.",
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -567,6 +568,7 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     out = capsys.readouterr().out
     assert "dry run" in out.lower()
     assert "Compressing" in out
+    assert "Total:" in out
 
 
 @patch("mempalace.cli.MempalaceConfig")
@@ -626,6 +628,7 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
         "original_tokens_est": 25,
         "summary_tokens_est": 8,
         "size_ratio": 3.3,
+        "note": "Estimates only.",
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -639,6 +642,7 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
         cmd_compress(args)
     out = capsys.readouterr().out
     assert "Stored" in out
+    assert "Total:" in out
     mock_comp_col.upsert.assert_called_once()
 
 

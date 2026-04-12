@@ -29,6 +29,7 @@ from pathlib import Path
 
 from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
+from .palace import get_collection as _get_collection_from_palace
 from .query_sanitizer import sanitize_query
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats, invalidate_graph_cache
@@ -138,7 +139,7 @@ def _get_client():
     mtime_changed = current_mtime and abs(current_mtime - _palace_db_mtime) > 0.01
 
     if _client_cache is None or inode_changed or mtime_changed:
-        from .palace import _fix_blob_seq_ids
+        from .backends.chroma import _fix_blob_seq_ids
 
         _fix_blob_seq_ids(_config.palace_path)
         _client_cache = chromadb.PersistentClient(path=_config.palace_path)
@@ -1351,6 +1352,8 @@ def handle_request(request):
                 "serverInfo": {"name": "mempalace", "version": __version__},
             },
         }
+    elif method == "ping":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
     elif method.startswith("notifications/"):
         # Notifications (no id) never get a response per JSON-RPC spec
         return None

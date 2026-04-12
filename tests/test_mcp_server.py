@@ -15,6 +15,13 @@ def _patch_mcp_server(monkeypatch, config, kg):
 
     monkeypatch.setattr(mcp_server, "_config", config)
     monkeypatch.setattr(mcp_server, "_kg", kg)
+    # Reset cached client/collection so _get_client() reconnects to test palace
+    monkeypatch.setattr(mcp_server, "_client_cache", None)
+    monkeypatch.setattr(mcp_server, "_collection_cache", None)
+    monkeypatch.setattr(mcp_server, "_palace_db_inode", 0)
+    monkeypatch.setattr(mcp_server, "_palace_db_mtime", 0.0)
+    monkeypatch.setattr(mcp_server, "_metadata_cache", None)
+    monkeypatch.setattr(mcp_server, "_metadata_cache_time", 0)
 
 
 def _get_collection(palace_path, create=False):
@@ -91,6 +98,13 @@ class TestHandleRequest:
 
         resp = handle_request({"method": "notifications/initialized", "id": None, "params": {}})
         assert resp is None
+
+    def test_ping_returns_empty_result(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request({"method": "ping", "id": 11, "params": {}})
+        assert resp["id"] == 11
+        assert resp["result"] == {}
 
     def test_tools_list(self):
         from mempalace.mcp_server import handle_request
