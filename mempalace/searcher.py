@@ -18,21 +18,40 @@ class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
 
 
-def build_where_filter(wing: str = None, room: str = None) -> dict:
-    """Build ChromaDB where filter for wing/room filtering."""
-    if wing and room:
-        return {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        return {"wing": wing}
-    elif room:
-        return {"room": room}
-    return {}
+def build_where_filter(wing: str = None, room: str = None, where: dict = None) -> dict:
+    """Build ChromaDB where filter for wing/room filtering.
+
+    Args:
+        wing: Optional wing filter.
+        room: Optional room filter.
+        where: Optional additional ChromaDB where conditions to merge.
+            Supports any ChromaDB where operators ($eq, $ne, $gt, $gte,
+            $lt, $lte, $in, $nin, $and, $or). These are combined with
+            wing/room filters via $and.
+    """
+    conditions = []
+    if wing:
+        conditions.append({"wing": wing})
+    if room:
+        conditions.append({"room": room})
+    if where:
+        conditions.append(where)
+
+    if len(conditions) == 0:
+        return {}
+    if len(conditions) == 1:
+        return conditions[0]
+    return {"$and": conditions}
 
 
-def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
+def search(query: str, palace_path: str, wing: str = None, room: str = None,
+           n_results: int = 5, where: dict = None, sort_by: str = "relevance"):
     """
     Search the palace. Returns verbatim drawer content.
-    Optionally filter by wing (project) or room (aspect).
+    Optionally filter by wing (project), room (aspect), or metadata conditions.
+
+    Args:
+        sort_by: "relevance" (default, similarity ranking) or "recency" (filed_at descending).
     """
     try:
         col = get_collection(palace_path, create=False)
@@ -41,7 +60,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         raise SearchError(f"No palace found at {palace_path}")
 
-    where = build_where_filter(wing, room)
+    where_filter = build_where_filter(wing, room, where)
 
     try:
         kwargs = {
@@ -49,8 +68,8 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
             "n_results": n_results,
             "include": ["documents", "metadatas", "distances"],
         }
-        if where:
-            kwargs["where"] = where
+        if where_filter:
+            kwargs["where"] = where_filter
 
         results = col.query(**kwargs)
 
@@ -66,6 +85,11 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f'\n  No results found for: "{query}"')
         return
 
+    # Sort by recency if requested (ChromaDB returns by similarity by default)
+    items = list(zip(docs, metas, dists))
+    if sort_by == "recency":
+        items.sort(key=lambda x: x[1].get("filed_at", ""), reverse=True)
+
     print(f"\n{'=' * 60}")
     print(f'  Results for: "{query}"')
     if wing:
@@ -74,7 +98,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"  Room: {room}")
     print(f"{'=' * 60}\n")
 
-    for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
+    for i, (doc, meta, dist) in enumerate(items, 1):
         similarity = round(max(0.0, 1 - dist), 3)
         source = Path(meta.get("source_file", "?")).name
         wing_name = meta.get("wing", "?")
@@ -83,6 +107,8 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"  [{i}] {wing_name} / {room_name}")
         print(f"      Source: {source}")
         print(f"      Match:  {similarity}")
+        if sort_by == "recency":
+            print(f"      Filed:  {meta.get('filed_at', '?')}")
         print()
         # Print the verbatim text, indented
         for line in doc.strip().split("\n"):
@@ -100,6 +126,8 @@ def search_memories(
     room: str = None,
     n_results: int = 5,
     max_distance: float = 0.0,
+    where: dict = None,
+    sort_by: str = "relevance",
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
 
@@ -115,6 +143,13 @@ def search_memories(
             cosine distance (hnsw:space=cosine) — 0 = identical, 2 = opposite.
             Results with distance > this value are filtered out. A value of
             0.0 disables filtering. Typical useful range: 0.3–1.0.
+        where: Optional additional ChromaDB where conditions for metadata
+            filtering. Supports any ChromaDB where operators ($eq, $gt,
+            $gte, $lt, $lte, $in, $nin). These are combined with wing/room
+            filters via $and.
+        sort_by: "relevance" (default, similarity ranking) or "recency"
+            (filed_at descending). Recency sorting happens after ChromaDB
+            returns similarity-ranked results.
     """
     try:
         col = get_collection(palace_path, create=False)
@@ -125,7 +160,7 @@ def search_memories(
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
         }
 
-    where = build_where_filter(wing, room)
+    where_filter = build_where_filter(wing, room, where)
 
     try:
         kwargs = {
@@ -133,8 +168,8 @@ def search_memories(
             "n_results": n_results,
             "include": ["documents", "metadatas", "distances"],
         }
-        if where:
-            kwargs["where"] = where
+        if where_filter:
+            kwargs["where"] = where_filter
 
         results = col.query(**kwargs)
     except Exception as e:
@@ -157,12 +192,19 @@ def search_memories(
                 "source_file": Path(meta.get("source_file", "?")).name,
                 "similarity": round(max(0.0, 1 - dist), 3),
                 "distance": round(dist, 4),
+                "filed_at": meta.get("filed_at", ""),
+                "metadata": {k: v for k, v in meta.items()
+                             if k not in ("wing", "room", "source_file", "chunk_index")},
             }
         )
 
+    if sort_by == "recency":
+        hits.sort(key=lambda h: h.get("filed_at", ""), reverse=True)
+
     return {
         "query": query,
-        "filters": {"wing": wing, "room": room},
+        "filters": {"wing": wing, "room": room, "where": where},
+        "sort_by": sort_by,
         "total_before_filter": len(docs),
         "results": hits,
     }
