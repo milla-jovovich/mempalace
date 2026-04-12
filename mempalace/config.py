@@ -173,6 +173,27 @@ class MempalaceConfig:
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
+    @property
+    def hook_silent_save(self):
+        """Whether the stop hook saves directly (True) or blocks for MCP calls (False)."""
+        return self._file_config.get("hooks", {}).get("silent_save", True)
+
+    @property
+    def hook_desktop_toast(self):
+        """Whether the stop hook shows a desktop notification via notify-send."""
+        return self._file_config.get("hooks", {}).get("desktop_toast", False)
+
+    def set_hook_setting(self, key: str, value: bool):
+        """Update a hook setting and write config to disk."""
+        if "hooks" not in self._file_config:
+            self._file_config["hooks"] = {}
+        self._file_config["hooks"][key] = value
+        try:
+            with open(self._config_file, "w", encoding="utf-8") as f:
+                json.dump(self._file_config, f, indent=2, ensure_ascii=False)
+        except OSError:
+            pass
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)

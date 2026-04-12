@@ -1,0 +1,7 @@
+[build]
+  base = "website"
+  command = "bun run docs:build"
+  publish = ".vitepress/dist"
+
+[build.environment]
+  DOCS_BASE = "/"

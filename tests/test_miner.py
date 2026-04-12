@@ -6,7 +6,7 @@ from pathlib import Path
 import chromadb
 import yaml
 
-from mempalace.miner import mine, scan_project
+from mempalace.miner import mine, scan_project, status
 from mempalace.palace import file_already_mined
 
 
@@ -260,3 +260,13 @@ def test_file_already_mined_check_mtime():
         # Release ChromaDB file handles before cleanup (required on Windows)
         del col, client
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_status_missing_palace_does_not_create_empty_collection(tmp_path, capsys):
+    palace_path = tmp_path / "missing-palace"
+
+    status(str(palace_path))
+
+    out = capsys.readouterr().out
+    assert "No palace found" in out
+    assert not palace_path.exists()

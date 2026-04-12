@@ -23,15 +23,16 @@ import sys
 import json
 import logging
 import hashlib
+import time
 from datetime import datetime
 from pathlib import Path
 
 from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
+import chromadb
 from .query_sanitizer import sanitize_query
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
-import chromadb
 
 from .knowledge_graph import KnowledgeGraph
 
@@ -58,6 +59,8 @@ if _args.palace:
     os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
 
 _config = MempalaceConfig()
+# Only override KG path when --palace is explicitly provided; otherwise use
+# KnowledgeGraph's default (~/.mempalace/knowledge_graph.sqlite3).
 if _args.palace:
     _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
 else:
@@ -66,6 +69,7 @@ else:
 
 _client_cache = None
 _collection_cache = None
+_palace_db_inode = 0  # inode of chroma.sqlite3 at cache time
 
 
 # ==================== WRITE-AHEAD LOG ====================
@@ -80,48 +84,79 @@ try:
 except (OSError, NotImplementedError):
     pass
 _WAL_FILE = _WAL_DIR / "write_log.jsonl"
+# Pre-create WAL file with restricted permissions to avoid race condition
+if not _WAL_FILE.exists():
+    _WAL_FILE.touch(mode=0o600)
+else:
+    try:
+        _WAL_FILE.chmod(0o600)
+    except (OSError, NotImplementedError):
+        pass
+
+# Keys whose values should be redacted in WAL entries to avoid logging sensitive content
+_WAL_REDACT_KEYS = frozenset({"content_preview", "entry_preview"})
 
 
 def _wal_log(operation: str, params: dict, result: dict = None):
     """Append a write operation to the write-ahead log."""
+    # Redact sensitive content from params before logging
+    safe_params = {}
+    for k, v in params.items():
+        if k in _WAL_REDACT_KEYS:
+            safe_params[k] = f"[REDACTED {len(v)} chars]" if isinstance(v, str) else "[REDACTED]"
+        else:
+            safe_params[k] = v
     entry = {
         "timestamp": datetime.now().isoformat(),
         "operation": operation,
-        "params": params,
+        "params": safe_params,
         "result": result,
     }
     try:
-        with open(_WAL_FILE, "a", encoding="utf-8") as f:
+        fd = os.open(str(_WAL_FILE), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, default=str) + "\n")
-        try:
-            _WAL_FILE.chmod(0o600)
-        except (OSError, NotImplementedError):
-            pass
     except Exception as e:
         logger.error(f"WAL write failed: {e}")
 
 
-_client_cache = None
-_collection_cache = None
-
-
 def _get_client():
-    """Return a singleton ChromaDB PersistentClient."""
-    global _client_cache
-    if _client_cache is None:
+    """Return a ChromaDB PersistentClient, reconnecting if the database changed on disk.
+
+    Detects palace rebuilds (repair/nuke/purge) by checking the inode of
+    chroma.sqlite3.  A full rebuild replaces the file, changing the inode.
+    """
+    global _client_cache, _collection_cache, _palace_db_inode, _metadata_cache, _metadata_cache_time
+    db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
+    try:
+        current_inode = os.stat(db_path).st_ino
+    except OSError:
+        current_inode = 0
+
+    if _client_cache is None or current_inode != _palace_db_inode:
         _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+        _collection_cache = None
+        _metadata_cache = None
+        _metadata_cache_time = 0
+        _palace_db_inode = current_inode
     return _client_cache
 
 
 def _get_collection(create=False):
     """Return the ChromaDB collection, caching the client between calls."""
-    global _collection_cache
+    global _collection_cache, _metadata_cache, _metadata_cache_time
     try:
         client = _get_client()
         if create:
-            _collection_cache = client.get_or_create_collection(_config.collection_name)
+            _collection_cache = client.get_or_create_collection(
+                _config.collection_name, metadata={"hnsw:space": "cosine"}
+            )
+            _metadata_cache = None
+            _metadata_cache_time = 0
         elif _collection_cache is None:
             _collection_cache = client.get_collection(_config.collection_name)
+            _metadata_cache = None
+            _metadata_cache_time = 0
         return _collection_cache
     except Exception:
         return None
@@ -134,6 +169,49 @@ def _no_palace():
     }
 
 
+# ==================== HELPERS ====================
+
+
+def _fetch_all_metadata(col, where=None):
+    """Paginate col.get() to avoid the 10K silent truncation limit."""
+    total = col.count()
+    all_meta = []
+    offset = 0
+    while offset < total:
+        kwargs = {"include": ["metadatas"], "limit": 1000, "offset": offset}
+        if where:
+            kwargs["where"] = where
+        batch = col.get(**kwargs)
+        if not batch["metadatas"]:
+            break
+        all_meta.extend(batch["metadatas"])
+        offset += len(batch["metadatas"])
+    return all_meta
+
+
+_metadata_cache = None
+_metadata_cache_time = 0
+_METADATA_CACHE_TTL = 5.0  # seconds
+_MAX_RESULTS = 100  # upper bound for search/list limit params
+
+
+def _get_cached_metadata(col, where=None):
+    """Return cached metadata if fresh, else fetch and cache."""
+    global _metadata_cache, _metadata_cache_time
+    now = time.time()
+    if (
+        where is None
+        and _metadata_cache is not None
+        and (now - _metadata_cache_time) < _METADATA_CACHE_TTL
+    ):
+        return _metadata_cache
+    result = _fetch_all_metadata(col, where=where)
+    if where is None:
+        _metadata_cache = result
+        _metadata_cache_time = now
+    return result
+
+
 # ==================== READ TOOLS ====================
 
 
@@ -144,24 +222,6 @@ def tool_status():
     count = col.count()
     wings = {}
     rooms = {}
-    batch_size = 5000
-    offset = 0
-    error_info = None
-    while True:
-        try:
-            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
-            rows = batch["metadatas"]
-            for m in rows:
-                w = m.get("wing", "unknown")
-                r = m.get("room", "unknown")
-                wings[w] = wings.get(w, 0) + 1
-                rooms[r] = rooms.get(r, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            error_info = f"Partial result, failed at offset {offset}: {str(e)}"
-            break
     result = {
         "total_drawers": count,
         "wings": wings,
@@ -170,8 +230,16 @@ def tool_status():
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
     }
-    if error_info:
-        result["error"] = error_info
+    try:
+        all_meta = _get_cached_metadata(col)
+        for m in all_meta:
+            w = m.get("wing", "unknown")
+            r = m.get("room", "unknown")
+            wings[w] = wings.get(w, 0) + 1
+            rooms[r] = rooms.get(r, 0) + 1
+    except Exception as e:
+        logger.exception("tool_status metadata fetch failed")
+        result["error"] = str(e)
         result["partial"] = True
     return result
 
@@ -214,29 +282,17 @@ def tool_list_wings():
     if not col:
         return _no_palace()
     wings = {}
-    batch_size = 5000
-    offset = 0
+    result = {"wings": wings}
     try:
-        col.count()  # verify collection is accessible
+        all_meta = _get_cached_metadata(col)
+        for m in all_meta:
+            w = m.get("wing", "unknown")
+            wings[w] = wings.get(w, 0) + 1
     except Exception as e:
-        return {"wings": {}, "error": str(e)}
-    while True:
-        try:
-            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
-            rows = batch["metadatas"]
-            for m in rows:
-                w = m.get("wing", "unknown")
-                wings[w] = wings.get(w, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            return {
-                "wings": wings,
-                "error": f"Partial result, failed at offset {offset}: {str(e)}",
-                "partial": True,
-            }
-    return {"wings": wings}
+        logger.exception("tool_list_wings metadata fetch failed")
+        result["error"] = str(e)
+        result["partial"] = True
+    return result
 
 
 def tool_list_rooms(wing: str = None):
@@ -244,34 +300,18 @@ def tool_list_rooms(wing: str = None):
     if not col:
         return _no_palace()
     rooms = {}
-    batch_size = 5000
-    offset = 0
-    where = {"wing": wing} if wing else None
+    result = {"wing": wing or "all", "rooms": rooms}
     try:
-        col.count()  # verify collection is accessible
+        where = {"wing": wing} if wing else None
+        all_meta = _fetch_all_metadata(col, where=where)
+        for m in all_meta:
+            r = m.get("room", "unknown")
+            rooms[r] = rooms.get(r, 0) + 1
     except Exception as e:
-        return {"wing": wing or "all", "rooms": {}, "error": str(e)}
-    while True:
-        try:
-            kwargs = {"include": ["metadatas"], "limit": batch_size, "offset": offset}
-            if where:
-                kwargs["where"] = where
-            batch = col.get(**kwargs)
-            rows = batch["metadatas"]
-            for m in rows:
-                r = m.get("room", "unknown")
-                rooms[r] = rooms.get(r, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            return {
-                "wing": wing or "all",
-                "rooms": rooms,
-                "error": f"Partial result, failed at offset {offset}: {str(e)}",
-                "partial": True,
-            }
-    return {"wing": wing or "all", "rooms": rooms}
+        logger.exception("tool_list_rooms metadata fetch failed")
+        result["error"] = str(e)
+        result["partial"] = True
+    return result
 
 
 def tool_get_taxonomy():
@@ -279,37 +319,36 @@ def tool_get_taxonomy():
     if not col:
         return _no_palace()
     taxonomy = {}
-    batch_size = 5000
-    offset = 0
+    result = {"taxonomy": taxonomy}
     try:
-        col.count()  # verify collection is accessible
+        all_meta = _get_cached_metadata(col)
+        for m in all_meta:
+            w = m.get("wing", "unknown")
+            r = m.get("room", "unknown")
+            if w not in taxonomy:
+                taxonomy[w] = {}
+            taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
     except Exception as e:
-        return {"taxonomy": {}, "error": str(e)}
-    while True:
-        try:
-            batch = col.get(include=["metadatas"], limit=batch_size, offset=offset)
-            rows = batch["metadatas"]
-            for m in rows:
-                w = m.get("wing", "unknown")
-                r = m.get("room", "unknown")
-                if w not in taxonomy:
-                    taxonomy[w] = {}
-                taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
-            offset += len(rows)
-            if len(rows) < batch_size:
-                break
-        except Exception as e:
-            return {
-                "taxonomy": taxonomy,
-                "error": f"Partial result, failed at offset {offset}: {str(e)}",
-                "partial": True,
-            }
-    return {"taxonomy": taxonomy}
+        logger.exception("tool_get_taxonomy metadata fetch failed")
+        result["error"] = str(e)
+        result["partial"] = True
+    return result
 
 
 def tool_search(
-    query: str, limit: int = 5, wing: str = None, room: str = None, context: str = None
+    query: str,
+    limit: int = 5,
+    wing: str = None,
+    room: str = None,
+    max_distance: float = 1.5,
+    min_similarity: float = None,
+    context: str = None,
 ):
+    limit = max(1, min(limit, _MAX_RESULTS))
+    # Backwards compat: accept old name
+    # Backwards compat: convert old similarity scale (higher=stricter) to
+    # distance scale (lower=stricter). Similarity 0.8 → distance 0.2.
+    dist = (1.0 - min_similarity) if min_similarity is not None else max_distance
     # Mitigate system prompt contamination (Issue #333)
     sanitized = sanitize_query(query)
     result = search_memories(
@@ -318,6 +357,7 @@ def tool_search(
         wing=wing,
         room=room,
         n_results=limit,
+        max_distance=dist,
     )
     # Attach sanitizer metadata for transparency
     if sanitized["was_sanitized"]:
@@ -364,8 +404,9 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
             "is_duplicate": len(duplicates) > 0,
             "matches": duplicates,
         }
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("check_duplicate failed")
+        return {"error": "Duplicate check failed"}
 
 
 def tool_get_aaak_spec():
@@ -375,6 +416,7 @@ def tool_get_aaak_spec():
 
 def tool_traverse_graph(start_room: str, max_hops: int = 2):
     """Walk the palace graph from a room. Find connected ideas across wings."""
+    max_hops = max(1, min(max_hops, 10))
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -404,6 +446,7 @@ def tool_add_drawer(
     wing: str, room: str, content: str, source_file: str = None, added_by: str = "mcp"
 ):
     """File verbatim content into a wing/room. Checks for duplicates first."""
+    global _metadata_cache
     try:
         wing = sanitize_name(wing, "wing")
         room = sanitize_name(room, "room")
@@ -452,6 +495,7 @@ def tool_add_drawer(
                 }
             ],
         )
+        _metadata_cache = None
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
     except Exception as e:
@@ -460,6 +504,7 @@ def tool_add_drawer(
 
 def tool_delete_drawer(drawer_id: str):
     """Delete a single drawer by ID."""
+    global _metadata_cache
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -481,8 +526,146 @@ def tool_delete_drawer(drawer_id: str):
 
     try:
         col.delete(ids=[drawer_id])
+        _metadata_cache = None
         logger.info(f"Deleted drawer: {drawer_id}")
         return {"success": True, "drawer_id": drawer_id}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_get_drawer(drawer_id: str):
+    """Fetch a single drawer by ID. Returns full content and metadata."""
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+    try:
+        result = col.get(ids=[drawer_id], include=["documents", "metadatas"])
+        if not result["ids"]:
+            return {"error": f"Drawer not found: {drawer_id}"}
+        meta = result["metadatas"][0]
+        doc = result["documents"][0]
+        return {
+            "drawer_id": drawer_id,
+            "content": doc,
+            "wing": meta.get("wing", ""),
+            "room": meta.get("room", ""),
+            "metadata": meta,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offset: int = 0):
+    """List drawers with pagination. Optional wing/room filter."""
+    limit = max(1, min(limit, _MAX_RESULTS))
+    offset = max(0, offset)
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+    try:
+        where = None
+        conditions = []
+        if wing:
+            conditions.append({"wing": wing})
+        if room:
+            conditions.append({"room": room})
+        if len(conditions) == 1:
+            where = conditions[0]
+        elif len(conditions) > 1:
+            where = {"$and": conditions}
+
+        kwargs = {"include": ["documents", "metadatas"], "limit": limit, "offset": offset}
+        if where:
+            kwargs["where"] = where
+        result = col.get(**kwargs)
+
+        drawers = []
+        for i, did in enumerate(result["ids"]):
+            meta = result["metadatas"][i]
+            doc = result["documents"][i]
+            drawers.append(
+                {
+                    "drawer_id": did,
+                    "wing": meta.get("wing", ""),
+                    "room": meta.get("room", ""),
+                    "content_preview": doc[:200] + "..." if len(doc) > 200 else doc,
+                }
+            )
+        return {
+            "drawers": drawers,
+            "count": len(drawers),
+            "offset": offset,
+            "limit": limit,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, room: str = None):
+    """Update an existing drawer's content and/or metadata."""
+    global _metadata_cache
+
+    if content is None and wing is None and room is None:
+        return {"success": True, "drawer_id": drawer_id, "noop": True}
+
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+    try:
+        existing = col.get(ids=[drawer_id], include=["documents", "metadatas"])
+        if not existing["ids"]:
+            return {"success": False, "error": f"Drawer not found: {drawer_id}"}
+
+        old_meta = existing["metadatas"][0]
+        old_doc = existing["documents"][0]
+
+        new_doc = old_doc
+        if content is not None:
+            try:
+                new_doc = sanitize_content(content)
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+
+        new_meta = dict(old_meta)
+        if wing is not None:
+            try:
+                new_meta["wing"] = sanitize_name(wing, "wing")
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+        if room is not None:
+            try:
+                new_meta["room"] = sanitize_name(room, "room")
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+
+        _wal_log(
+            "update_drawer",
+            {
+                "drawer_id": drawer_id,
+                "old_wing": old_meta.get("wing", ""),
+                "old_room": old_meta.get("room", ""),
+                "new_wing": new_meta.get("wing", ""),
+                "new_room": new_meta.get("room", ""),
+                "content_changed": content is not None,
+                "content_preview": new_doc[:200] if content is not None else None,
+            },
+        )
+
+        update_kwargs = {"ids": [drawer_id]}
+        if content is not None:
+            update_kwargs["documents"] = [new_doc]
+        update_kwargs["metadatas"] = [new_meta]
+        col.update(**update_kwargs)
+
+        _metadata_cache = None
+
+        logger.info(f"Updated drawer: {drawer_id}")
+        return {
+            "success": True,
+            "drawer_id": drawer_id,
+            "wing": new_meta.get("wing", ""),
+            "room": new_meta.get("room", ""),
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -492,6 +675,12 @@ def tool_delete_drawer(drawer_id: str):
 
 def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
     """Query the knowledge graph for an entity's relationships."""
+    try:
+        entity = sanitize_name(entity, "entity")
+    except ValueError as e:
+        return {"error": str(e)}
+    if direction not in ("outgoing", "incoming", "both"):
+        return {"error": "direction must be 'outgoing', 'incoming', or 'both'"}
     results = _kg.query_entity(entity, as_of=as_of, direction=direction)
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
 
@@ -525,6 +714,12 @@ def tool_kg_add(
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
     """Mark a fact as no longer true (set end date)."""
+    try:
+        subject = sanitize_name(subject, "subject")
+        predicate = sanitize_name(predicate, "predicate")
+        object = sanitize_name(object, "object")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
     _wal_log(
         "kg_invalidate",
         {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
@@ -539,6 +734,11 @@ def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = N
 
 def tool_kg_timeline(entity: str = None):
     """Get chronological timeline of facts, optionally for one entity."""
+    if entity is not None:
+        try:
+            entity = sanitize_name(entity, "entity")
+        except ValueError as e:
+            return {"error": str(e)}
     results = _kg.timeline(entity)
     return {"entity": entity or "all", "timeline": results, "count": len(results)}
 
@@ -622,6 +822,11 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
     Read an agent's recent diary entries. Returns the last N entries
     in chronological order — the agent's personal journal.
     """
+    try:
+        agent_name = sanitize_name(agent_name, "agent_name")
+    except ValueError as e:
+        return {"error": str(e)}
+    last_n = max(1, min(last_n, 100))
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     col = _get_collection()
     if not col:
@@ -658,8 +863,84 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
             "total": len(results["ids"]),
             "showing": len(entries),
         }
+    except Exception:
+        logger.exception("diary_read failed")
+        return {"error": "Failed to read diary entries"}
+
+
+def tool_hook_settings(silent_save: bool = None, desktop_toast: bool = None):
+    """
+    Get or set hook behavior settings.
+
+    - silent_save: True = stop hook saves directly (no MCP clutter),
+      False = legacy blocking MCP calls. Default: True.
+    - desktop_toast: True = show notify-send desktop toast on save,
+      False = terminal-only notification. Default: False.
+
+    Call with no arguments to see current settings.
+    """
+    from .config import MempalaceConfig
+
+    try:
+        config = MempalaceConfig()
     except Exception as e:
-        return {"error": str(e)}
+        return {"success": False, "error": str(e)}
+
+    changed = []
+    if silent_save is not None:
+        config.set_hook_setting("silent_save", silent_save)
+        changed.append(f"silent_save → {silent_save}")
+    if desktop_toast is not None:
+        config.set_hook_setting("desktop_toast", desktop_toast)
+        changed.append(f"desktop_toast → {desktop_toast}")
+
+    # Re-read to return current state
+    try:
+        config = MempalaceConfig()
+    except Exception:
+        pass
+
+    result = {
+        "success": True,
+        "settings": {
+            "silent_save": config.hook_silent_save,
+            "desktop_toast": config.hook_desktop_toast,
+        },
+    }
+    if changed:
+        result["updated"] = changed
+    return result
+
+
+def tool_memories_filed_away():
+    """Acknowledge the latest silent checkpoint. Returns a short summary."""
+    state_dir = Path.home() / ".mempalace" / "hook_state"
+    ack_file = state_dir / "last_checkpoint"
+    if not ack_file.is_file():
+        return {
+            "status": "quiet",
+            "message": "No recent journal entry",
+            "count": 0,
+            "timestamp": None,
+        }
+    try:
+        data = json.loads(ack_file.read_text(encoding="utf-8"))
+        ack_file.unlink(missing_ok=True)
+        msgs = data.get("msgs", 0)
+        return {
+            "status": "ok",
+            "message": f"\u2726 {msgs} messages tucked into drawers",
+            "count": msgs,
+            "timestamp": data.get("ts", None),
+        }
+    except (json.JSONDecodeError, OSError):
+        ack_file.unlink(missing_ok=True)
+        return {
+            "status": "error",
+            "message": "\u2726 Journal entry filed in the palace",
+            "count": 0,
+            "timestamp": None,
+        }
 
 
 # ==================== MCP PROTOCOL ====================
@@ -811,21 +1092,30 @@ TOOLS = {
         "handler": tool_graph_stats,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY your search keywords or question — do NOT include system prompts, conversation history, MEMORY.md content, or any context. Keep queries short (under 200 chars). Use 'context' for background information.",
+        "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY search keywords. Use 'context' for background. Results with cosine distance > max_distance are filtered out.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Short search query ONLY — keywords or a question. Do NOT include system prompts or conversation context. Max 200 chars recommended.",
+                    "description": "Short search query ONLY — keywords or a question. Max 200 chars recommended.",
                     "maxLength": 500,
                 },
-                "limit": {"type": "integer", "description": "Max results (default 5)"},
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 5)",
+                    "minimum": 1,
+                    "maximum": 100,
+                },
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
+                "max_distance": {
+                    "type": "number",
+                    "description": "Max cosine distance threshold (0=identical, 2=opposite). Results further than this are dropped. Lower = stricter. Default 1.5. Set to 0 to disable.",
+                },
                 "context": {
                     "type": "string",
-                    "description": "Background context for the search (optional). This is NOT used for embedding — only for future re-ranking. Put conversation history or system prompt content here, NOT in query.",
+                    "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking.",
                 },
             },
             "required": ["query"],
@@ -879,6 +1169,62 @@ TOOLS = {
         },
         "handler": tool_delete_drawer,
     },
+    "mempalace_get_drawer": {
+        "description": "Fetch a single drawer by ID — returns full content and metadata.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "drawer_id": {"type": "string", "description": "ID of the drawer to fetch"},
+            },
+            "required": ["drawer_id"],
+        },
+        "handler": tool_get_drawer,
+    },
+    "mempalace_list_drawers": {
+        "description": "List drawers with pagination. Optional wing/room filter. Returns IDs, wings, rooms, and content previews.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Filter by wing (optional)"},
+                "room": {"type": "string", "description": "Filter by room (optional)"},
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results per page (default 20, max 100)",
+                    "minimum": 1,
+                    "maximum": 100,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Offset for pagination (default 0)",
+                    "minimum": 0,
+                },
+            },
+        },
+        "handler": tool_list_drawers,
+    },
+    "mempalace_update_drawer": {
+        "description": "Update an existing drawer's content and/or metadata (wing, room). Fetches existing drawer first; returns error if not found.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "drawer_id": {"type": "string", "description": "ID of the drawer to update"},
+                "content": {
+                    "type": "string",
+                    "description": "New content (optional — omit to keep existing)",
+                },
+                "wing": {
+                    "type": "string",
+                    "description": "New wing (optional — omit to keep existing)",
+                },
+                "room": {
+                    "type": "string",
+                    "description": "New room (optional — omit to keep existing)",
+                },
+            },
+            "required": ["drawer_id"],
+        },
+        "handler": tool_update_drawer,
+    },
     "mempalace_diary_write": {
         "description": "Write to your personal agent diary in AAAK format. Your observations, thoughts, what you worked on, what matters. Each agent has their own diary with full history. Write in AAAK for compression — e.g. 'SESSION:2026-04-04|built.palace.graph+diary.tools|ALC.req:agent.diaries.in.aaak|★★★'. Use entity codes from the AAAK spec.",
         "input_schema": {
@@ -919,6 +1265,32 @@ TOOLS = {
         },
         "handler": tool_diary_read,
     },
+    "mempalace_hook_settings": {
+        "description": (
+            "Get or set hook behavior. silent_save: True = save directly "
+            "(no MCP clutter), False = legacy blocking. desktop_toast: "
+            "True = show desktop notification. Call with no args to view."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "silent_save": {
+                    "type": "boolean",
+                    "description": "True = silent direct save, False = blocking MCP calls",
+                },
+                "desktop_toast": {
+                    "type": "boolean",
+                    "description": "True = show desktop toast via notify-send",
+                },
+            },
+        },
+        "handler": tool_hook_settings,
+    },
+    "mempalace_memories_filed_away": {
+        "description": "Check if a recent palace checkpoint was saved. Returns message count and timestamp.",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_memories_filed_away,
+    },
 }
 
 
@@ -931,8 +1303,8 @@ SUPPORTED_PROTOCOL_VERSIONS = [
 
 
 def handle_request(request):
-    method = request.get("method", "")
-    params = request.get("params", {})
+    method = request.get("method") or ""
+    params = request.get("params") or {}
     req_id = request.get("id")
 
     if method == "initialize":
@@ -951,7 +1323,10 @@ def handle_request(request):
                 "serverInfo": {"name": "mempalace", "version": __version__},
             },
         }
-    elif method == "notifications/initialized":
+    elif method == "ping":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
+    elif method.startswith("notifications/"):
+        # Notifications (no id) never get a response per JSON-RPC spec
         return None
     elif method == "tools/list":
         return {
@@ -973,18 +1348,29 @@ def handle_request(request):
                 "id": req_id,
                 "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
             }
+        # Whitelist arguments to declared schema properties only.
+        # Prevents callers from spoofing internal params like added_by/source_file.
+        schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
+        tool_args = {k: v for k, v in tool_args.items() if k in schema_props}
         # Coerce argument types based on input_schema.
         # MCP JSON transport may deliver integers as floats or strings;
         # ChromaDB and Python slicing require native int.
-        schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
         for key, value in list(tool_args.items()):
             prop_schema = schema_props.get(key, {})
             declared_type = prop_schema.get("type")
-            if declared_type == "integer" and not isinstance(value, int):
-                tool_args[key] = int(value)
-            elif declared_type == "number" and not isinstance(value, (int, float)):
-                tool_args[key] = float(value)
+            try:
+                if declared_type == "integer" and not isinstance(value, int):
+                    tool_args[key] = int(value)
+                elif declared_type == "number" and not isinstance(value, (int, float)):
+                    tool_args[key] = float(value)
+            except (ValueError, TypeError):
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32602, "message": f"Invalid value for parameter '{key}'"},
+                }
         try:
+            tool_args.pop("wait_for_previous", None)
             result = TOOLS[tool_name]["handler"](**tool_args)
             return {
                 "jsonrpc": "2.0",
@@ -999,6 +1385,9 @@ def handle_request(request):
                 "error": {"code": -32000, "message": "Internal tool error"},
             }
 
+    # Notifications (missing id) must never get a response
+    if req_id is None:
+        return None
     return {
         "jsonrpc": "2.0",
         "id": req_id,

@@ -134,7 +134,8 @@ def cmd_split(args):
     import sys
 
     # Rebuild argv for split_mega_files argparse
-    argv = ["--source", args.dir]
+    # Expand ~ and resolve to absolute path so split_mega_files sees a real path
+    argv = ["--source", str(Path(args.dir).expanduser().resolve())]
     if args.output_dir:
         argv += ["--output-dir", args.output_dir]
     if args.dry_run:
@@ -505,7 +506,7 @@ def cmd_compress(args):
         stats = dialect.compression_stats(doc, compressed)
 
         total_original += stats["original_chars"]
-        total_compressed += stats["compressed_chars"]
+        total_compressed += stats["summary_chars"]
 
         compressed_entries.append((doc_id, compressed, meta, stats))
 
@@ -515,7 +516,7 @@ def cmd_compress(args):
             source = Path(meta.get("source_file", "?")).name
             print(f"  [{wing_name}/{room_name}] {source}")
             print(
-                f"    {stats['original_tokens']}t -> {stats['compressed_tokens']}t ({stats['ratio']:.1f}x)"
+                f"    {stats['original_tokens_est']}t -> {stats['summary_tokens_est']}t ({stats['size_ratio']:.1f}x)"
             )
             print(f"    {compressed}")
             print()
@@ -526,8 +527,8 @@ def cmd_compress(args):
             comp_col = client.get_or_create_collection("mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
-                comp_meta["compression_ratio"] = round(stats["ratio"], 1)
-                comp_meta["original_tokens"] = stats["original_tokens"]
+                comp_meta["compression_ratio"] = round(stats["size_ratio"], 1)
+                comp_meta["original_tokens"] = stats["original_tokens_est"]
                 comp_col.upsert(
                     ids=[doc_id],
                     documents=[compressed],
@@ -542,8 +543,9 @@ def cmd_compress(args):
 
     # Summary
     ratio = total_original / max(total_compressed, 1)
-    orig_tokens = Dialect.count_tokens("x" * total_original)
-    comp_tokens = Dialect.count_tokens("x" * total_compressed)
+    # Estimate tokens from char count (~3.8 chars/token for English text)
+    orig_tokens = max(1, int(total_original / 3.8))
+    comp_tokens = max(1, int(total_compressed / 3.8))
     print(f"  Total: {orig_tokens:,}t -> {comp_tokens:,}t ({ratio:.1f}x compression)")
     if args.dry_run:
         print("  (dry run -- nothing stored)")
