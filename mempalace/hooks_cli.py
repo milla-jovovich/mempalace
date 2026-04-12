@@ -316,8 +316,24 @@ def hook_pretooluse(data: dict, harness: str):
     tool_input = data.get("tool_input", {})
     session_id = data.get("session_id", "")
 
-    # Always-allowed tools pass through without checks
+    # For mempalace MCP tools: always allow + inject sessionId via updatedInput
     if tool_name in ALWAYS_ALLOWED_TOOLS or tool_name.startswith("mcp__plugin_mempalace"):
+        response = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+            },
+        }
+        # Inject sessionId into MCP tool input so the server knows the session
+        if tool_name.startswith("mcp__plugin_mempalace") and session_id:
+            updated = dict(tool_input) if tool_input else {}
+            updated["sessionId"] = session_id
+            response["hookSpecificOutput"]["updatedInput"] = updated
+        _output(response)
+        return
+
+    # For other always-allowed tools (Agent, Task*, Skill, etc.) — pass through
+    if tool_name in ALWAYS_ALLOWED_TOOLS:
         _output({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",

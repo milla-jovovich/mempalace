@@ -3129,6 +3129,12 @@ def handle_request(request):
                 "id": req_id,
                 "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
             }
+        # Extract sessionId injected by PreToolUse hook (not a tool parameter)
+        injected_session_id = tool_args.pop("sessionId", None)
+        if injected_session_id:
+            global _session_id
+            _session_id = str(injected_session_id)
+
         # Coerce argument types based on input_schema.
         # MCP JSON transport may deliver integers as floats or strings;
         # ChromaDB and Python slicing require native int.
