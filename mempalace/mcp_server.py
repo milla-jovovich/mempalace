@@ -150,8 +150,8 @@ def tool_status():
             r = m.get("room", "unknown")
             wings[w] = wings.get(w, 0) + 1
             rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("tool_status: could not aggregate metadata: %s", e)
     return {
         "total_drawers": count,
         "wings": wings,
@@ -205,8 +205,8 @@ def tool_list_wings():
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("tool_list_wings: could not aggregate metadata: %s", e)
     return {"wings": wings}
 
 
@@ -223,8 +223,8 @@ def tool_list_rooms(wing: str = None):
         for m in all_meta:
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("tool_list_rooms: could not aggregate metadata: %s", e)
     return {"wing": wing or "all", "rooms": rooms}
 
 
@@ -241,8 +241,8 @@ def tool_get_taxonomy():
             if w not in taxonomy:
                 taxonomy[w] = {}
             taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("tool_get_taxonomy: could not aggregate metadata: %s", e)
     return {"taxonomy": taxonomy}
 
 
