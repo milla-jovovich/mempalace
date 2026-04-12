@@ -1145,9 +1145,9 @@ def tool_kg_add(
         },
     )
     triple_id = _kg.add_triple(
-        subject, predicate, object, valid_from=valid_from, source_closet=source_closet
+        sub_normalized, pred_normalized, obj_normalized, valid_from=valid_from, source_closet=source_closet
     )
-    return {"success": True, "triple_id": triple_id, "fact": f"{subject} -> {predicate} -> {object}"}
+    return {"success": True, "triple_id": triple_id, "fact": f"{sub_normalized} -> {pred_normalized} -> {obj_normalized}"}
 
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
