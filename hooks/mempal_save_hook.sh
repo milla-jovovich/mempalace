@@ -145,7 +145,7 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
     cat << 'HOOKJSON'
 {
   "decision": "block",
-  "reason": "AUTO-SAVE checkpoint. Save key topics, decisions, quotes, and code from this session to your memory system. Organize into appropriate categories. Use verbatim quotes where possible. Continue conversation after saving."
+  "reason": "AUTO-SAVE checkpoint (MemPalace). Save this session's key content:\n1. mempalace_diary_write — AAAK-compressed session summary\n2. mempalace_add_drawer — verbatim quotes, decisions, code snippets\n3. mempalace_kg_add — entity relationships (optional)\nDo NOT write to Claude Code's native auto-memory (.md files). Continue conversation after saving."
 }
 HOOKJSON
 else
