@@ -47,23 +47,25 @@ def _mempalace_python() -> str:
 _RECENT_MSG_COUNT = 30  # how many recent user messages to summarize
 
 STOP_BLOCK_REASON = (
-    "AUTO-SAVE checkpoint. Save key topics, decisions, quotes, and code "
-    "from this session to MemPalace using the MCP tools:\n"
-    "1. Use mempalace_diary_write to save a session summary (what was discussed, "
-    "key decisions, current state of work).\n"
-    "2. Use mempalace_add_drawer for each important decision, quote, or code "
-    "snippet — place in the appropriate wing and room.\n"
+    "AUTO-SAVE checkpoint (MemPalace). Save this session's key content:\n"
+    "1. mempalace_diary_write — session summary (what was discussed, "
+    "key decisions, current state of work)\n"
+    "2. mempalace_add_drawer — verbatim quotes, decisions, code snippets "
+    "(place in appropriate wing and room)\n"
+    "3. mempalace_kg_add — entity relationships (optional)\n"
+    "For THIS save, use MemPalace MCP tools only (not auto-memory .md files). "
     "Use verbatim quotes where possible. Continue conversation after saving."
 )
 
 PRECOMPACT_BLOCK_REASON = (
-    "COMPACTION IMMINENT — detailed context will be lost. Save ALL topics, "
-    "decisions, quotes, code, and important context to MemPalace using MCP tools:\n"
-    "1. Use mempalace_diary_write for a thorough session summary.\n"
-    "2. Use mempalace_add_drawer for EVERY key decision, finding, quote, and "
-    "code snippet — place each in the appropriate wing and room.\n"
-    "Be thorough — after compaction this is all that survives. Use verbatim "
-    "quotes. Save everything, then allow compaction to proceed."
+    "COMPACTION IMMINENT (MemPalace). Save ALL session content before context is lost:\n"
+    "1. mempalace_diary_write — thorough session summary\n"
+    "2. mempalace_add_drawer — ALL verbatim quotes, decisions, code, context "
+    "(place each in appropriate wing and room)\n"
+    "3. mempalace_kg_add — entity relationships (optional)\n"
+    "For THIS save, use MemPalace MCP tools only (not auto-memory .md files). "
+    "Be thorough — after compaction this is all that survives. "
+    "Save everything to MemPalace, then allow compaction to proceed."
 )
 
 
