@@ -1,27 +1,60 @@
-# MCP Integration — Claude Code
+# MCP Integration
 
-## Setup
+## Local MCP clients
 
-Run the MCP server:
-
-```bash
-python -m mempalace.mcp_server
-```
-
-Or add it to Claude Code:
+For Claude Code, Cursor, or any other client that can launch a local stdio server:
 
 ```bash
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-## Available Tools
+You can also run the server directly:
 
-The server exposes the full MemPalace MCP toolset. Common entry points include:
+```bash
+python -m mempalace.mcp_server
+```
 
-- **mempalace_status** — palace stats (wings, rooms, drawer counts)
-- **mempalace_search** — semantic search across all memories
-- **mempalace_list_wings** — list all projects in the palace
+## ChatGPT custom MCP apps
 
-## Usage in Claude Code
+ChatGPT does not connect to a local stdio server. It needs a remote HTTPS MCP endpoint.
 
-Once configured, Claude Code can search your memories directly during conversations.
+Start MemPalace with Streamable HTTP:
+
+```bash
+python -m mempalace.mcp_server --transport streamable-http --host 0.0.0.0 --port 8000
+```
+
+The MCP endpoint will be:
+
+```text
+http://<host>:8000/mcp
+```
+
+Put that behind HTTPS with your normal deployment path or a tunnel/reverse proxy, then register the public URL in ChatGPT developer mode.
+
+Notes:
+- ChatGPT custom MCP apps are configured from ChatGPT web
+- local MCP servers are not supported
+- MemPalace validates `Origin` by default for `https://chatgpt.com` and `https://chat.openai.com`
+- for local browser-based testing, add extra origins with `--allow-origin`
+
+Example:
+
+```bash
+python -m mempalace.mcp_server \
+  --transport streamable-http \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --allow-origin https://chatgpt.com \
+  --allow-origin http://localhost:6274
+```
+
+## Available tools
+
+- `mempalace_status` — palace stats and protocol bootstrap
+- `mempalace_search` — semantic search across memories
+- `mempalace_list_wings` — list wings with drawer counts
+- `mempalace_list_rooms` — list rooms inside a wing
+- `mempalace_get_taxonomy` — full wing/room taxonomy
+- `mempalace_kg_*` — knowledge graph read/write tools
+- `mempalace_diary_*` — long-term agent diary tools

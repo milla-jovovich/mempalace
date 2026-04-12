@@ -122,7 +122,7 @@ Three mining modes: **projects** (code and docs), **convos** (conversation expor
 
 ## How You Actually Use It
 
-After the one-time setup (install → init → mine), you don't run MemPalace commands manually. Your AI uses it for you. There are two ways, depending on which AI you use.
+After the one-time setup (install → init → mine), you don't run MemPalace commands manually. Your AI uses it for you. There are three common ways, depending on which AI you use.
 
 ### With Claude Code (recommended)
 
@@ -135,10 +135,10 @@ claude plugin install --scope user mempalace
 
 Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 
-### With Claude, ChatGPT, Cursor, Gemini (MCP-compatible tools)
+### With Claude, Cursor, Gemini, and other local MCP clients
 
 ```bash
-# Connect MemPalace once
+# Connect MemPalace once over stdio
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
@@ -149,6 +149,25 @@ Now your AI has 19 tools available through MCP. Ask it anything:
 Claude calls `mempalace_search` automatically, gets verbatim results, and answers you. You never type `mempalace search` again. The AI handles it.
 
 MemPalace also works natively with **Gemini CLI** (which handles the server and save hooks automatically) — see the [Gemini CLI Integration Guide](examples/gemini_cli_setup.md).
+
+### With ChatGPT custom MCP apps
+
+ChatGPT custom MCP apps do **not** connect to a local stdio server. They require a **remote HTTPS MCP endpoint**.
+
+Run MemPalace with Streamable HTTP:
+
+```bash
+python -m mempalace.mcp_server --transport streamable-http --host 0.0.0.0 --port 8000
+```
+
+That exposes MCP at `http://<host>:8000/mcp`. Put it behind HTTPS using your normal deploy path or a tunnel/reverse proxy, then register the public URL in ChatGPT developer mode.
+
+Current OpenAI limitations to account for:
+- custom MCP apps are configured from **ChatGPT web**, not a local desktop config file
+- **local** MCP servers are **not** supported by ChatGPT
+- full MCP developer mode is currently for ChatGPT **Business** and **Enterprise/Edu** workspaces; Pro can connect read/fetch MCPs only
+
+Once the remote URL is live, import it in ChatGPT as a custom MCP app and MemPalace’s tools will appear there the same way they do in Claude.
 
 ### With local models (Llama, Mistral, or any offline LLM)
 
@@ -461,6 +480,8 @@ Letta charges $20–200/mo for agent-managed memory. MemPalace does it with a wi
 
 ## MCP Server
 
+Claude Code / Cursor (local stdio):
+
 ```bash
 # Via plugin (recommended)
 claude plugin marketplace add milla-jovovich/mempalace
@@ -469,6 +490,15 @@ claude plugin install --scope user mempalace
 # Or manually
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
+
+ChatGPT custom MCP apps (remote Streamable HTTP):
+
+```bash
+python -m mempalace.mcp_server --transport streamable-http --host 0.0.0.0 --port 8000
+# MCP endpoint: http://<host>:8000/mcp
+```
+
+If you are connecting from ChatGPT, expose that endpoint over public HTTPS first. ChatGPT does not connect to local MCP servers.
 
 ### 19 Tools
 
