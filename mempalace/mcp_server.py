@@ -1350,16 +1350,19 @@ def handle_request(request):
             }
         # Whitelist arguments to declared schema properties only.
         # Prevents callers from spoofing internal params like added_by/source_file.
-        # Skip filtering for handlers that accept **kwargs — they intentionally
-        # handle arbitrary arguments (e.g., pass-through to ChromaDB).
+        # Skip filtering if handler explicitly accepts **kwargs (pass-through).
+        # Default to filtering on inspect failure (safe fallback).
         import inspect
 
-        handler = TOOLS[tool_name]["handler"]
-        sig = inspect.signature(handler)
-        accepts_var_keyword = any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-        )
         schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
+        try:
+            handler = TOOLS[tool_name]["handler"]
+            sig = inspect.signature(handler)
+            accepts_var_keyword = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            )
+        except (ValueError, TypeError):
+            accepts_var_keyword = False
         if not accepts_var_keyword:
             tool_args = {k: v for k, v in tool_args.items() if k in schema_props}
         # Coerce argument types based on input_schema.
