@@ -29,7 +29,7 @@ from pathlib import Path
 
 SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-03-26", "2024-11-05"]
 
-from .config import MempalaceConfig
+from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
 import chromadb
 from .query_sanitizer import sanitize_query

@@ -298,8 +298,8 @@ class TestWriteTools:
         assert result1["success"] is True
 
         result2 = tool_add_drawer(wing="w", room="r", content=content)
-        assert result2["success"] is False
-        assert result2["reason"] == "duplicate"
+        assert result2["success"] is True
+        assert result2["reason"] == "already_exists"
 
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
