@@ -35,11 +35,21 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     Optionally filter by wing (project) or room (aspect).
     """
     try:
-        col = get_collection(palace_path, create=False)
+        col = get_collection(palace_path)
+    except ImportError:
+        print(f"\n  Palace at {palace_path} uses ChromaDB but 'chromadb' is not installed.")
+        print("  Install with: pip install 'mempalace[chroma]'")
+        print("  Or migrate:  mempalace migrate")
+        raise SearchError(f"Missing chromadb dependency for {palace_path}")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         raise SearchError(f"No palace found at {palace_path}")
+
+    if col.count() == 0:
+        print(f"\n  Palace at {palace_path} exists but is empty.")
+        print("  Run: mempalace mine <dir>")
+        raise SearchError(f"Empty palace at {palace_path}")
 
     where = build_where_filter(wing, room)
 
@@ -117,12 +127,23 @@ def search_memories(
             0.0 disables filtering. Typical useful range: 0.3–1.0.
     """
     try:
-        col = get_collection(palace_path, create=False)
+        col = get_collection(palace_path)
+    except ImportError:
+        return {
+            "error": "Missing chromadb dependency",
+            "hint": "pip install 'mempalace[chroma]' or run: mempalace migrate",
+        }
     except Exception as e:
         logger.error("No palace found at %s: %s", palace_path, e)
         return {
             "error": "No palace found",
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
+        }
+
+    if col.count() == 0:
+        return {
+            "error": "Empty palace",
+            "hint": "Run: mempalace mine <dir>",
         }
 
     where = build_where_filter(wing, room)

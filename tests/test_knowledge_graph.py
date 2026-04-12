@@ -5,6 +5,10 @@ Covers: entity CRUD, triple CRUD, temporal queries, invalidation,
 timeline, stats, and edge cases (duplicate triples, ID collisions).
 """
 
+import os
+
+from mempalace.knowledge_graph import KnowledgeGraph
+
 
 class TestEntityOperations:
     def test_add_entity(self, kg):
@@ -118,7 +122,10 @@ class TestTimeline:
 
 
 class TestWALMode:
-    def test_wal_mode_enabled(self, kg):
+    def test_wal_mode_enabled(self, tmp_dir):
+        """WAL mode is enabled on the SQLite backend."""
+        db_path = os.path.join(tmp_dir, "wal_test.sqlite3")
+        kg = KnowledgeGraph(db_path=db_path)
         conn = kg._conn()
         mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         conn.close()

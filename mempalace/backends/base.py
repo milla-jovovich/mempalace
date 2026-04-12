@@ -40,5 +40,9 @@ class BaseCollection(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def update(self, **kwargs: Any) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def count(self) -> int:
         raise NotImplementedError

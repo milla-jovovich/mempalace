@@ -7,7 +7,7 @@ from mempalace.knowledge_graph import KnowledgeGraph
 
 @pytest.fixture
 def kg(tmp_path):
-    return KnowledgeGraph(db_path=str(tmp_path / "kg.db"))
+    return KnowledgeGraph(palace_path=str(tmp_path / "kg_palace"))
 
 
 class TestSeedFromEntityFacts:
