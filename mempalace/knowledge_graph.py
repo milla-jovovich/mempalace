@@ -261,8 +261,6 @@ class KnowledgeGraph:
              {"subject_kinds": ["entity"], "object_kinds": ["entity"], "subject_classes": ["thing"], "object_classes": ["thing"], "cardinality": "many-to-one"}),
             ("invalidated_by", "Subject was made obsolete by object event", 3,
              {"subject_kinds": ["entity"], "object_kinds": ["entity"], "subject_classes": ["thing"], "object_classes": ["thing"], "cardinality": "many-to-one"}),
-            ("has_memory", "Subject entity is linked to object drawer ID", 4,
-             {"subject_kinds": ["entity"], "object_kinds": ["entity"], "subject_classes": ["thing"], "object_classes": ["thing"], "cardinality": "many-to-many"}),
             ("described_by", "Entity's canonical description lives in this drawer", 4,
              {"subject_kinds": ["entity"], "object_kinds": ["entity"], "subject_classes": ["thing"], "object_classes": ["thing"], "cardinality": "many-to-many"}),
             ("evidenced_by", "A rule or decision is backed by this drawer's content", 3,

@@ -625,6 +625,7 @@ def tool_add_drawer(
     hall: str = None,
     importance: int = None,
     entity: str = None,
+    predicate: str = "described_by",
 ):
     """File verbatim content into a wing/room. Checks for duplicates first.
 
@@ -636,10 +637,15 @@ def tool_add_drawer(
               hall_discoveries, hall_preferences, hall_advice, hall_diary.
         importance: integer 1-5 — REQUIRED. 5=critical, 4=canonical,
                     3=default, 2=low, 1=junk.
-        entity: entity name (or comma-separated list) — REQUIRED. Links this drawer to
-                via has_memory edges in the KG. If not provided, defaults to the
-                wing name as entity. This prevents orphan drawers — every drawer
-                should be discoverable via the entity graph.
+        entity: entity name (or comma-separated list) — REQUIRED. Links this drawer
+                to an entity in the KG. If not provided, defaults to the wing name.
+                This prevents orphan drawers — every drawer should be discoverable
+                via the entity graph.
+        predicate: relationship type for the entity→drawer link. Default: described_by.
+                   Use a precise predicate: described_by (canonical description),
+                   evidenced_by (backs a rule/decision), derived_from (extracted from),
+                   mentioned_in (referenced but not main topic), session_note_for
+                   (diary/session entry).
 
     Note: date_added is always set to the current time. Diary drawers
     (via diary_write) are exempt from the entity/slug requirement.
@@ -720,7 +726,10 @@ def tool_add_drawer(
         )
         logger.info(f"Filed drawer: {drawer_id} -> {wing}/{room} hall={hall} imp={importance}")
 
-        # Create has_memory entity link(s)
+        # Create entity→drawer link(s) using the specified predicate
+        VALID_DRAWER_PREDICATES = {"described_by", "evidenced_by", "derived_from", "mentioned_in", "session_note_for"}
+        link_predicate = predicate if predicate in VALID_DRAWER_PREDICATES else "described_by"
+
         linked_entities = []
         entity_names = []
         if entity:
@@ -738,7 +747,7 @@ def tool_add_drawer(
             if not existing_entity:
                 _kg.add_entity(ename, kind="entity", description=f"Auto-created from drawer link in {wing}/{room}")
             try:
-                _kg.add_triple(eid, "has_memory", drawer_id)
+                _kg.add_triple(eid, link_predicate, drawer_id)
                 linked_entities.append(eid)
             except Exception:
                 pass  # Non-fatal: drawer exists, linking failed
@@ -3088,7 +3097,7 @@ TOOLS = {
         "handler": tool_check_duplicate,
     },
     "mempalace_add_drawer": {
-        "description": "File verbatim content into the palace. Checks for duplicates first. Creates has_memory link(s) from entity to drawer in the KG. Supports hall (content-type), importance (1-5), and entity (link to KG entity, defaults to wing name).",
+        "description": "File verbatim content into the palace. Checks for duplicates first. Creates entity→drawer link(s) in the KG using the specified predicate. Supports hall (content-type), importance (1-5), and entity (link to KG entity, defaults to wing name).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -3120,7 +3129,12 @@ TOOLS = {
                 },
                 "entity": {
                     "type": "string",
-                    "description": "Entity name (or comma-separated list) to link this drawer to via has_memory edges in the KG. Defaults to the wing name if not provided. Every drawer should be discoverable via the entity graph — no orphan blobs.",
+                    "description": "Entity name (or comma-separated list) to link this drawer to in the KG. Defaults to the wing name if not provided. Every drawer should be discoverable via the entity graph — no orphan blobs.",
+                },
+                "predicate": {
+                    "type": "string",
+                    "description": "Relationship type for the entity→drawer link. Default: described_by. Use a precise predicate: described_by (canonical description), evidenced_by (backs a rule/decision), derived_from (extracted from), mentioned_in (referenced but not main topic), session_note_for (diary/session entry).",
+                    "enum": ["described_by", "evidenced_by", "derived_from", "mentioned_in", "session_note_for"],
                 },
             },
             "required": ["wing", "room", "content", "slug", "hall", "importance", "entity"],
