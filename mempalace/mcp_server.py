@@ -2569,6 +2569,7 @@ def check_tool_permission(tool_name: str, target: str = None) -> dict:
 def tool_diary_write(
     agent_name: str,
     entry: str,
+    slug: str = "",
     topic: str = "general",
     hall: str = "hall_diary",
     importance: int = None,
@@ -2580,7 +2581,10 @@ def tool_diary_write(
     This is the agent's personal journal — observations, thoughts,
     what it worked on, what it noticed, what it thinks matters.
 
-    Optional:
+    Args:
+        slug: Descriptive identifier for this entry (e.g. 'session12-intent-narrowing-shipped').
+              If not provided, falls back to date-topic format.
+        topic: Topic tag (optional, default: general)
         hall: default 'hall_diary'. Override with 'hall_discoveries' for
               "today I learned" entries that deserve higher retrieval priority,
               or 'hall_events' for plain activity logs.
@@ -2603,7 +2607,10 @@ def tool_diary_write(
         return _no_palace()
 
     now = datetime.now()
-    diary_slug = _normalize_drawer_slug(f"{now.strftime('%Y%m%d-%H%M%S')}-{topic}")
+    if slug and slug.strip():
+        diary_slug = _normalize_drawer_slug(slug)
+    else:
+        diary_slug = _normalize_drawer_slug(f"{now.strftime('%Y%m%d-%H%M%S')}-{topic}")
     entry_id = f"diary_{wing}_{diary_slug}"
 
     _wal_log(
@@ -3181,6 +3188,10 @@ TOOLS = {
                 "entry": {
                     "type": "string",
                     "description": "Your diary entry in AAAK format — compressed, entity-coded, emotion-marked",
+                },
+                "slug": {
+                    "type": "string",
+                    "description": "Descriptive identifier for this diary entry (e.g. 'session12-intent-narrowing-shipped', 'migration-lesson-learned'). Used as part of the entry ID.",
                 },
                 "topic": {
                     "type": "string",
