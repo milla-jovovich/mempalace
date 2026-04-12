@@ -6,6 +6,9 @@ timeline, stats, and edge cases (duplicate triples, ID collisions).
 """
 
 
+import os
+
+
 class TestEntityOperations:
     def test_add_entity(self, kg):
         eid = kg.add_entity("Alice", entity_type="person")
@@ -123,6 +126,19 @@ class TestWALMode:
         mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         conn.close()
         assert mode == "wal"
+
+    def test_reconnect_recreates_schema_after_db_deleted(self, kg):
+        db_path = kg.db_path
+
+        kg.close()
+        os.remove(db_path)
+
+        stats = kg.stats()
+        assert stats["entities"] == 0
+        assert stats["triples"] == 0
+
+        triple_id = kg.add_triple("Alice", "knows", "Bob")
+        assert triple_id.startswith("t_alice_knows_bob_")
 
 
 class TestStats:

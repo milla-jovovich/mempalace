@@ -47,6 +47,39 @@ from pathlib import Path
 DEFAULT_KG_PATH = os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
 
 
+SCHEMA_SQL = """
+    PRAGMA journal_mode=WAL;
+
+    CREATE TABLE IF NOT EXISTS entities (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT DEFAULT 'unknown',
+        properties TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS triples (
+        id TEXT PRIMARY KEY,
+        subject TEXT NOT NULL,
+        predicate TEXT NOT NULL,
+        object TEXT NOT NULL,
+        valid_from TEXT,
+        valid_to TEXT,
+        confidence REAL DEFAULT 1.0,
+        source_closet TEXT,
+        source_file TEXT,
+        extracted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (subject) REFERENCES entities(id),
+        FOREIGN KEY (object) REFERENCES entities(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(subject);
+    CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
+    CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
+    CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);
+"""
+
+
 class KnowledgeGraph:
     def __init__(self, db_path: str = None):
         self.db_path = db_path or DEFAULT_KG_PATH
@@ -57,37 +90,10 @@ class KnowledgeGraph:
 
     def _init_db(self):
         conn = self._conn()
-        conn.executescript("""
-            PRAGMA journal_mode=WAL;
+        self._ensure_schema(conn)
 
-            CREATE TABLE IF NOT EXISTS entities (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                type TEXT DEFAULT 'unknown',
-                properties TEXT DEFAULT '{}',
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS triples (
-                id TEXT PRIMARY KEY,
-                subject TEXT NOT NULL,
-                predicate TEXT NOT NULL,
-                object TEXT NOT NULL,
-                valid_from TEXT,
-                valid_to TEXT,
-                confidence REAL DEFAULT 1.0,
-                source_closet TEXT,
-                source_file TEXT,
-                extracted_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (subject) REFERENCES entities(id),
-                FOREIGN KEY (object) REFERENCES entities(id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(subject);
-            CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
-            CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
-            CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);
-        """)
+    def _ensure_schema(self, conn):
+        conn.executescript(SCHEMA_SQL)
         conn.commit()
 
     def _conn(self):
@@ -95,6 +101,10 @@ class KnowledgeGraph:
             self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
             self._connection.execute("PRAGMA journal_mode=WAL")
             self._connection.row_factory = sqlite3.Row
+            # If the DB file was deleted or recreated after this KnowledgeGraph was
+            # constructed, opening a fresh SQLite file would otherwise yield an empty
+            # schema and the next KG call would fail with "no such table: entities".
+            self._ensure_schema(self._connection)
         return self._connection
 
     def close(self):
