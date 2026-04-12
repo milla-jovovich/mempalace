@@ -502,7 +502,7 @@ def tool_kg_add(
     try:
         subject = sanitize_name(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
-        object = sanitize_name(object, "object")
+        object = sanitize_content(object)
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
