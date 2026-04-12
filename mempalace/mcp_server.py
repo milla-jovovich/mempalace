@@ -933,7 +933,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
         return {"success": False, "error": str(e)}
 
     if wing:
-        wing = wing.lower().replace(" ", "_")
+        wing = sanitize_name(wing)
     else:
         wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     room = "diary"
@@ -994,15 +994,20 @@ def tool_diary_read(agent_name: str, last_n: int = 10, wing: str = ""):
     """
     Read an agent's recent diary entries. Returns the last N entries
     in chronological order — the agent's personal journal.
+
+    When ``wing`` is provided, reads from that wing instead of the
+    agent's default ``wing_<agent_name>`` wing.  This lets hooks
+    direct diary reads to a project-specific wing derived from
+    the transcript path.
     """
     try:
         agent_name = sanitize_name(agent_name, "agent_name")
+        if wing:
+            wing = sanitize_name(wing)
     except ValueError as e:
         return {"error": str(e)}
     last_n = max(1, min(last_n, 100))
-    if wing:
-        wing = wing.lower().replace(" ", "_")
-    else:
+    if not wing:
         wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     col = _get_collection()
     if not col:

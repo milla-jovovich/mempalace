@@ -20,6 +20,7 @@ from mempalace.hooks_cli import (
     _parse_harness_input,
     _sanitize_session_id,
     _validate_transcript_path,
+    _wing_from_transcript_path,
     hook_stop,
     hook_session_start,
     hook_precompact,
@@ -237,6 +238,25 @@ def test_stop_hook_saves_silently_at_interval(tmp_path):
     mock_save.assert_called_once_with(str(transcript), "test", wing="sessions", toast=False)
 
 
+def test_stop_hook_derives_wing_from_transcript_path(tmp_path):
+    """When transcript path looks like a Claude Code path, wing is derived from it."""
+    project_dir = tmp_path / ".claude" / "projects" / "-home-jp-Projects-myproject"
+    project_dir.mkdir(parents=True)
+    transcript = project_dir / "session.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
+    )
+    save_result = {"count": 15, "themes": []}
+    with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result) as mock_save:
+        _capture_hook_output(
+            hook_stop,
+            {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+            state_dir=tmp_path,
+        )
+    mock_save.assert_called_once_with(str(transcript), "test", wing="myproject", toast=False)
+
+
 def test_stop_hook_tracks_save_point(tmp_path):
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
@@ -280,6 +300,28 @@ def test_precompact_allows(tmp_path):
         state_dir=tmp_path,
     )
     assert result == {}
+
+
+# --- _wing_from_transcript_path ---
+
+
+def test_wing_from_transcript_path_extracts_project():
+    path = "/home/jp/.claude/projects/-home-jp-Projects-memorypalace/session.jsonl"
+    assert _wing_from_transcript_path(path) == "memorypalace"
+
+
+def test_wing_from_transcript_path_fallback():
+    assert _wing_from_transcript_path("/some/random/path.jsonl") == "sessions"
+
+
+def test_wing_from_transcript_path_windows_backslashes():
+    path = "C:\\Users\\jp\\.claude\\projects\\-home-jp-Projects-myapp\\session.jsonl"
+    assert _wing_from_transcript_path(path) == "myapp"
+
+
+def test_wing_from_transcript_path_lowercases():
+    path = "/home/jp/.claude/projects/-home-jp-Projects-MyProject/session.jsonl"
+    assert _wing_from_transcript_path(path) == "myproject"
 
 
 # --- _log ---

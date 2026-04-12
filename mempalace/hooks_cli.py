@@ -494,7 +494,9 @@ def _wing_from_transcript_path(transcript_path: str) -> str:
         ~/.claude/projects/-home-<user>-Projects-<project>/session.jsonl
     We extract <project> as the wing name.  Falls back to "sessions".
     """
-    match = re.search(r"-Projects-([^/]+?)(?:/|$)", transcript_path)
+    # Normalize path separators for cross-platform (Windows backslashes)
+    normalized = transcript_path.replace("\\", "/")
+    match = re.search(r"-Projects-([^/]+?)(?:/|$)", normalized)
     if match:
         return match.group(1).lower().replace(" ", "_")
     return "sessions"
