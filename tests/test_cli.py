@@ -13,6 +13,7 @@ from mempalace.cli import (
     cmd_init,
     cmd_instructions,
     cmd_mine,
+    cmd_purge,
     cmd_repair,
     cmd_search,
     cmd_split,
@@ -693,3 +694,64 @@ def test_cmd_repair_trailing_slash_does_not_recurse():
     palace_path = os.path.expanduser(args.palace).rstrip(os.sep)
     backup_path = palace_path + ".backup"
     assert not backup_path.startswith(palace_path + os.sep)
+
+
+# ── --version flag ────────────────────────────────────────────────────
+
+
+def test_version_flag_prints_version(capsys):
+    from mempalace.version import __version__
+
+    with patch("sys.argv", ["mempalace", "--version"]):
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert __version__ in out
+
+
+# ── cmd_purge ─────────────────────────────────────────────────────────
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_purge_no_args_prints_error(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(palace=None, wing=None, room=None, yes=True)
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        cmd_purge(args)
+    out = capsys.readouterr().out
+    assert "specify --wing" in out.lower()
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_purge_no_matching_drawers(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(palace=None, wing="nonexistent", room=None, yes=True)
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.count.return_value = 100
+    mock_col.get.return_value = {"ids": [], "documents": [], "metadatas": []}
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        cmd_purge(args)
+    out = capsys.readouterr().out
+    assert "No drawers found" in out
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_purge_no_palace(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(palace=None, wing="test", room=None, yes=True)
+    mock_chromadb = MagicMock()
+    mock_chromadb.PersistentClient.side_effect = Exception("no db")
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        cmd_purge(args)
+    out = capsys.readouterr().out
+    assert "No palace found" in out
