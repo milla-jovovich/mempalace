@@ -2030,10 +2030,17 @@ def tool_declare_intent(
             "success": False,
             "error": (
                 f"Intent type '{intent_id}' not declared in this session. "
-                f"Call kg_declare_entity(name='{intent_type}', description='...', kind='entity') "
-                f"and then kg_add(subject='{intent_type}', predicate='is_a', object='<parent_intent_type>') "
-                f"to make it an intent type. Built-in types (inspect, modify, execute, communicate) "
-                f"are auto-declared at wake-up."
+                f"Specific intent types are preferred over broad ones — they carry domain-specific "
+                f"rules (must, requires, has_gotcha) that broad types don't. "
+                f"Create it now:\n"
+                f"  1. kg_declare_entity(name='{intent_type}', "
+                f"description='<what this action does, when to use it>', kind='entity', importance=4)\n"
+                f"  2. kg_add(subject='{intent_type}', predicate='is_a', "
+                f"object='<parent>') — where parent is the broad type it inherits from "
+                f"(inspect, modify, execute, or communicate)\n"
+                f"  3. Then retry declare_intent with this type.\n"
+                f"This is a one-time cost — once created, the type persists across sessions "
+                f"and accumulates rules that will be surfaced on every future use."
             ),
         }
 
@@ -2041,10 +2048,13 @@ def tool_declare_intent(
         return {
             "success": False,
             "error": (
-                f"'{intent_id}' is not an intent type (no is-a intent_type edge). "
-                f"Add: kg_add(subject='{intent_id}', predicate='is_a', object='modify') "
-                f"(or inspect/execute/communicate). Intent types must be classified "
-                f"in the intent_type hierarchy."
+                f"'{intent_id}' exists but is not an intent type (missing is_a edge to the hierarchy). "
+                f"Link it to the parent it inherits from:\n"
+                f"  kg_add(subject='{intent_id}', predicate='is_a', object='<parent>')\n"
+                f"Where parent is the broad type it specializes "
+                f"(inspect, modify, execute, or communicate). "
+                f"The type will then inherit its parent's permissions and slots, "
+                f"and you can attach domain-specific rules to it."
             ),
         }
 
