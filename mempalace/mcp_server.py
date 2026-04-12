@@ -868,6 +868,8 @@ def handle_request(request):
         }
     elif method == "notifications/initialized":
         return None
+    elif method == "ping":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
     elif method == "tools/list":
         return {
             "jsonrpc": "2.0",
