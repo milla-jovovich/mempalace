@@ -59,7 +59,7 @@ All fork changes submitted as separate focused PRs targeting `develop`. First PR
 
 | PR | Status | Description |
 |----|--------|-------------|
-| #626 | open | Standalone bug fixes |
+| #626 | **closed** | Standalone bug fixes (split into #681-684) |
 | #629 | open | Batch writes, concurrent mining |
 | #632 | open | Repair, purge, --version |
 | #633 | **closed** | Hook capture (superseded, resubmitted as #673) |
@@ -69,8 +69,12 @@ All fork changes submitted as separate focused PRs targeting `develop`. First PR
 | #661 | open | Graph cache with write-invalidation |
 | #662 | open | Hybrid search fallback |
 | #663 | open | Stale HNSW mtime detection |
-| #664 | open | BLOB seq_id migration repair |
+| #664 | **merged** | BLOB seq_id migration repair |
 | #673 | open | Deterministic hook saves (replaces #633) |
+| #681 | open | Unicode checkmark → ASCII (#535) |
+| #682 | open | --yes flag for init (#534) |
+| #683 | open | Unicode sanitize_name (#637) |
+| #684 | open | VAR_KEYWORD kwargs check (#572) |
 
 ## Two-Layer Memory Architecture
 
