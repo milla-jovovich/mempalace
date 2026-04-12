@@ -174,6 +174,11 @@ class MempalaceConfig:
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
     @property
+    def backend(self):
+        """Storage backend to use (chroma or qdrant)."""
+        return self._file_config.get("backend", "chroma")
+
+    @property
     def hook_silent_save(self):
         """Whether the stop hook saves directly (True) or blocks for MCP calls (False)."""
         return self._file_config.get("hooks", {}).get("silent_save", True)

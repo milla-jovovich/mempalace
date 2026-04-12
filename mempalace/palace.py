@@ -7,6 +7,7 @@ Consolidates collection access patterns used by both miners and the MCP server.
 import os
 
 from .backends.chroma import ChromaBackend
+from .config import MempalaceConfig
 
 SKIP_DIRS = {
     ".git",
@@ -34,7 +35,26 @@ SKIP_DIRS = {
     "target",
 }
 
-_DEFAULT_BACKEND = ChromaBackend()
+
+def _get_backend():
+    """Get the configured backend (lazy initialization)."""
+    config = MempalaceConfig()
+    backend_name = config.backend
+
+    if backend_name == "qdrant":
+        try:
+            from .backends.qdrant import QdrantBackend
+
+            return QdrantBackend()
+        except ImportError as e:
+            raise ImportError(
+                "Qdrant backend requires qdrant-client and sentence-transformers. "
+                "Install with: pip install mempalace[qdrant]"
+            ) from e
+    elif backend_name == "chroma":
+        return ChromaBackend()
+    else:
+        raise ValueError(f"Unknown backend: {backend_name}. Use 'chroma' or 'qdrant'.")
 
 
 def get_collection(
@@ -43,7 +63,8 @@ def get_collection(
     create: bool = True,
 ):
     """Get the palace collection through the backend layer."""
-    return _DEFAULT_BACKEND.get_collection(
+    backend = _get_backend()
+    return backend.get_collection(
         palace_path,
         collection_name=collection_name,
         create=create,

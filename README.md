@@ -120,6 +120,35 @@ Three mining modes: **projects** (code and docs), **convos** (conversation expor
 
 ---
 
+## Alternative Backend: Qdrant
+
+By default, MemPalace uses ChromaDB for vector storage. For palaces larger than 100K drawers, you can optionally use Qdrant as an alternative backend. Qdrant uses approximately 4x less storage and scales better for large memory collections.
+
+**Why Qdrant?**
+- **Scales beyond 100K drawers** — tested with 168K+ drawers in production
+- **4x less storage** — ~850MB vs 3.5GB for equivalent collections
+- **Same API** — drop-in replacement, no code changes needed
+
+**Installation:**
+```bash
+pip install mempalace[qdrant]
+```
+
+**Enable Qdrant backend:**
+
+Add `"backend": "qdrant"` to your `~/.mempalace/config.json`:
+
+```json
+{
+  "palace_path": "~/.mempalace/palace_qdrant",
+  "backend": "qdrant"
+}
+```
+
+**Migration note:** Existing ChromaDB palaces need to be re-mined. The two backends use different storage formats and cannot share the same palace directory. Point Qdrant to a new path and re-run your miners.
+
+---
+
 ## How You Actually Use It
 
 After the one-time setup (install → init → mine), you don't run MemPalace commands manually. Your AI uses it for you. There are two ways, depending on which AI you use.
