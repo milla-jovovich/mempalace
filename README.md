@@ -142,7 +142,7 @@ Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-Now your AI has 19 tools available through MCP. Ask it anything:
+Now your AI has 24 tools available through MCP. Ask it anything:
 
 > *"What did we decide about auth last month?"*
 
@@ -470,7 +470,7 @@ claude plugin install --scope user mempalace
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-### 19 Tools
+### 24 Tools
 
 **Palace (read)**
 
@@ -490,6 +490,9 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 |------|------|
 | `mempalace_add_drawer` | File verbatim content |
 | `mempalace_delete_drawer` | Remove by ID |
+| `mempalace_get_drawer` | Fetch a drawer by ID |
+| `mempalace_list_drawers` | List drawers with pagination and filters |
+| `mempalace_update_drawer` | Update drawer content or metadata |
 
 **Knowledge Graph**
 
@@ -515,6 +518,13 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 |------|------|
 | `mempalace_diary_write` | Write AAAK diary entry |
 | `mempalace_diary_read` | Read recent diary entries |
+
+**Settings**
+
+| Tool | What |
+|------|------|
+| `mempalace_hook_settings` | Get or set hook behavior (silent save, desktop toast) |
+| `mempalace_memories_filed_away` | Check if a recent checkpoint was saved |
 
 The AI learns AAAK and the memory protocol automatically from the `mempalace_status` response. No manual configuration.
 
@@ -645,7 +655,7 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `cli.py` | CLI entry point |
 | `config.py` | Configuration loading and defaults |
 | `normalize.py` | Converts 5 chat formats to standard transcript |
-| `mcp_server.py` | MCP server — 19 tools, AAAK auto-teach, memory protocol |
+| `mcp_server.py` | MCP server — 24 tools, AAAK auto-teach, memory protocol |
 | `miner.py` | Project file ingest |
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |
 | `searcher.py` | Semantic search via ChromaDB |
@@ -669,7 +679,7 @@ mempalace/
 ├── README.md                  ← you are here
 ├── mempalace/                 ← core package (README)
 │   ├── cli.py                 ← CLI entry point
-│   ├── mcp_server.py          ← MCP server (19 tools)
+│   ├── mcp_server.py          ← MCP server (24 tools)
 │   ├── knowledge_graph.py     ← temporal entity graph
 │   ├── palace_graph.py        ← room navigation graph
 │   ├── dialect.py             ← AAAK compression
