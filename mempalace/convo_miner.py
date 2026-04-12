@@ -28,7 +28,10 @@ CONVO_EXTENSIONS = {
 }
 
 MIN_CHUNK_SIZE = 30
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+# Default cap for individual conversation files. claude.ai privacy exports of
+# ~100+ conversations routinely produce 20–50 MB JSON files, so the default is
+# generous enough to ingest a typical export without manual splitting.
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB — skip files larger than this
 
 
 # =============================================================================
@@ -202,7 +205,11 @@ def detect_convo_room(content: str) -> str:
 
 
 def scan_convos(convo_dir: str) -> list:
-    """Find all potential conversation files."""
+    """Find all potential conversation files.
+
+    Files larger than ``MAX_FILE_SIZE`` are skipped with a warning so users
+    can spot the limit instead of getting silently zero drawers.
+    """
     convo_path = Path(convo_dir).expanduser().resolve()
     files = []
     for root, dirs, filenames in os.walk(convo_path):
@@ -216,9 +223,17 @@ def scan_convos(convo_dir: str) -> list:
                 if filepath.is_symlink():
                     continue
                 try:
-                    if filepath.stat().st_size > MAX_FILE_SIZE:
-                        continue
+                    file_size = filepath.stat().st_size
                 except OSError:
+                    continue
+                if file_size > MAX_FILE_SIZE:
+                    size_mb = file_size / (1024 * 1024)
+                    limit_mb = MAX_FILE_SIZE / (1024 * 1024)
+                    print(
+                        f"  ⚠ Skipping large file ({size_mb:.1f} MB > "
+                        f"{limit_mb:.0f} MB limit): {filepath}",
+                        file=sys.stderr,
+                    )
                     continue
                 files.append(filepath)
     return files

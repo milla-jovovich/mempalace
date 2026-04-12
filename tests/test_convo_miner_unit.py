@@ -1,5 +1,8 @@
 """Unit tests for convo_miner pure functions (no chromadb needed)."""
 
+from unittest.mock import patch
+
+from mempalace import convo_miner
 from mempalace.convo_miner import (
     chunk_exchanges,
     detect_convo_room,
@@ -100,3 +103,18 @@ class TestScanConvos:
     def test_scan_empty_dir(self, tmp_path):
         files = scan_convos(str(tmp_path))
         assert files == []
+
+    def test_scan_default_limit_accepts_typical_claude_ai_export(self, tmp_path):
+        """Default limit must accommodate ~38 MB claude.ai privacy exports."""
+        assert convo_miner.MAX_FILE_SIZE >= 50 * 1024 * 1024
+
+    def test_scan_warns_on_oversized_file(self, tmp_path, capsys):
+        """Skipped large files emit a visible warning."""
+        big = tmp_path / "conversations.json"
+        big.write_text("{}", encoding="utf-8")
+        with patch.object(convo_miner, "MAX_FILE_SIZE", 1):
+            files = scan_convos(str(tmp_path))
+        assert files == []
+        captured = capsys.readouterr()
+        assert "Skipping large file" in captured.err
+        assert "conversations.json" in captured.err

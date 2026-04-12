@@ -184,7 +184,12 @@ def _try_codex_jsonl(content: str) -> Optional[str]:
 
 
 def _try_claude_ai_json(data) -> Optional[str]:
-    """Claude.ai JSON export: flat messages list or privacy export with chat_messages."""
+    """Claude.ai JSON export: flat messages list or privacy export with chat_messages.
+
+    The claude.ai privacy export uses ``sender`` rather than ``role`` to identify
+    message authors and stores the rendered message in a top-level ``text`` field
+    in addition to the structured ``content`` blocks. Both are supported here.
+    """
     if isinstance(data, dict):
         data = data.get("messages", data.get("chat_messages", []))
     if not isinstance(data, list):
@@ -198,14 +203,9 @@ def _try_claude_ai_json(data) -> Optional[str]:
                 continue
             chat_msgs = convo.get("chat_messages", [])
             for item in chat_msgs:
-                if not isinstance(item, dict):
-                    continue
-                role = item.get("role", "")
-                text = _extract_content(item.get("content", ""))
-                if role in ("user", "human") and text:
-                    all_messages.append(("user", text))
-                elif role in ("assistant", "ai") and text:
-                    all_messages.append(("assistant", text))
+                msg = _extract_claude_ai_message(item)
+                if msg:
+                    all_messages.append(msg)
         if len(all_messages) >= 2:
             return _messages_to_transcript(all_messages)
         return None
@@ -213,16 +213,34 @@ def _try_claude_ai_json(data) -> Optional[str]:
     # Flat messages list
     messages = []
     for item in data:
-        if not isinstance(item, dict):
-            continue
-        role = item.get("role", "")
-        text = _extract_content(item.get("content", ""))
-        if role in ("user", "human") and text:
-            messages.append(("user", text))
-        elif role in ("assistant", "ai") and text:
-            messages.append(("assistant", text))
+        msg = _extract_claude_ai_message(item)
+        if msg:
+            messages.append(msg)
     if len(messages) >= 2:
         return _messages_to_transcript(messages)
+    return None
+
+
+def _extract_claude_ai_message(item) -> Optional[tuple]:
+    """Pull (role, text) from a single claude.ai message dict.
+
+    Accepts ``role`` or ``sender`` as the author field, and falls back to the
+    top-level ``text`` field when ``content`` blocks yield nothing.
+    """
+    if not isinstance(item, dict):
+        return None
+    role = item.get("role") or item.get("sender") or ""
+    text = _extract_content(item.get("content", ""))
+    if not text:
+        fallback = item.get("text", "")
+        if isinstance(fallback, str):
+            text = fallback.strip()
+    if not text:
+        return None
+    if role in ("user", "human"):
+        return ("user", text)
+    if role in ("assistant", "ai"):
+        return ("assistant", text)
     return None
 
 
