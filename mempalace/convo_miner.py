@@ -70,7 +70,7 @@ def _chunk_by_exchange(lines: list) -> list:
                     ai_lines.append(next_line.strip())
                 i += 1
 
-            ai_response = " ".join(ai_lines[:8])
+            ai_response = " ".join(ai_lines)
             content = f"{user_turn}\n{ai_response}" if ai_response else user_turn
 
             if len(content.strip()) > MIN_CHUNK_SIZE:
