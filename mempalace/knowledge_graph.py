@@ -131,9 +131,24 @@ class KnowledgeGraph:
         confidence: float = 1.0,
         source_closet: str = None,
         source_file: str = None,
+        auto_invalidate: bool = False,
     ):
         """
         Add a relationship triple: subject → predicate → object.
+
+        Checks for contradictions: if an open triple exists with the same
+        subject and predicate but a *different* object, a contradiction
+        warning is included in the return value.
+
+        Args:
+            auto_invalidate: If True, automatically close (set valid_to)
+                conflicting triples when a contradiction is detected.
+
+        Returns:
+            A dict with keys:
+                - "triple_id": the ID of the inserted (or existing) triple
+                - "contradiction": None, or a dict with "existing_object",
+                  "new_object", "predicate", "subject", and "invalidated" flag
 
         Examples:
             add_triple("Max", "child_of", "Alice", valid_from="2015-04-01")
@@ -143,6 +158,8 @@ class KnowledgeGraph:
         sub_id = self._entity_id(subject)
         obj_id = self._entity_id(obj)
         pred = predicate.lower().replace(" ", "_")
+
+        contradiction = None
 
         # Auto-create entities if they don't exist
         with self._lock:
@@ -162,7 +179,38 @@ class KnowledgeGraph:
                 ).fetchone()
 
                 if existing:
-                    return existing["id"]  # Already exists and still valid
+                    return {"triple_id": existing["id"], "contradiction": None}
+
+                # Contradiction detection: check for open triples with the
+                # same subject+predicate but a different object.
+                conflicting = conn.execute(
+                    "SELECT id, object FROM triples WHERE subject=? AND predicate=? AND object!=? AND valid_to IS NULL",
+                    (sub_id, pred, obj_id),
+                ).fetchall()
+
+                if conflicting:
+                    # Resolve the existing object name for the warning
+                    first = conflicting[0]
+                    existing_name_row = conn.execute(
+                        "SELECT name FROM entities WHERE id=?", (first["object"],)
+                    ).fetchone()
+                    existing_name = existing_name_row["name"] if existing_name_row else first["object"]
+
+                    contradiction = {
+                        "subject": subject,
+                        "predicate": pred,
+                        "existing_object": existing_name,
+                        "new_object": obj,
+                        "invalidated": auto_invalidate,
+                    }
+
+                    if auto_invalidate:
+                        ended = valid_from or date.today().isoformat()
+                        for row in conflicting:
+                            conn.execute(
+                                "UPDATE triples SET valid_to=? WHERE id=?",
+                                (ended, row["id"]),
+                            )
 
                 triple_id = f"t_{sub_id}_{pred}_{obj_id}_{hashlib.sha256(f'{valid_from}{datetime.now().isoformat()}'.encode()).hexdigest()[:12]}"
 
@@ -181,7 +229,7 @@ class KnowledgeGraph:
                         source_file,
                     ),
                 )
-        return triple_id
+        return {"triple_id": triple_id, "contradiction": contradiction}
 
     def invalidate(self, subject: str, predicate: str, obj: str, ended: str = None):
         """Mark a relationship as no longer valid (set valid_to date)."""

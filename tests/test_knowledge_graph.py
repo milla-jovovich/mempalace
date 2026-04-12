@@ -25,25 +25,47 @@ class TestEntityOperations:
 
 class TestTripleOperations:
     def test_add_triple_creates_entities(self, kg):
-        tid = kg.add_triple("Alice", "knows", "Bob")
-        assert tid.startswith("t_alice_knows_bob_")
+        result = kg.add_triple("Alice", "knows", "Bob")
+        assert result["triple_id"].startswith("t_alice_knows_bob_")
+        assert result["contradiction"] is None
         stats = kg.stats()
         assert stats["entities"] == 2  # auto-created
 
     def test_add_triple_with_dates(self, kg):
-        tid = kg.add_triple("Max", "does", "swimming", valid_from="2025-01-01")
-        assert tid.startswith("t_max_does_swimming_")
+        result = kg.add_triple("Max", "does", "swimming", valid_from="2025-01-01")
+        assert result["triple_id"].startswith("t_max_does_swimming_")
 
     def test_duplicate_triple_returns_existing_id(self, kg):
-        tid1 = kg.add_triple("Alice", "knows", "Bob")
-        tid2 = kg.add_triple("Alice", "knows", "Bob")
-        assert tid1 == tid2
+        result1 = kg.add_triple("Alice", "knows", "Bob")
+        result2 = kg.add_triple("Alice", "knows", "Bob")
+        assert result1["triple_id"] == result2["triple_id"]
 
     def test_invalidated_triple_allows_re_add(self, kg):
-        tid1 = kg.add_triple("Alice", "works_at", "Acme")
+        result1 = kg.add_triple("Alice", "works_at", "Acme")
         kg.invalidate("Alice", "works_at", "Acme", ended="2025-01-01")
-        tid2 = kg.add_triple("Alice", "works_at", "Acme")
-        assert tid1 != tid2  # new triple since old one was closed
+        result2 = kg.add_triple("Alice", "works_at", "Acme")
+        assert result1["triple_id"] != result2["triple_id"]  # new triple since old one was closed
+
+    def test_contradiction_detection(self, kg):
+        kg.add_triple("Alice", "married_to", "Bob")
+        result = kg.add_triple("Alice", "married_to", "Charlie")
+        assert result["contradiction"] is not None
+        assert result["contradiction"]["existing_object"] == "Bob"
+        assert result["contradiction"]["new_object"] == "Charlie"
+        assert result["contradiction"]["invalidated"] is False
+
+    def test_contradiction_auto_invalidate(self, kg):
+        kg.add_triple("Alice", "works_at", "Acme")
+        result = kg.add_triple(
+            "Alice", "works_at", "NewCo", valid_from="2025-01-01", auto_invalidate=True
+        )
+        assert result["contradiction"] is not None
+        assert result["contradiction"]["invalidated"] is True
+        # Old triple should now be closed
+        facts = kg.query_entity("Alice", direction="outgoing")
+        current_employers = [f["object"] for f in facts if f["predicate"] == "works_at" and f["current"]]
+        assert "NewCo" in current_employers
+        assert "Acme" not in current_employers
 
 
 class TestQueries:

@@ -18,14 +18,24 @@ class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
 
 
-def build_where_filter(wing: str = None, room: str = None) -> dict:
-    """Build ChromaDB where filter for wing/room filtering."""
-    if wing and room:
-        return {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        return {"wing": wing}
-    elif room:
-        return {"room": room}
+def build_where_filter(wing: str = None, room: str = None, hall: str = None) -> dict:
+    """Build ChromaDB where filter for wing/room/hall metadata filtering.
+
+    Filters are standard ChromaDB metadata queries — they narrow results
+    to drawers tagged with the given wing, room, and/or hall values.
+    """
+    conditions = []
+    if wing:
+        conditions.append({"wing": wing})
+    if room:
+        conditions.append({"room": room})
+    if hall:
+        conditions.append({"hall": hall})
+
+    if len(conditions) > 1:
+        return {"$and": conditions}
+    elif len(conditions) == 1:
+        return conditions[0]
     return {}
 
 

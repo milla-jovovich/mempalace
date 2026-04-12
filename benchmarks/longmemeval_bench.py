@@ -17,9 +17,19 @@ Outputs:
 - JSONL log compatible with LongMemEval's evaluation scripts
 
 Modes:
-    raw     — baseline: raw text into ChromaDB (default)
-    aaak    — AAAK dialect compression before ingestion
-    rooms   — topic-based room detection + room-filtered search
+    raw     — baseline: raw verbatim text into ChromaDB with default
+              embeddings. No palace structure used. This is the mode that
+              produces the 96.6% R@5 headline score.
+    aaak    — AAAK lossy dialect summarization before ingestion. Currently
+              regresses vs raw mode (84.2% R@5). Experimental.
+    rooms   — topic-based room detection + room-filtered search via
+              ChromaDB metadata filtering. The "+34% retrieval boost"
+              compared to unfiltered search comes from this standard
+              ChromaDB metadata filtering mechanism.
+
+Note: The "100% with Haiku rerank" result uses a separate reranking
+pipeline (Anthropic Haiku API calls) that is not included in this public
+benchmark script. We are working on adding it.
 
 Usage:
     python benchmarks/longmemeval_bench.py data/longmemeval_s_cleaned.json

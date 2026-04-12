@@ -61,7 +61,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 >
 > - **"+34% palace boost" was misleading.** That number compares unfiltered search to wing+room metadata filtering. Metadata filtering is a standard ChromaDB feature, not a novel retrieval mechanism. Real and useful, but not a moat.
 >
-> - **"Contradiction detection"** exists as a separate utility (`fact_checker.py`) but is not currently wired into the knowledge graph operations as the README implied.
+> - **"Contradiction detection"** is now integrated directly into `knowledge_graph.py` — `add_triple()` detects conflicting predicates and returns contradiction warnings.
 >
 > - **"100% with Haiku rerank"** is real (we have the result files) but the rerank pipeline is not in the public benchmark scripts. We're adding it.
 >
@@ -75,7 +75,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 >
 > 1. Rewriting the AAAK example with real tokenizer counts and a scenario where AAAK actually demonstrates compression
 > 2. Adding `mode raw / aaak / rooms` clearly to the benchmark documentation so the trade-offs are visible
-> 3. Wiring `fact_checker.py` into the KG ops so the contradiction detection claim becomes true
+> 3. ~~Wiring `fact_checker.py` into the KG ops so the contradiction detection claim becomes true~~ **Done** — contradiction detection is now built into `add_triple()`
 > 4. Pinning ChromaDB to a tested range (Issue #100), fixing the shell injection in hooks (#110), and addressing the macOS ARM64 segfault (#74)
 >
 > **Thank you to everyone who poked holes in this.** Brutal honest criticism is exactly what makes open source work, and it's what we asked for. Special thanks to [@panuhorsmalahti](https://github.com/milla-jovovich/mempalace/issues/43), [@lhl](https://github.com/milla-jovovich/mempalace/issues/27), [@gizmax](https://github.com/milla-jovovich/mempalace/issues/39), and everyone who filed an issue or a PR in the first 48 hours. We're listening, we're fixing, and we'd rather be right than impressive.
@@ -249,9 +249,9 @@ You say what you're looking for and boom, it already knows which wing to go to. 
 
 **Wings** — a person or project. As many as you need.
 **Rooms** — specific topics within a wing. Auth, billing, deploy — endless rooms.
-**Halls** — connections between related rooms *within* the same wing. If Room A (auth) and Room B (security) are related, a hall links them.
+**Halls** — organizational metadata tags for memory types within a wing (e.g. `hall_facts`, `hall_events`). Halls can be used as ChromaDB metadata filters in search queries to narrow results by memory type.
 **Tunnels** — connections *between* wings. When Person A and a Project both have a room about "auth," a tunnel cross-references them automatically.
-**Closets** — summaries that point to the original content. (In v3.0.0 these are plain-text summaries; AAAK-encoded closets are coming in a future update — see [Task #30](https://github.com/milla-jovovich/mempalace/issues/30).)
+**Closets** — a planned summary layer that will point to the original content. In v3.x, closets exist as `source_closet` metadata fields in the knowledge graph schema but are not a separate storage tier — drawers hold all content directly. AAAK-encoded closets are a future goal (see [Task #30](https://github.com/milla-jovovich/mempalace/issues/30)).
 **Drawers** — the original verbatim files. The exact words, never summarized.
 
 **Halls** are memory types — the same in every wing, acting as corridors:
@@ -282,7 +282,7 @@ Search wing + hall:          84.8%  (+24%)
 Search wing + room:          94.8%  (+34%)
 ```
 
-Wings and rooms aren't cosmetic. They're a **34% retrieval improvement**. The palace structure is the product.
+Wings and rooms aren't cosmetic. Metadata filtering via ChromaDB narrows the search space and improves retrieval by **+34% R@10** compared to unfiltered search.
 
 ### The Memory Stack
 
@@ -309,22 +309,28 @@ AAAK is a lossy abbreviation system — entity codes, structural markers, and se
 
 We're iterating on the dialect spec, adding a real tokenizer for stats, and exploring better break points for when to use it. Track progress in [Issue #43](https://github.com/milla-jovovich/mempalace/issues/43) and [#27](https://github.com/milla-jovovich/mempalace/issues/27).
 
-### Contradiction Detection (experimental, not yet wired into KG)
+### Contradiction Detection
 
-A separate utility (`fact_checker.py`) can check assertions against entity facts. It's not currently called automatically by the knowledge graph operations — this is being fixed (track in [Issue #27](https://github.com/milla-jovovich/mempalace/issues/27)). When enabled it catches things like:
+The knowledge graph's `add_triple()` method detects contradictions automatically: when inserting a new triple, it checks for existing open triples with the same subject and predicate but a different object. Contradictions are returned as warnings in the result dict. Use `auto_invalidate=True` to automatically close the old conflicting triple. Example:
 
+```python
+kg = KnowledgeGraph()
+kg.add_triple("Maya", "assigned_to", "auth-migration")
+
+# Later, a conflicting fact is added:
+result = kg.add_triple("Soren", "assigned_to", "auth-migration")
+# result["contradiction"] is None (different subject — no conflict)
+
+kg.add_triple("Kai", "works_at", "Acme")
+result = kg.add_triple("Kai", "works_at", "NewCo", auto_invalidate=True)
+# result["contradiction"] == {
+#   "subject": "Kai", "predicate": "works_at",
+#   "existing_object": "Acme", "new_object": "NewCo",
+#   "invalidated": True
+# }
 ```
-Input:  "Soren finished the auth migration"
-Output: 🔴 AUTH-MIGRATION: attribution conflict — Maya was assigned, not Soren
 
-Input:  "Kai has been here 2 years"
-Output: 🟡 KAI: wrong_tenure — records show 3 years (started 2023-04)
-
-Input:  "The sprint ends Friday"
-Output: 🟡 SPRINT: stale_date — current sprint ends Thursday (updated 2 days ago)
-```
-
-Facts checked against the knowledge graph. Ages, dates, and tenures calculated dynamically — not hardcoded.
+Contradictions are detected at the triple level (same subject + predicate, different object). The `auto_invalidate` flag controls whether the old triple is automatically closed.
 
 ---
 
@@ -551,7 +557,7 @@ Tested on standard academic benchmarks — reproducible, published datasets.
 | **LongMemEval R@5** | Hybrid + Haiku rerank | **100%** (500/500) | ~500 |
 | **LoCoMo R@10** | Raw, session level | **60.3%** | Zero |
 | **Personal palace R@10** | Heuristic bench | **85%** | Zero |
-| **Palace structure impact** | Wing+room filtering | **+34%** R@10 | Zero |
+| **Metadata filtering** | Wing+room ChromaDB filters | **+34%** R@10 | Zero |
 
 The 96.6% raw score is the highest published LongMemEval result requiring no API key, no cloud, and no LLM at any stage.
 
@@ -650,7 +656,7 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |
 | `searcher.py` | Semantic search via ChromaDB |
 | `layers.py` | 4-layer memory stack |
-| `dialect.py` | AAAK compression — 30x lossless |
+| `dialect.py` | AAAK dialect — lossy abbreviation/summarization |
 | `knowledge_graph.py` | Temporal entity-relationship graph (SQLite) |
 | `palace_graph.py` | Room-based navigation graph |
 | `onboarding.py` | Guided setup — generates AAAK bootstrap + wing config |

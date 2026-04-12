@@ -1,33 +1,55 @@
 # Contradiction Detection
 
-::: warning Experimental
-Contradiction detection is a planned capability, not a shipped end-to-end feature in the current MCP workflow. The examples below show the intended behavior rather than a fully integrated command path.
+::: info Integrated
+Contradiction detection is built into `knowledge_graph.py`'s `add_triple()` method. Every triple insertion checks for conflicting open triples automatically.
 :::
 
 ## What It Does
 
-Checks assertions against entity facts in the knowledge graph. When enabled, it catches contradictions like:
+When a new triple is added, `add_triple()` checks for existing open triples with the same subject and predicate but a different object. If a conflict is found, a contradiction warning is returned alongside the new triple ID.
 
+```python
+from mempalace.knowledge_graph import KnowledgeGraph
+
+kg = KnowledgeGraph()
+kg.add_triple("Kai", "works_at", "Acme")
+
+# Later, a conflicting fact:
+result = kg.add_triple("Kai", "works_at", "NewCo")
+# result == {
+#   "triple_id": "t_kai_works_at_newco_...",
+#   "contradiction": {
+#     "subject": "Kai",
+#     "predicate": "works_at",
+#     "existing_object": "Acme",
+#     "new_object": "NewCo",
+#     "invalidated": False
+#   }
+# }
 ```
-Input:  "Soren finished the auth migration"
-Output: 🔴 AUTH-MIGRATION: attribution conflict — Maya was assigned, not Soren
 
-Input:  "Kai has been here 2 years"
-Output: 🟡 KAI: wrong_tenure — records show 3 years (started 2023-04)
+## Auto-Invalidation
 
-Input:  "The sprint ends Friday"
-Output: 🟡 SPRINT: stale_date — current sprint ends Thursday (updated 2 days ago)
+Pass `auto_invalidate=True` to automatically close the old conflicting triple when a contradiction is detected:
+
+```python
+result = kg.add_triple("Kai", "works_at", "NewCo", auto_invalidate=True)
+# The old "Kai works_at Acme" triple is now closed (valid_to set)
+# result["contradiction"]["invalidated"] == True
 ```
 
 ## How It Works
 
-Facts are checked against the knowledge graph:
-- **Attribution conflicts** — the wrong person credited for a task
-- **Temporal errors** — wrong dates, tenures, or durations
-- **Stale information** — facts that have been superseded
+- **Same subject + predicate, different object** triggers a contradiction warning
+- **Exact duplicate triples** (same subject, predicate, and object) are deduplicated — no warning
+- **Different subjects** with the same predicate are independent — no conflict
+- The check only considers open triples (where `valid_to IS NULL`)
 
-Ages, dates, and tenures are calculated dynamically from the entity's recorded facts — not hardcoded.
+## Scope
 
-## Status
+Contradiction detection operates at the triple level. It catches cases like:
+- Two different employers for the same person (`works_at`)
+- Two different assignees for the same role (`assigned_to`)
+- Conflicting status values (`status_is`)
 
-The current codebase includes the temporal knowledge graph primitives needed for this direction, but not a complete contradiction-checking tool exposed through the CLI or MCP server.
+It does not perform semantic reasoning (e.g., inferring that "married_to Bob" and "single" are contradictory across different predicates).

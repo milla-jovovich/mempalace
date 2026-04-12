@@ -706,10 +706,13 @@ def tool_kg_add(
             "source_closet": source_closet,
         },
     )
-    triple_id = _kg.add_triple(
+    result = _kg.add_triple(
         subject, predicate, object, valid_from=valid_from, source_closet=source_closet
     )
-    return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {object}"}
+    response = {"success": True, "triple_id": result["triple_id"], "fact": f"{subject} → {predicate} → {object}"}
+    if result["contradiction"]:
+        response["contradiction"] = result["contradiction"]
+    return response
 
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
