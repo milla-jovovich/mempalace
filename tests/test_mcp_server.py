@@ -9,6 +9,9 @@ via monkeypatch to avoid touching real data.
 import json
 
 
+LARGE_COLLECTION_SIZE = 10_050
+
+
 def _patch_mcp_server(monkeypatch, config, kg):
     """Patch the mcp_server module globals to use test fixtures."""
     from mempalace import mcp_server
@@ -29,6 +32,30 @@ def _get_collection(palace_path, create=False):
     if create:
         return client, client.get_or_create_collection("mempalace_drawers")
     return client, client.get_collection("mempalace_drawers")
+
+
+def _seed_large_collection(collection, total=LARGE_COLLECTION_SIZE):
+    ids = [f"drawer_large_{i:05d}" for i in range(total)]
+    documents = [f"Large drawer {i} mentions café number {i}." for i in range(total)]
+    metadatas = [
+        {
+            "wing": f"wing_{i % 3}",
+            "room": f"room_{i % 5}",
+            "source_file": f"source_{i}.md",
+            "chunk_index": 0,
+            "added_by": "miner",
+            "filed_at": f"2026-02-{(i % 28) + 1:02d}T00:00:00",
+        }
+        for i in range(total)
+    ]
+    batch_size = 1000
+    for offset in range(0, total, batch_size):
+        end = offset + batch_size
+        collection.add(
+            ids=ids[offset:end],
+            documents=documents[offset:end],
+            metadatas=metadatas[offset:end],
+        )
 
 
 # ── Protocol Layer ──────────────────────────────────────────────────────
@@ -98,6 +125,14 @@ class TestHandleRequest:
         resp = handle_request({"method": "ping", "id": 11, "params": {}})
         assert resp["id"] == 11
         assert resp["result"] == {}
+
+    def test_json_dumps_preserves_unicode(self):
+        from mempalace.mcp_server import _json_dumps
+
+        payload = {"message": "café ☕"}
+        rendered = _json_dumps(payload)
+        assert "café ☕" in rendered
+        assert "\\u" not in rendered
 
     def test_tools_list(self):
         from mempalace.mcp_server import handle_request
@@ -200,6 +235,29 @@ class TestHandleRequest:
         content = json.loads(resp["result"]["content"][0]["text"])
         assert "total_drawers" in content
 
+    def test_tools_call_preserves_unicode(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 12,
+                "params": {
+                    "name": "mempalace_get_aaak_spec",
+                    "arguments": {},
+                },
+            }
+        )
+
+        text = resp["result"]["content"][0]["text"]
+        assert "♡" in text
+        assert "→" in text
+        assert "\\u2661" not in text
+        assert "\\u2192" not in text
+
 
 # ── Read Tools ──────────────────────────────────────────────────────────
 
@@ -257,6 +315,29 @@ class TestReadTools:
         assert result["taxonomy"]["project"]["backend"] == 2
         assert result["taxonomy"]["project"]["frontend"] == 1
         assert result["taxonomy"]["notes"]["planning"] == 1
+
+    def test_status_scans_beyond_10k_drawers(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, collection = _get_collection(palace_path, create=True)
+        _seed_large_collection(collection)
+        del _client
+        from mempalace.mcp_server import tool_status
+
+        result = tool_status()
+        assert result["total_drawers"] == LARGE_COLLECTION_SIZE
+        assert sum(result["wings"].values()) == LARGE_COLLECTION_SIZE
+
+    def test_get_taxonomy_scans_beyond_10k_drawers(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, collection = _get_collection(palace_path, create=True)
+        _seed_large_collection(collection)
+        del _client
+        from mempalace.mcp_server import tool_get_taxonomy
+
+        result = tool_get_taxonomy()
+        total = sum(sum(rooms.values()) for rooms in result["taxonomy"].values())
+        assert total == LARGE_COLLECTION_SIZE
+        assert result["taxonomy"]["wing_0"]["room_0"] == 670
 
     def test_no_palace_returns_error(self, monkeypatch, config, kg):
         _patch_mcp_server(monkeypatch, config, kg)
@@ -345,6 +426,23 @@ class TestWriteTools:
         result2 = tool_add_drawer(wing="w", room="r", content=content)
         assert result2["success"] is True
         assert result2["reason"] == "already_exists"
+
+    def test_add_drawer_sets_empty_source_updated_at_for_manual_drawers(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, collection = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer
+
+        result = tool_add_drawer(wing="test_wing", room="manual_room", content="naïve café note")
+        stored = collection.get(ids=[result["drawer_id"]], include=["metadatas"])
+        metadata = stored["metadatas"][0]
+
+        assert metadata["source_type"] == "manual_drawer"
+        assert metadata["hall"] == "hall_manual"
+        assert metadata["memory_type"] == "manual_drawer"
+        assert metadata["source_updated_at"] == ""
 
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
@@ -563,3 +661,34 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+    def test_diary_read_scans_beyond_10k_entries(self, monkeypatch, config, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        class FakeDiaryCollection:
+            def __init__(self, total):
+                self.total = total
+
+            def get(self, where=None, include=None, limit=5000, offset=0):
+                if offset >= self.total:
+                    return {"ids": [], "documents": [], "metadatas": []}
+                end = min(offset + limit, self.total)
+                ids = [f"diary_{i}" for i in range(offset, end)]
+                documents = [f"entry {i}" for i in range(offset, end)]
+                metadatas = [
+                    {
+                        "date": "2026-03-01",
+                        "filed_at": f"2026-03-01T00:00:{i % 60:02d}",
+                        "topic": "load-test",
+                    }
+                    for i in range(offset, end)
+                ]
+                return {"ids": ids, "documents": documents, "metadatas": metadatas}
+
+        monkeypatch.setattr(mcp_server, "_get_collection", lambda create=False: FakeDiaryCollection(10050))
+
+        result = mcp_server.tool_diary_read(agent_name="TestAgent", last_n=3)
+        assert result["total"] == 10050
+        assert result["showing"] == 3
+        assert len(result["entries"]) == 3

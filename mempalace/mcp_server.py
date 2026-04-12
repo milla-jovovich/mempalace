@@ -40,6 +40,11 @@ logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
 
 
+def _json_dumps(payload, **kwargs):
+    """Serialize MCP payloads without ASCII-escaping Unicode content."""
+    return json.dumps(payload, ensure_ascii=False, default=str, **kwargs)
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(description="MemPalace MCP Server")
     parser.add_argument(
@@ -115,7 +120,7 @@ def _wal_log(operation: str, params: dict, result: dict = None):
     try:
         fd = os.open(str(_WAL_FILE), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, default=str) + "\n")
+            f.write(_json_dumps(entry) + "\n")
     except Exception as e:
         logger.error(f"WAL write failed: {e}")
 
@@ -492,6 +497,10 @@ def tool_add_drawer(
                     "chunk_index": 0,
                     "added_by": added_by,
                     "filed_at": datetime.now().isoformat(),
+                    "source_type": "manual_drawer",
+                    "hall": "hall_manual",
+                    "memory_type": "manual_drawer",
+                    "source_updated_at": "",
                 }
             ],
         )
@@ -833,11 +842,26 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         return _no_palace()
 
     try:
-        results = col.get(
-            where={"$and": [{"wing": wing}, {"room": "diary"}]},
-            include=["documents", "metadatas"],
-            limit=10000,
-        )
+        results = {"ids": [], "documents": [], "metadatas": []}
+        batch_size = 5000
+        offset = 0
+
+        while True:
+            batch = col.get(
+                where={"$and": [{"wing": wing}, {"room": "diary"}]},
+                include=["documents", "metadatas"],
+                limit=batch_size,
+                offset=offset,
+            )
+            batch_ids = batch.get("ids", [])
+            if not batch_ids:
+                break
+            results["ids"].extend(batch_ids)
+            results["documents"].extend(batch.get("documents", []))
+            results["metadatas"].extend(batch.get("metadatas", []))
+            offset += len(batch_ids)
+            if len(batch_ids) < batch_size:
+                break
 
         if not results["ids"]:
             return {"agent": agent_name, "entries": [], "message": "No diary entries yet."}
@@ -1388,7 +1412,7 @@ def handle_request(request):
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                "result": {"content": [{"type": "text", "text": _json_dumps(result, indent=2)}]},
             }
         except Exception:
             logger.exception(f"Tool error in {tool_name}")
@@ -1421,7 +1445,7 @@ def main():
             request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
+                sys.stdout.write(_json_dumps(response) + "\n")
                 sys.stdout.flush()
         except KeyboardInterrupt:
             break
