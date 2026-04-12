@@ -25,7 +25,10 @@ def test_plain_text(tmp_path):
 
 
 def test_claude_json(tmp_path):
-    data = [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}]
+    data = [
+        {"role": "user", "content": "Hi"},
+        {"role": "assistant", "content": "Hello"},
+    ]
     f = tmp_path / "claude.json"
     f.write_text(json.dumps(data))
     result = normalize(str(f))
@@ -59,7 +62,10 @@ def test_normalize_already_has_markers(tmp_path):
 
 def test_normalize_json_content_detected_by_brace(tmp_path):
     """A .txt file starting with [ triggers JSON parsing."""
-    data = [{"role": "user", "content": "Hey"}, {"role": "assistant", "content": "Hi there"}]
+    data = [
+        {"role": "user", "content": "Hey"},
+        {"role": "assistant", "content": "Hi there"},
+    ]
     f = tmp_path / "chat.txt"
     f.write_text(json.dumps(data))
     result = normalize(str(f))
@@ -100,6 +106,73 @@ def test_extract_content_none():
 def test_extract_content_mixed_list():
     blocks = ["plain", {"type": "text", "text": "block"}]
     assert _extract_content(blocks) == "plain block"
+
+
+def test_extract_content_tool_result_string():
+    blocks = [
+        {
+            "type": "tool_result",
+            "content": "file contents here",
+            "tool_use_id": "toolu_abc",
+        }
+    ]
+    assert _extract_content(blocks) == "file contents here"
+
+
+def test_extract_content_tool_result_nested_list():
+    blocks = [
+        {
+            "type": "tool_result",
+            "content": [{"type": "text", "text": "nested text"}],
+            "tool_use_id": "toolu_abc",
+        }
+    ]
+    assert _extract_content(blocks) == "nested text"
+
+
+def test_extract_content_tool_result_empty():
+    blocks = [{"type": "tool_result", "tool_use_id": "toolu_abc"}]
+    assert _extract_content(blocks) == ""
+
+
+def test_extract_content_tool_use_with_command():
+    blocks = [
+        {
+            "type": "tool_use",
+            "id": "toolu_abc",
+            "name": "Bash",
+            "input": {"command": "ls -la"},
+        }
+    ]
+    assert _extract_content(blocks) == "[Bash: ls -la]"
+
+
+def test_extract_content_tool_use_no_input():
+    blocks = [{"type": "tool_use", "id": "toolu_abc", "name": "Read", "input": {}}]
+    assert _extract_content(blocks) == "[Read]"
+
+
+def test_extract_content_mixed_text_and_tool_use():
+    blocks = [
+        {"type": "text", "text": "Let me check that."},
+        {
+            "type": "tool_use",
+            "id": "toolu_abc",
+            "name": "Bash",
+            "input": {"command": "git status"},
+        },
+    ]
+    result = _extract_content(blocks)
+    assert "Let me check that." in result
+    assert "[Bash: git status]" in result
+
+
+def test_extract_content_thinking_skipped():
+    blocks = [
+        {"type": "thinking", "thinking": "internal reasoning"},
+        {"type": "text", "text": "visible response"},
+    ]
+    assert _extract_content(blocks) == "visible response"
 
 
 # ── _try_claude_code_jsonl ─────────────────────────────────────────────
@@ -152,14 +225,85 @@ def test_claude_code_jsonl_non_dict_entries():
     assert result is not None
 
 
+def test_claude_code_jsonl_tool_result_content():
+    """User messages with tool_result content are captured."""
+    lines = [
+        json.dumps(
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "content": "def hello(): pass",
+                            "tool_use_id": "toolu_abc",
+                        }
+                    ]
+                },
+            }
+        ),
+        json.dumps(
+            {"type": "assistant", "message": {"content": "That function looks good."}}
+        ),
+    ]
+    result = _try_claude_code_jsonl("\n".join(lines))
+    assert result is not None
+    assert "def hello(): pass" in result
+
+
+def test_claude_code_jsonl_tool_use_in_assistant():
+    """Assistant messages with tool_use blocks are captured."""
+    lines = [
+        json.dumps({"type": "user", "message": {"content": "List files"}}),
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "Let me check."},
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_abc",
+                            "name": "Bash",
+                            "input": {"command": "ls"},
+                        },
+                    ]
+                },
+            }
+        ),
+    ]
+    result = _try_claude_code_jsonl("\n".join(lines))
+    assert result is not None
+    assert "Let me check." in result
+    assert "[Bash: ls]" in result
+
+
+def test_claude_code_jsonl_both_human_and_user_types():
+    """Both 'human' and 'user' type entries produce user turns (regression: #327)."""
+    lines = [
+        json.dumps({"type": "human", "message": {"content": "From human type"}}),
+        json.dumps({"type": "assistant", "message": {"content": "Response 1"}}),
+        json.dumps({"type": "user", "message": {"content": "From user type"}}),
+        json.dumps({"type": "assistant", "message": {"content": "Response 2"}}),
+    ]
+    result = _try_claude_code_jsonl("\n".join(lines))
+    assert result is not None
+    assert "> From human type" in result
+    assert "> From user type" in result
+
+
 # ── _try_codex_jsonl ───────────────────────────────────────────────────
 
 
 def test_codex_jsonl_valid():
     lines = [
         json.dumps({"type": "session_meta", "payload": {}}),
-        json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}),
-        json.dumps({"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}
+        ),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}
+        ),
     ]
     result = _try_codex_jsonl("\n".join(lines))
     assert result is not None
@@ -169,8 +313,12 @@ def test_codex_jsonl_valid():
 def test_codex_jsonl_no_session_meta():
     """Without session_meta, codex parser returns None."""
     lines = [
-        json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}),
-        json.dumps({"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}
+        ),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}
+        ),
     ]
     result = _try_codex_jsonl("\n".join(lines))
     assert result is None
@@ -179,9 +327,18 @@ def test_codex_jsonl_no_session_meta():
 def test_codex_jsonl_skips_non_event_msg():
     lines = [
         json.dumps({"type": "session_meta"}),
-        json.dumps({"type": "response_item", "payload": {"type": "user_message", "message": "X"}}),
-        json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}),
-        json.dumps({"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}),
+        json.dumps(
+            {
+                "type": "response_item",
+                "payload": {"type": "user_message", "message": "X"},
+            }
+        ),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}
+        ),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}
+        ),
     ]
     result = _try_codex_jsonl("\n".join(lines))
     assert result is not None
@@ -191,9 +348,15 @@ def test_codex_jsonl_skips_non_event_msg():
 def test_codex_jsonl_non_string_message():
     lines = [
         json.dumps({"type": "session_meta"}),
-        json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": 123}}),
-        json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}),
-        json.dumps({"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "user_message", "message": 123}}
+        ),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}
+        ),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}
+        ),
     ]
     result = _try_codex_jsonl("\n".join(lines))
     assert result is not None
@@ -202,9 +365,15 @@ def test_codex_jsonl_non_string_message():
 def test_codex_jsonl_empty_text_skipped():
     lines = [
         json.dumps({"type": "session_meta"}),
-        json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "  "}}),
-        json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}),
-        json.dumps({"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "  "}}
+        ),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}
+        ),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}
+        ),
     ]
     result = _try_codex_jsonl("\n".join(lines))
     assert result is not None
@@ -214,8 +383,12 @@ def test_codex_jsonl_payload_not_dict():
     lines = [
         json.dumps({"type": "session_meta"}),
         json.dumps({"type": "event_msg", "payload": "not a dict"}),
-        json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}),
-        json.dumps({"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "user_message", "message": "Q"}}
+        ),
+        json.dumps(
+            {"type": "event_msg", "payload": {"type": "agent_message", "message": "A"}}
+        ),
     ]
     result = _try_codex_jsonl("\n".join(lines))
     assert result is not None
@@ -479,7 +652,9 @@ def test_try_normalize_json_valid_but_unknown_schema():
 
 def test_messages_to_transcript_basic():
     msgs = [("user", "Q"), ("assistant", "A")]
-    with patch("mempalace.normalize.spellcheck_user_text", side_effect=lambda x: x, create=True):
+    with patch(
+        "mempalace.normalize.spellcheck_user_text", side_effect=lambda x: x, create=True
+    ):
         result = _messages_to_transcript(msgs, spellcheck=False)
     assert "> Q" in result
     assert "A" in result

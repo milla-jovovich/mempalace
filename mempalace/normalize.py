@@ -225,7 +225,9 @@ def _try_chatgpt_json(data) -> Optional[str]:
                 role = msg.get("author", {}).get("role", "")
                 content = msg.get("content", {})
                 parts = content.get("parts", []) if isinstance(content, dict) else []
-                text = " ".join(str(p) for p in parts if isinstance(p, str) and p).strip()
+                text = " ".join(
+                    str(p) for p in parts if isinstance(p, str) and p
+                ).strip()
                 if role == "user" and text:
                     messages.append(("user", text))
                 elif role == "assistant" and text:
@@ -279,8 +281,27 @@ def _extract_content(content) -> str:
         for item in content:
             if isinstance(item, str):
                 parts.append(item)
-            elif isinstance(item, dict) and item.get("type") == "text":
-                parts.append(item.get("text", ""))
+            elif isinstance(item, dict):
+                block_type = item.get("type", "")
+                if block_type == "text":
+                    parts.append(item.get("text", ""))
+                elif block_type == "tool_result":
+                    inner = item.get("content", "")
+                    parts.append(_extract_content(inner))
+                elif block_type == "tool_use":
+                    name = item.get("name", "")
+                    inp = item.get("input", {})
+                    brief = ""
+                    if isinstance(inp, dict):
+                        brief = (
+                            inp.get("command", "")
+                            or inp.get("file_path", "")
+                            or inp.get("pattern", "")
+                        )
+                    if name and brief:
+                        parts.append(f"[{name}: {brief}]")
+                    elif name:
+                        parts.append(f"[{name}]")
         return " ".join(parts).strip()
     if isinstance(content, dict):
         return content.get("text", "").strip()
