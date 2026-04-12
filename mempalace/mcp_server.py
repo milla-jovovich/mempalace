@@ -59,7 +59,12 @@ if _args.palace:
     os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
 
 _config = MempalaceConfig()
-_kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
+# Only override KG path when --palace is explicitly provided; otherwise use
+# KnowledgeGraph's default (~/.mempalace/knowledge_graph.sqlite3).
+if _args.palace:
+    _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
+else:
+    _kg = KnowledgeGraph()
 
 
 _client_cache = None
@@ -147,7 +152,7 @@ def _get_client():
         current_inode = 0
         current_mtime = 0.0
 
-    inode_changed = current_inode and current_inode != _palace_db_inode
+    inode_changed = current_inode != _palace_db_inode
     mtime_changed = current_mtime and abs(current_mtime - _palace_db_mtime) > 0.01
 
     if _client_cache is None or inode_changed or mtime_changed:
@@ -203,10 +208,10 @@ def _fetch_all_metadata(col, where=None):
         if where:
             kwargs["where"] = where
         batch = col.get(**kwargs)
-        all_meta.extend(batch["metadatas"])
-        offset += len(batch["metadatas"])
         if not batch["metadatas"]:
             break
+        all_meta.extend(batch["metadatas"])
+        offset += len(batch["metadatas"])
     return all_meta
 
 
@@ -243,16 +248,7 @@ def tool_status():
     count = col.count()
     wings = {}
     rooms = {}
-    try:
-        all_meta = _get_cached_metadata(col)
-        for m in all_meta:
-            w = m.get("wing", "unknown")
-            r = m.get("room", "unknown")
-            wings[w] = wings.get(w, 0) + 1
-            rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
-    return {
+    result = {
         "total_drawers": count,
         "wings": wings,
         "rooms": rooms,
@@ -260,6 +256,18 @@ def tool_status():
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
     }
+    try:
+        all_meta = _get_cached_metadata(col)
+        for m in all_meta:
+            w = m.get("wing", "unknown")
+            r = m.get("room", "unknown")
+            wings[w] = wings.get(w, 0) + 1
+            rooms[r] = rooms.get(r, 0) + 1
+    except Exception as e:
+        logger.exception("tool_status metadata fetch failed")
+        result["error"] = str(e)
+        result["partial"] = True
+    return result
 
 
 # ── AAAK Dialect Spec ─────────────────────────────────────────────────────────
@@ -300,14 +308,17 @@ def tool_list_wings():
     if not col:
         return _no_palace()
     wings = {}
+    result = {"wings": wings}
     try:
         all_meta = _get_cached_metadata(col)
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
-    except Exception:
-        pass
-    return {"wings": wings}
+    except Exception as e:
+        logger.exception("tool_list_wings metadata fetch failed")
+        result["error"] = str(e)
+        result["partial"] = True
+    return result
 
 
 def tool_list_rooms(wing: str = None):
@@ -315,15 +326,18 @@ def tool_list_rooms(wing: str = None):
     if not col:
         return _no_palace()
     rooms = {}
+    result = {"wing": wing or "all", "rooms": rooms}
     try:
         where = {"wing": wing} if wing else None
         all_meta = _fetch_all_metadata(col, where=where)
         for m in all_meta:
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
-    except Exception:
-        pass
-    return {"wing": wing or "all", "rooms": rooms}
+    except Exception as e:
+        logger.exception("tool_list_rooms metadata fetch failed")
+        result["error"] = str(e)
+        result["partial"] = True
+    return result
 
 
 def tool_get_taxonomy():
@@ -331,6 +345,7 @@ def tool_get_taxonomy():
     if not col:
         return _no_palace()
     taxonomy = {}
+    result = {"taxonomy": taxonomy}
     try:
         all_meta = _get_cached_metadata(col)
         for m in all_meta:
@@ -339,9 +354,11 @@ def tool_get_taxonomy():
             if w not in taxonomy:
                 taxonomy[w] = {}
             taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
-    except Exception:
-        pass
-    return {"taxonomy": taxonomy}
+    except Exception as e:
+        logger.exception("tool_get_taxonomy metadata fetch failed")
+        result["error"] = str(e)
+        result["partial"] = True
+    return result
 
 
 def tool_search(
@@ -355,8 +372,9 @@ def tool_search(
     keyword: str = None,
 ):
     limit = max(1, min(limit, _MAX_RESULTS))
-    # Backwards compat: accept old name
-    dist = min_similarity if min_similarity is not None else max_distance
+    # Backwards compat: convert old similarity scale (higher=stricter) to
+    # distance scale (lower=stricter). Similarity 0.8 → distance 0.2.
+    dist = (1.0 - min_similarity) if min_similarity is not None else max_distance
     # Mitigate system prompt contamination (Issue #333)
     sanitized = sanitize_query(query)
     result = search_memories(
