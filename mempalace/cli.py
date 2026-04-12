@@ -144,7 +144,7 @@ def _force_clean(palace_path: str, source_dir: str):
     if to_delete:
         print(f"\n  --force: deleting {len(to_delete)} existing drawers from {source_prefix}...")
         for i in range(0, len(to_delete), 100):
-            col.delete(ids=to_delete[i:i + 100])
+            col.delete(ids=to_delete[i : i + 100])
         print("  Deleted. Re-mining fresh.\n")
 
 
@@ -184,7 +184,8 @@ def cmd_split(args):
     import sys
 
     # Rebuild argv for split_mega_files argparse
-    argv = ["--source", args.dir]
+    # Expand ~ and resolve to absolute path so split_mega_files sees a real path
+    argv = ["--source", str(Path(args.dir).expanduser().resolve())]
     if args.output_dir:
         argv += ["--output-dir", args.output_dir]
     if args.dry_run:
@@ -327,7 +328,6 @@ def cmd_repair(args):
     print(f"\n{'=' * 55}\n")
 
 
-
 def cmd_sync(args):  # noqa: C901
     """Sync palace with source files — re-mine changed files, report stale drawers."""
     import chromadb
@@ -358,9 +358,7 @@ def cmd_sync(args):  # noqa: C901
     batch_size = 500
     offset = 0
     while offset < total:
-        batch = col.get(
-            limit=batch_size, offset=offset, include=["metadatas"]
-        )
+        batch = col.get(limit=batch_size, offset=offset, include=["metadatas"])
         if not batch["ids"]:
             break
         for drawer_id, meta in zip(batch["ids"], batch["metadatas"]):
@@ -383,8 +381,7 @@ def cmd_sync(args):  # noqa: C901
     if args.dir:
         sync_dir = str(Path(args.dir).expanduser().resolve())
         source_files = {
-            sf: info for sf, info in source_files.items()
-            if _resolve_path(sf).startswith(sync_dir)
+            sf: info for sf, info in source_files.items() if _resolve_path(sf).startswith(sync_dir)
         }
         print(f"  Filtered to {len(source_files)} files in {sync_dir}\n")
 
@@ -393,10 +390,10 @@ def cmd_sync(args):  # noqa: C901
         return
 
     # Check each source file for changes
-    stale = []       # files that changed
-    missing = []     # files that no longer exist
-    fresh = 0        # files unchanged
-    no_hash = 0      # files without content_hash (mined before sync feature)
+    stale = []  # files that changed
+    missing = []  # files that no longer exist
+    fresh = 0  # files unchanged
+    no_hash = 0  # files without content_hash (mined before sync feature)
 
     for sf, info in sorted(source_files.items()):
         if not os.path.exists(sf):
@@ -410,6 +407,7 @@ def cmd_sync(args):  # noqa: C901
 
         try:
             from .miner import file_content_hash
+
             current_hash = file_content_hash(Path(sf))
         except OSError:
             missing.append(sf)
@@ -477,7 +475,7 @@ def cmd_sync(args):  # noqa: C901
 
             # Step 1: delete stale drawers for this file
             for i in range(0, len(ids), 100):
-                col.delete(ids=ids[i:i + 100])
+                col.delete(ids=ids[i : i + 100])
             deleted += len(ids)
 
             # Step 2: re-mine this specific file immediately
@@ -519,7 +517,7 @@ def cmd_sync(args):  # noqa: C901
         for sf in missing:
             ids = source_files[sf]["drawer_ids"]
             for i in range(0, len(ids), 100):
-                col.delete(ids=ids[i:i + 100])
+                col.delete(ids=ids[i : i + 100])
             orphan_count += len(ids)
         deleted += orphan_count
         print(f"  Cleaned {orphan_count} orphaned drawers")
@@ -530,7 +528,7 @@ def cmd_sync(args):  # noqa: C901
     print(f"  Deleted: {deleted} stale drawers")
     if re_mined:
         print(f"  Re-mined: {re_mined} files")
-    sep = '=' * 55
+    sep = "=" * 55
     print(f"\n{sep}\n")
 
 
@@ -646,7 +644,7 @@ def cmd_compress(args):
         stats = dialect.compression_stats(doc, compressed)
 
         total_original += stats["original_chars"]
-        total_compressed += stats["compressed_chars"]
+        total_compressed += stats["summary_chars"]
 
         compressed_entries.append((doc_id, compressed, meta, stats))
 
@@ -656,7 +654,7 @@ def cmd_compress(args):
             source = Path(meta.get("source_file", "?")).name
             print(f"  [{wing_name}/{room_name}] {source}")
             print(
-                f"    {stats['original_tokens']}t -> {stats['compressed_tokens']}t ({stats['ratio']:.1f}x)"
+                f"    {stats['original_tokens_est']}t -> {stats['summary_tokens_est']}t ({stats['size_ratio']:.1f}x)"
             )
             print(f"    {compressed}")
             print()
@@ -667,8 +665,8 @@ def cmd_compress(args):
             comp_col = client.get_or_create_collection("mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
-                comp_meta["compression_ratio"] = round(stats["ratio"], 1)
-                comp_meta["original_tokens"] = stats["original_tokens"]
+                comp_meta["compression_ratio"] = round(stats["size_ratio"], 1)
+                comp_meta["original_tokens"] = stats["original_tokens_est"]
                 comp_col.upsert(
                     ids=[doc_id],
                     documents=[compressed],
@@ -683,8 +681,9 @@ def cmd_compress(args):
 
     # Summary
     ratio = total_original / max(total_compressed, 1)
-    orig_tokens = Dialect.count_tokens("x" * total_original)
-    comp_tokens = Dialect.count_tokens("x" * total_compressed)
+    # Estimate tokens from char count (~3.8 chars/token for English text)
+    orig_tokens = max(1, int(total_original / 3.8))
+    comp_tokens = max(1, int(total_compressed / 3.8))
     print(f"  Total: {orig_tokens:,}t -> {comp_tokens:,}t ({ratio:.1f}x compression)")
     if args.dry_run:
         print("  (dry run -- nothing stored)")

@@ -41,7 +41,7 @@ before continuing.
 
 ## Step 5: Initialize the palace
 
-Run `mempalace init <dir>` where `<dir>` is the directory from Step 4.
+Run `mempalace init --yes <dir>` where `<dir>` is the directory from Step 4.
 
 If this fails, report the error and stop.
 

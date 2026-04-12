@@ -554,10 +554,11 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
+        "note": "Estimates only.",
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -572,6 +573,7 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     out = capsys.readouterr().out
     assert "dry run" in out.lower()
     assert "Compressing" in out
+    assert "Total:" in out
 
 
 @patch("mempalace.cli.MempalaceConfig")
@@ -627,10 +629,11 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
+        "note": "Estimates only.",
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -644,6 +647,7 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
         cmd_compress(args)
     out = capsys.readouterr().out
     assert "Stored" in out
+    assert "Total:" in out
     mock_comp_col.upsert.assert_called_once()
 
 

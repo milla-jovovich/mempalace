@@ -17,8 +17,6 @@ from datetime import datetime
 
 from collections import defaultdict
 
-import chromadb
-
 from .palace import SKIP_DIRS, get_collection, file_already_mined
 
 
@@ -26,6 +24,7 @@ def file_content_hash(filepath: Path) -> str:
     """Compute content hash for a file — single source of truth for sync."""
     content = filepath.read_text(encoding="utf-8", errors="replace").strip()
     return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
+
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -378,9 +377,14 @@ def chunk_text(content: str, source_file: str) -> list:
 # =============================================================================
 
 
-
 def add_drawer(
-    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str,
+    collection,
+    wing: str,
+    room: str,
+    content: str,
+    source_file: str,
+    chunk_index: int,
+    agent: str,
     content_hash: str = "",  # computed from content if empty
 ):
     """Add one drawer to the palace."""
@@ -428,17 +432,17 @@ def process_file(
 
     # Skip if already filed
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file):
-        return 0
+    if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
+        return 0, "general"
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return 0
+        return 0, "general"
 
     content = content.strip()
     if len(content) < MIN_CHUNK_SIZE:
-        return 0
+        return 0, "general"
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)
@@ -639,8 +643,7 @@ def mine(
 def status(palace_path: str):
     """Show what's been filed in the palace."""
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_collection(palace_path, create=False)
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
