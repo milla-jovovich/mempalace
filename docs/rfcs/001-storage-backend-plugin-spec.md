@@ -138,7 +138,7 @@ On empty results: return a result object with empty inner lists, never raise. Sp
 
 **Required operators:** `$eq`, `$ne`, `$in`, `$nin`, `$and`, `$or`, `$contains`.
 
-Backends that do not support full-text natively must implement `$contains` via payload string match. The `supports_contains_fast` capability flag (§2.1) lets callers check whether a backend's implementation is indexed (fast) or scan-based (slow).
+Backends that do not support full-text natively MUST still implement `$contains` via payload string match — correctness is required; performance is not. `supports_contains_fast` (§2.1) is the only performance floor the spec promises. Without it, callers and benchmarks MUST assume `$contains` is O(n). This is an intentional split: `$contains` is a correctness requirement, `contains_fast` is the performance boundary, and the gap between scan and indexed FTS is too large for the spec to paper over.
 
 **Unknown operators:** backends MUST raise `UnsupportedFilterError`. Silent dropping is forbidden — it produces incorrect results.
 
@@ -146,13 +146,36 @@ Backends that do not support full-text natively must implement `$contains` via p
 
 ### 1.5 Embeddings
 
-Backends MUST accept a pre-computed `embeddings=` argument on `add` / `upsert`. Backends that recompute from text may ignore its value but MUST NOT reject the argument. This is required for lossless migration.
+#### Signature compliance (all backends)
+
+All backends MUST accept a pre-computed `embeddings=` argument on `add` / `upsert` without raising. This is signature compliance only — it does not guarantee the vectors are persisted (see passthrough below). Capability token: `supports_embeddings_in`.
 
 Backends MUST NOT hardcode embedding models or dimensions. Model selection is the embedder's responsibility (§4).
 
+#### Passthrough vs re-embed (separate guarantee)
+
+Accepting the argument is not the same as honoring it. Two distinct semantics, distinguished by capability:
+
+- **`supports_embeddings_passthrough`** — when `embeddings=` is provided, the backend MUST persist those vectors as-is and MUST NOT re-embed from text. This is the stronger guarantee lossless migration depends on.
+- **No `supports_embeddings_passthrough`** — the backend always re-embeds from text at write time. Provided `embeddings=` is accepted (signature compliance) but discarded. Migration *to* such a backend is re-embedding, not lossless transfer.
+
+`supports_migration_export` (source-side bulk read) MUST be paired with `supports_embeddings_passthrough` (target-side lossless write) for a migration to be labeled lossless. The `mempalace migrate` CLI refuses to run between backends where the target lacks `supports_embeddings_passthrough` unless `--accept-re-embed` is passed, which records re-embedding in the target palace's migration log.
+
+#### Dimension check (all backends, required)
+
 Backends MUST validate embedding dimension on first write to a new collection and on open of an existing collection, and MUST raise `DimensionMismatchError` on mismatch. Silent acceptance of mismatched dimensions produces unrecoverable corruption.
 
-**Dimension matching is necessary but not sufficient.** Swapping to a different model that happens to share a dimension (e.g., both 384-d) will silently degrade retrieval quality without tripping `DimensionMismatchError`. To guard this, backends MUST persist the `embedder.model_name` alongside the collection on first write, and MUST raise `EmbedderIdentityMismatchError` when a later open presents a different `model_name`. Users can override with an explicit `--force-model-swap` at the CLI layer, which records the swap in the palace's migration log.
+#### Model identity check (all backends, three-state)
+
+Dimension matching is necessary but not sufficient. Swapping to a different model that happens to share a dimension (e.g., both 384-d) silently degrades retrieval without tripping `DimensionMismatchError`. Backends MUST persist `embedder.model_name` alongside the collection on first write and MUST check it on subsequent open. Three outcomes:
+
+| State | Condition | Required behavior |
+|---|---|---|
+| `known_match` | Stored name equals current `embedder.model_name` | Proceed normally. |
+| `known_mismatch` | Stored name exists and differs from current | Raise `EmbedderIdentityMismatchError`. Override only via explicit CLI `--force-model-swap`, which writes the swap to the palace's migration log and updates the stored identity. |
+| `unknown` | No model name recorded (legacy collection, pre-v1 palace) | Do not hard-fail — emit a `EmbedderIdentityUnknownWarning` on first open. The resolved identity is recorded on the next successful write, reindex, or migration, transitioning the palace to `known_match` going forward. CLI exposes `mempalace palace set-embedder --model NAME` for explicit resolution. |
+
+The `unknown` state exists because existing palaces from #413 and earlier have no recorded identity; hard-failing them on upgrade would be hostile. Once recorded, subsequent opens are strict.
 
 ---
 
@@ -171,7 +194,8 @@ Defined capability tokens (v1):
 
 | Token | Meaning |
 |---|---|
-| `supports_embeddings_in` | Accepts pre-computed embeddings (MUST be true for all backends) |
+| `supports_embeddings_in` | Accepts pre-computed `embeddings=` without raising (signature compliance; MUST be true for all backends) |
+| `supports_embeddings_passthrough` | Persists provided `embeddings=` as-is without re-embedding (required for lossless migration target) |
 | `supports_embeddings_out` | Returns embeddings when `include=["embeddings"]` is requested |
 | `supports_estimated_count` | `estimated_count()` is meaningfully cheaper than `count()` |
 | `supports_update` | Distinguishes `upsert` from `add` with meaningful replace semantics |
@@ -296,7 +320,7 @@ When resolving a palace's backend, priority (highest first):
 4. Auto-detect from on-disk artifacts: `chroma.sqlite3` → `chroma`, `*.lance` → `lance`, etc. Backends declare detection hints via an optional `BaseBackend.detect(path: str) -> bool` classmethod.
 5. Default: `chroma`.
 
-Auto-detection preserves existing palaces when users upgrade — no manual config migration needed.
+**Auto-detection is strictly a migration/upgrade compatibility path, not a general selection mechanism.** It exists so existing palaces from v3.x keep opening without forced config migration. For *new* palaces, explicit configuration or CLI flag always wins — creating a palace without a resolved backend from (1)–(3) falls through to default (5), never to detection (4). Auto-detection fires only when a local path is presented AND no earlier rule has chosen a backend AND the path already contains backend-identifiable artifacts.
 
 ---
 
@@ -444,15 +468,25 @@ mempalace migrate --all --to lance
 
 Implementation is backend-agnostic: reads from source via `BaseCollection.get(include=["documents", "metadatas", "embeddings"])`, writes to target via `BaseCollection.upsert(...)` with the original embeddings. No backend-specific migration code.
 
-### 8.2 Safety
+### 8.2 Lossless vs re-embed
+
+Migration is labeled **lossless** only when:
+
+- The source advertises `supports_migration_export` (bulk read includes embeddings), AND
+- The target advertises `supports_embeddings_passthrough` (persists provided embeddings as-is), AND
+- Source and target agree on `embedder.model_name` (or `--force-model-swap` is explicit).
+
+If the target lacks `supports_embeddings_passthrough`, `mempalace migrate` refuses to run. Passing `--accept-re-embed` overrides — the migration proceeds but re-embeds from document text at write time, and the migration record labels the result as re-embedded rather than lossless. Retrieval quality may shift.
+
+### 8.3 Safety
 
 - Source is never modified. Migration is read-only against the source backend.
 - Target palace must not already exist unless `--overwrite` is passed.
-- A successful migration writes a `.mempalace-migration.json` record into the target palace (source backend, source path, timestamp, row count).
+- A successful migration writes a `.mempalace-migration.json` record into the target palace containing: source backend name, source path/ref, timestamp, row count, `lossless: true|false`, source and target `embedder.model_name`, and whether `--force-model-swap` or `--accept-re-embed` was used.
 
-### 8.3 Verification
+### 8.4 Verification
 
-After migration, run `mempalace verify --palace PATH --against SOURCE_PATH --source-backend chroma`. This samples N rows and confirms round-trip parity (ids match, documents match, embedding cosine similarity ≥ 0.999).
+After migration, run `mempalace verify --palace PATH --against SOURCE_PATH --source-backend chroma`. This samples N rows and confirms round-trip parity (ids match, documents match, embedding cosine similarity ≥ 0.999 when the migration was lossless; a looser document-overlap check when re-embedded).
 
 ---
 
