@@ -1008,7 +1008,11 @@ TOOLS = {
         "handler": tool_get_aaak_spec,
     },
     "mempalace_kg_query": {
-        "description": "Query the knowledge graph for an entity's relationships. Returns typed facts with temporal validity. E.g. 'Max' → child_of Alice, loves chess, does swimming. Filter by date with as_of to see what was true at a point in time.",
+        "description": (
+            "Query the knowledge graph for an entity's relationships. "
+            "Returns typed facts with temporal validity. "
+            "E.g. 'Max' → child_of Alice, loves chess, does swimming."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1095,7 +1099,10 @@ TOOLS = {
         "handler": tool_kg_stats,
     },
     "mempalace_traverse": {
-        "description": "Walk the palace graph from a room. Shows connected ideas across wings — the tunnels. Like following a thread through the palace: start at 'chromadb-setup' in wing_code, discover it connects to wing_myproject (planning) and wing_user (feelings about it).",
+        "description": (
+            "Walk the palace graph from a room. Shows connected ideas across wings "
+            "— the tunnels. Like following a thread through the palace."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1129,7 +1136,10 @@ TOOLS = {
         "handler": tool_graph_stats,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY search keywords. Use 'context' for background. Results with cosine distance > max_distance are filtered out.",
+        "description": (
+            "Semantic search. Returns verbatim drawer content with similarity scores. "
+            "Query must contain ONLY your search keywords or question."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1152,7 +1162,10 @@ TOOLS = {
                 },
                 "context": {
                     "type": "string",
-                    "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking.",
+                    "description": (
+                        "Background context for the search (optional). "
+                        "Not used for embedding — only for future re-ranking."
+                    ),
                 },
             },
             "required": ["query"],
@@ -1278,7 +1291,10 @@ TOOLS = {
         "handler": tool_update_drawer,
     },
     "mempalace_diary_write": {
-        "description": "Write to your personal agent diary in AAAK format. Your observations, thoughts, what you worked on, what matters. Each agent has their own diary with full history. Write in AAAK for compression — e.g. 'SESSION:2026-04-04|built.palace.graph+diary.tools|ALC.req:agent.diaries.in.aaak|★★★'. Use entity codes from the AAAK spec.",
+        "description": (
+            "Write to your personal agent diary in AAAK format. "
+            "Record your observations, thoughts, and what you worked on."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
