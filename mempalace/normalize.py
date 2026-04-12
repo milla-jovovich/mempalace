@@ -100,6 +100,11 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
             text = _extract_content(message.get("content", ""))
             if text:
                 messages.append(("assistant", text))
+        elif msg_type == "tool":
+            # Tool result entries — content holds the output returned to the assistant
+            text = _extract_content(message.get("content", ""))
+            if text:
+                messages.append(("assistant", text))
     if len(messages) >= 2:
         return _messages_to_transcript(messages)
     return None
@@ -279,8 +284,23 @@ def _extract_content(content) -> str:
         for item in content:
             if isinstance(item, str):
                 parts.append(item)
-            elif isinstance(item, dict) and item.get("type") == "text":
-                parts.append(item.get("text", ""))
+            elif isinstance(item, dict):
+                block_type = item.get("type")
+                if block_type == "text":
+                    parts.append(item.get("text", ""))
+                elif block_type == "tool_use":
+                    # Record the tool invocation so the mining context is preserved
+                    parts.append(f"[Tool: {item.get('name', 'tool')}]")
+                elif block_type == "tool_result":
+                    # Inline tool output — may be a string or a list of text blocks
+                    result = item.get("content", "")
+                    if isinstance(result, list):
+                        result = " ".join(
+                            b.get("text", "") for b in result
+                            if isinstance(b, dict) and b.get("type") == "text"
+                        )
+                    if result:
+                        parts.append(str(result))
         return " ".join(parts).strip()
     if isinstance(content, dict):
         return content.get("text", "").strip()
