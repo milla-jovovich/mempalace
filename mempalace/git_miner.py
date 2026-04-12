@@ -298,7 +298,7 @@ def collect_prs(
     repo_dir: str,
     max_prs: int = 25,
     no_reviews: bool = False,
-    diff_summary: str = DIFF_SUMMARY_ALWAYS,
+    diff_summary: str = DIFF_SUMMARY_FALLBACK,
 ) -> tuple:
     """Return ``(pr_entries, pr_shas)`` fetched via ``gh``.
 
@@ -315,8 +315,9 @@ def collect_prs(
         max_prs: Maximum number of merged PRs to fetch (default 25).
         no_reviews: Skip folding review threads into PR bodies.
         diff_summary: When to append the structured diff summary:
-            ``"always"`` (default), ``"fallback"`` (only when PR body is
-            absent/short), or ``"never"``.
+            ``"fallback"`` (default, only when PR body is absent/short),
+            ``"always"`` (every PR, costs one extra ``gh api`` call per PR),
+            or ``"never"``.
     """
     pr_shas: set = set()
 
@@ -463,7 +464,7 @@ def collect_entries(
     include_all: bool = False,
     no_reviews: bool = False,
     decision_only: bool = False,
-    diff_summary: str = DIFF_SUMMARY_ALWAYS,
+    diff_summary: str = DIFF_SUMMARY_FALLBACK,
 ) -> list:
     """Collect all git entries without writing to the palace.
 
@@ -503,7 +504,7 @@ def mine_git(
     no_reviews: bool = False,
     decision_only: bool = False,
     dry_run: bool = False,
-    diff_summary: str = DIFF_SUMMARY_ALWAYS,
+    diff_summary: str = DIFF_SUMMARY_FALLBACK,
 ) -> dict:
     """Mine a git repository and file entries into the palace.
 
@@ -523,7 +524,9 @@ def mine_git(
         decision_only: Only file entries matching decision-signal keywords.
         dry_run: Print entries without writing to the palace.
         diff_summary: When to append structured diff summary to PR drawers:
-            ``"always"`` (default), ``"fallback"`` (only when no description),
+            ``"fallback"`` (default, only when PR has no description),
+            ``"always"`` (every PR — costs one extra ``gh api`` call per PR;
+            can hit GitHub rate limits on repos with many PRs),
             or ``"never"``.
         dry_run: Print entries without writing to the palace.
 

@@ -599,9 +599,9 @@ def main():
     )
     p_git_mine.add_argument(
         "--diff-summary",
-        default="always",
+        default="fallback",
         choices=["always", "fallback", "never"],
-        help="Append structured diff summary to PR drawers: always (default), fallback (only when no description), never",
+        help="Append structured diff summary to PR drawers: fallback (default, only when no description), always (every PR — one extra gh api call per PR), never",
     )
     p_git_mine.add_argument(
         "--no-reviews", action="store_true", help="Skip folding review threads into PR drawers"

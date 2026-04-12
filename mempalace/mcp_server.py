@@ -599,7 +599,7 @@ def tool_git_mine(
     no_reviews: bool = False,
     decision_only: bool = False,
     dry_run: bool = False,
-    diff_summary: str = "always",
+    diff_summary: str = "fallback",
 ):
     """
     Mine a git repository for merged PRs (with review threads and diff summary
@@ -950,7 +950,7 @@ TOOLS = {
                 },
                 "diff_summary": {
                     "type": "string",
-                    "description": "When to append structured diff summary (changed files + touched functions) to PR drawers: 'always' (default), 'fallback' (only when PR has no description), or 'never'",
+                    "description": "When to append structured diff summary (changed files + touched functions) to PR drawers: 'fallback' (default, only when PR has no description), 'always' (every PR — one extra gh api call per PR, may hit rate limits on large repos), or 'never'",
                 },
                 "max_commits": {
                     "type": "integer",
