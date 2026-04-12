@@ -760,7 +760,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
         if detected["uncertain"]:
             print("\n  Uncertain entities — classify each:")
             for e in detected["uncertain"]:
-                ans = input(f"    {e['name']} — (p)erson, (r)roject, or (s)kip? ").strip().lower()
+                ans = input(f"    {e['name']} — (p)erson, (r)project, or (s)kip? ").strip().lower()
                 if ans == "p":
                     confirmed_people.append(e["name"])
                 elif ans == "r":
