@@ -10,6 +10,18 @@ from mempalace.miner import mine, scan_project, status
 from mempalace.palace import file_already_mined
 
 
+def _close_client(client):
+    close = getattr(client, "close", None)
+    if callable(close):
+        close()
+        return
+
+    system = getattr(client, "_system", None)
+    stop = getattr(system, "stop", None)
+    if callable(stop):
+        stop()
+
+
 def write_file(path: Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -18,6 +30,19 @@ def write_file(path: Path, content: str):
 def scanned_files(project_root: Path, **kwargs):
     files = scan_project(str(project_root), **kwargs)
     return sorted(path.relative_to(project_root).as_posix() for path in files)
+
+
+def _close_client(client):
+    """Close Chroma clients across versions."""
+    close = getattr(client, "close", None)
+    if callable(close):
+        close()
+        return
+
+    system = getattr(client, "_system", None)
+    stop = getattr(system, "stop", None)
+    if callable(stop):
+        stop()
 
 
 def test_project_mining():
@@ -45,10 +70,13 @@ def test_project_mining():
         mine(str(project_root), str(palace_path))
 
         client = chromadb.PersistentClient(path=str(palace_path))
-        col = client.get_collection("mempalace_drawers")
-        assert col.count() > 0
+        try:
+            col = client.get_collection("mempalace_drawers")
+            assert col.count() > 0
+        finally:
+            _close_client(client)  # release file handles before cleanup (required on Windows)
     finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        shutil.rmtree(tmpdir)
 
 
 def test_scan_project_respects_gitignore():
@@ -258,7 +286,7 @@ def test_file_already_mined_check_mtime():
         assert file_already_mined(col, "/fake/no_mtime.txt", check_mtime=True) is False
     finally:
         # Release ChromaDB file handles before cleanup (required on Windows)
-        del col, client
+        _close_client(client)
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 

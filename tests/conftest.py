@@ -34,6 +34,19 @@ from mempalace.config import MempalaceConfig  # noqa: E402
 from mempalace.knowledge_graph import KnowledgeGraph  # noqa: E402
 
 
+def _close_client(client):
+    """Close Chroma clients across versions."""
+    close = getattr(client, "close", None)
+    if callable(close):
+        close()
+        return
+
+    system = getattr(client, "_system", None)
+    stop = getattr(system, "stop", None)
+    if callable(stop):
+        stop()
+
+
 @pytest.fixture(autouse=True)
 def _reset_mcp_cache():
     """Reset the MCP server's cached ChromaDB client/collection between tests."""
@@ -103,8 +116,10 @@ def collection(palace_path):
     client = chromadb.PersistentClient(path=palace_path)
     col = client.get_or_create_collection("mempalace_drawers")
     yield col
-    client.delete_collection("mempalace_drawers")
-    del client
+    try:
+        client.delete_collection("mempalace_drawers")
+    finally:
+        _close_client(client)  # release file handles before tmp_dir cleanup (required on Windows)
 
 
 @pytest.fixture
