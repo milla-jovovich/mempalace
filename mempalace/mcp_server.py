@@ -2058,6 +2058,74 @@ def tool_declare_intent(
             ),
         }
 
+    # ── Auto-narrow: use description to find best-fit child intent type ──
+    narrowed_from = None
+    subtypes = []
+    all_entities = _kg.list_entities(status="active", kind="entity")
+    for e in all_entities:
+        e_edges = _kg.query_entity(e["id"], direction="outgoing")
+        for edge in e_edges:
+            if edge["predicate"] in ("is-a", "is_a") and edge["current"]:
+                parent_id = normalize_entity_name(edge["object"])
+                if parent_id == intent_id:
+                    subtypes.append({
+                        "id": e["id"],
+                        "description": e.get("description", ""),
+                    })
+                    break
+
+    if subtypes and description.strip():
+        ecol = _get_entity_collection(create=False)
+        if ecol:
+            try:
+                child_id_set = {s["id"] for s in subtypes}
+                count = ecol.count()
+                if count > 0:
+                    results = ecol.query(
+                        query_texts=[description],
+                        n_results=min(count, 50),
+                        include=["documents", "metadatas", "distances"],
+                    )
+                    # Collect distances for parent and children
+                    parent_dist = None
+                    child_scores = []  # (id, distance, description)
+                    if results["ids"] and results["ids"][0]:
+                        for i, eid in enumerate(results["ids"][0]):
+                            dist = results["distances"][0][i]
+                            if eid == intent_id:
+                                parent_dist = dist
+                            elif eid in child_id_set:
+                                child_scores.append({
+                                    "id": eid,
+                                    "distance": dist,
+                                    "description": results["documents"][0][i],
+                                })
+                    # Auto-narrow: if a child is closer than the parent, it's
+                    # a better fit for the agent's description. Use it.
+                    if parent_dist is not None and child_scores:
+                        child_scores.sort(key=lambda c: c["distance"])
+                        better = [c for c in child_scores if c["distance"] < parent_dist]
+                        if len(better) == 1:
+                            narrowed_from = intent_id
+                            intent_id = better[0]["id"]
+                            _declared_entities.add(intent_id)
+                        elif len(better) > 1:
+                            # Multiple children beat the parent — disambiguate
+                            return {
+                                "success": False,
+                                "error": (
+                                    f"Description matches multiple subtypes of '{intent_id}' "
+                                    f"better than '{intent_id}' itself. "
+                                    f"Pick the most appropriate one and declare it directly."
+                                ),
+                                "matching_subtypes": [
+                                    {"id": c["id"], "description": c["description"][:120]}
+                                    for c in better
+                                ],
+                            }
+            except Exception:
+                pass  # Non-fatal — narrowing is best-effort
+
     # ── Resolve effective profile via inheritance ──
     effective_slots, effective_permissions = _resolve_intent_profile(intent_id)
 
@@ -2318,32 +2386,38 @@ def tool_declare_intent(
         "description": description[:200],
     })
 
-    # ── Suggest more specific subtypes ──
+    # ── Suggest more specific subtypes (reuse subtypes found during auto-narrow) ──
+    # If we narrowed, re-discover subtypes of the NEW (narrowed) intent type
+    if narrowed_from:
+        subtypes = []
+        for e in all_entities:
+            e_edges = _kg.query_entity(e["id"], direction="outgoing")
+            for edge in e_edges:
+                if edge["predicate"] in ("is-a", "is_a") and edge["current"]:
+                    parent_id = normalize_entity_name(edge["object"])
+                    if parent_id == intent_id:
+                        subtypes.append({
+                            "id": e["id"],
+                            "description": e.get("description", "")[:120],
+                        })
+                        break
+
+    # Trim descriptions for response
+    suggested = [{"id": s["id"], "description": s.get("description", "")[:120]} for s in subtypes]
+
     subtype_hint = None
-    subtypes = []
-
-    # Find children of this intent type (entities that is-a this type)
-    all_entities = _kg.list_entities(status="active", kind="entity")
-    for e in all_entities:
-        e_edges = _kg.query_entity(e["id"], direction="outgoing")
-        for edge in e_edges:
-            if edge["predicate"] in ("is-a", "is_a") and edge["current"]:
-                parent_id = normalize_entity_name(edge["object"])
-                if parent_id == intent_id:
-                    subtypes.append({
-                        "id": e["id"],
-                        "description": e["description"][:120],
-                    })
-                    break
-
-    if subtypes:
+    if narrowed_from:
+        subtype_hint = (
+            f"Auto-narrowed from '{narrowed_from}' to '{intent_id}' based on your description. "
+            f"This type carries domain-specific rules that '{narrowed_from}' does not."
+        )
+    elif suggested:
         subtype_hint = (
             f"You declared '{intent_id}' but more specific intent types exist. "
             f"Specific types carry domain-specific rules (must, requires, has_gotcha) "
             f"that '{intent_id}' does not. Consider switching if one fits."
         )
     else:
-        # No subtypes exist — suggest creating one if this is a recurring pattern
         subtype_hint = (
             f"No specific subtypes of '{intent_id}' exist yet. If this is a recurring "
             f"action pattern, consider declaring a specific intent type: "
@@ -2353,7 +2427,7 @@ def tool_declare_intent(
             f"Future declarations of the specific type will surface those rules automatically."
         )
 
-    return {
+    result = {
         "success": True,
         "intent_id": new_intent_id,
         "intent_type": intent_id,
@@ -2361,9 +2435,12 @@ def tool_declare_intent(
         "permissions": permissions,
         "context": context,
         "previous_expired": previous_expired,
-        "suggested_subtypes": subtypes,
+        "suggested_subtypes": suggested,
         "subtype_hint": subtype_hint,
     }
+    if narrowed_from:
+        result["narrowed_from"] = narrowed_from
+    return result
 
 
 def tool_active_intent():
@@ -2839,7 +2916,12 @@ TOOLS = {
                 },
                 "description": {
                     "type": "string",
-                    "description": "Free-text description of what you plan to do and why",
+                    "description": (
+                        "Describe what you plan to do and why. Used for auto-narrowing: "
+                        "if a more specific child intent type matches your description, "
+                        "the system will auto-select it. Structure: '<action> <target> — <reason>'. "
+                        "Example: 'Editing auth module — adding rate limiting to login endpoint'"
+                    ),
                 },
                 "auto_declare_files": {
                     "type": "boolean",
