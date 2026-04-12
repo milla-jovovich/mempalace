@@ -193,3 +193,50 @@ def test_kg_value_rejects_null_bytes():
 def test_kg_value_rejects_over_length():
     with pytest.raises(ValueError):
         sanitize_kg_value("a" * 129)
+
+
+# --- hooks.auto_save ---
+
+
+def test_hooks_auto_save_default():
+    cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+    assert cfg.hooks_auto_save is True
+
+
+def test_hooks_auto_save_from_config():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"hooks": {"auto_save": False}}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.hooks_auto_save is False
+
+
+def test_hooks_auto_save_env_override_false():
+    os.environ["MEMPALACE_HOOKS_AUTO_SAVE"] = "false"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.hooks_auto_save is False
+    finally:
+        del os.environ["MEMPALACE_HOOKS_AUTO_SAVE"]
+
+
+def test_hooks_auto_save_env_override_zero():
+    os.environ["MEMPALACE_HOOKS_AUTO_SAVE"] = "0"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.hooks_auto_save is False
+    finally:
+        del os.environ["MEMPALACE_HOOKS_AUTO_SAVE"]
+
+
+def test_hooks_auto_save_env_override_true():
+    """Env var set to 'true' overrides config file even if config says false."""
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"hooks": {"auto_save": False}}, f)
+    os.environ["MEMPALACE_HOOKS_AUTO_SAVE"] = "true"
+    try:
+        cfg = MempalaceConfig(config_dir=tmpdir)
+        assert cfg.hooks_auto_save is True
+    finally:
+        del os.environ["MEMPALACE_HOOKS_AUTO_SAVE"]

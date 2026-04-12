@@ -70,6 +70,26 @@ Edit `mempal_save_hook.sh` to change:
 - **`MEMPAL_DIR`** — Optional. Set to a conversations directory to auto-run `mempalace mine <dir>` on each save trigger. Leave blank (default) to let the AI handle saving via the block reason message.
 - **`MEMPALACE_PYTHON`** — Optional env var. Python interpreter with mempalace + chromadb installed. Auto-detects: `MEMPALACE_PYTHON` env var → repo `venv/bin/python3` → system `python3`. Set this if your venv is in a non-standard location.
 
+### Disabling Auto-Save (Silent Mode)
+
+To keep hooks installed but disable auto-save blocking entirely, set `hooks.auto_save` to `false` in your config:
+
+**Option 1 — config file** (`~/.mempalace/config.json`):
+```json
+{
+  "hooks": {
+    "auto_save": false
+  }
+}
+```
+
+**Option 2 — environment variable:**
+```bash
+export MEMPALACE_HOOKS_AUTO_SAVE=false
+```
+
+When disabled, both the stop hook and precompact hook pass through without blocking. You can still save manually with `mempalace mine <dir> --mode convos`.
+
 ### mempalace CLI
 
 The relevant commands are:
