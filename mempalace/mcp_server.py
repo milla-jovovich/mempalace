@@ -1927,6 +1927,7 @@ def tool_declare_intent(
     intent_type: str,
     slots: dict,
     description: str = "",
+    auto_declare_files: bool = False,
 ):
     """Declare what you intend to do BEFORE doing it. Returns permissions + context.
 
@@ -2054,8 +2055,40 @@ def tool_declare_intent(
 
         # Validate each entity in slot
         normalized_values = []
+        allowed_classes = slot_def.get("classes", ["thing"])
+        is_file_slot = "file" in allowed_classes
+
         for val in slot_values:
-            val_id = normalize_entity_name(val)
+            # For file slots: use basename for entity name, keep raw path for scoping
+            if is_file_slot:
+                file_basename = os.path.basename(val)
+                val_id = normalize_entity_name(file_basename)
+            else:
+                val_id = normalize_entity_name(val)
+
+            # Auto-declare file entities if slot expects class=file
+            if val_id not in _declared_entities and is_file_slot:
+                file_exists = os.path.exists(val) or os.path.exists(
+                    os.path.join(os.getcwd(), val)
+                )
+                if file_exists or auto_declare_files:
+                    # Auto-declare: create entity from basename + is-a file
+                    _kg.add_entity(
+                        file_basename, kind="entity",
+                        description=f"File: {val}" + (" (new)" if not file_exists else ""),
+                        importance=2,
+                    )
+                    _kg.add_triple(val_id, "is-a", "file")
+                    _sync_entity_to_chromadb(val_id, file_basename, f"File: {val}", "entity", 2)
+                    _declared_entities.add(val_id)
+                elif not file_exists:
+                    slot_errors.append(
+                        f"File '{val}' does not exist on disk and auto_declare_files=false. "
+                        f"Either provide an existing file path, or set auto_declare_files=true "
+                        f"if you intend to create this file."
+                    )
+                    continue
+
             if val_id not in _declared_entities:
                 slot_errors.append(
                     f"Entity '{val_id}' in slot '{slot_name}' not declared. "
@@ -2064,14 +2097,12 @@ def tool_declare_intent(
                 continue
 
             # Check class constraint via is-a + inheritance
-            allowed_classes = slot_def.get("classes", ["thing"])
             if "thing" not in allowed_classes:
                 entity_classes = [
                     e["object"] for e in _kg.query_entity(val_id, direction="outgoing")
                     if e["predicate"] in ("is-a", "is_a") and e["current"]
                 ]
                 if entity_classes:
-                    # Reuse the BFS subclass check from kg_add
                     from .knowledge_graph import normalize_entity_name as _norm
                     norm_classes = [_norm(c) for c in entity_classes]
                     norm_allowed = [_norm(c) for c in allowed_classes]
@@ -2104,7 +2135,7 @@ def tool_declare_intent(
                         )
                         continue
 
-            normalized_values.append(val_id)
+            normalized_values.append({"id": val_id, "raw": val})
         resolved_slots[slot_name] = normalized_values
 
     if slot_errors:
@@ -2123,20 +2154,26 @@ def tool_declare_intent(
         }
 
     # ── Build permissions ──
-    permissions = []
+    # Flatten resolved_slots for return (id only) and keep raw paths for scoping
+    flat_slots = {}  # slot_name -> [entity_id, ...]
+    raw_paths = {}   # slot_name -> [raw_value, ...]
     all_slot_entities = []
-    for slot_name, entities in resolved_slots.items():
-        all_slot_entities.extend(entities)
+    for slot_name, entries in resolved_slots.items():
+        flat_slots[slot_name] = [e["id"] for e in entries]
+        raw_paths[slot_name] = [e["raw"] for e in entries]
+        all_slot_entities.extend(flat_slots[slot_name])
+
+    permissions = []
+    for slot_name, entity_ids in flat_slots.items():
+        raws = raw_paths.get(slot_name, entity_ids)
         for perm in effective_permissions:
             scope = perm.get("scope", "*")
             if f"{{{slot_name}}}" in scope:
-                # Replace slot reference with actual entity values
-                for entity_id in entities:
-                    entity = _kg.get_entity(entity_id)
-                    entity_name = entity["name"] if entity else entity_id
+                # Replace slot reference with RAW values (file paths, not normalized IDs)
+                for raw_val, entity_id in zip(raws, entity_ids):
                     permissions.append({
                         "tool": perm["tool"],
-                        "scope": scope.replace(f"{{{slot_name}}}", entity_name),
+                        "scope": scope.replace(f"{{{slot_name}}}", raw_val),
                         "slot": slot_name,
                         "entity": entity_id,
                     })
@@ -2201,7 +2238,7 @@ def tool_declare_intent(
     _active_intent = {
         "intent_id": new_intent_id,
         "intent_type": intent_id,
-        "slots": resolved_slots,
+        "slots": flat_slots,
         "effective_permissions": permissions,
         "injected_drawer_ids": already_injected,
         "description": description,
@@ -2213,18 +2250,55 @@ def tool_declare_intent(
     _wal_log("declare_intent", {
         "intent_id": new_intent_id,
         "intent_type": intent_id,
-        "slots": {k: v for k, v in resolved_slots.items()},
+        "slots": flat_slots,
         "description": description[:200],
     })
+
+    # ── Suggest more specific subtypes ──
+    subtype_hint = None
+    subtypes = []
+
+    # Find children of this intent type (entities that is-a this type)
+    all_entities = _kg.list_entities(status="active", kind="entity")
+    for e in all_entities:
+        e_edges = _kg.query_entity(e["id"], direction="outgoing")
+        for edge in e_edges:
+            if edge["predicate"] in ("is-a", "is_a") and edge["current"]:
+                parent_id = normalize_entity_name(edge["object"])
+                if parent_id == intent_id:
+                    subtypes.append({
+                        "id": e["id"],
+                        "description": e["description"][:120],
+                    })
+                    break
+
+    if subtypes:
+        subtype_hint = (
+            f"You declared '{intent_id}' but more specific intent types exist. "
+            f"Specific types carry domain-specific rules (must, requires, has_gotcha) "
+            f"that '{intent_id}' does not. Consider switching if one fits."
+        )
+    else:
+        # No subtypes exist — suggest creating one if this is a recurring pattern
+        subtype_hint = (
+            f"No specific subtypes of '{intent_id}' exist yet. If this is a recurring "
+            f"action pattern, consider declaring a specific intent type: "
+            f"kg_declare_entity(name='<specific_action>', description='...', kind='entity') "
+            f"+ kg_add(subject='<specific_action>', predicate='is_a', object='{intent_id}'). "
+            f"Then attach rules: kg_add(subject='<specific_action>', predicate='must', object='<rule>'). "
+            f"Future declarations of the specific type will surface those rules automatically."
+        )
 
     return {
         "success": True,
         "intent_id": new_intent_id,
         "intent_type": intent_id,
-        "slots": resolved_slots,
+        "slots": flat_slots,
         "permissions": permissions,
         "context": context,
         "previous_expired": previous_expired,
+        "suggested_subtypes": subtypes,
+        "subtype_hint": subtype_hint,
     }
 
 
@@ -2675,8 +2749,8 @@ TOOLS = {
             "  communicate: external ops (Bash scoped). Slots: target, audience\n\n"
             "Domain-specific types inherit from these: edit_file, write_tests, deploy, etc. "
             "Declare new types via kg_declare_entity + is_a edge to a parent intent type.\n\n"
-            "Slots are filled with declared entity names. Each slot has class constraints "
-            "validated via is-a inheritance (same as predicate constraints)."
+            "Slots are filled with entity names or file paths. For file slots, existing "
+            "files on disk are auto-declared. For new files, set auto_declare_files=true."
         ),
         "input_schema": {
             "type": "object",
@@ -2685,21 +2759,30 @@ TOOLS = {
                     "type": "string",
                     "description": (
                         "The intent type to declare (must be is-a intent_type). "
-                        "Examples: 'inspect', 'modify', 'edit_file', 'deploy', 'run_tests'"
+                        "Use the MOST SPECIFIC type available — specific types carry domain rules. "
+                        "Examples: 'edit_file', 'write_tests', 'deploy', 'run_tests', 'diagnose_failure'. "
+                        "Broad types: 'inspect', 'modify', 'execute', 'communicate'."
                     ),
                 },
                 "slots": {
                     "type": "object",
                     "description": (
-                        "Named slots filled with entity names. Each intent type defines its slots. "
-                        "Example for edit_file: {\"files\": [\"auth.test.ts\"]}. "
+                        "Named slots filled with entity names or file paths. "
+                        "Example for edit_file: {\"files\": [\"src/auth.test.ts\"]}. "
                         "Example for deploy: {\"target\": [\"my_project\"], \"environment\": [\"staging\"]}. "
-                        "Values can be a string (single entity) or list (multiple entities if slot allows)."
+                        "File slots auto-declare existing files. Other slots require pre-declared entities."
                     ),
                 },
                 "description": {
                     "type": "string",
                     "description": "Free-text description of what you plan to do and why",
+                },
+                "auto_declare_files": {
+                    "type": "boolean",
+                    "description": (
+                        "Set to true when creating NEW files that don't exist on disk yet. "
+                        "Existing files are auto-declared without this flag. Default: false."
+                    ),
                 },
             },
             "required": ["intent_type", "slots"],
