@@ -148,6 +148,17 @@ def _get_client():
         current_inode = 0
         current_mtime = 0.0
 
+    # If the DB file disappeared (e.g. during rebuild) but we have a cached
+    # collection, invalidate so we don't serve stale data.  Without this,
+    # both stored and current values are 0 on the first call after deletion,
+    # making inode_changed and mtime_changed both False.
+    if not os.path.isfile(db_path) and _collection_cache is not None:
+        _client_cache = None
+        _collection_cache = None
+        _palace_db_inode = 0
+        _palace_db_mtime = 0.0
+        # Fall through to normal reconnect which will handle missing DB
+
     inode_changed = current_inode != 0 and current_inode != _palace_db_inode
     mtime_changed = current_mtime != 0.0 and abs(current_mtime - _palace_db_mtime) > 0.01
 
@@ -1005,10 +1016,16 @@ def tool_reconnect():
     _palace_db_mtime = 0.0
     try:
         col = _get_collection()
-        count = col.count() if col else 0
-        return {"success": True, "message": "Reconnected to palace", "drawers": count}
+        if col is None:
+            return {
+                "success": False,
+                "message": "No palace found after reconnect",
+                "drawers": 0,
+            }
+        return {"success": True, "message": "Reconnected to palace", "drawers": col.count()}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 # ==================== MCP PROTOCOL ====================
 
