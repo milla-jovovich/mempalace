@@ -42,6 +42,50 @@ class TestHandleRequest:
         assert resp["result"]["serverInfo"]["name"] == "mempalace"
         assert resp["id"] == 1
 
+    def test_initialize_negotiates_client_version(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "initialize",
+                "id": 1,
+                "params": {"protocolVersion": "2025-11-25"},
+            }
+        )
+        assert resp["result"]["protocolVersion"] == "2025-11-25"
+
+    def test_initialize_negotiates_older_supported_version(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "initialize",
+                "id": 1,
+                "params": {"protocolVersion": "2025-03-26"},
+            }
+        )
+        assert resp["result"]["protocolVersion"] == "2025-03-26"
+
+    def test_initialize_unknown_version_falls_back_to_latest(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "initialize",
+                "id": 1,
+                "params": {"protocolVersion": "9999-12-31"},
+            }
+        )
+        from mempalace.mcp_server import SUPPORTED_PROTOCOL_VERSIONS
+
+        assert resp["result"]["protocolVersion"] == SUPPORTED_PROTOCOL_VERSIONS[0]
+
+    def test_initialize_missing_version_uses_oldest(self):
+        from mempalace.mcp_server import handle_request, SUPPORTED_PROTOCOL_VERSIONS
+
+        resp = handle_request({"method": "initialize", "id": 1, "params": {}})
+        assert resp["result"]["protocolVersion"] == SUPPORTED_PROTOCOL_VERSIONS[-1]
+
     def test_notifications_initialized_returns_none(self):
         from mempalace.mcp_server import handle_request
 
@@ -58,6 +102,23 @@ class TestHandleRequest:
         assert "mempalace_search" in names
         assert "mempalace_add_drawer" in names
         assert "mempalace_kg_add" in names
+
+    def test_null_arguments_does_not_hang(self, monkeypatch, config, palace_path, seeded_kg):
+        """Sending arguments: null should return a result, not hang (#394)."""
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import handle_request
+
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 10,
+                "params": {"name": "mempalace_status", "arguments": None},
+            }
+        )
+        assert "error" not in resp
+        assert resp["result"] is not None
 
     def test_unknown_tool(self):
         from mempalace.mcp_server import handle_request
