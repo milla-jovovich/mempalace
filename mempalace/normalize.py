@@ -30,7 +30,7 @@ def normalize(filepath: str) -> str:
     except OSError as e:
         raise IOError(f"Could not read {filepath}: {e}")
     if file_size > 500 * 1024 * 1024:  # 500 MB safety limit
-        raise IOError(f"File too large ({file_size // (1024*1024)} MB): {filepath}")
+        raise IOError(f"File too large ({file_size // (1024 * 1024)} MB): {filepath}")
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
@@ -109,8 +109,7 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
         if msg_type in ("human", "user"):
             # Check if this message is tool_results only (no user text)
             is_tool_only = isinstance(msg_content, list) and all(
-                isinstance(b, dict) and b.get("type") == "tool_result"
-                for b in msg_content
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in msg_content
             )
             text = _extract_content(msg_content, tool_use_map=tool_use_map)
             if text:
@@ -256,9 +255,7 @@ def _try_chatgpt_json(data) -> Optional[str]:
                 role = msg.get("author", {}).get("role", "")
                 content = msg.get("content", {})
                 parts = content.get("parts", []) if isinstance(content, dict) else []
-                text = " ".join(
-                    str(p) for p in parts if isinstance(p, str) and p
-                ).strip()
+                text = " ".join(str(p) for p in parts if isinstance(p, str) and p).strip()
                 if role == "user" and text:
                     messages.append(("user", text))
                 elif role == "assistant" and text:
@@ -443,9 +440,7 @@ def _format_tool_result(content, tool_name: str) -> str:
 
     # Unknown — byte cap
     if len(text) > _TOOL_RESULT_MAX_BYTES:
-        return (
-            "→ " + text[:_TOOL_RESULT_MAX_BYTES] + f"... [truncated, {len(text)} chars]"
-        )
+        return "→ " + text[:_TOOL_RESULT_MAX_BYTES] + f"... [truncated, {len(text)} chars]"
     return "→ " + text
 
 

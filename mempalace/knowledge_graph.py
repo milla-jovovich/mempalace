@@ -91,9 +91,7 @@ class KnowledgeGraph:
 
     def _conn(self):
         if self._connection is None:
-            self._connection = sqlite3.connect(
-                self.db_path, timeout=10, check_same_thread=False
-            )
+            self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
             self._connection.execute("PRAGMA journal_mode=WAL")
             self._connection.row_factory = sqlite3.Row
         return self._connection
@@ -109,9 +107,7 @@ class KnowledgeGraph:
 
     # ── Write operations ──────────────────────────────────────────────────
 
-    def add_entity(
-        self, name: str, entity_type: str = "unknown", properties: dict = None
-    ):
+    def add_entity(self, name: str, entity_type: str = "unknown", properties: dict = None):
         """Add or update an entity node."""
         eid = self._entity_id(name)
         props = json.dumps(properties or {})
@@ -335,9 +331,7 @@ class KnowledgeGraph:
 
     def stats(self):
         conn = self._conn()
-        entities = conn.execute("SELECT COUNT(*) as cnt FROM entities").fetchone()[
-            "cnt"
-        ]
+        entities = conn.execute("SELECT COUNT(*) as cnt FROM entities").fetchone()["cnt"]
         triples = conn.execute("SELECT COUNT(*) as cnt FROM triples").fetchone()["cnt"]
         current = conn.execute(
             "SELECT COUNT(*) as cnt FROM triples WHERE valid_to IS NULL"
@@ -399,21 +393,13 @@ class KnowledgeGraph:
                     valid_from=facts.get("birthday"),
                 )
             elif relationship == "husband":
-                self.add_triple(
-                    name, "is_partner_of", facts.get("partner", name).capitalize()
-                )
+                self.add_triple(name, "is_partner_of", facts.get("partner", name).capitalize())
             elif relationship == "brother":
-                self.add_triple(
-                    name, "is_sibling_of", facts.get("sibling", name).capitalize()
-                )
+                self.add_triple(name, "is_sibling_of", facts.get("sibling", name).capitalize())
             elif relationship == "dog":
-                self.add_triple(
-                    name, "is_pet_of", facts.get("owner", name).capitalize()
-                )
+                self.add_triple(name, "is_pet_of", facts.get("owner", name).capitalize())
                 self.add_entity(name, "animal")
 
             # Interests
             for interest in facts.get("interests", []):
-                self.add_triple(
-                    name, "loves", interest.capitalize(), valid_from="2025-01-01"
-                )
+                self.add_triple(name, "loves", interest.capitalize(), valid_from="2025-01-01")

@@ -57,7 +57,9 @@ class Layer0:
             with open(self.path, "r") as f:
                 self._text = f.read().strip()
         else:
-            self._text = "## L0 — IDENTITY\nNo identity configured. Create ~/.mempalace/identity.txt"
+            self._text = (
+                "## L0 — IDENTITY\nNo identity configured. Create ~/.mempalace/identity.txt"
+            )
 
         return self._text
 
@@ -157,11 +159,7 @@ class Layer1:
             total_len += len(room_line)
 
             for imp, meta, doc in entries:
-                source = (
-                    Path(meta.get("source_file", "")).name
-                    if meta.get("source_file")
-                    else ""
-                )
+                source = Path(meta.get("source_file", "")).name if meta.get("source_file") else ""
 
                 # Truncate doc to keep L1 compact
                 snippet = doc.strip().replace("\n", " ")
@@ -228,11 +226,7 @@ class Layer2:
         lines = [f"## L2 — ON-DEMAND ({len(docs)} drawers)"]
         for doc, meta in zip(docs[:n_results], metas[:n_results]):
             room_name = meta.get("room", "?")
-            source = (
-                Path(meta.get("source_file", "")).name
-                if meta.get("source_file")
-                else ""
-            )
+            source = Path(meta.get("source_file", "")).name if meta.get("source_file") else ""
             snippet = doc.strip().replace("\n", " ")
             if len(snippet) > 300:
                 snippet = snippet[:297] + "..."
@@ -259,9 +253,7 @@ class Layer3:
         cfg = MempalaceConfig()
         self.palace_path = palace_path or cfg.palace_path
 
-    def search(
-        self, query: str, wing: str = None, room: str = None, n_results: int = 5
-    ) -> str:
+    def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
         """Semantic search, returns compact result text."""
         try:
             col = _get_collection(self.palace_path, create=False)
@@ -295,11 +287,7 @@ class Layer3:
             similarity = round(1 - dist, 3)
             wing_name = meta.get("wing", "?")
             room_name = meta.get("room", "?")
-            source = (
-                Path(meta.get("source_file", "")).name
-                if meta.get("source_file")
-                else ""
-            )
+            source = Path(meta.get("source_file", "")).name if meta.get("source_file") else ""
 
             snippet = doc.strip().replace("\n", " ")
             if len(snippet) > 300:
@@ -373,9 +361,7 @@ class MemoryStack:
     def __init__(self, palace_path: str = None, identity_path: str = None):
         cfg = MempalaceConfig()
         self.palace_path = palace_path or cfg.palace_path
-        self.identity_path = identity_path or os.path.expanduser(
-            "~/.mempalace/identity.txt"
-        )
+        self.identity_path = identity_path or os.path.expanduser("~/.mempalace/identity.txt")
 
         self.l0 = Layer0(self.identity_path)
         self.l1 = Layer1(self.palace_path)
@@ -407,9 +393,7 @@ class MemoryStack:
         """On-demand L2 retrieval filtered by wing/room."""
         return self.l2.retrieve(wing=wing, room=room, n_results=n_results)
 
-    def search(
-        self, query: str, wing: str = None, room: str = None, n_results: int = 5
-    ) -> str:
+    def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
         """Deep L3 semantic search."""
         return self.l3.search(query, wing=wing, room=room, n_results=n_results)
 

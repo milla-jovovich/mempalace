@@ -29,9 +29,7 @@ import re
 from pathlib import Path
 
 HOME = Path.home()
-LUMI_DIR = Path(
-    os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts"))
-)
+LUMI_DIR = Path(os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts")))
 
 # People we know about (for name detection in content)
 # Loaded from ~/.mempalace/known_names.json if it exists, otherwise generic fallback.
@@ -105,9 +103,7 @@ def extract_timestamp(lines):
     Find the first timestamp line: ⏺ H:MM AM/PM Weekday, Month DD, YYYY
     Returns (datetime_str, iso_str) or (None, None).
     """
-    ts_pattern = re.compile(
-        r"⏺\s+(\d{1,2}:\d{2}\s+[AP]M)\s+\w+,\s+(\w+)\s+(\d{1,2}),\s+(\d{4})"
-    )
+    ts_pattern = re.compile(r"⏺\s+(\d{1,2}:\d{2}\s+[AP]M)\s+\w+,\s+(\w+)\s+(\d{1,2}),\s+(\d{4})")
     months = {
         "January": "01",
         "February": "02",
@@ -188,7 +184,7 @@ def split_file(filepath, output_dir, dry_run=False):
     path = Path(filepath)
     max_size = 500 * 1024 * 1024  # 500 MB safety limit
     if path.stat().st_size > max_size:
-        print(f"  SKIP: {path.name} exceeds {max_size // (1024*1024)} MB limit")
+        print(f"  SKIP: {path.name} exceeds {max_size // (1024 * 1024)} MB limit")
         return []
     lines = path.read_text(errors="replace").splitlines(keepends=True)
 
@@ -282,7 +278,7 @@ def main():
     max_scan_size = 500 * 1024 * 1024  # 500 MB
     for f in files:
         if f.stat().st_size > max_scan_size:
-            print(f"  SKIP: {f.name} exceeds {max_scan_size // (1024*1024)} MB limit")
+            print(f"  SKIP: {f.name} exceeds {max_scan_size // (1024 * 1024)} MB limit")
             continue
         lines = f.read_text(errors="replace").splitlines(keepends=True)
         boundaries = find_session_boundaries(lines)
@@ -316,13 +312,9 @@ def main():
 
     print(f"{'─' * 60}")
     if args.dry_run:
-        print(
-            f"  DRY RUN — would create {total_written} files from {len(mega_files)} mega-files"
-        )
+        print(f"  DRY RUN — would create {total_written} files from {len(mega_files)} mega-files")
     else:
-        print(
-            f"  Done — created {total_written} files from {len(mega_files)} mega-files"
-        )
+        print(f"  Done — created {total_written} files from {len(mega_files)} mega-files")
     print()
 
 

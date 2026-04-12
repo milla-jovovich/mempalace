@@ -672,11 +672,7 @@ class Dialect:
                 score += matches * 2
                 if len(q) > 20:
                     score += 1
-                if (
-                    q.startswith("The ")
-                    or q.startswith("This ")
-                    or q.startswith("She ")
-                ):
+                if q.startswith("The ") or q.startswith("This ") or q.startswith("She "):
                     score -= 2
                 scored.append((score, q))
             scored.sort(key=lambda x: -x[0])
@@ -744,11 +740,7 @@ class Dialect:
             all_people = {"???"}
         primary = "+".join(sorted(all_people)[:3])
 
-        title = (
-            source.replace(".txt", "").split("-", 1)[-1].strip()
-            if "-" in source
-            else source
-        )
+        title = source.replace(".txt", "").split("-", 1)[-1].strip() if "-" in source else source
         lines.append(f"{file_num}|{primary}|{date}|{title}")
 
         arc = zettel_json.get("emotional_arc", "")
@@ -826,9 +818,7 @@ class Dialect:
                 is_origin = z.get("origin_moment", False)
                 flags = self.get_flags(z)
                 has_key_flag = (
-                    any(f in flags for f in ["ORIGIN", "CORE", "GENESIS"])
-                    if flags
-                    else False
+                    any(f in flags for f in ["ORIGIN", "CORE", "GENESIS"]) if flags else False
                 )
 
                 if weight >= weight_threshold or is_origin or has_key_flag:
@@ -855,9 +845,7 @@ class Dialect:
 
         lines = []
         lines.append("## LAYER 1 -- ESSENTIAL STORY")
-        lines.append(
-            f"## Auto-generated from zettel files. Updated {date_cls.today()}."
-        )
+        lines.append(f"## Auto-generated from zettel files. Updated {date_cls.today()}.")
         lines.append("")
 
         if identity_sections:
@@ -986,24 +974,12 @@ if __name__ == "__main__":
         print("AAAK Dialect -- Compressed Symbolic Memory for Any LLM")
         print()
         print("Usage:")
-        print(
-            "  python dialect.py <text>                         # Compress text from argument"
-        )
-        print(
-            "  python dialect.py --file <zettel.json>           # Compress zettel JSON file"
-        )
-        print(
-            "  python dialect.py --all <zettel_dir>             # Compress all zettel files"
-        )
-        print(
-            "  python dialect.py --stats <zettel.json>          # Show compression stats"
-        )
-        print(
-            "  python dialect.py --layer1 <zettel_dir>          # Generate Layer 1 wake-up file"
-        )
-        print(
-            "  python dialect.py --init                         # Create example config"
-        )
+        print("  python dialect.py <text>                         # Compress text from argument")
+        print("  python dialect.py --file <zettel.json>           # Compress zettel JSON file")
+        print("  python dialect.py --all <zettel_dir>             # Compress all zettel files")
+        print("  python dialect.py --stats <zettel.json>          # Show compression stats")
+        print("  python dialect.py --layer1 <zettel_dir>          # Generate Layer 1 wake-up file")
+        print("  python dialect.py --init                         # Create example config")
         print()
         print("Options:")
         print("  --config <path>   Load entity mappings from JSON config")
@@ -1039,9 +1015,7 @@ if __name__ == "__main__":
         with open(out_path, "w") as f:
             json.dump(example, f, indent=2)
         print(f"Created example config: {out_path}")
-        print(
-            "Edit this file with your own entity mappings, then use --config entities.json"
-        )
+        print("Edit this file with your own entity mappings, then use --config entities.json")
 
     elif args[0] == "--file":
         result = dialect.compress_file(args[1])
@@ -1095,8 +1069,6 @@ if __name__ == "__main__":
         print(
             f"AAAK:     ~{stats['summary_tokens_est']} tokens est ({stats['summary_chars']} chars)"
         )
-        print(
-            f"Ratio:    {stats['size_ratio']}x (lossy summary, not lossless compression)"
-        )
+        print(f"Ratio:    {stats['size_ratio']}x (lossy summary, not lossless compression)")
         print()
         print(compressed)

@@ -212,8 +212,7 @@ def _wikipedia_lookup(word: str) -> dict:
             confidence = (
                 0.90
                 if any(
-                    f"{word.lower()} is a" in extract
-                    or f"{word.lower()} (name" in extract
+                    f"{word.lower()} is a" in extract or f"{word.lower()} (name" in extract
                     for _ in [1]
                 )
                 else 0.80
@@ -298,11 +297,7 @@ class EntityRegistry:
 
     @classmethod
     def load(cls, config_dir: Optional[Path] = None) -> "EntityRegistry":
-        path = (
-            (Path(config_dir) / "entity_registry.json")
-            if config_dir
-            else cls.DEFAULT_PATH
-        )
+        path = (Path(config_dir) / "entity_registry.json") if config_dir else cls.DEFAULT_PATH
         if path.exists():
             try:
                 data = json.loads(path.read_text())
@@ -461,9 +456,7 @@ class EntityRegistry:
             "needs_disambiguation": False,
         }
 
-    def _disambiguate(
-        self, word: str, context: str, person_info: dict
-    ) -> Optional[dict]:
+    def _disambiguate(self, word: str, context: str, person_info: dict) -> Optional[dict]:
         """
         When a word is both a name and a common word, check context.
         Returns person result if context suggests a name, None if ambiguous.

@@ -64,12 +64,8 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
             break
 
         # Group this batch by wing/room so we do one file write per room per batch
-        batch_grouped: dict[str, dict[str, list]] = defaultdict(
-            lambda: defaultdict(list)
-        )
-        for doc_id, doc, meta in zip(
-            batch["ids"], batch["documents"], batch["metadatas"]
-        ):
+        batch_grouped: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+        for doc_id, doc, meta in zip(batch["ids"], batch["documents"], batch["metadatas"]):
             wing = meta.get("wing", "unknown")
             room = meta.get("room", "general")
             batch_grouped[wing][room].append(

@@ -145,9 +145,7 @@ def scan_palace(palace_path=None, only_wing=None):
 
     print(f"\n  Scan complete in {time.time() - t0:.1f}s")
     print(f"  GOOD: {len(good_set):,}")
-    print(
-        f"  BAD:  {len(bad_set):,}  ({len(bad_set) / max(len(all_ids), 1) * 100:.1f}%)"
-    )
+    print(f"  BAD:  {len(bad_set):,}  ({len(bad_set) / max(len(all_ids), 1) * 100:.1f}%)")
 
     bad_file = os.path.join(palace_path, "corrupt_ids.txt")
     with open(bad_file, "w") as f:
@@ -246,9 +244,7 @@ def rebuild_index(palace_path=None):
     all_metas = []
     offset = 0
     while offset < total:
-        batch = col.get(
-            limit=batch_size, offset=offset, include=["documents", "metadatas"]
-        )
+        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
         if not batch["ids"]:
             break
         all_ids.extend(batch["ids"])
@@ -261,18 +257,14 @@ def rebuild_index(palace_path=None):
     sqlite_path = os.path.join(palace_path, "chroma.sqlite3")
     if os.path.exists(sqlite_path):
         backup_path = sqlite_path + ".backup"
-        print(
-            f"  Backing up chroma.sqlite3 ({os.path.getsize(sqlite_path) / 1e6:.0f} MB)..."
-        )
+        print(f"  Backing up chroma.sqlite3 ({os.path.getsize(sqlite_path) / 1e6:.0f} MB)...")
         shutil.copy2(sqlite_path, backup_path)
         print(f"  Backup: {backup_path}")
 
     # Rebuild with correct HNSW settings
     print("  Rebuilding collection with hnsw:space=cosine...")
     client.delete_collection(COLLECTION_NAME)
-    new_col = client.create_collection(
-        COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
-    )
+    new_col = client.create_collection(COLLECTION_NAME, metadata={"hnsw:space": "cosine"})
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
