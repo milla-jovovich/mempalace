@@ -108,12 +108,8 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
 
         if msg_type in ("human", "user"):
             # Check if this message is tool_results only (no user text)
-            is_tool_only = (
-                isinstance(msg_content, list)
-                and all(
-                    isinstance(b, dict) and b.get("type") == "tool_result"
-                    for b in msg_content
-                )
+            is_tool_only = isinstance(msg_content, list) and all(
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in msg_content
             )
             text = _extract_content(msg_content, tool_use_map=tool_use_map)
             if text:
@@ -381,8 +377,8 @@ def _format_tool_use(block: dict) -> str:
 
 
 _TOOL_RESULT_MAX_LINES_BASH = 20  # head and tail line count
-_TOOL_RESULT_MAX_MATCHES = 20     # Grep/Glob cap
-_TOOL_RESULT_MAX_BYTES = 2048     # fallback cap for unknown tools
+_TOOL_RESULT_MAX_MATCHES = 20  # Grep/Glob cap
+_TOOL_RESULT_MAX_BYTES = 2048  # fallback cap for unknown tools
 
 
 def _format_tool_result(content, tool_name: str) -> str:
@@ -426,9 +422,11 @@ def _format_tool_result(content, tool_name: str) -> str:
         tail = lines[-n:]
         omitted = len(lines) - 2 * n
         return (
-            "→ " + "\n→ ".join(head)
+            "→ "
+            + "\n→ ".join(head)
             + f"\n→ ... [{omitted} lines omitted] ..."
-            + "\n→ " + "\n→ ".join(tail)
+            + "\n→ "
+            + "\n→ ".join(tail)
         )
 
     # Grep/Glob — cap matches

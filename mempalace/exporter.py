@@ -21,9 +21,9 @@ from .palace import get_collection
 
 def _safe_path_component(name: str) -> str:
     """Sanitize a string for use as a directory/file name component."""
-    name = re.sub(r'[/\\:*?"<>|]', '_', name)
-    name = name.strip('. ')
-    return name or 'unknown'
+    name = re.sub(r'[/\\:*?"<>|]', "_", name)
+    name = name.strip(". ")
+    return name or "unknown"
 
 
 def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -> dict:
@@ -68,13 +68,15 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
         for doc_id, doc, meta in zip(batch["ids"], batch["documents"], batch["metadatas"]):
             wing = meta.get("wing", "unknown")
             room = meta.get("room", "general")
-            batch_grouped[wing][room].append({
-                "id": doc_id,
-                "content": doc,
-                "source": meta.get("source_file", ""),
-                "filed_at": meta.get("filed_at", ""),
-                "added_by": meta.get("added_by", ""),
-            })
+            batch_grouped[wing][room].append(
+                {
+                    "id": doc_id,
+                    "content": doc,
+                    "source": meta.get("source_file", ""),
+                    "filed_at": meta.get("filed_at", ""),
+                    "added_by": meta.get("added_by", ""),
+                }
+            )
 
         # Write/append each room file
         for wing, rooms in batch_grouped.items():
@@ -141,8 +143,14 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
     with open(index_path, "w", encoding="utf-8") as f:
         f.write("\n".join(index_lines))
 
-    stats = {"wings": len(wing_stats), "rooms": sum(r for _, r, _ in index_rows), "drawers": total_drawers}
-    print(f"\n  Exported {stats['drawers']} drawers across {stats['wings']} wings, {stats['rooms']} rooms")
+    stats = {
+        "wings": len(wing_stats),
+        "rooms": sum(r for _, r, _ in index_rows),
+        "drawers": total_drawers,
+    }
+    print(
+        f"\n  Exported {stats['drawers']} drawers across {stats['wings']} wings, {stats['rooms']} rooms"
+    )
     print(f"  Output: {output_dir}")
     return stats
 

@@ -82,7 +82,7 @@ class Layer1:
 
     MAX_DRAWERS = 15  # at most 15 moments in wake-up
     MAX_CHARS = 3200  # hard cap on total L1 text (~800 tokens)
-    MAX_SCAN = 2000   # don't scan more than this for L1 generation
+    MAX_SCAN = 2000  # don't scan more than this for L1 generation
 
     def __init__(self, palace_path: str = None, wing: str = None):
         cfg = MempalaceConfig()
