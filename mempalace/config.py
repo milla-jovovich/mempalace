@@ -18,6 +18,9 @@ from pathlib import Path
 MAX_NAME_LENGTH = 128
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_ .'-]{0,126}[a-zA-Z0-9]?$")
 
+MAX_KG_VALUE_LENGTH = 256
+_UNSAFE_KG_RE = re.compile(r"[\x00-\x1f\\/]")
+
 
 def sanitize_name(value: str, field_name: str = "name") -> str:
     """Validate and sanitize a wing/room/entity name.
@@ -42,6 +45,36 @@ def sanitize_name(value: str, field_name: str = "name") -> str:
 
     # Enforce safe character set
     if not _SAFE_NAME_RE.match(value):
+        raise ValueError(f"{field_name} contains invalid characters")
+
+    return value
+
+
+def sanitize_kg_value(value: str, field_name: str = "value") -> str:
+    """Validate a knowledge graph triple field (subject/predicate/object).
+
+    More permissive than sanitize_name: allows Unicode (CJK, etc.) and
+    common punctuation like commas, colons, and parentheses.  KG values
+    are stored in SQLite, not used as file paths, so the ASCII-only
+    restriction from sanitize_name is unnecessary here.
+
+    Still blocks control characters, path separators (/ \\), path
+    traversal (..), and null bytes.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+
+    value = value.strip()
+
+    if len(value) > MAX_KG_VALUE_LENGTH:
+        raise ValueError(
+            f"{field_name} exceeds maximum length of {MAX_KG_VALUE_LENGTH} characters"
+        )
+
+    if ".." in value:
+        raise ValueError(f"{field_name} contains invalid path characters")
+
+    if _UNSAFE_KG_RE.search(value):
         raise ValueError(f"{field_name} contains invalid characters")
 
     return value

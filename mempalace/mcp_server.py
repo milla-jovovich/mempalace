@@ -27,7 +27,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from .config import MempalaceConfig, sanitize_name, sanitize_content
+from .config import MempalaceConfig, sanitize_name, sanitize_kg_value, sanitize_content
 from .version import __version__
 import chromadb
 from .query_sanitizer import sanitize_query
@@ -690,9 +690,9 @@ def tool_kg_add(
 ):
     """Add a relationship to the knowledge graph."""
     try:
-        subject = sanitize_name(subject, "subject")
-        predicate = sanitize_name(predicate, "predicate")
-        object = sanitize_name(object, "object")
+        subject = sanitize_kg_value(subject, "subject")
+        predicate = sanitize_kg_value(predicate, "predicate")
+        object = sanitize_kg_value(object, "object")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -715,9 +715,9 @@ def tool_kg_add(
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
     """Mark a fact as no longer true (set end date)."""
     try:
-        subject = sanitize_name(subject, "subject")
-        predicate = sanitize_name(predicate, "predicate")
-        object = sanitize_name(object, "object")
+        subject = sanitize_kg_value(subject, "subject")
+        predicate = sanitize_kg_value(predicate, "predicate")
+        object = sanitize_kg_value(object, "object")
     except ValueError as e:
         return {"success": False, "error": str(e)}
     _wal_log(
