@@ -20,7 +20,6 @@ from pathlib import Path
 from mempalace.entity_registry import EntityRegistry
 from mempalace.entity_detector import detect_entities, scan_for_detection
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Default wing taxonomies by mode
 # ─────────────────────────────────────────────────────────────────────────────
@@ -143,7 +142,9 @@ def _ask_people(mode: str) -> tuple[list, dict]:
                 nick = input(f"  Nickname for {name}? (or enter to skip): ").strip()
                 if nick:
                     aliases[nick] = name
-                people.append({"name": name, "relationship": relationship, "context": "personal"})
+                people.append(
+                    {"name": name, "relationship": relationship, "context": "personal"}
+                )
 
     if mode in ("work", "combo"):
         _hr()
@@ -312,7 +313,9 @@ def _generate_aaak_bootstrap(
         ]
     )
 
-    (mempalace_dir / "aaak_entities.md").write_text("\n".join(registry_lines), encoding="utf-8")
+    (mempalace_dir / "aaak_entities.md").write_text(
+        "\n".join(registry_lines), encoding="utf-8"
+    )
 
     # Critical facts bootstrap (pre-palace — before any mining)
     facts_lines = [
@@ -329,7 +332,9 @@ def _generate_aaak_bootstrap(
             code = entity_codes[p["name"]]
             rel = p.get("relationship", "")
             facts_lines.append(
-                f"- **{p['name']}** ({code}) — {rel}" if rel else f"- **{p['name']}** ({code})"
+                f"- **{p['name']}** ({code}) — {rel}"
+                if rel
+                else f"- **{p['name']}** ({code})"
             )
         facts_lines.append("")
 
@@ -339,7 +344,9 @@ def _generate_aaak_bootstrap(
             code = entity_codes[p["name"]]
             rel = p.get("relationship", "")
             facts_lines.append(
-                f"- **{p['name']}** ({code}) — {rel}" if rel else f"- **{p['name']}** ({code})"
+                f"- **{p['name']}** ({code}) — {rel}"
+                if rel
+                else f"- **{p['name']}** ({code})"
             )
         facts_lines.append("")
 
@@ -359,7 +366,9 @@ def _generate_aaak_bootstrap(
         ]
     )
 
-    (mempalace_dir / "critical_facts.md").write_text("\n".join(facts_lines), encoding="utf-8")
+    (mempalace_dir / "critical_facts.md").write_text(
+        "\n".join(facts_lines), encoding="utf-8"
+    )
 
 
 def run_onboarding(
@@ -384,7 +393,9 @@ def run_onboarding(
     wings = _ask_wings(mode)
 
     # Step 5: Auto-detect additional people from files
-    if auto_detect and _yn("\nScan your files for additional names we might have missed?"):
+    if auto_detect and _yn(
+        "\nScan your files for additional names we might have missed?"
+    ):
         directory = _ask("Directory to scan", default=directory)
         detected = _auto_detect(directory, people)
         if detected:
@@ -414,7 +425,9 @@ def run_onboarding(
                                 .replace("p", "personal")
                             )
                         )
-                        people.append({"name": e["name"], "relationship": rel, "context": ctx})
+                        people.append(
+                            {"name": e["name"], "relationship": rel, "context": ctx}
+                        )
 
     # Step 6: Warn about ambiguous names
     ambiguous = _warn_ambiguous(people)

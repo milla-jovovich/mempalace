@@ -22,7 +22,6 @@ Usage:
 import re
 from typing import List, Dict, Tuple
 
-
 # =============================================================================
 # MARKER SETS — One per memory type
 # =============================================================================
@@ -351,7 +350,9 @@ def _score_markers(text: str, markers: List[str]) -> Tuple[float, List[str]]:
         matches = re.findall(marker, text_lower)
         if matches:
             score += len(matches)
-            keywords.extend(m if isinstance(m, str) else m[0] if m else marker for m in matches)
+            keywords.extend(
+                m if isinstance(m, str) else m[0] if m else marker for m in matches
+            )
     return score, list(set(keywords))
 
 

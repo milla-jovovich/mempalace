@@ -18,7 +18,6 @@ from collections import defaultdict
 from .normalize import normalize
 from .palace import SKIP_DIRS, get_collection, file_already_mined
 
-
 # File types that might contain conversations
 CONVO_EXTENSIONS = {
     ".txt",
@@ -64,7 +63,9 @@ def _chunk_by_exchange(lines: list) -> list:
             ai_lines = []
             while i < len(lines):
                 next_line = lines[i]
-                if next_line.strip().startswith(">") or next_line.strip().startswith("---"):
+                if next_line.strip().startswith(">") or next_line.strip().startswith(
+                    "---"
+                ):
                     break
                 if next_line.strip():
                     ai_lines.append(next_line.strip())
@@ -311,9 +312,13 @@ def mine_convos(
 
                 type_counts = Counter(c.get("memory_type", "general") for c in chunks)
                 types_str = ", ".join(f"{t}:{n}" for t, n in type_counts.most_common())
-                print(f"    [DRY RUN] {filepath.name} → {len(chunks)} memories ({types_str})")
+                print(
+                    f"    [DRY RUN] {filepath.name} → {len(chunks)} memories ({types_str})"
+                )
             else:
-                print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
+                print(
+                    f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)"
+                )
             total_drawers += len(chunks)
             # Track room counts
             if extract_mode == "general":
@@ -329,7 +334,9 @@ def mine_convos(
         # File each chunk
         drawers_added = 0
         for chunk in chunks:
-            chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
+            chunk_room = (
+                chunk.get("memory_type", room) if extract_mode == "general" else room
+            )
             if extract_mode == "general":
                 room_counts[chunk_room] += 1
             drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
@@ -365,7 +372,9 @@ def mine_convos(
     print(f"  Drawers filed: {total_drawers}")
     if room_counts:
         print("\n  By room:")
-        for room, count in sorted(room_counts.items(), key=lambda x: x[1], reverse=True):
+        for room, count in sorted(
+            room_counts.items(), key=lambda x: x[1], reverse=True
+        ):
             print(f"    {room:20} {count} files")
     print('\n  Next: mempalace search "what you\'re looking for"')
     print(f"{'=' * 55}\n")
@@ -373,7 +382,9 @@ def mine_convos(
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python convo_miner.py <convo_dir> [--palace PATH] [--limit N] [--dry-run]")
+        print(
+            "Usage: python convo_miner.py <convo_dir> [--palace PATH] [--limit N] [--dry-run]"
+        )
         sys.exit(1)
     from .config import MempalaceConfig
 

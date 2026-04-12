@@ -29,7 +29,6 @@ from collections import defaultdict
 
 import chromadb
 
-
 COLLECTION_NAME = "mempalace_drawers"
 # Cosine DISTANCE threshold (not similarity). Lower = stricter.
 # 0.15 = ~85% cosine similarity — catches near-identical chunks.
@@ -48,7 +47,9 @@ def _get_palace_path():
         return os.path.join(os.path.expanduser("~"), ".mempalace", "palace")
 
 
-def get_source_groups(col, min_count=MIN_DRAWERS_TO_CHECK, source_pattern=None, wing=None):
+def get_source_groups(
+    col, min_count=MIN_DRAWERS_TO_CHECK, source_pattern=None, wing=None
+):
     """Group drawers by source_file, return groups with min_count+ entries.
 
     If wing is specified, only considers drawers in that wing. This catches
@@ -144,7 +145,9 @@ def show_stats(palace_path=None):
     for src, ids in sorted_groups[:15]:
         print(f"    {len(ids):4d}  {src[:65]}")
 
-    estimated_dups = sum(int(len(ids) * 0.4) for ids in groups.values() if len(ids) > 20)
+    estimated_dups = sum(
+        int(len(ids) * 0.4) for ids in groups.values() if len(ids) > 20
+    )
     print(f"\n  Estimated duplicates (groups > 20): ~{estimated_dups:,}")
 
 
@@ -219,7 +222,9 @@ if __name__ == "__main__":
         default=DEFAULT_THRESHOLD,
         help=f"Cosine distance threshold (default: {DEFAULT_THRESHOLD})",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Preview without deleting")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Preview without deleting"
+    )
     parser.add_argument("--stats", action="store_true", help="Show stats only")
     parser.add_argument("--wing", default=None, help="Scope dedup to a single wing")
     parser.add_argument("--source", default=None, help="Filter by source file pattern")

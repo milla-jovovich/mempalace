@@ -58,7 +58,9 @@ def _count_human_messages(transcript_path: str) -> int:
                                 continue
                         elif isinstance(content, list):
                             text = " ".join(
-                                b.get("text", "") for b in content if isinstance(b, dict)
+                                b.get("text", "")
+                                for b in content
+                                if isinstance(b, dict)
                             )
                             if "<command-message>" in text:
                                 continue
@@ -67,9 +69,15 @@ def _count_human_messages(transcript_path: str) -> int:
                     # {"type": "event_msg", "payload": {"type": "user_message", "message": "..."}}
                     elif entry.get("type") == "event_msg":
                         payload = entry.get("payload", {})
-                        if isinstance(payload, dict) and payload.get("type") == "user_message":
+                        if (
+                            isinstance(payload, dict)
+                            and payload.get("type") == "user_message"
+                        ):
                             msg_text = payload.get("message", "")
-                            if isinstance(msg_text, str) and "<command-message>" not in msg_text:
+                            if (
+                                isinstance(msg_text, str)
+                                and "<command-message>" not in msg_text
+                            ):
                                 count += 1
                 except (json.JSONDecodeError, AttributeError):
                     pass
@@ -153,7 +161,9 @@ def hook_stop(data: dict, harness: str):
 
     since_last = exchange_count - last_save
 
-    _log(f"Session {session_id}: {exchange_count} exchanges, {since_last} since last save")
+    _log(
+        f"Session {session_id}: {exchange_count} exchanges, {since_last} since last save"
+    )
 
     if since_last >= SAVE_INTERVAL and exchange_count > 0:
         # Update last save point

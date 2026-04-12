@@ -20,7 +20,6 @@ import os
 from pathlib import Path
 from collections import defaultdict
 
-
 # ==================== SIGNAL PATTERNS ====================
 
 # Person signals — things people do
@@ -471,13 +470,18 @@ def _build_patterns(name: str) -> dict:
     n = re.escape(name)
     return {
         "dialogue": [
-            re.compile(p.format(name=n), re.MULTILINE | re.IGNORECASE) for p in DIALOGUE_PATTERNS
+            re.compile(p.format(name=n), re.MULTILINE | re.IGNORECASE)
+            for p in DIALOGUE_PATTERNS
         ],
-        "person_verbs": [re.compile(p.format(name=n), re.IGNORECASE) for p in PERSON_VERB_PATTERNS],
+        "person_verbs": [
+            re.compile(p.format(name=n), re.IGNORECASE) for p in PERSON_VERB_PATTERNS
+        ],
         "project_verbs": [
             re.compile(p.format(name=n), re.IGNORECASE) for p in PROJECT_VERB_PATTERNS
         ],
-        "direct": re.compile(rf"\bhey\s+{n}\b|\bthanks?\s+{n}\b|\bhi\s+{n}\b", re.IGNORECASE),
+        "direct": re.compile(
+            rf"\bhey\s+{n}\b|\bthanks?\s+{n}\b|\bhi\s+{n}\b", re.IGNORECASE
+        ),
         "versioned": re.compile(rf"\b{n}[-v]\w+", re.IGNORECASE),
         "code_ref": re.compile(rf"\b{n}\.(py|js|ts|yaml|yml|json|sh)\b", re.IGNORECASE),
     }
@@ -512,7 +516,9 @@ def score_entity(name: str, text: str, lines: list) -> dict:
 
     # Pronoun proximity — pronouns within 3 lines of the name
     name_lower = name.lower()
-    name_line_indices = [i for i, line in enumerate(lines) if name_lower in line.lower()]
+    name_line_indices = [
+        i for i, line in enumerate(lines) if name_lower in line.lower()
+    ]
     pronoun_hits = 0
     for idx in name_line_indices:
         window_text = " ".join(lines[max(0, idx - 2) : idx + 3]).lower()
@@ -606,7 +612,9 @@ def classify_entity(name: str, frequency: int, scores: dict) -> dict:
         # Pronoun-only match — downgrade to uncertain
         entity_type = "uncertain"
         confidence = 0.4
-        signals = scores["person_signals"] + [f"appears {frequency}x — pronoun-only match"]
+        signals = scores["person_signals"] + [
+            f"appears {frequency}x — pronoun-only match"
+        ]
     elif person_ratio <= 0.3:
         entity_type = "project"
         confidence = min(0.99, 0.5 + (1 - person_ratio) * 0.5)
@@ -649,7 +657,9 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
     all_lines = []
     files_read = 0
 
-    MAX_BYTES_PER_FILE = 5_000  # first 5KB per file — enough to catch recurring entities
+    MAX_BYTES_PER_FILE = (
+        5_000  # first 5KB per file — enough to catch recurring entities
+    )
 
     for filepath in file_paths:
         if files_read >= max_files:
@@ -709,7 +719,9 @@ def _print_entity_list(entities: list, label: str):
         print("    (none detected)")
         return
     for i, e in enumerate(entities):
-        confidence_bar = "●" * int(e["confidence"] * 5) + "○" * (5 - int(e["confidence"] * 5))
+        confidence_bar = "●" * int(e["confidence"] * 5) + "○" * (
+            5 - int(e["confidence"] * 5)
+        )
         signals_str = ", ".join(e["signals"][:2]) if e["signals"] else ""
         print(f"    {i + 1:2}. {e['name']:20} [{confidence_bar}] {signals_str}")
 
@@ -760,7 +772,11 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
         if detected["uncertain"]:
             print("\n  Uncertain entities — classify each:")
             for e in detected["uncertain"]:
-                ans = input(f"    {e['name']} — (p)erson, (r)roject, or (s)kip? ").strip().lower()
+                ans = (
+                    input(f"    {e['name']} — (p)erson, (r)roject, or (s)kip? ")
+                    .strip()
+                    .lower()
+                )
                 if ans == "p":
                     confirmed_people.append(e["name"])
                 elif ans == "r":
@@ -772,8 +788,12 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
             "  Numbers to REMOVE from people (comma-separated, or enter to skip): "
         ).strip()
         if remove:
-            to_remove = {int(x.strip()) - 1 for x in remove.split(",") if x.strip().isdigit()}
-            confirmed_people = [p for i, p in enumerate(confirmed_people) if i not in to_remove]
+            to_remove = {
+                int(x.strip()) - 1 for x in remove.split(",") if x.strip().isdigit()
+            }
+            confirmed_people = [
+                p for i, p in enumerate(confirmed_people) if i not in to_remove
+            ]
 
         # Remove wrong projects
         print(f"\n  Current projects: {', '.join(confirmed_projects) or '(none)'}")
@@ -781,8 +801,12 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
             "  Numbers to REMOVE from projects (comma-separated, or enter to skip): "
         ).strip()
         if remove:
-            to_remove = {int(x.strip()) - 1 for x in remove.split(",") if x.strip().isdigit()}
-            confirmed_projects = [p for i, p in enumerate(confirmed_projects) if i not in to_remove]
+            to_remove = {
+                int(x.strip()) - 1 for x in remove.split(",") if x.strip().isdigit()
+            }
+            confirmed_projects = [
+                p for i, p in enumerate(confirmed_projects) if i not in to_remove
+            ]
 
     if choice == "add" or input("\n  Add any missing? [y/N]: ").strip().lower() == "y":
         while True:

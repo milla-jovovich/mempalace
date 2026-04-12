@@ -29,7 +29,9 @@ import re
 from pathlib import Path
 
 HOME = Path.home()
-LUMI_DIR = Path(os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts")))
+LUMI_DIR = Path(
+    os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts"))
+)
 
 # People we know about (for name detection in content)
 # Loaded from ~/.mempalace/known_names.json if it exists, otherwise generic fallback.
@@ -103,7 +105,9 @@ def extract_timestamp(lines):
     Find the first timestamp line: ⏺ H:MM AM/PM Weekday, Month DD, YYYY
     Returns (datetime_str, iso_str) or (None, None).
     """
-    ts_pattern = re.compile(r"⏺\s+(\d{1,2}:\d{2}\s+[AP]M)\s+\w+,\s+(\w+)\s+(\d{1,2}),\s+(\d{4})")
+    ts_pattern = re.compile(
+        r"⏺\s+(\d{1,2}:\d{2}\s+[AP]M)\s+\w+,\s+(\w+)\s+(\d{1,2}),\s+(\d{4})"
+    )
     months = {
         "January": "01",
         "February": "02",
@@ -242,7 +246,10 @@ def main():
         help="Source directory (default: MEMPALACE_SOURCE_DIR or ~/Desktop/transcripts)",
     )
     parser.add_argument(
-        "--output-dir", type=str, default=None, help="Output directory (default: same as source)"
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Output directory (default: same as source)",
     )
     parser.add_argument(
         "--min-sessions",
@@ -251,7 +258,9 @@ def main():
         help="Only split files with at least N sessions (default: 2)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="Show what would happen without writing files"
+        "--dry-run",
+        action="store_true",
+        help="Show what would happen without writing files",
     )
     parser.add_argument(
         "--file",
@@ -307,9 +316,13 @@ def main():
 
     print(f"{'─' * 60}")
     if args.dry_run:
-        print(f"  DRY RUN — would create {total_written} files from {len(mega_files)} mega-files")
+        print(
+            f"  DRY RUN — would create {total_written} files from {len(mega_files)} mega-files"
+        )
     else:
-        print(f"  Done — created {total_written} files from {len(mega_files)} mega-files")
+        print(
+            f"  Done — created {total_written} files from {len(mega_files)} mega-files"
+        )
     print()
 
 

@@ -74,7 +74,9 @@ class GitignoreMatcher:
             return None
 
         try:
-            lines = gitignore_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            lines = gitignore_path.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()
         except Exception:
             return None
 
@@ -290,7 +292,9 @@ def detect_room(filepath: Path, content: str, rooms: list, project_path: Path) -
     path_parts = relative.replace("\\", "/").split("/")
     for part in path_parts[:-1]:  # skip filename itself
         for room in rooms:
-            candidates = [room["name"].lower()] + [k.lower() for k in room.get("keywords", [])]
+            candidates = [room["name"].lower()] + [
+                k.lower() for k in room.get("keywords", [])
+            ]
             if any(part == c or c in part or part in c for c in candidates):
                 return room["name"]
 
@@ -369,7 +373,13 @@ def chunk_text(content: str, source_file: str) -> list:
 
 
 def add_drawer(
-    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
+    collection,
+    wing: str,
+    room: str,
+    content: str,
+    source_file: str,
+    chunk_index: int,
+    agent: str,
 ):
     """Add one drawer to the palace."""
     drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
@@ -485,7 +495,8 @@ def scan_project(
             active_matchers = [
                 matcher
                 for matcher in active_matchers
-                if root_path == matcher.base_dir or matcher.base_dir in root_path.parents
+                if root_path == matcher.base_dir
+                or matcher.base_dir in root_path.parents
             ]
             current_matcher = load_gitignore_matcher(root_path, matcher_cache)
             if current_matcher is not None:
@@ -508,11 +519,16 @@ def scan_project(
         for filename in filenames:
             filepath = root_path / filename
             force_include = is_force_included(filepath, project_path, include_paths)
-            exact_force_include = is_exact_force_include(filepath, project_path, include_paths)
+            exact_force_include = is_exact_force_include(
+                filepath, project_path, include_paths
+            )
 
             if not force_include and filename in SKIP_FILENAMES:
                 continue
-            if filepath.suffix.lower() not in READABLE_EXTENSIONS and not exact_force_include:
+            if (
+                filepath.suffix.lower() not in READABLE_EXTENSIONS
+                and not exact_force_include
+            ):
                 continue
             if respect_gitignore and active_matchers and not force_include:
                 if is_gitignored(filepath, active_matchers, is_dir=False):
@@ -551,7 +567,9 @@ def mine(
     config = load_config(project_dir)
 
     wing = wing_override or config["wing"]
-    rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
+    rooms = config.get(
+        "rooms", [{"name": "general", "description": "All project files"}]
+    )
 
     files = scan_project(
         project_dir,
@@ -573,7 +591,9 @@ def mine(
     if not respect_gitignore:
         print("  .gitignore: DISABLED")
     if include_ignored:
-        print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
+        print(
+            f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}"
+        )
     print(f"{'─' * 55}\n")
 
     if not dry_run:

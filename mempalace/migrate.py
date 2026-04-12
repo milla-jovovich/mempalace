@@ -95,7 +95,9 @@ def detect_chromadb_version(db_path: str) -> str:
         # 0.6.x has embeddings_queue but no schema_str
         tables = [
             r[0]
-            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
         ]
         if "embeddings_queue" in tables:
             return "0.6.x"

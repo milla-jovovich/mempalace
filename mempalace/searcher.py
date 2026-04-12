@@ -29,7 +29,9 @@ def build_where_filter(wing: str = None, room: str = None) -> dict:
     return {}
 
 
-def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
+def search(
+    query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5
+):
     """
     Search the palace. Returns verbatim drawer content.
     Optionally filter by wing (project) or room (aspect).

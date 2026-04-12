@@ -47,7 +47,9 @@ def build_graph(col=None, config=None):
         return {}, []
 
     total = col.count()
-    room_data = defaultdict(lambda: {"wings": set(), "halls": set(), "count": 0, "dates": set()})
+    room_data = defaultdict(
+        lambda: {"wings": set(), "halls": set(), "count": 0, "dates": set()}
+    )
 
     offset = 0
     while offset < total:
