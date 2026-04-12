@@ -19,7 +19,7 @@ No dependency on palace.py or layers.py.
 
 FORMAT:
   Header:   FILE_NUM|PRIMARY_ENTITY|DATE|TITLE
-  Zettel:   ZID:ENTITIES|topic_keywords|"key_quote"|WEIGHT|EMOTIONS|FLAGS
+  Zettel:   ZID:ENTITIES|topic_keywords|"key_quote"|WEIGHT (CONF)|EMOTIONS|FLAGS
   Tunnel:   T:ZID<->ZID|label
   Arc:      ARC:emotion->emotion->emotion
 
@@ -46,6 +46,13 @@ import os
 import re
 from typing import List, Dict, Optional
 from pathlib import Path
+
+BLOCK_SYMBOLS = ["▱▱▱▱▱", "▰▱▱▱▱", "▰▰▱▱▱", "▰▰▰▱▱", "▰▰▰▰▱", "▰▰▰▰▰"]
+
+def get_confidence_visual(weight: float) -> str:
+    """Convert a 0.0-1.0 weight into a high-density visual block bar."""
+    index = min(5, max(0, int(weight * 5)))
+    return BLOCK_SYMBOLS[index]
 
 
 # === EMOTION CODES (universal) ===
@@ -707,7 +714,7 @@ class Dialect:
         parts = [f"{zid}:{entities}", topic_str]
         if quote_part:
             parts.append(quote_part)
-        parts.append(str(weight))
+        parts.append(f"{weight} {get_confidence_visual(weight)}")
         if emotions:
             parts.append(emotions)
         if flags:
@@ -884,7 +891,7 @@ class Dialect:
                     parts.append(f'"{quote}"')
                 if sensitivity and "SENSITIVE" not in (flags or ""):
                     parts.append("SENSITIVE")
-                parts.append(str(weight))
+                parts.append(f"{weight} {get_confidence_visual(weight)}")
                 if flags:
                     parts.append(flags)
 
