@@ -108,18 +108,14 @@ def _chunk_by_exchange(lines: list) -> list:
                 # First chunk: user turn + as much response as fits
                 first_part = content[:CHUNK_SIZE]
                 if len(first_part.strip()) > MIN_CHUNK_SIZE:
-                    chunks.append(
-                        {"content": first_part, "chunk_index": len(chunks)}
-                    )
+                    chunks.append({"content": first_part, "chunk_index": len(chunks)})
                 # Remaining response in CHUNK_SIZE-sized continuation drawers
                 remainder = content[CHUNK_SIZE:]
                 while remainder:
                     part = remainder[:CHUNK_SIZE]
                     remainder = remainder[CHUNK_SIZE:]
                     if len(part.strip()) > MIN_CHUNK_SIZE:
-                        chunks.append(
-                            {"content": part, "chunk_index": len(chunks)}
-                        )
+                        chunks.append({"content": part, "chunk_index": len(chunks)})
             elif len(content.strip()) > MIN_CHUNK_SIZE:
                 chunks.append(
                     {
