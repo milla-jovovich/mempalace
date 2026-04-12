@@ -153,9 +153,7 @@ def test_layer1_with_wing_filter():
 
     assert "ESSENTIAL STORY" in result
     # Verify wing filter was passed in at least one get() call
-    all_wheres = [
-        c[1].get("where") for c in mock_client.get.call_args_list
-    ]
+    all_wheres = [c[1].get("where") for c in mock_client.get.call_args_list]
     assert any(
         w == {"wing": "project_x"}  # fallback path
         or (isinstance(w, dict) and w.get("$and") and {"wing": "project_x"} in w["$and"])

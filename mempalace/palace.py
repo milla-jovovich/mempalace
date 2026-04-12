@@ -39,6 +39,7 @@ SKIP_DIRS = {
 
 _DEFAULT_BACKEND = ChromaBackend()
 
+
 def get_collection(
     palace_path: str,
     collection_name: str = "mempalace_drawers",
