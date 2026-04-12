@@ -413,10 +413,17 @@ def process_file(
 ) -> tuple:
     """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
 
-    # Skip if already filed
+    # Skip if already filed; clean old drawers if file was modified
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
-        return 0, None
+    if not dry_run:
+        if file_already_mined(collection, source_file, check_mtime=True):
+            return 0, None
+        else:
+            # File is new or modified — remove old drawers before re-mining
+            # to prevent orphaned chunks when file content shrinks.
+            from .pruner import prune_file
+
+            prune_file(collection, source_file)
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")

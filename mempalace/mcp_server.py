@@ -502,6 +502,20 @@ def tool_add_drawer(
         return {"success": False, "error": str(e)}
 
 
+def tool_prune(strategy: str = "all", wing: str = None, dry_run: bool = True):
+    """Detect and optionally remove stale drawers."""
+    from .pruner import prune
+
+    result = prune(
+        palace_path=_config.palace_path,
+        strategy=strategy,
+        wing=wing,
+        dry_run=dry_run,
+        wal_log=_wal_log,
+    )
+    return result
+
+
 def tool_delete_drawer(drawer_id: str):
     """Delete a single drawer by ID."""
     global _metadata_cache
@@ -1157,6 +1171,27 @@ TOOLS = {
             "required": ["wing", "room", "content"],
         },
         "handler": tool_add_drawer,
+    },
+    "mempalace_prune": {
+        "description": "Detect and remove stale drawers. Strategies: 'existence' (source file deleted), 'mtime' (source file modified since mining), 'orphans' (leftover chunks after file shrank), 'all' (default). Use dry_run=true to preview before deleting.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "strategy": {
+                    "type": "string",
+                    "description": "Detection strategy: existence, mtime, orphans, or all (default: all)",
+                },
+                "wing": {
+                    "type": "string",
+                    "description": "Limit to one wing (optional)",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Preview only, no deletions (default: true)",
+                },
+            },
+        },
+        "handler": tool_prune,
     },
     "mempalace_delete_drawer": {
         "description": "Delete a drawer by ID. Irreversible.",
