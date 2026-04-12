@@ -229,6 +229,15 @@ def test_hooks_auto_save_env_override_zero():
         del os.environ["MEMPALACE_HOOKS_AUTO_SAVE"]
 
 
+def test_hooks_auto_save_env_override_no():
+    os.environ["MEMPALACE_HOOKS_AUTO_SAVE"] = "no"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.hooks_auto_save is False
+    finally:
+        del os.environ["MEMPALACE_HOOKS_AUTO_SAVE"]
+
+
 def test_hooks_auto_save_env_override_true():
     """Env var set to 'true' overrides config file even if config says false."""
     tmpdir = tempfile.mkdtemp()
