@@ -26,6 +26,27 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
+# Python version guard — chromadb 0.5-0.6.x uses pydantic v1 which is
+# incompatible with Python 3.14+ (type inference fails at import time).
+# Emit a clear message instead of a cryptic pydantic ConfigError.
+if sys.version_info >= (3, 14):
+    print(
+        json.dumps({
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {
+                "code": -32002,
+                "message": (
+                    f"MemPalace requires Python 3.9-3.13 but found {sys.version.split()[0]}. "
+                    "ChromaDB is incompatible with Python 3.14+. "
+                    "Set MEMPALACE_PYTHON to a supported interpreter or install in a 3.13 venv."
+                ),
+            },
+        }),
+        flush=True,
+    )
+    sys.exit(1)
+
 from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
 from .query_sanitizer import sanitize_query
