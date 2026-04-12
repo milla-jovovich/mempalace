@@ -18,6 +18,8 @@ Commands:
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
     mempalace status                      Show what's been filed
+    mempalace hooks path                  Show installed hooks directory
+    mempalace hooks install               Print ready-to-paste config for Claude Code
 
 Examples:
     mempalace init ~/projects/my_app
@@ -395,6 +397,55 @@ def cmd_compress(args):
         print("  (dry run -- nothing stored)")
 
 
+def cmd_hooks(args):
+    """Show hook paths or generate install config."""
+    import json
+
+    from mempalace.hooks import hook_path, hooks_dir
+
+    if args.hooks_action == "path":
+        if args.name:
+            try:
+                print(hook_path(args.name))
+            except FileNotFoundError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print(hooks_dir())
+
+    elif args.hooks_action == "install":
+        save = str(hook_path("mempal_save_hook.sh"))
+        precompact = str(hook_path("mempal_precompact_hook.sh"))
+
+        if args.format == "codex":
+            config = {
+                "Stop": [{"type": "command", "command": save, "timeout": 30}],
+                "PreCompact": [{"type": "command", "command": precompact, "timeout": 30}],
+            }
+            print("Add to .codex/hooks.json:\n", file=sys.stderr)
+            print(json.dumps(config, indent=2))
+        else:
+            config = {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "matcher": "*",
+                            "hooks": [{"type": "command", "command": save, "timeout": 30}],
+                        }
+                    ],
+                    "PreCompact": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": precompact, "timeout": 30}
+                            ],
+                        }
+                    ],
+                }
+            }
+            print("Add to .claude/settings.local.json:\n", file=sys.stderr)
+            print(json.dumps(config, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
@@ -554,6 +605,26 @@ def main():
 
     sub.add_parser("status", help="Show what's been filed")
 
+    # hooks
+    p_hooks = sub.add_parser("hooks", help="Show hook paths or generate install config")
+    p_hooks.add_argument(
+        "hooks_action",
+        choices=["path", "install"],
+        help="'path' prints hooks directory, 'install' prints ready-to-paste config",
+    )
+    p_hooks.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="Specific hook filename (for 'path' action only)",
+    )
+    p_hooks.add_argument(
+        "--format",
+        choices=["claude", "codex"],
+        default="claude",
+        help="Config format: 'claude' for settings.local.json (default), 'codex' for hooks.json",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -588,6 +659,7 @@ def main():
         "repair": cmd_repair,
         "migrate": cmd_migrate,
         "status": cmd_status,
+        "hooks": cmd_hooks,
     }
     dispatch[args.command](args)
 
