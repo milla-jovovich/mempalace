@@ -797,23 +797,51 @@ def tool_wake_up(wing: str = None):
             _declared_entities.add(c["id"])
             auto_declared["classes"].append({"id": c["id"], "description": c["description"][:100]})
 
-        # 3. Auto-declare intent types (entities that is-a intent_type)
+        # 3. Auto-declare intent types — walk is-a tree from intent_type class
+        from .layers import compute_decay_score
         auto_declared["intent_types"] = []
         entities = _kg.list_entities(status="active", kind="entity")
+
+        # Build set of all intent type IDs by walking is-a tree from "intent_type"
+        intent_type_ids = set()
+        frontier = {"intent_type"}  # start from the class
+        visited = set()
+        for _ in range(5):  # max depth
+            if not frontier:
+                break
+            next_frontier = set()
+            for parent_id in frontier:
+                if parent_id in visited:
+                    continue
+                visited.add(parent_id)
+                # Find all entities that is-a this parent
+                for e in entities:
+                    e_edges = _kg.query_entity(e["id"], direction="outgoing")
+                    for edge in e_edges:
+                        if edge["predicate"] in ("is-a", "is_a") and edge["current"]:
+                            if normalize_entity_name(edge["object"]) == parent_id:
+                                intent_type_ids.add(e["id"])
+                                next_frontier.add(e["id"])
+            frontier = next_frontier
+
+        # Rank by importance + decay, take top 20
+        intent_entries = []
         for e in entities:
-            edges = _kg.query_entity(e["id"], direction="outgoing")
-            is_intent = any(
-                edge["predicate"] in ("is-a", "is_a") and edge["current"]
-                and normalize_entity_name(edge["object"]) in ("intent_type", "inspect", "modify", "execute", "communicate")
-                for edge in edges
-            )
-            if is_intent:
-                _declared_entities.add(e["id"])
-                auto_declared["intent_types"].append({
-                    "id": e["id"],
-                    "description": e["description"][:100],
-                    "importance": e["importance"],
-                })
+            if e["id"] in intent_type_ids:
+                score = compute_decay_score(
+                    e.get("importance", 3),
+                    e.get("last_touched", ""),
+                )
+                intent_entries.append((score, e))
+        intent_entries.sort(key=lambda x: x[0], reverse=True)
+
+        for score, e in intent_entries[:20]:
+            _declared_entities.add(e["id"])
+            auto_declared["intent_types"].append({
+                "id": e["id"],
+                "description": e["description"][:100],
+                "importance": e["importance"],
+            })
 
         # 4. Auto-declare top entities for this wing (by importance+decay)
         if wing:
