@@ -23,6 +23,8 @@ import sys
 import json
 import logging
 import hashlib
+import fcntl
+import io
 from datetime import datetime
 from pathlib import Path
 
@@ -53,6 +55,34 @@ def _parse_args():
 
 
 _args = _parse_args()
+
+# ==================== WINDOWS STDIN/STDOUT UTF-8 FIX ====================
+# On Windows, Python's stdin/stdout may use a text mode that fails
+# with UnicodeEncodeError when encountering non-ASCII characters
+# (e.g. Chinese characters in queries). Re-configure to use UTF-8
+# with surrogateescape so that surrogates are handled gracefully.
+if sys.platform == "win32":
+    for stream_name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, stream_name)
+        try:
+            fd = stream.fileno()
+            if fd is not None and fd >= 0:
+                try:
+                    fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_NONBLOCK)
+                except (OSError, AttributeError):
+                    pass
+            # Wrap with a UTF-8 stream that accepts surrogates.
+            wrapped = io.TextIOWrapper(
+                stream.buffer if hasattr(stream, "buffer") else stream,
+                encoding="utf-8",
+                errors="surrogateescape",
+                line_buffering=stream.line_buffering,
+            )
+            wrapped.strict_errors_warnings = False
+            setattr(sys, stream_name, wrapped)
+        except Exception:
+            pass  # Fall back to default if re-configuration fails
+
 
 if _args.palace:
     os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
@@ -113,6 +143,19 @@ def _get_collection(create=False):
         return _collection_cache
     except Exception:
         return None
+
+
+def _strip_surrogates(obj):
+    """Recursively strip surrogate pairs from strings in a container.
+    Surrogates can appear in Unicode strings on Windows and cause
+    UnicodeEncodeError when encoding to JSON or writing to stdout."""
+    if isinstance(obj, str):
+        return obj.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
+    elif isinstance(obj, dict):
+        return {k: _strip_surrogates(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_strip_surrogates(item) for item in obj]
+    return obj
 
 
 def _no_palace():
@@ -957,6 +1000,8 @@ def handle_request(request):
     elif method == "tools/call":
         tool_name = params.get("name")
         tool_args = params.get("arguments") or {}
+        # Sanitize: strip surrogate pairs from all string arguments.
+        tool_args = _strip_surrogates(tool_args)
         if tool_name not in TOOLS:
             return {
                 "jsonrpc": "2.0",
