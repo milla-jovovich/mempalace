@@ -29,12 +29,18 @@ def _extract_keyword(query: str) -> str:
     Picks the longest non-stopword token.  Prefers tokens that look like
     identifiers (contain digits, dots, underscores, or are ALLCAPS).
     """
-    tokens = re.findall(r"[\w.]+", query.lower())
-    candidates = [t for t in tokens if t not in _STOPWORDS and len(t) > 2]
+    raw_tokens = re.findall(r"[\w.]+", query)
+    # Prefer ALLCAPS identifier-like tokens (before lowercasing loses the signal)
+    upper_tokens = [t for t in raw_tokens if t.isupper() and len(t) > 2]
+    if upper_tokens:
+        return upper_tokens[0]
+    # Fall back to longest non-stopword token (lowercased)
+    lower_tokens = [t.lower() for t in raw_tokens]
+    candidates = [t for t in lower_tokens if t not in _STOPWORDS and len(t) > 2]
     if not candidates:
         return ""
     # Prefer identifier-looking tokens (error codes, config keys, etc.)
-    ids = [t for t in candidates if re.search(r"\d|_|\.", t) or t.isupper()]
+    ids = [t for t in candidates if re.search(r"\d|_|\.", t)]
     if ids:
         return max(ids, key=len)
     return max(candidates, key=len)
@@ -208,7 +214,7 @@ def search_memories(
             for kid, kdoc, kmeta, kdist in zip(kw_ids, kw_docs, kw_metas, kw_dists):
                 kw_hits_by_id[kid] = (kdoc, kmeta, kdist)
         except Exception:
-            pass  # keyword fallback is best-effort
+            logger.debug("Keyword fallback query failed for keyword=%r", kw)
 
     # Build hit list from vector results
     seen_ids = set()
@@ -254,6 +260,6 @@ def search_memories(
         "query": query,
         "filters": {"wing": wing, "room": room},
         "total_before_filter": len(docs),
-        "keyword_fallback": kw if kw_hits_by_id else None,
+        "keyword_fallback": kw if kw else None,
         "results": hits,
     }
