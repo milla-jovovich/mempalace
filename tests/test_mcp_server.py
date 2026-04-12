@@ -92,6 +92,13 @@ class TestHandleRequest:
         resp = handle_request({"method": "notifications/initialized", "id": None, "params": {}})
         assert resp is None
 
+    def test_ping_returns_empty_result(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request({"method": "ping", "id": 11, "params": {}})
+        assert resp["id"] == 11
+        assert resp["result"] == {}
+
     def test_tools_list(self):
         from mempalace.mcp_server import handle_request
 
@@ -136,6 +143,42 @@ class TestHandleRequest:
         from mempalace.mcp_server import handle_request
 
         resp = handle_request({"method": "unknown/method", "id": 4, "params": {}})
+        assert resp["error"]["code"] == -32601
+
+    def test_any_notification_returns_none(self):
+        """All notifications/* methods should return None (no response)."""
+        from mempalace.mcp_server import handle_request
+
+        for method in [
+            "notifications/initialized",
+            "notifications/cancelled",
+            "notifications/progress",
+            "notifications/roots/list_changed",
+        ]:
+            resp = handle_request({"method": method, "params": {}})
+            assert resp is None, f"{method} should return None"
+
+    def test_unknown_method_no_id_returns_none(self):
+        """Messages without id (notifications) must never get a response."""
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request({"method": "unknown/thing", "params": {}})
+        assert resp is None
+
+    def test_malformed_method_none(self):
+        """method=None or missing should not crash."""
+        from mempalace.mcp_server import handle_request
+
+        # Explicit None
+        resp = handle_request({"method": None, "params": {}})
+        assert resp is None  # no id → no response
+
+        # Missing method entirely
+        resp = handle_request({"params": {}})
+        assert resp is None
+
+        # method=None with id → should return error, not crash
+        resp = handle_request({"method": None, "id": 99, "params": {}})
         assert resp["error"]["code"] == -32601
 
     def test_tools_call_dispatches(self, monkeypatch, config, palace_path, seeded_kg):
@@ -252,6 +295,22 @@ class TestSearchTool:
         result = tool_search(query="database", room="backend")
         assert all(r["room"] == "backend" for r in result["results"])
 
+    def test_search_min_similarity_backwards_compat(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        """Old min_similarity param still works via backwards-compat shim."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_search
+
+        # Old name should work
+        result = tool_search(query="JWT", min_similarity=1.5)
+        assert "results" in result
+
+        # Old name takes precedence when both provided
+        result_strict = tool_search(query="JWT", max_distance=999.0, min_similarity=0.01)
+        result_loose = tool_search(query="JWT", max_distance=0.01, min_similarity=999.0)
+        assert len(result_strict["results"]) <= len(result_loose["results"])
+
 
 # ── Write Tools ─────────────────────────────────────────────────────────
 
@@ -320,6 +379,107 @@ class TestWriteTools:
             threshold=0.99,
         )
         assert result["is_duplicate"] is False
+
+    def test_get_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_get_drawer
+
+        result = tool_get_drawer("drawer_proj_backend_aaa")
+        assert result["drawer_id"] == "drawer_proj_backend_aaa"
+        assert result["wing"] == "project"
+        assert result["room"] == "backend"
+        assert "JWT tokens" in result["content"]
+
+    def test_get_drawer_not_found(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_get_drawer
+
+        result = tool_get_drawer("nonexistent_drawer")
+        assert "error" in result
+
+    def test_list_drawers(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers()
+        assert result["count"] == 4
+        assert len(result["drawers"]) == 4
+
+    def test_list_drawers_with_wing_filter(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(wing="project")
+        assert result["count"] == 3
+        assert all(d["wing"] == "project" for d in result["drawers"])
+
+    def test_list_drawers_with_room_filter(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(wing="project", room="backend")
+        assert result["count"] == 2
+        assert all(d["room"] == "backend" for d in result["drawers"])
+
+    def test_list_drawers_pagination(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(limit=2, offset=0)
+        assert result["count"] == 2
+        assert result["limit"] == 2
+        assert result["offset"] == 0
+
+    def test_list_drawers_negative_offset_clamped(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(offset=-5)
+        assert result["offset"] == 0
+
+    def test_update_drawer_content(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer, tool_get_drawer
+
+        result = tool_update_drawer(
+            "drawer_proj_backend_aaa", content="Updated content about auth."
+        )
+        assert result["success"] is True
+
+        fetched = tool_get_drawer("drawer_proj_backend_aaa")
+        assert fetched["content"] == "Updated content about auth."
+
+    def test_update_drawer_wing_and_room(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer
+
+        result = tool_update_drawer("drawer_proj_backend_aaa", wing="new_wing", room="new_room")
+        assert result["success"] is True
+        assert result["wing"] == "new_wing"
+        assert result["room"] == "new_room"
+
+    def test_update_drawer_not_found(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer
+
+        result = tool_update_drawer("nonexistent_drawer", content="hello")
+        assert result["success"] is False
+
+    def test_update_drawer_noop(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer
+
+        result = tool_update_drawer("drawer_proj_backend_aaa")
+        assert result["success"] is True
+        assert result.get("noop") is True
 
 
 # ── KG Tools ────────────────────────────────────────────────────────────
