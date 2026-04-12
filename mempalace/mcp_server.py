@@ -993,6 +993,40 @@ def tool_kg_add(
             "issues": errors,
         }
 
+    # ── Class inheritance helper ──
+    def _is_subclass_of(entity_classes, allowed_classes, max_depth=5):
+        """Check if any of entity_classes is a subclass of any allowed_class.
+
+        Walks is-a edges upward from each entity class. If it reaches an
+        allowed class within max_depth hops, returns True. This enables
+        class inheritance: if 'system is-a thing' and constraint allows
+        'thing', then any system entity passes.
+        """
+        if not allowed_classes:
+            return True  # no constraint = pass
+        # Direct match first
+        if any(c in allowed_classes for c in entity_classes):
+            return True
+        # Walk is-a hierarchy upward
+        visited = set(entity_classes)
+        frontier = list(entity_classes)
+        for _ in range(max_depth):
+            next_frontier = []
+            for cls in frontier:
+                parent_edges = _kg.query_entity(cls, direction="outgoing")
+                for e in parent_edges:
+                    if e["predicate"] == "is-a" and e["current"]:
+                        parent = e["object"]
+                        if parent in allowed_classes:
+                            return True
+                        if parent not in visited:
+                            visited.add(parent)
+                            next_frontier.append(parent)
+            frontier = next_frontier
+            if not frontier:
+                break
+        return False
+
     # ── Constraint enforcement ──
     constraint_errors = []
     if pred_entity:
@@ -1023,7 +1057,7 @@ def tool_kg_add(
                     e["object"] for e in _kg.query_entity(sub_normalized, direction="outgoing")
                     if e["predicate"] == "is-a" and e["current"]
                 ]
-                if sub_classes and not any(c in allowed_sub_classes for c in sub_classes):
+                if sub_classes and not _is_subclass_of(sub_classes, allowed_sub_classes):
                     constraint_errors.append(
                         f"Subject class mismatch: '{sub_normalized}' is-a {sub_classes}, "
                         f"but predicate '{pred_normalized}' expects subject is-a {allowed_sub_classes}. "
@@ -1052,7 +1086,7 @@ def tool_kg_add(
                     e["object"] for e in _kg.query_entity(obj_normalized, direction="outgoing")
                     if e["predicate"] == "is-a" and e["current"]
                 ]
-                if obj_classes and not any(c in allowed_obj_classes for c in obj_classes):
+                if obj_classes and not _is_subclass_of(obj_classes, allowed_obj_classes):
                     constraint_errors.append(
                         f"Object class mismatch: '{obj_normalized}' is-a {obj_classes}, "
                         f"but predicate '{pred_normalized}' expects object is-a {allowed_obj_classes}. "
