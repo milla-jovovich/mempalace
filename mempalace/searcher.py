@@ -7,7 +7,10 @@ Returns verbatim text — the actual words, never summaries.
 """
 
 import logging
+import re
+from .archivist import LiteArchivist
 from pathlib import Path
+
 
 from .palace import get_collection
 
@@ -93,6 +96,32 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     print()
 
 
+def search_archive(query: str, palace_path: str, n_results: int = 5) -> list:
+        """Fallback search against the SQLite deep archive when vector search is sparse."""
+        db_path = Path(palace_path) / "palace_archive.db"
+        if not db_path.exists():
+                    return []
+
+    archivist = LiteArchivist(str(db_path))
+    # Extract likely tags from query
+    import re
+    tags = re.findall(r"\w{4,}", query.lower())
+    rows = archivist.search(tags=tags, limit=n_results)
+
+    hits = []
+    for r in rows:
+                hits.append({
+                                "text": r["content"],
+                                "wing": "archive",
+                                "room": "deep_history",
+                                "source_file": "SQLite Archive",
+                                "similarity": 0.45,
+                                "distance": 1.1,
+                                "archived": True
+                })
+            return hits
+
+
 def search_memories(
     query: str,
     palace_path: str,
@@ -160,6 +189,10 @@ def search_memories(
             }
         )
 
+        if not hits or (len(hits) < n_results and len(query.split()) > 1):
+                    archive_hits = search_archive(query, palace_path, n_results=n_results - len(hits))
+                    hits.extend(archive_hits)
+            
     return {
         "query": query,
         "filters": {"wing": wing, "room": room},
