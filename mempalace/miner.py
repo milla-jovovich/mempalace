@@ -571,11 +571,13 @@ def process_file(
     if batch_docs is None:
         return 0, None
 
-    collection.upsert(
-        documents=batch_docs,
-        ids=batch_ids,
-        metadatas=batch_metas,
-    )
+    for i in range(0, len(batch_docs), _UPSERT_BATCH_SIZE):
+        end = i + _UPSERT_BATCH_SIZE
+        collection.upsert(
+            documents=batch_docs[i:end],
+            ids=batch_ids[i:end],
+            metadatas=batch_metas[i:end],
+        )
 
     return len(batch_docs), room
 
@@ -774,7 +776,7 @@ def mine(
                 total_drawers += drawers
                 room_counts[room or "general"] += 1
                 if not dry_run:
-                    print(f"  \u2713 [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+                    print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
     else:
         # --- Concurrent path (workers > 1) ---
 
@@ -833,21 +835,21 @@ def mine(
                 pending_ids.extend(batch_ids)
                 pending_metas.extend(batch_metas)
 
-                # Flush when batch is large enough
-                if len(pending_docs) >= _UPSERT_BATCH_SIZE:
+                # Flush in fixed-size batches
+                while len(pending_docs) >= _UPSERT_BATCH_SIZE:
                     collection.upsert(
-                        documents=pending_docs,
-                        ids=pending_ids,
-                        metadatas=pending_metas,
+                        documents=pending_docs[:_UPSERT_BATCH_SIZE],
+                        ids=pending_ids[:_UPSERT_BATCH_SIZE],
+                        metadatas=pending_metas[:_UPSERT_BATCH_SIZE],
                     )
-                    pending_docs = []
-                    pending_ids = []
-                    pending_metas = []
+                    pending_docs = pending_docs[_UPSERT_BATCH_SIZE:]
+                    pending_ids = pending_ids[_UPSERT_BATCH_SIZE:]
+                    pending_metas = pending_metas[_UPSERT_BATCH_SIZE:]
 
                 with counter_lock:
                     processed_count += 1
                     print(
-                        f"  \u2713 [{processed_count:4}/{len(files_to_process)}] "
+                        f"  + [{processed_count:4}/{len(files_to_process)}] "
                         f"{filepath.name[:50]:50} +{len(batch_docs)}"
                     )
 
