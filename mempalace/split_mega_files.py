@@ -98,6 +98,42 @@ def find_session_boundaries(lines):
     return boundaries
 
 
+def count_sessions_streaming(filepath):
+    """
+    Stream through file to count true session starts without loading entire file.
+    Returns the session count.
+
+    A true session start is a 'Claude Code v' header NOT followed by
+    'Ctrl+E'/'previous messages' within the next 6 lines.
+    """
+    count = 0
+
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+            while True:
+                try:
+                    line = next(f)
+                except StopIteration:
+                    break
+
+                if "Claude Code v" in line:
+                    # Peek ahead: read next 5 lines to check for Ctrl+E context
+                    context = [line]
+                    for _ in range(5):
+                        try:
+                            context.append(next(f))
+                        except StopIteration:
+                            break
+
+                    nearby = "".join(context)
+                    if "Ctrl+E" not in nearby and "previous messages" not in nearby:
+                        count += 1
+    except OSError:
+        return 0
+
+    return count
+
+
 def extract_timestamp(lines):
     """
     Find the first timestamp line: ⏺ H:MM AM/PM Weekday, Month DD, YYYY
@@ -176,59 +212,127 @@ def extract_subject(lines):
     return "session"
 
 
-def split_file(filepath, output_dir, dry_run=False):
+def split_file(filepath, output_dir, dry_run=False, min_sessions=2):
     """
-    Split a single mega-file into per-session files.
-    Returns list of output paths written (or would be written if dry_run).
+    Split a single mega-file into per-session files using streaming.
+    Accumulates sessions line-by-line to avoid loading entire file into memory.
+
+    Args:
+        filepath: Path to the transcript file to split
+        output_dir: Directory to write split files (None = same as source)
+        dry_run: If True, show what would happen without writing files
+        min_sessions: Minimum number of sessions required to split (default: 2).
+            Set to 1 to extract single sessions (e.g., extracting a session from
+            a file with preamble/footer content).
+
+    Returns:
+        List of output paths written (or would be written if dry_run)
     """
     path = Path(filepath)
     max_size = 500 * 1024 * 1024  # 500 MB safety limit
     if path.stat().st_size > max_size:
         print(f"  SKIP: {path.name} exceeds {max_size // (1024*1024)} MB limit")
         return []
-    lines = path.read_text(errors="replace").splitlines(keepends=True)
 
-    boundaries = find_session_boundaries(lines)
-    if len(boundaries) < 2:
-        return []  # Not a mega-file
-
-    # Add sentinel at end
-    boundaries.append(len(lines))
+    # Check if this is actually a mega-file with multiple sessions
+    total_sessions = count_sessions_streaming(filepath)
+    if total_sessions < min_sessions:
+        return []
 
     out_dir = Path(output_dir) if output_dir else path.parent
     written = []
 
-    for i, (start, end) in enumerate(zip(boundaries, boundaries[1:])):
-        chunk = lines[start:end]
-        if len(chunk) < 10:
-            continue  # Skip tiny fragments
+    current_session = []
+    session_count = 0
 
-        ts_human, ts_iso = extract_timestamp(chunk)
-        people = extract_people(chunk)
-        subject = extract_subject(chunk)
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            pending_header = None  # Lines collected while checking for context restore
 
-        # Build filename: SOURCESTEM__DATE_TIME_People_subject.txt
-        # Source stem prefix prevents collisions when multiple mega-files
-        # produce sessions with the same timestamp/people/subject.
-        ts_part = ts_human or f"part{i + 1:02d}"
-        people_part = "-".join(people[:3]) if people else "unknown"
-        src_stem = re.sub(r"[^\w-]", "_", path.stem)[:40]
-        name = f"{src_stem}__{ts_part}_{people_part}_{subject}.txt"
-        # Sanitize
-        name = re.sub(r"[^\w\.\-]", "_", name)
-        name = re.sub(r"_+", "_", name)
+            for line in f:
+                # If we have a pending header, we're checking if it's a context restore
+                if pending_header is not None:
+                    pending_header.append(line)
+                    # Check if this is a context restore (Ctrl+E in first 6 lines)
+                    nearby = "".join(pending_header)
 
-        out_path = out_dir / name
+                    if len(pending_header) >= 6 or "Ctrl+E" in nearby or "previous messages" in nearby:
+                        # We've collected enough context to decide
+                        if "Ctrl+E" not in nearby and "previous messages" not in nearby:
+                            # True session start - process previous session if exists
+                            if current_session and len(current_session) >= 10:
+                                session_count += 1
+                                _write_session(current_session, path, session_count, out_dir, dry_run, written)
+                            # Start new session
+                            current_session = list(pending_header)
+                        else:
+                            # Context restore - add to current session
+                            if current_session:
+                                current_session.extend(pending_header)
+                            else:
+                                # No current session yet, just discard or treat as partial
+                                current_session = list(pending_header)
+                        pending_header = None
+                    continue
 
-        if dry_run:
-            print(f"  [{i + 1}/{len(boundaries) - 1}] {name}  ({len(chunk)} lines)")
-        else:
-            out_path.write_text("".join(chunk), encoding="utf-8")
-            print(f"  ✓ {name}  ({len(chunk)} lines)")
+                # Check for new session header
+                if "Claude Code v" in line:
+                    # Start collecting context to check for Ctrl+E
+                    pending_header = [line]
+                else:
+                    # Normal line - add to current session
+                    if current_session:
+                        current_session.append(line)
 
-        written.append(out_path)
+            # Handle any pending header at end of file
+            if pending_header is not None:
+                nearby = "".join(pending_header)
+                if "Ctrl+E" not in nearby and "previous messages" not in nearby:
+                    if current_session and len(current_session) >= 10:
+                        session_count += 1
+                        _write_session(current_session, path, session_count, out_dir, dry_run, written)
+                    current_session = list(pending_header)
+                else:
+                    if current_session:
+                        current_session.extend(pending_header)
+                    else:
+                        current_session = list(pending_header)
+
+        # Process final session
+        if current_session and len(current_session) >= 10:
+            session_count += 1
+            _write_session(current_session, path, session_count, out_dir, dry_run, written)
+
+    except OSError:
+        return []
 
     return written
+
+
+def _write_session(session_lines, source_path, session_idx, out_dir, dry_run, written_list):
+    """Helper to extract metadata and write a single session to file."""
+    ts_human, ts_iso = extract_timestamp(session_lines)
+    people = extract_people(session_lines)
+    subject = extract_subject(session_lines)
+
+    # Build filename: SOURCESTEM__DATE_TIME_People_subject.txt
+    ts_part = ts_human or f"part{session_idx:02d}"
+    people_part = "-".join(people[:3]) if people else "unknown"
+    src_stem = re.sub(r"[^\w-]", "_", source_path.stem)[:40]
+    name = f"{src_stem}__{ts_part}_{people_part}_{subject}.txt"
+    # Sanitize
+    name = re.sub(r"[^\w\.\-]", "_", name)
+    name = re.sub(r"_+", "_", name)
+
+    out_path = out_dir / name
+
+    if dry_run:
+        print(f"  [{session_idx}] {name}  ({len(session_lines)} lines)")
+    else:
+        out_path.write_text("".join(session_lines), encoding="utf-8")
+        print(f"  ✓ {name}  ({len(session_lines)} lines)")
+
+    written_list.append(out_path)
 
 
 def main():
@@ -275,10 +379,10 @@ def main():
         if f.stat().st_size > max_scan_size:
             print(f"  SKIP: {f.name} exceeds {max_scan_size // (1024*1024)} MB limit")
             continue
-        lines = f.read_text(errors="replace").splitlines(keepends=True)
-        boundaries = find_session_boundaries(lines)
-        if len(boundaries) >= args.min_sessions:
-            mega_files.append((f, len(boundaries)))
+        # Use streaming session counter to avoid loading entire file
+        session_count = count_sessions_streaming(f)
+        if session_count >= args.min_sessions:
+            mega_files.append((f, session_count))
 
     if not mega_files:
         print(f"No mega-files found in {src_dir} (min {args.min_sessions} sessions).")

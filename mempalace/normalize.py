@@ -24,6 +24,7 @@ def normalize(filepath: str) -> str:
     """
     Load a file and normalize to transcript format if it's a chat export.
     Plain text files pass through unchanged.
+    Uses streaming for JSONL files to avoid OOM on large files.
     """
     try:
         file_size = os.path.getsize(filepath)
@@ -31,6 +32,22 @@ def normalize(filepath: str) -> str:
         raise IOError(f"Could not read {filepath}: {e}")
     if file_size > 500 * 1024 * 1024:  # 500 MB safety limit
         raise IOError(f"File too large ({file_size // (1024*1024)} MB): {filepath}")
+
+    ext = Path(filepath).suffix.lower()
+
+    # For JSONL files, use streaming to avoid loading entire file
+    if ext == ".jsonl":
+        try:
+            normalized = _try_claude_code_jsonl_streaming(filepath)
+            if normalized:
+                return normalized
+            normalized = _try_codex_jsonl_streaming(filepath)
+            if normalized:
+                return normalized
+        except OSError:
+            pass
+
+    # For other formats, load file and check content
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
@@ -46,8 +63,7 @@ def normalize(filepath: str) -> str:
         return content
 
     # Try JSON normalization
-    ext = Path(filepath).suffix.lower()
-    if ext in (".json", ".jsonl") or content.strip()[:1] in ("{", "["):
+    if ext in (".json",) or content.strip()[:1] in ("{", "["):
         normalized = _try_normalize_json(content)
         if normalized:
             return normalized
@@ -80,7 +96,7 @@ def _try_normalize_json(content: str) -> Optional[str]:
 
 
 def _try_claude_code_jsonl(content: str) -> Optional[str]:
-    """Claude Code JSONL sessions."""
+    """Claude Code JSONL sessions (legacy - used by _try_normalize_json)."""
     lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
     messages = []
     for line in lines:
@@ -101,6 +117,93 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
             if text:
                 messages.append(("assistant", text))
     if len(messages) >= 2:
+        return _messages_to_transcript(messages)
+    return None
+
+
+def _try_claude_code_jsonl_streaming(filepath: str) -> Optional[str]:
+    """Claude Code JSONL sessions - streaming version for large files."""
+    messages = []
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                msg_type = entry.get("type", "")
+                message = entry.get("message", {})
+                if msg_type in ("human", "user"):
+                    text = _extract_content(message.get("content", ""))
+                    if text:
+                        messages.append(("user", text))
+                elif msg_type == "assistant":
+                    text = _extract_content(message.get("content", ""))
+                    if text:
+                        messages.append(("assistant", text))
+    except OSError:
+        return None
+
+    if len(messages) >= 2:
+        return _messages_to_transcript(messages)
+    return None
+
+
+def _try_codex_jsonl_streaming(filepath: str) -> Optional[str]:
+    """OpenAI Codex CLI sessions - streaming version for large files.
+
+    Uses only event_msg entries (user_message / agent_message) which represent
+    the canonical conversation turns. response_item entries are skipped.
+    """
+    messages = []
+    has_session_meta = False
+
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+
+                entry_type = entry.get("type", "")
+                if entry_type == "session_meta":
+                    has_session_meta = True
+                    continue
+
+                if entry_type != "event_msg":
+                    continue
+
+                payload = entry.get("payload", {})
+                if not isinstance(payload, dict):
+                    continue
+
+                payload_type = payload.get("type", "")
+                msg = payload.get("message")
+                if not isinstance(msg, str):
+                    continue
+                text = msg.strip()
+                if not text:
+                    continue
+
+                if payload_type == "user_message":
+                    messages.append(("user", text))
+                elif payload_type == "agent_message":
+                    messages.append(("assistant", text))
+    except OSError:
+        return None
+
+    if len(messages) >= 2 and has_session_meta:
         return _messages_to_transcript(messages)
     return None
 
