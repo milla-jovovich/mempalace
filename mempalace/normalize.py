@@ -8,6 +8,8 @@ Supported:
     - ChatGPT conversations.json
     - Claude Code JSONL
     - OpenAI Codex CLI JSONL
+    - GitHub Copilot CLI JSONL (events.jsonl)
+    - Factory.ai / Droid JSONL (*.jsonl)
     - Slack JSON export
     - Plain text (pass through for paragraph chunking)
 
@@ -63,6 +65,14 @@ def _try_normalize_json(content: str) -> Optional[str]:
         return normalized
 
     normalized = _try_codex_jsonl(content)
+    if normalized:
+        return normalized
+
+    normalized = _try_copilot_cli_jsonl(content)
+    if normalized:
+        return normalized
+
+    normalized = _try_factory_jsonl(content)
     if normalized:
         return normalized
 
@@ -151,6 +161,129 @@ def _try_codex_jsonl(content: str) -> Optional[str]:
     if len(messages) >= 2 and has_session_meta:
         return _messages_to_transcript(messages)
     return None
+
+
+def _try_copilot_cli_jsonl(content: str) -> Optional[str]:
+    """GitHub Copilot CLI sessions (events.jsonl).
+
+    Format: one JSON object per line with a top-level "type" field.
+    Relevant event types:
+        session.start   — fingerprint; confirms this is a Copilot CLI file
+        user.message    — the human turn; use "content" (raw user intent),
+                          not "transformedContent" (injected system prompt)
+        assistant.message — conductor/agent narration; use "content" when
+                            present and not purely a system_notification wrapper
+    """
+    lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
+    messages = []
+    has_session_start = False
+
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+
+        event_type = entry.get("type", "")
+        data = entry.get("data", {})
+        if not isinstance(data, dict):
+            continue
+
+        if event_type == "session.start":
+            has_session_start = True
+
+        elif event_type == "user.message":
+            # Use the raw user content, not the injected transformedContent
+            text = data.get("content", "").strip()
+            if text:
+                messages.append(("user", text))
+
+        elif event_type == "assistant.message":
+            text = data.get("content", "").strip()
+            # Skip empty, pure system-notification wrappers, and trivial narrations
+            if not text or len(text) < 30:
+                continue
+            if text.startswith("<system_notification>") and len(text) < 120:
+                continue
+            messages.append(("assistant", text))
+
+    if len(messages) >= 2 and has_session_start:
+        return _messages_to_transcript(messages)
+    return None
+
+
+def _try_factory_jsonl(content: str) -> Optional[str]:
+    """Factory.ai / Droid sessions (*.jsonl).
+
+    Format: one JSON object per line.
+    Relevant event types:
+        session_start — fingerprint; confirms this is a Factory.ai file
+        message       — conversation turn; role is user|assistant in message.role
+
+    User content blocks starting with <system-reminder> are injected context
+    and are excluded. Assistant tool_use and thinking blocks are also excluded.
+    """
+    lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
+    messages = []
+    has_session_start = False
+
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+
+        event_type = entry.get("type", "")
+
+        if event_type == "session_start":
+            has_session_start = True
+            continue
+
+        if event_type != "message":
+            continue
+
+        msg = entry.get("message", {})
+        if not isinstance(msg, dict):
+            continue
+
+        role = msg.get("role", "")
+        raw_content = msg.get("content", [])
+
+        if role in ("user", "human"):
+            # Filter out <system-reminder> injected context blocks
+            parts = []
+            if isinstance(raw_content, list):
+                for block in raw_content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "").strip()
+                        if text and not text.startswith("<system-reminder>"):
+                            parts.append(text)
+                    elif isinstance(block, str):
+                        s = block.strip()
+                        if s and not s.startswith("<system-reminder>"):
+                            parts.append(s)
+            elif isinstance(raw_content, str):
+                s = raw_content.strip()
+                if s and not s.startswith("<system-reminder>"):
+                    parts.append(s)
+            text = " ".join(parts).strip()
+            if text:
+                messages.append(("user", text))
+
+        elif role == "assistant":
+            # _extract_content already skips tool_use and thinking (keeps type==text only)
+            text = _extract_content(raw_content)
+            if text and len(text) >= 30:
+                messages.append(("assistant", text))
+
+    if len(messages) >= 2 and has_session_start:
+        return _messages_to_transcript(messages)
+    return None
+
 
 
 def _try_claude_ai_json(data) -> Optional[str]:

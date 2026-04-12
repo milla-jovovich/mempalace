@@ -26,12 +26,12 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
+from .palace import distance_to_similarity, get_client, get_embedding_function
 from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
 from .query_sanitizer import sanitize_query
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
-import chromadb
 
 from .knowledge_graph import KnowledgeGraph
 
@@ -109,7 +109,7 @@ def _get_client():
     """Return a singleton ChromaDB PersistentClient."""
     global _client_cache
     if _client_cache is None:
-        _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+        _client_cache = get_client(_config.palace_path)
     return _client_cache
 
 
@@ -118,10 +118,17 @@ def _get_collection(create=False):
     global _collection_cache
     try:
         client = _get_client()
+        embedding_function = get_embedding_function()
         if create:
-            _collection_cache = client.get_or_create_collection(_config.collection_name)
+            _collection_cache = client.get_or_create_collection(
+                _config.collection_name,
+                embedding_function=embedding_function,
+            )
         elif _collection_cache is None:
-            _collection_cache = client.get_collection(_config.collection_name)
+            _collection_cache = client.get_collection(
+                _config.collection_name,
+                embedding_function=embedding_function,
+            )
         return _collection_cache
     except Exception:
         return None
@@ -309,7 +316,8 @@ def tool_get_taxonomy():
 
 def tool_search(
     query: str, limit: int = 5, wing: str = None, room: str = None, context: str = None
-):
+,
+               min_similarity: float = 0.0):
     # Mitigate system prompt contamination (Issue #333)
     sanitized = sanitize_query(query)
     result = search_memories(
@@ -318,6 +326,7 @@ def tool_search(
         wing=wing,
         room=room,
         n_results=limit,
+        min_similarity=min_similarity,
     )
     # Attach sanitizer metadata for transparency
     if sanitized["was_sanitized"]:
@@ -347,7 +356,7 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
         if results["ids"] and results["ids"][0]:
             for i, drawer_id in enumerate(results["ids"][0]):
                 dist = results["distances"][0][i]
-                similarity = round(1 - dist, 3)
+                similarity = distance_to_similarity(dist)
                 if similarity >= threshold:
                     meta = results["metadatas"][0][i]
                     doc = results["documents"][0][i]
@@ -415,7 +424,7 @@ def tool_add_drawer(
     if not col:
         return _no_palace()
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content[:100]).encode()).hexdigest()[:24]}"
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content).encode()).hexdigest()[:24]}"
 
     _wal_log(
         "add_drawer",
@@ -826,6 +835,10 @@ TOOLS = {
                 "context": {
                     "type": "string",
                     "description": "Background context for the search (optional). This is NOT used for embedding — only for future re-ranking. Put conversation history or system prompt content here, NOT in query.",
+                },
+                "min_similarity": {
+                    "type": "number",
+                    "description": "Minimum similarity threshold 0.0–1.0 (default 0.0). Use 0.5+ to filter low-quality matches.",
                 },
             },
             "required": ["query"],

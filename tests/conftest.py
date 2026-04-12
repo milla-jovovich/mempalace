@@ -27,11 +27,11 @@ os.environ["HOMEDRIVE"] = os.path.splitdrive(_session_tmp)[0] or "C:"
 os.environ["HOMEPATH"] = os.path.splitdrive(_session_tmp)[1] or _session_tmp
 
 # Now it is safe to import mempalace modules that trigger initialisation.
-import chromadb  # noqa: E402
 import pytest  # noqa: E402
 
 from mempalace.config import MempalaceConfig  # noqa: E402
 from mempalace.knowledge_graph import KnowledgeGraph  # noqa: E402
+from mempalace.palace import get_client, get_collection as get_palace_collection  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -100,8 +100,8 @@ def config(tmp_dir, palace_path):
 @pytest.fixture
 def collection(palace_path):
     """A ChromaDB collection pre-seeded in the temp palace."""
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
+    client = get_client(palace_path)
+    col = get_palace_collection(palace_path, create=True)
     yield col
     client.delete_collection("mempalace_drawers")
     del client

@@ -39,6 +39,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import threading
 from datetime import date, datetime
 from pathlib import Path
 
@@ -50,7 +51,7 @@ class KnowledgeGraph:
     def __init__(self, db_path: str = None):
         self.db_path = db_path or DEFAULT_KG_PATH
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._connection = None
+        self._local = threading.local()
         self._init_db()
 
     def _init_db(self):
@@ -89,17 +90,20 @@ class KnowledgeGraph:
         conn.commit()
 
     def _conn(self):
-        if self._connection is None:
-            self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
-            self._connection.execute("PRAGMA journal_mode=WAL")
-            self._connection.row_factory = sqlite3.Row
-        return self._connection
+        conn = getattr(self._local, "connection", None)
+        if conn is None:
+            conn = sqlite3.connect(self.db_path, timeout=10)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.row_factory = sqlite3.Row
+            self._local.connection = conn
+        return conn
 
     def close(self):
-        """Close the database connection."""
-        if self._connection is not None:
-            self._connection.close()
-            self._connection = None
+        """Close the calling thread's database connection."""
+        conn = getattr(self._local, "connection", None)
+        if conn is not None:
+            conn.close()
+            self._local.connection = None
 
     def _entity_id(self, name: str) -> str:
         return name.lower().replace(" ", "_").replace("'", "")
