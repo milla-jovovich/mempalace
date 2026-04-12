@@ -390,6 +390,7 @@ def tool_search(
     max_distance: float = 1.5,
     min_similarity: float = None,
     context: str = None,
+    keyword: str = None,
 ):
     limit = max(1, min(limit, _MAX_RESULTS))
     try:
@@ -410,6 +411,7 @@ def tool_search(
         room=room,
         n_results=limit,
         max_distance=dist,
+        keyword=keyword,
     )
     # Attach sanitizer metadata for transparency
     if sanitized["was_sanitized"]:
@@ -1206,6 +1208,10 @@ TOOLS = {
                 "context": {
                     "type": "string",
                     "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking.",
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "Explicit keyword for text-match fallback. Use for exact terms (error codes, config keys, identifiers) that vector search may miss. Auto-extracted from query if omitted and vector results are poor.",
                 },
             },
             "required": ["query"],
