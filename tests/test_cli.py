@@ -31,7 +31,10 @@ def test_cmd_status_default_palace(mock_config_cls):
     mock_config_cls.return_value.palace_path = "/fake/palace"
     args = argparse.Namespace(palace=None)
     mock_miner = MagicMock()
-    with patch.dict("sys.modules", {"mempalace.miner": mock_miner}):
+    with (
+        patch.dict("sys.modules", {"mempalace.miner": mock_miner}),
+        patch("mempalace.cli.read_collection_metadata", return_value={}),
+    ):
         cmd_status(args)
         mock_miner.status.assert_called_once_with(palace_path="/fake/palace")
 
@@ -40,7 +43,10 @@ def test_cmd_status_default_palace(mock_config_cls):
 def test_cmd_status_custom_palace(mock_config_cls):
     args = argparse.Namespace(palace="~/my_palace")
     mock_miner = MagicMock()
-    with patch.dict("sys.modules", {"mempalace.miner": mock_miner}):
+    with (
+        patch.dict("sys.modules", {"mempalace.miner": mock_miner}),
+        patch("mempalace.cli.read_collection_metadata", return_value={}),
+    ):
         cmd_status(args)
         import os
 
@@ -109,6 +115,7 @@ def test_cmd_init_no_entities(mock_config_cls, tmp_path):
     with (
         patch("mempalace.entity_detector.scan_for_detection", return_value=[]),
         patch("mempalace.room_detector_local.detect_rooms_local") as mock_rooms,
+        patch("mempalace.cli._palace_get_collection"),
         patch("mempalace.cli._maybe_run_mine_after_init"),
     ):
         cmd_init(args)
@@ -127,6 +134,7 @@ def test_cmd_init_with_entities(mock_config_cls, tmp_path):
         patch("mempalace.entity_detector.detect_entities", return_value=detected),
         patch("mempalace.entity_detector.confirm_entities", return_value=confirmed),
         patch("mempalace.room_detector_local.detect_rooms_local"),
+        patch("mempalace.cli._palace_get_collection"),
         patch("builtins.open", MagicMock()),
         patch("mempalace.cli._maybe_run_mine_after_init"),
     ):
@@ -143,6 +151,7 @@ def test_cmd_init_with_entities_zero_total(mock_config_cls, tmp_path, capsys):
         patch("mempalace.entity_detector.scan_for_detection", return_value=fake_files),
         patch("mempalace.entity_detector.detect_entities", return_value=detected),
         patch("mempalace.room_detector_local.detect_rooms_local"),
+        patch("mempalace.cli._palace_get_collection"),
         patch("mempalace.cli._maybe_run_mine_after_init"),
     ):
         cmd_init(args)
@@ -680,9 +689,7 @@ def test_cmd_repair_error_reading(mock_config_cls, tmp_path, capsys):
     (palace_dir / "chroma.sqlite3").write_text("db")
     mock_config_cls.return_value.palace_path = str(palace_dir)
     args = argparse.Namespace(palace=None)
-    mock_backend = MagicMock()
-    mock_backend.get_collection.side_effect = Exception("corrupt db")
-    with patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend):
+    with patch("mempalace.cli._palace_get_collection", side_effect=Exception("corrupt db")):
         cmd_repair(args)
     out = capsys.readouterr().out
     assert "Error reading palace" in out
@@ -697,8 +704,7 @@ def test_cmd_repair_zero_drawers(mock_config_cls, tmp_path, capsys):
     args = argparse.Namespace(palace=None)
     mock_col = MagicMock()
     mock_col.count.return_value = 0
-    mock_backend = _mock_backend_for(col=mock_col)
-    with patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend):
+    with patch("mempalace.cli._palace_get_collection", return_value=mock_col):
         cmd_repair(args)
     out = capsys.readouterr().out
     assert "Nothing to repair" in out
@@ -719,8 +725,16 @@ def test_cmd_repair_success(mock_config_cls, tmp_path, capsys):
         "metadatas": [{"wing": "a"}, {"wing": "b"}],
     }
     mock_new_col = MagicMock()
-    mock_backend = _mock_backend_for(col=mock_col, new_col=mock_new_col)
-    with patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend):
+    # cmd_repair now reads via palace.get_collection (so the EF stamped at
+    # init time is reapplied), drops the old collection through the
+    # backend's delete_collection (which also invalidates the client cache),
+    # then re-creates via palace.get_collection.
+    mock_backend = _mock_backend_for(col=mock_col)
+    mock_backend.delete_collection = MagicMock()
+    with (
+        patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend),
+        patch("mempalace.cli._palace_get_collection", side_effect=[mock_col, mock_new_col]),
+    ):
         cmd_repair(args)
     out = capsys.readouterr().out
     assert "Repair complete" in out
@@ -737,14 +751,17 @@ def test_cmd_repair_aborts_without_confirmation(mock_config_cls, tmp_path, capsy
     mock_col = MagicMock()
     mock_col.count.return_value = 1
     mock_backend = _mock_backend_for(col=mock_col)
+    mock_backend.delete_collection = MagicMock()
     with (
         patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend),
+        patch("mempalace.cli._palace_get_collection", return_value=mock_col),
         patch("builtins.input", return_value="n"),
     ):
         cmd_repair(args)
     out = capsys.readouterr().out
     assert "Aborted." in out
-    mock_backend.create_collection.assert_not_called()
+    # Repair must not touch the collection if the user declines.
+    mock_backend.delete_collection.assert_not_called()
 
 
 # ── cmd_compress ───────────────────────────────────────────────────────
@@ -754,10 +771,8 @@ def test_cmd_repair_aborts_without_confirmation(mock_config_cls, tmp_path, capsy
 def test_cmd_compress_no_palace(mock_config_cls, capsys):
     mock_config_cls.return_value.palace_path = "/fake/palace"
     args = argparse.Namespace(palace=None, wing=None, dry_run=False, config=None)
-    mock_backend = MagicMock()
-    mock_backend.get_collection.side_effect = Exception("no palace")
     with (
-        patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend),
+        patch("mempalace.cli._palace_get_collection", side_effect=Exception("no palace")),
         pytest.raises(SystemExit),
     ):
         cmd_compress(args)
@@ -769,8 +784,7 @@ def test_cmd_compress_no_drawers(mock_config_cls, capsys):
     args = argparse.Namespace(palace=None, wing="mywing", dry_run=False, config=None)
     mock_col = MagicMock()
     mock_col.get.return_value = {"documents": [], "metadatas": [], "ids": []}
-    mock_backend = _mock_backend_for(col=mock_col)
-    with patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend):
+    with patch("mempalace.cli._palace_get_collection", return_value=mock_col):
         cmd_compress(args)
     out = capsys.readouterr().out
     assert "No drawers found" in out
@@ -798,7 +812,6 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
         },
         {"documents": [], "metadatas": [], "ids": []},
     ]
-    mock_backend = _mock_backend_for(col=mock_col)
 
     mock_dialect = MagicMock()
     mock_dialect.compress.return_value = "compressed"
@@ -813,7 +826,7 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
     with (
-        patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend),
+        patch("mempalace.cli._palace_get_collection", return_value=mock_col),
         patch.dict("sys.modules", {"mempalace.dialect": mock_dialect_mod}),
     ):
         cmd_compress(args)
@@ -831,13 +844,12 @@ def test_cmd_compress_with_config(mock_config_cls, tmp_path, capsys):
     args = argparse.Namespace(palace=None, wing=None, dry_run=True, config=str(config_file))
     mock_col = MagicMock()
     mock_col.get.return_value = {"documents": [], "metadatas": [], "ids": []}
-    mock_backend = _mock_backend_for(col=mock_col)
 
     mock_dialect = MagicMock()
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
     with (
-        patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend),
+        patch("mempalace.cli._palace_get_collection", return_value=mock_col),
         patch.dict("sys.modules", {"mempalace.dialect": mock_dialect_mod}),
     ):
         cmd_compress(args)
@@ -860,9 +872,6 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
         {"documents": [], "metadatas": [], "ids": []},
     ]
     mock_comp_col = MagicMock()
-    mock_backend = MagicMock()
-    mock_backend.get_collection.return_value = mock_col
-    mock_backend.get_or_create_collection.return_value = mock_comp_col
 
     mock_dialect = MagicMock()
     mock_dialect.compress.return_value = "compressed"
@@ -877,7 +886,7 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
     with (
-        patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend),
+        patch("mempalace.cli._palace_get_collection", side_effect=[mock_col, mock_comp_col]),
         patch.dict("sys.modules", {"mempalace.dialect": mock_dialect_mod}),
     ):
         cmd_compress(args)

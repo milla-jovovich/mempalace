@@ -14,6 +14,7 @@ import math
 import re
 from pathlib import Path
 
+from .config import EmbeddingModelMismatchError
 from .palace import get_closets_collection, get_collection
 
 # Closet pointer line format: "topic|entities|→drawer_id_a,drawer_id_b"
@@ -279,6 +280,8 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     """
     try:
         col = get_collection(palace_path, create=False)
+    except EmbeddingModelMismatchError:
+        raise
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
@@ -381,6 +384,8 @@ def search_memories(
     """
     try:
         drawers_col = get_collection(palace_path, create=False)
+    except EmbeddingModelMismatchError:
+        raise
     except Exception as e:
         logger.error("No palace found at %s: %s", palace_path, e)
         return {

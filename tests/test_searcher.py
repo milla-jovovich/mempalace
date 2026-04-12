@@ -38,8 +38,9 @@ class TestSearchMemories:
         result = search_memories("code", palace_path, n_results=2)
         assert len(result["results"]) <= 2
 
-    def test_no_palace_returns_error(self, tmp_path):
-        result = search_memories("anything", str(tmp_path / "missing"))
+    def test_no_palace_returns_error(self):
+        with patch("mempalace.searcher.get_collection", side_effect=Exception("no palace")):
+            result = search_memories("anything", "/fake/missing")
         assert "error" in result
 
     def test_result_fields(self, palace_path, seeded_collection):
@@ -146,9 +147,10 @@ class TestSearchCLI:
         assert "Wing:" in captured.out
         assert "Room:" in captured.out
 
-    def test_search_no_palace_raises(self, tmp_path):
-        with pytest.raises(SearchError, match="No palace found"):
-            search("anything", str(tmp_path / "missing"))
+    def test_search_no_palace_raises(self):
+        with patch("mempalace.searcher.get_collection", side_effect=Exception("no palace")):
+            with pytest.raises(SearchError, match="No palace found"):
+                search("anything", "/fake/missing")
 
     def test_search_no_results(self, palace_path, collection, capsys):
         """Empty collection returns no results message."""

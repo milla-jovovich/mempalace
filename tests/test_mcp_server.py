@@ -318,8 +318,14 @@ class TestReadTools:
 
     def test_no_palace_returns_error(self, monkeypatch, config, kg):
         _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
         from mempalace.mcp_server import tool_status
 
+        monkeypatch.setattr(mcp_server, "_collection_cache", None)
+        monkeypatch.setattr(
+            mcp_server, "_get_collection",
+            lambda create=False: None,
+        )
         result = tool_status()
         assert "error" in result
 

@@ -404,10 +404,21 @@ class ChromaCollection(BaseCollection):
         Used by the searcher to detect legacy palaces that were created
         without ``hnsw:space=cosine`` and therefore silently use L2
         distance, which breaks cosine-based similarity interpretation.
+        Also used by ``palace.get_collection`` to read the
+        ``embedding_model`` stamp written at init time (PR #442).
         Returns ``{}`` when metadata is absent so callers can do a plain
         ``.get("hnsw:space")`` without None-checks.
         """
         return self._collection.metadata or {}
+
+    def modify(self, **kwargs):
+        """Pass-through to ``Collection.modify`` for metadata updates.
+
+        ``palace.get_collection`` calls this to stamp the embedding model
+        into legacy palaces and to retrofit an embedding_model field when
+        re-mining with --force.
+        """
+        self._collection.modify(**kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -569,7 +580,9 @@ class ChromaBackend(BaseBackend):
         * Legacy: ``get_collection(palace_path, collection_name, create=False)``
           — still used by callers not yet migrated.
         """
-        palace_ref, collection_name, create, options = _normalize_get_collection_args(args, kwargs)
+        palace_ref, collection_name, create, options, embedding_function, extra_metadata = (
+            _normalize_get_collection_args(args, kwargs)
+        )
 
         palace_path = palace_ref.local_path
         if palace_path is None:
@@ -590,13 +603,22 @@ class ChromaBackend(BaseBackend):
         if options and isinstance(options, dict):
             hnsw_space = options.get("hnsw_space", hnsw_space)
 
-        ef = self._resolve_embedding_function()
+        # Embedding function: explicit override (palace.get_collection passes the
+        # init-time-bound EF for the palace's embedding_model) wins; otherwise
+        # fall back to the env-derived default EF for legacy callers.
+        ef = embedding_function if embedding_function is not None else self._resolve_embedding_function()
         ef_kwargs = {"embedding_function": ef} if ef is not None else {}
 
         if create:
+            create_metadata = {"hnsw:space": hnsw_space, "hnsw:num_threads": 1}
+            if extra_metadata:
+                # palace.get_collection stamps embedding_model / chunk_size /
+                # chunk_overlap here. Don't let user metadata clobber HNSW knobs.
+                for k, v in extra_metadata.items():
+                    create_metadata.setdefault(k, v)
             collection = client.get_or_create_collection(
                 collection_name,
-                metadata={"hnsw:space": hnsw_space, "hnsw:num_threads": 1},
+                metadata=create_metadata,
                 **ef_kwargs,
             )
         else:
@@ -656,8 +678,17 @@ def _normalize_get_collection_args(args, kwargs):
     """Unify legacy positional ``(palace_path, collection_name, create)`` calls
     with the new kwargs-only ``(palace=PalaceRef, collection_name=..., create=...)``.
 
-    Returns ``(PalaceRef, collection_name, create, options)``.
+    Also extracts ``embedding_function=`` and ``metadata=`` overrides used by
+    ``palace.get_collection`` to enforce the init-time embedding model binding
+    introduced in PR #442 (#442 stamps embedding_model into collection metadata
+    and re-applies the matching EF on every open).
+
+    Returns ``(PalaceRef, collection_name, create, options, embedding_function, metadata)``.
     """
+    # Pull #442-era overrides out first; they may appear with either calling style.
+    embedding_function = kwargs.pop("embedding_function", None)
+    extra_metadata = kwargs.pop("metadata", None)
+
     # New-style: palace= kwarg with a PalaceRef (spec path).
     if "palace" in kwargs:
         palace_ref = kwargs.pop("palace")
@@ -670,7 +701,7 @@ def _normalize_get_collection_args(args, kwargs):
             raise TypeError(f"unexpected kwargs: {sorted(kwargs)}")
         if args:
             raise TypeError("positional args not allowed with palace= kwarg")
-        return palace_ref, collection_name, create, options
+        return palace_ref, collection_name, create, options, embedding_function, extra_metadata
 
     # Legacy: first positional is a path string.
     if args:
@@ -691,6 +722,8 @@ def _normalize_get_collection_args(args, kwargs):
             collection_name,
             bool(create),
             None,
+            embedding_function,
+            extra_metadata,
         )
 
     # Legacy kwargs-only (palace_path=..., collection_name=..., create=...)
@@ -705,6 +738,8 @@ def _normalize_get_collection_args(args, kwargs):
             collection_name,
             bool(create),
             None,
+            embedding_function,
+            extra_metadata,
         )
 
     raise TypeError("get_collection requires palace= or a positional palace_path")
