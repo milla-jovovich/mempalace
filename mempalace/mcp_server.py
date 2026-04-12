@@ -58,10 +58,11 @@ if _args.palace:
     os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
 
 _config = MempalaceConfig()
-if _args.palace:
-    _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
-else:
-    _kg = KnowledgeGraph()
+# Always derive KG path from palace_path to match CLI expectations.
+# Previously, the no-arg fallback used DEFAULT_KG_PATH (~/.mempalace/knowledge_graph.sqlite3)
+# while CLI reads from palace_path/knowledge.db — causing KG writes via MCP to be
+# invisible to CLI search/query commands.
+_kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge.db"))
 
 
 _collection_cache = None
@@ -994,6 +995,37 @@ def handle_request(request):
         "id": req_id,
         "error": {"code": -32601, "message": f"Unknown method: {method}"},
     }
+
+
+def _shutdown():
+    """Flush KG WAL and release ChromaDB client before exit.
+
+    Prevents data loss when the stdio transport closes — ChromaDB's
+    PersistentClient uses an in-memory WAL that may not flush if the
+    process exits before the background thread completes.
+
+    Note: atexit handlers do not run on SIGKILL. For maximum robustness,
+    consider PRAGMA journal_mode=DELETE at startup (trades write
+    concurrency for crash safety). WAL checkpoint on clean exit covers
+    the common case (SIGTERM, SIGINT, normal exit).
+    """
+    try:
+        if _kg and _kg._connection:
+            _kg._connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            _kg._connection.close()
+            logger.info("KG WAL checkpointed and connection closed")
+    except Exception:
+        pass
+    try:
+        if _client_cache:
+            del _client_cache
+            logger.info("ChromaDB client released")
+    except Exception:
+        pass
+
+
+import atexit
+atexit.register(_shutdown)
 
 
 def main():
