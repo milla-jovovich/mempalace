@@ -6,9 +6,14 @@ Memory is identity. When an AI forgets everything between conversations, it cann
 
 MemPalace exists to solve this. It is a memory system — not a search engine, not a RAG pipeline, not a vector database wrapper. It treats every word you have shared as sacred, stores it verbatim, and makes it instantly available. Your data never leaves your machine. We never summarize. We never paraphrase. We return your exact words.
 
-100% recall is not a marketing number. It is the design requirement. Anything less means forgetting, and forgetting means starting over.
+100% recall is the design requirement — the target every search path is measured against. Anything less means forgetting, and forgetting means starting over.
 
-The name comes from the ancient "method of loci" — the memory palace technique used for thousands of years to organize and recall vast amounts of information by placing it in imagined rooms of an imagined building. We apply that same spatial metaphor to AI memory: wings for topics, rooms for days, closets for compressed indexes, drawers for full verbatim content.
+The name comes from the ancient "method of loci" — the memory palace technique used for thousands of years to organize and recall vast amounts of information by placing it in imagined rooms of an imagined building. We were also inspired by the Zettelkasten method (created by German sociologist Niklas Luhmann) — small cross-referenced index cards that point to each other. We apply both ideas to AI memory:
+
+- **Wings** for broad categories (people, projects, topics)
+- **Rooms** for time-based groupings (days, sessions)
+- **Drawers** for full verbatim content (your exact words)
+- **AAAK compression** for the index layer — a compact symbolic format (via `dialect.py`) that lets an LLM scan thousands of entries instantly and know exactly which drawer to open
 
 ## Design Principles
 
@@ -20,6 +25,7 @@ These are non-negotiable. Every PR, every feature, every refactor must honor the
 - **Local-first, zero API** — All extraction, chunking, and embedding happens on the user's machine. No cloud dependency for memory operations. No API keys required.
 - **Performance budgets** — Hooks under 500ms. Startup injection under 100ms. Memory should feel instant.
 - **Privacy by architecture** — The system physically cannot send your data because it never leaves your machine. No telemetry, no phone-home, no external service dependencies for core operations.
+- **Background everything** — Filing, indexing, timestamps, and pipeline work happen via hooks in the background. Nothing interrupts the user's conversation. Zero tokens spent on bookkeeping in the chat window.
 
 ## Contributing
 
@@ -57,18 +63,36 @@ ruff format --check .
 ```
 mempalace/
 ├── mcp_server.py        # MCP server — all read/write tools
+├── cli.py               # CLI dispatcher
+├── config.py            # Configuration + input validation
 ├── miner.py             # Project file miner
 ├── convo_miner.py       # Conversation transcript miner
-├── searcher.py          # Semantic search
+├── searcher.py          # Semantic search (hybrid BM25 + vector)
 ├── knowledge_graph.py   # Temporal entity-relationship graph (SQLite)
-├── palace.py            # Shared palace operations (ChromaDB access)
-├── config.py            # Configuration + input validation
-├── normalize.py         # Transcript format detection + normalization
-├── cli.py               # CLI dispatcher
-├── dialect.py           # AAAK compression dialect
+├── palace.py            # Shared palace operations
 ├── palace_graph.py      # Room traversal + cross-wing tunnels
-├── hooks_cli.py         # Hook system for auto-save
+├── backends/            # Pluggable storage backends (ChromaDB default)
+│   ├── base.py          # Abstract interface — implement this for new backends
+│   └── chroma.py        # ChromaDB implementation
+├── dialect.py           # AAAK compression dialect
+├── normalize.py         # Transcript format detection + normalization
+├── entity_detector.py   # Auto-detect people/projects from content
+├── entity_registry.py   # Entity storage and disambiguation
+├── layers.py            # L0-L3 memory wake-up stack
+├── onboarding.py        # Interactive first-run setup
+├── repair.py            # Palace repair and consistency checks
+├── dedup.py             # Deduplication
+├── migrate.py           # ChromaDB version migration
+├── spellcheck.py        # Auto-correct user messages
+├── exporter.py          # Palace data export
+├── hooks_cli.py         # Hook management CLI
+├── query_sanitizer.py   # Prompt contamination prevention
+├── split_mega_files.py  # Split concatenated transcript files
 └── version.py           # Single source of truth for version
+
+hooks/                   # Claude Code hook scripts
+├── mempal_save_hook.sh        # Stop: triggers diary save
+└── mempal_precompact_hook.sh  # PreCompact: saves state before compression
 ```
 
 ## Conventions
@@ -83,12 +107,17 @@ mempalace/
 ## Architecture
 
 ```
-User → CLI / MCP Server → ChromaDB (vector store) + SQLite (knowledge graph)
+User → CLI / MCP Server → Storage Backend (ChromaDB default, pluggable)
+                        → SQLite (knowledge graph)
 
 Palace structure:
   WING (person/project)
-    └── ROOM (topic)
+    └── ROOM (day/topic)
           └── DRAWER (verbatim text chunk)
+
+Index layer (AAAK):
+  Compressed pointers → DRAWER locations
+  Scanned by LLM to find relevant drawers without reading all content
 
 Knowledge Graph:
   ENTITY → PREDICATE → ENTITY (with valid_from / valid_to dates)
@@ -99,5 +128,6 @@ Knowledge Graph:
 - **Adding an MCP tool**: `mempalace/mcp_server.py` — add handler function + TOOLS dict entry
 - **Changing search**: `mempalace/searcher.py`
 - **Modifying mining**: `mempalace/miner.py` (project files) or `mempalace/convo_miner.py` (transcripts)
+- **Adding a storage backend**: subclass `mempalace/backends/base.py`, register in `backends/__init__.py`
 - **Input validation**: `mempalace/config.py` — `sanitize_name()` / `sanitize_content()`
 - **Tests**: mirror source structure in `tests/test_<module>.py`
