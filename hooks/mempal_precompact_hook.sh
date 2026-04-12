@@ -155,6 +155,6 @@ fi
 cat << 'HOOKJSON'
 {
   "decision": "block",
-  "reason": "COMPACTION IMMINENT — MEMPALACE SAVE REQUIRED. Use the mempalace MCP tools (mempalace_add_drawer, mempalace_diary_write) to save EVERYTHING to the memory palace. Do NOT save to your internal Claude memory (~/.claude/projects/.../memory/) — save to the MEMPALACE via MCP tools only. CRITICAL: Save tool output VERBATIM — Bash command results, probe findings, search results, build output, error messages. These are lost on compaction and exist nowhere else. Also save all topics, decisions, quotes, code, and important context. Be thorough — after compaction, detailed context will be lost. Organize into appropriate wings/rooms. Save everything, then allow compaction to proceed."
+  "reason": "COMPACTION IMMINENT (MemPalace). Save ALL session content before context is lost:\n1. mempalace_diary_write — thorough session summary\n2. mempalace_add_drawer — ALL verbatim quotes, decisions, code, context (place each in appropriate wing and room)\n3. mempalace_kg_add — entity relationships (optional)\nFor THIS save, use MemPalace MCP tools only (not auto-memory .md files). Be thorough — after compaction this is all that survives. Save everything to MemPalace, then allow compaction to proceed."
 }
 HOOKJSON

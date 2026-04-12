@@ -48,8 +48,8 @@ _RECENT_MSG_COUNT = 30  # how many recent user messages to summarize
 
 STOP_BLOCK_REASON = (
     "AUTO-SAVE checkpoint (MemPalace). Save this session's key content:\n"
-    "1. mempalace_diary_write — session summary (what was discussed, "
-    "key decisions, current state of work)\n"
+    "1. mempalace_diary_write — session summary "
+    "(what was discussed, key decisions, current state of work)\n"
     "2. mempalace_add_drawer — verbatim quotes, decisions, code snippets "
     "(place in appropriate wing and room)\n"
     "3. mempalace_kg_add — entity relationships (optional)\n"
@@ -64,7 +64,7 @@ PRECOMPACT_BLOCK_REASON = (
     "(place each in appropriate wing and room)\n"
     "3. mempalace_kg_add — entity relationships (optional)\n"
     "For THIS save, use MemPalace MCP tools only (not auto-memory .md files). "
-    "Be thorough — after compaction this is all that survives. "
+    "Be thorough \u2014 after compaction this is all that survives. "
     "Save everything to MemPalace, then allow compaction to proceed."
 )
 

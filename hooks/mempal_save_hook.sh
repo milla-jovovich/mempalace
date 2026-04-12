@@ -201,7 +201,7 @@ PYMINE
     cat << 'HOOKJSON'
 {
   "decision": "block",
-  "reason": "MEMPALACE AUTO-SAVE checkpoint. Use the mempalace MCP tools (mempalace_add_drawer, mempalace_diary_write) to save to the memory palace. Do NOT save to your internal Claude memory (~/.claude/projects/.../memory/) — save to the MEMPALACE via MCP tools only. IMPORTANT: Save tool output VERBATIM — Bash command results, probe findings, search results, build output, error messages. These are lost on compaction and exist nowhere else. Also save key topics, decisions, and quotes. Organize into appropriate wings/rooms. Continue conversation after saving."
+  "reason": "AUTO-SAVE checkpoint (MemPalace). Save this session's key content:\n1. mempalace_diary_write — session summary (what was discussed, key decisions, current state of work)\n2. mempalace_add_drawer — verbatim quotes, decisions, code snippets (place in appropriate wing and room)\n3. mempalace_kg_add — entity relationships (optional)\nFor THIS save, use MemPalace MCP tools only (not auto-memory .md files). Use verbatim quotes where possible. Continue conversation after saving."
 }
 HOOKJSON
 else
