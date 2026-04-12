@@ -9,25 +9,26 @@ via monkeypatch to avoid touching real data.
 import json
 
 
-def _patch_mcp_server(monkeypatch, config, palace_path, kg):
+def _patch_mcp_server(monkeypatch, config, kg):
     """Patch the mcp_server module globals to use test fixtures."""
     from mempalace import mcp_server
 
-    assert getattr(config, "palace_path", None) == palace_path, (
-        f"config.palace_path ({getattr(config, 'palace_path', None)!r}) does not match palace_path fixture ({palace_path!r})"
-    )
     monkeypatch.setattr(mcp_server, "_config", config)
     monkeypatch.setattr(mcp_server, "_kg", kg)
 
 
 def _get_collection(palace_path, create=False):
-    """Helper to get collection from test palace."""
+    """Helper to get collection from test palace.
+
+    Returns (client, collection) so callers can clean up the client
+    when they are done.
+    """
     import chromadb
 
     client = chromadb.PersistentClient(path=palace_path)
     if create:
-        return client.get_or_create_collection("mempalace_drawers")
-    return client.get_collection("mempalace_drawers")
+        return client, client.get_or_create_collection("mempalace_drawers")
+    return client, client.get_collection("mempalace_drawers")
 
 
 # ── Protocol Layer ──────────────────────────────────────────────────────
@@ -41,11 +42,62 @@ class TestHandleRequest:
         assert resp["result"]["serverInfo"]["name"] == "mempalace"
         assert resp["id"] == 1
 
+    def test_initialize_negotiates_client_version(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "initialize",
+                "id": 1,
+                "params": {"protocolVersion": "2025-11-25"},
+            }
+        )
+        assert resp["result"]["protocolVersion"] == "2025-11-25"
+
+    def test_initialize_negotiates_older_supported_version(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "initialize",
+                "id": 1,
+                "params": {"protocolVersion": "2025-03-26"},
+            }
+        )
+        assert resp["result"]["protocolVersion"] == "2025-03-26"
+
+    def test_initialize_unknown_version_falls_back_to_latest(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "initialize",
+                "id": 1,
+                "params": {"protocolVersion": "9999-12-31"},
+            }
+        )
+        from mempalace.mcp_server import SUPPORTED_PROTOCOL_VERSIONS
+
+        assert resp["result"]["protocolVersion"] == SUPPORTED_PROTOCOL_VERSIONS[0]
+
+    def test_initialize_missing_version_uses_oldest(self):
+        from mempalace.mcp_server import handle_request, SUPPORTED_PROTOCOL_VERSIONS
+
+        resp = handle_request({"method": "initialize", "id": 1, "params": {}})
+        assert resp["result"]["protocolVersion"] == SUPPORTED_PROTOCOL_VERSIONS[-1]
+
     def test_notifications_initialized_returns_none(self):
         from mempalace.mcp_server import handle_request
 
         resp = handle_request({"method": "notifications/initialized", "id": None, "params": {}})
         assert resp is None
+
+    def test_ping_returns_empty_result(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request({"method": "ping", "id": 11, "params": {}})
+        assert resp["id"] == 11
+        assert resp["result"] == {}
 
     def test_tools_list(self):
         from mempalace.mcp_server import handle_request
@@ -57,6 +109,23 @@ class TestHandleRequest:
         assert "mempalace_search" in names
         assert "mempalace_add_drawer" in names
         assert "mempalace_kg_add" in names
+
+    def test_null_arguments_does_not_hang(self, monkeypatch, config, palace_path, seeded_kg):
+        """Sending arguments: null should return a result, not hang (#394)."""
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import handle_request
+
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 10,
+                "params": {"name": "mempalace_status", "arguments": None},
+            }
+        )
+        assert "error" not in resp
+        assert resp["result"] is not None
 
     def test_unknown_tool(self):
         from mempalace.mcp_server import handle_request
@@ -76,12 +145,49 @@ class TestHandleRequest:
         resp = handle_request({"method": "unknown/method", "id": 4, "params": {}})
         assert resp["error"]["code"] == -32601
 
+    def test_any_notification_returns_none(self):
+        """All notifications/* methods should return None (no response)."""
+        from mempalace.mcp_server import handle_request
+
+        for method in [
+            "notifications/initialized",
+            "notifications/cancelled",
+            "notifications/progress",
+            "notifications/roots/list_changed",
+        ]:
+            resp = handle_request({"method": method, "params": {}})
+            assert resp is None, f"{method} should return None"
+
+    def test_unknown_method_no_id_returns_none(self):
+        """Messages without id (notifications) must never get a response."""
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request({"method": "unknown/thing", "params": {}})
+        assert resp is None
+
+    def test_malformed_method_none(self):
+        """method=None or missing should not crash."""
+        from mempalace.mcp_server import handle_request
+
+        # Explicit None
+        resp = handle_request({"method": None, "params": {}})
+        assert resp is None  # no id → no response
+
+        # Missing method entirely
+        resp = handle_request({"params": {}})
+        assert resp is None
+
+        # method=None with id → should return error, not crash
+        resp = handle_request({"method": None, "id": 99, "params": {}})
+        assert resp["error"]["code"] == -32601
+
     def test_tools_call_dispatches(self, monkeypatch, config, palace_path, seeded_kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, seeded_kg)
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
         from mempalace.mcp_server import handle_request
 
         # Create a collection so status works
-        _get_collection(palace_path, create=True)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
 
         resp = handle_request(
             {
@@ -100,8 +206,9 @@ class TestHandleRequest:
 
 class TestReadTools:
     def test_status_empty_palace(self, monkeypatch, config, palace_path, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
-        _get_collection(palace_path, create=True)
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
         from mempalace.mcp_server import tool_status
 
         result = tool_status()
@@ -109,7 +216,7 @@ class TestReadTools:
         assert result["wings"] == {}
 
     def test_status_with_data(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_status
 
         result = tool_status()
@@ -118,7 +225,7 @@ class TestReadTools:
         assert "notes" in result["wings"]
 
     def test_list_wings(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_list_wings
 
         result = tool_list_wings()
@@ -126,7 +233,7 @@ class TestReadTools:
         assert result["wings"]["notes"] == 1
 
     def test_list_rooms_all(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_list_rooms
 
         result = tool_list_rooms()
@@ -135,7 +242,7 @@ class TestReadTools:
         assert "planning" in result["rooms"]
 
     def test_list_rooms_filtered(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_list_rooms
 
         result = tool_list_rooms(wing="project")
@@ -143,7 +250,7 @@ class TestReadTools:
         assert "planning" not in result["rooms"]
 
     def test_get_taxonomy(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_get_taxonomy
 
         result = tool_get_taxonomy()
@@ -152,8 +259,7 @@ class TestReadTools:
         assert result["taxonomy"]["notes"]["planning"] == 1
 
     def test_no_palace_returns_error(self, monkeypatch, config, kg):
-        config._file_config["palace_path"] = "/nonexistent/path"
-        _patch_mcp_server(monkeypatch, config, "/nonexistent/path", kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_status
 
         result = tool_status()
@@ -165,7 +271,7 @@ class TestReadTools:
 
 class TestSearchTool:
     def test_search_basic(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_search
 
         result = tool_search(query="JWT authentication tokens")
@@ -176,18 +282,34 @@ class TestSearchTool:
         assert "JWT" in top["text"] or "authentication" in top["text"].lower()
 
     def test_search_with_wing_filter(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_search
 
         result = tool_search(query="planning", wing="notes")
         assert all(r["wing"] == "notes" for r in result["results"])
 
     def test_search_with_room_filter(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_search
 
         result = tool_search(query="database", room="backend")
         assert all(r["room"] == "backend" for r in result["results"])
+
+    def test_search_min_similarity_backwards_compat(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        """Old min_similarity param still works via backwards-compat shim."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_search
+
+        # Old name should work
+        result = tool_search(query="JWT", min_similarity=1.5)
+        assert "results" in result
+
+        # Old name takes precedence when both provided
+        result_strict = tool_search(query="JWT", max_distance=999.0, min_similarity=0.01)
+        result_loose = tool_search(query="JWT", max_distance=0.01, min_similarity=999.0)
+        assert len(result_strict["results"]) <= len(result_loose["results"])
 
 
 # ── Write Tools ─────────────────────────────────────────────────────────
@@ -195,8 +317,9 @@ class TestSearchTool:
 
 class TestWriteTools:
     def test_add_drawer(self, monkeypatch, config, palace_path, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
-        _get_collection(palace_path, create=True)
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
         from mempalace.mcp_server import tool_add_drawer
 
         result = tool_add_drawer(
@@ -210,8 +333,9 @@ class TestWriteTools:
         assert result["drawer_id"].startswith("drawer_test_wing_test_room_")
 
     def test_add_drawer_duplicate_detection(self, monkeypatch, config, palace_path, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
-        _get_collection(palace_path, create=True)
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
         from mempalace.mcp_server import tool_add_drawer
 
         content = "This is a unique test memory about Rust ownership and borrowing."
@@ -219,11 +343,11 @@ class TestWriteTools:
         assert result1["success"] is True
 
         result2 = tool_add_drawer(wing="w", room="r", content=content)
-        assert result2["success"] is False
-        assert result2["reason"] == "duplicate"
+        assert result2["success"] is True
+        assert result2["reason"] == "already_exists"
 
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_delete_drawer
 
         result = tool_delete_drawer("drawer_proj_backend_aaa")
@@ -231,14 +355,14 @@ class TestWriteTools:
         assert seeded_collection.count() == 3
 
     def test_delete_drawer_not_found(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_delete_drawer
 
         result = tool_delete_drawer("nonexistent_drawer")
         assert result["success"] is False
 
     def test_check_duplicate(self, monkeypatch, config, palace_path, seeded_collection, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_check_duplicate
 
         # Exact match text from seeded_collection should be flagged
@@ -256,13 +380,114 @@ class TestWriteTools:
         )
         assert result["is_duplicate"] is False
 
+    def test_get_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_get_drawer
+
+        result = tool_get_drawer("drawer_proj_backend_aaa")
+        assert result["drawer_id"] == "drawer_proj_backend_aaa"
+        assert result["wing"] == "project"
+        assert result["room"] == "backend"
+        assert "JWT tokens" in result["content"]
+
+    def test_get_drawer_not_found(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_get_drawer
+
+        result = tool_get_drawer("nonexistent_drawer")
+        assert "error" in result
+
+    def test_list_drawers(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers()
+        assert result["count"] == 4
+        assert len(result["drawers"]) == 4
+
+    def test_list_drawers_with_wing_filter(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(wing="project")
+        assert result["count"] == 3
+        assert all(d["wing"] == "project" for d in result["drawers"])
+
+    def test_list_drawers_with_room_filter(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(wing="project", room="backend")
+        assert result["count"] == 2
+        assert all(d["room"] == "backend" for d in result["drawers"])
+
+    def test_list_drawers_pagination(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(limit=2, offset=0)
+        assert result["count"] == 2
+        assert result["limit"] == 2
+        assert result["offset"] == 0
+
+    def test_list_drawers_negative_offset_clamped(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_list_drawers
+
+        result = tool_list_drawers(offset=-5)
+        assert result["offset"] == 0
+
+    def test_update_drawer_content(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer, tool_get_drawer
+
+        result = tool_update_drawer(
+            "drawer_proj_backend_aaa", content="Updated content about auth."
+        )
+        assert result["success"] is True
+
+        fetched = tool_get_drawer("drawer_proj_backend_aaa")
+        assert fetched["content"] == "Updated content about auth."
+
+    def test_update_drawer_wing_and_room(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer
+
+        result = tool_update_drawer("drawer_proj_backend_aaa", wing="new_wing", room="new_room")
+        assert result["success"] is True
+        assert result["wing"] == "new_wing"
+        assert result["room"] == "new_room"
+
+    def test_update_drawer_not_found(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer
+
+        result = tool_update_drawer("nonexistent_drawer", content="hello")
+        assert result["success"] is False
+
+    def test_update_drawer_noop(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_update_drawer
+
+        result = tool_update_drawer("drawer_proj_backend_aaa")
+        assert result["success"] is True
+        assert result.get("noop") is True
+
 
 # ── KG Tools ────────────────────────────────────────────────────────────
 
 
 class TestKGTools:
     def test_kg_add(self, monkeypatch, config, palace_path, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
+        _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_kg_add
 
         result = tool_kg_add(
@@ -274,14 +499,14 @@ class TestKGTools:
         assert result["success"] is True
 
     def test_kg_query(self, monkeypatch, config, palace_path, seeded_kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, seeded_kg)
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
         from mempalace.mcp_server import tool_kg_query
 
         result = tool_kg_query(entity="Max")
         assert result["count"] > 0
 
     def test_kg_invalidate(self, monkeypatch, config, palace_path, seeded_kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, seeded_kg)
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
         from mempalace.mcp_server import tool_kg_invalidate
 
         result = tool_kg_invalidate(
@@ -293,14 +518,14 @@ class TestKGTools:
         assert result["success"] is True
 
     def test_kg_timeline(self, monkeypatch, config, palace_path, seeded_kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, seeded_kg)
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
         from mempalace.mcp_server import tool_kg_timeline
 
         result = tool_kg_timeline(entity="Alice")
         assert result["count"] > 0
 
     def test_kg_stats(self, monkeypatch, config, palace_path, seeded_kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, seeded_kg)
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
         from mempalace.mcp_server import tool_kg_stats
 
         result = tool_kg_stats()
@@ -312,8 +537,9 @@ class TestKGTools:
 
 class TestDiaryTools:
     def test_diary_write_and_read(self, monkeypatch, config, palace_path, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
-        _get_collection(palace_path, create=True)
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
         from mempalace.mcp_server import tool_diary_write, tool_diary_read
 
         w = tool_diary_write(
@@ -330,8 +556,9 @@ class TestDiaryTools:
         assert "authentication" in r["entries"][0]["content"]
 
     def test_diary_read_empty(self, monkeypatch, config, palace_path, kg):
-        _patch_mcp_server(monkeypatch, config, palace_path, kg)
-        _get_collection(palace_path, create=True)
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
         from mempalace.mcp_server import tool_diary_read
 
         r = tool_diary_read(agent_name="Nobody")

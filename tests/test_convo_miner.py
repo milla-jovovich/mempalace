@@ -23,4 +23,4 @@ def test_convo_mining():
     results = col.query(query_texts=["memory persistence"], n_results=1)
     assert len(results["documents"][0]) > 0
 
-    shutil.rmtree(tmpdir)
+    shutil.rmtree(tmpdir, ignore_errors=True)
