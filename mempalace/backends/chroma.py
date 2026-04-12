@@ -64,6 +64,9 @@ class ChromaCollection(BaseCollection):
     def delete(self, **kwargs):
         self._collection.delete(**kwargs)
 
+    def update(self, **kwargs):
+        self._collection.update(**kwargs)
+
     def count(self):
         return self._collection.count()
 

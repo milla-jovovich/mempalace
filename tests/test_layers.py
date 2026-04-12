@@ -70,8 +70,8 @@ def test_layer0_default_path():
 # ── Layer1 — mocked chromadb ────────────────────────────────────────────
 
 
-def _mock_chromadb_for_layer(docs, metas, monkeypatch=None):
-    """Return a mock collection whose get() returns docs/metas."""
+def _mock_collection_for_layer(docs, metas):
+    """Return a mock collection whose .get returns docs/metas."""
     mock_col = MagicMock()
     # First batch returns data, second batch returns empty (end of pagination)
     mock_col.get.side_effect = [
@@ -99,11 +99,11 @@ def test_layer1_generates_essential_story():
         {"room": "decisions", "source_file": "meeting.txt", "importance": 5},
         {"room": "architecture", "source_file": "design.txt", "importance": 4},
     ]
-    mock_col = _mock_chromadb_for_layer(docs, metas)
+    mock_col = _mock_collection_for_layer(docs, metas)
 
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer1(palace_path="/fake")
@@ -116,9 +116,10 @@ def test_layer1_generates_essential_story():
 def test_layer1_empty_palace():
     mock_col = MagicMock()
     mock_col.get.return_value = {"documents": [], "metadatas": []}
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer1(palace_path="/fake")
@@ -130,11 +131,11 @@ def test_layer1_empty_palace():
 def test_layer1_with_wing_filter():
     docs = ["Memory about project X"]
     metas = [{"room": "general", "source_file": "x.txt", "importance": 3}]
-    mock_col = _mock_chromadb_for_layer(docs, metas)
+    mock_col = _mock_collection_for_layer(docs, metas)
 
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer1(palace_path="/fake", wing="project_x")
@@ -149,11 +150,11 @@ def test_layer1_with_wing_filter():
 def test_layer1_truncates_long_snippets():
     docs = ["A" * 300]
     metas = [{"room": "general", "source_file": "long.txt"}]
-    mock_col = _mock_chromadb_for_layer(docs, metas)
+    mock_col = _mock_collection_for_layer(docs, metas)
 
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer1(palace_path="/fake")
@@ -166,11 +167,11 @@ def test_layer1_respects_max_chars():
     """L1 stops adding entries once MAX_CHARS is reached."""
     docs = [f"Memory number {i} with substantial content padding here" for i in range(30)]
     metas = [{"room": "general", "source_file": f"f{i}.txt", "importance": 5} for i in range(30)]
-    mock_col = _mock_chromadb_for_layer(docs, metas)
+    mock_col = _mock_collection_for_layer(docs, metas)
 
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer1(palace_path="/fake")
@@ -188,11 +189,11 @@ def test_layer1_importance_from_various_keys():
         {"room": "r", "weight": 1},
         {"room": "r"},  # no weight key, defaults to 3
     ]
-    mock_col = _mock_chromadb_for_layer(docs, metas)
+    mock_col = _mock_collection_for_layer(docs, metas)
 
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer1(palace_path="/fake")
@@ -208,9 +209,10 @@ def test_layer1_batch_exception_breaks():
         {"documents": ["doc1"], "metadatas": [{"room": "r"}]},
         RuntimeError("batch error"),
     ]
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer1(palace_path="/fake")
@@ -236,9 +238,10 @@ def test_layer2_retrieve_with_wing():
         "documents": ["Some memory about the project"],
         "metadatas": [{"room": "backend", "source_file": "notes.txt"}],
     }
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer2(palace_path="/fake")
@@ -254,9 +257,10 @@ def test_layer2_retrieve_with_room():
         "documents": ["Backend architecture notes"],
         "metadatas": [{"room": "architecture", "source_file": "arch.txt"}],
     }
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer2(palace_path="/fake")
@@ -271,9 +275,10 @@ def test_layer2_retrieve_wing_and_room():
         "documents": ["Filtered result"],
         "metadatas": [{"room": "backend", "source_file": "x.txt"}],
     }
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer2(palace_path="/fake")
@@ -287,9 +292,10 @@ def test_layer2_retrieve_wing_and_room():
 def test_layer2_retrieve_empty():
     mock_col = MagicMock()
     mock_col.get.return_value = {"documents": [], "metadatas": []}
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer2(palace_path="/fake")
@@ -301,9 +307,10 @@ def test_layer2_retrieve_empty():
 def test_layer2_retrieve_no_filter():
     mock_col = MagicMock()
     mock_col.get.return_value = {"documents": [], "metadatas": []}
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer2(palace_path="/fake")
@@ -317,9 +324,10 @@ def test_layer2_retrieve_no_filter():
 def test_layer2_retrieve_error():
     mock_col = MagicMock()
     mock_col.get.side_effect = RuntimeError("db error")
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer2(palace_path="/fake")
@@ -334,9 +342,10 @@ def test_layer2_truncates_long_snippets():
         "documents": ["B" * 400],
         "metadatas": [{"room": "r", "source_file": "s.txt"}],
     }
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer2(palace_path="/fake")
@@ -379,9 +388,10 @@ def test_layer3_search_with_results():
         [{"wing": "project", "room": "backend", "source_file": "notes.txt"}],
         [0.2],
     )
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer3(palace_path="/fake")
@@ -395,9 +405,10 @@ def test_layer3_search_with_results():
 def test_layer3_search_no_results():
     mock_col = MagicMock()
     mock_col.query.return_value = _mock_query_results([], [], [])
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer3(palace_path="/fake")
@@ -413,9 +424,10 @@ def test_layer3_search_with_wing_filter():
         [{"wing": "proj", "room": "r"}],
         [0.1],
     )
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer3(palace_path="/fake")
@@ -432,9 +444,10 @@ def test_layer3_search_with_room_filter():
         [{"wing": "w", "room": "backend"}],
         [0.1],
     )
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer3(palace_path="/fake")
@@ -451,9 +464,10 @@ def test_layer3_search_with_wing_and_room():
         [{"wing": "proj", "room": "backend"}],
         [0.1],
     )
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer3(palace_path="/fake")
@@ -466,9 +480,10 @@ def test_layer3_search_with_wing_and_room():
 def test_layer3_search_error():
     mock_col = MagicMock()
     mock_col.query.side_effect = RuntimeError("search failed")
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer3(palace_path="/fake")
@@ -484,9 +499,10 @@ def test_layer3_search_truncates_long_docs():
         [{"wing": "w", "room": "r", "source_file": "s.txt"}],
         [0.1],
     )
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer3(palace_path="/fake")
@@ -502,9 +518,10 @@ def test_layer3_search_raw_returns_dicts():
         [{"wing": "proj", "room": "backend", "source_file": "f.txt"}],
         [0.3],
     )
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer3(palace_path="/fake")
@@ -524,9 +541,10 @@ def test_layer3_search_raw_with_filters():
         [{"wing": "w", "room": "r"}],
         [0.1],
     )
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer3(palace_path="/fake")
@@ -539,9 +557,10 @@ def test_layer3_search_raw_with_filters():
 def test_layer3_search_raw_error():
     mock_col = MagicMock()
     mock_col.query.side_effect = RuntimeError("fail")
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         layer = Layer3(palace_path="/fake")
@@ -642,9 +661,10 @@ def test_memory_stack_status_with_palace(tmp_path):
 
     mock_col = MagicMock()
     mock_col.count.return_value = 42
+
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.layers._get_palace_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
         stack = MemoryStack(

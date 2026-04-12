@@ -55,6 +55,7 @@ class TestSearchMemories:
     def test_search_memories_query_error(self):
         """search_memories returns error dict when query raises."""
         mock_col = MagicMock()
+        mock_col.count.return_value = 1
         mock_col.query.side_effect = RuntimeError("query failed")
 
         with patch("mempalace.searcher.get_collection", return_value=mock_col):
@@ -94,20 +95,18 @@ class TestSearchCLI:
         assert "Room:" in captured.out
 
     def test_search_no_palace_raises(self, tmp_path):
-        with pytest.raises(SearchError, match="No palace found"):
+        with pytest.raises(SearchError, match="(No palace found|Empty palace)"):
             search("anything", str(tmp_path / "missing"))
 
     def test_search_no_results(self, palace_path, collection, capsys):
-        """Empty collection returns no results message."""
-        # collection is empty (no seeded data)
-        result = search("xyzzy_nonexistent_query", palace_path, n_results=1)
-        captured = capsys.readouterr()
-        # Either prints "No results" or returns None
-        assert result is None or "No results" in captured.out
+        """Empty collection raises SearchError (no data to search)."""
+        with pytest.raises(SearchError):
+            search("xyzzy_nonexistent_query", palace_path, n_results=1)
 
     def test_search_query_error_raises(self):
         """search raises SearchError when query fails."""
         mock_col = MagicMock()
+        mock_col.count.return_value = 1
         mock_col.query.side_effect = RuntimeError("boom")
 
         with patch("mempalace.searcher.get_collection", return_value=mock_col):

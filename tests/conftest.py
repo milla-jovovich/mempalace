@@ -27,7 +27,7 @@ os.environ["HOMEDRIVE"] = os.path.splitdrive(_session_tmp)[0] or "C:"
 os.environ["HOMEPATH"] = os.path.splitdrive(_session_tmp)[1] or _session_tmp
 
 # Now it is safe to import mempalace modules that trigger initialisation.
-import chromadb  # noqa: E402
+from mempalace.palace import get_collection as _get_collection  # noqa: E402
 import pytest  # noqa: E402
 
 from mempalace.config import MempalaceConfig  # noqa: E402
@@ -99,18 +99,15 @@ def config(tmp_dir, palace_path):
 
 @pytest.fixture
 def collection(palace_path):
-    """A ChromaDB collection pre-seeded in the temp palace."""
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
+    """A palace collection in the temp directory."""
+    col = _get_collection(palace_path)
     yield col
-    client.delete_collection("mempalace_drawers")
-    del client
 
 
 @pytest.fixture
 def seeded_collection(collection):
     """Collection with a handful of representative drawers."""
-    collection.add(
+    collection.upsert(
         ids=[
             "drawer_proj_backend_aaa",
             "drawer_proj_backend_bbb",
@@ -167,9 +164,9 @@ def seeded_collection(collection):
 
 @pytest.fixture
 def kg(tmp_dir):
-    """An isolated KnowledgeGraph using a temp SQLite file."""
-    db_path = os.path.join(tmp_dir, "test_kg.sqlite3")
-    return KnowledgeGraph(db_path=db_path)
+    """An isolated KnowledgeGraph using a temp directory."""
+    kg_dir = os.path.join(tmp_dir, "kg_palace")
+    return KnowledgeGraph(palace_path=kg_dir)
 
 
 @pytest.fixture

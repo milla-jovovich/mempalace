@@ -60,6 +60,7 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
+DEFAULT_BACKEND = "lance"  # "lance" or "chroma"
 
 DEFAULT_TOPIC_WINGS = [
     "emotions",
@@ -149,8 +150,31 @@ class MempalaceConfig:
 
     @property
     def collection_name(self):
-        """ChromaDB collection name."""
+        """Database collection/table name."""
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
+
+    @property
+    def backend(self):
+        """Storage backend: 'lance' (default) or 'chroma' (legacy)."""
+        env_val = os.environ.get("MEMPALACE_BACKEND")
+        if env_val:
+            return env_val
+        return self._file_config.get("backend", DEFAULT_BACKEND)
+
+    @property
+    def embedder_config(self):
+        """Embedder configuration dict."""
+        return {
+            "embedder": self._file_config.get("embedder", "all-MiniLM-L6-v2"),
+            "embedder_options": self._file_config.get("embedder_options", {"device": "cpu"}),
+        }
+
+    @property
+    def node_id(self):
+        """This machine's unique sync node ID."""
+        from .sync_meta import get_identity
+
+        return get_identity(str(self._config_dir)).node_id
 
     @property
     def people_map(self):

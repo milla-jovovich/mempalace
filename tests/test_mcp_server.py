@@ -18,17 +18,10 @@ def _patch_mcp_server(monkeypatch, config, kg):
 
 
 def _get_collection(palace_path, create=False):
-    """Helper to get collection from test palace.
+    """Helper to get collection from test palace."""
+    from mempalace.palace import get_collection
 
-    Returns (client, collection) so callers can clean up the client
-    when they are done.
-    """
-    import chromadb
-
-    client = chromadb.PersistentClient(path=palace_path)
-    if create:
-        return client, client.get_or_create_collection("mempalace_drawers")
-    return client, client.get_collection("mempalace_drawers")
+    return None, get_collection(palace_path)
 
 
 # ── Protocol Layer ──────────────────────────────────────────────────────
@@ -258,12 +251,13 @@ class TestReadTools:
         assert result["taxonomy"]["project"]["frontend"] == 1
         assert result["taxonomy"]["notes"]["planning"] == 1
 
-    def test_no_palace_returns_error(self, monkeypatch, config, kg):
+    def test_no_palace_returns_empty_status(self, monkeypatch, config, kg):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_status
 
         result = tool_status()
-        assert "error" in result
+        # Empty palace returns status with 0 drawers (not an error)
+        assert result["total_drawers"] == 0
 
 
 # ── Search Tool ─────────────────────────────────────────────────────────

@@ -25,8 +25,10 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "chromadb>=0.5.0,<0.7",
+    "lancedb>=0.14",
     "pyyaml>=6.0,<7",
+    "onnxruntime>=1.14",
+    "tokenizers>=0.13",
 ]
 
 [project.urls]
@@ -40,6 +42,9 @@ mempalace = "mempalace:main"
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
 spellcheck = ["autocorrect>=2.0"]
+chroma = ["chromadb>=0.5.0,<0.7"]  # Legacy backend — install for migration
+gpu = ["sentence-transformers>=2.2.0"]  # Local GPU/CPU embeddings via torch
+server = ["fastapi>=0.100", "uvicorn>=0.20", "httpx>=0.24"]  # Sync server
 
 [dependency-groups]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
