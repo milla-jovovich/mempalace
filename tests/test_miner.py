@@ -3,11 +3,14 @@ import shutil
 import tempfile
 from pathlib import Path
 
-import chromadb
 import yaml
 
-from mempalace.miner import chunk_python_ast, chunk_text, mine, scan_project
-from mempalace.palace import file_already_mined
+from mempalace.miner import chunk_python_ast, mine, scan_project
+from mempalace.palace import (
+    file_already_mined,
+    get_client,
+    get_collection as get_palace_collection,
+)
 
 
 def write_file(path: Path, content: str):
@@ -44,8 +47,7 @@ def test_project_mining():
         palace_path = project_root / "palace"
         mine(str(project_root), str(palace_path))
 
-        client = chromadb.PersistentClient(path=str(palace_path))
-        col = client.get_collection("mempalace_drawers")
+        col = get_palace_collection(str(palace_path), create=False)
         assert col.count() > 0
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -301,8 +303,8 @@ def test_file_already_mined_check_mtime():
     try:
         palace_path = os.path.join(tmpdir, "palace")
         os.makedirs(palace_path)
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_or_create_collection("mempalace_drawers")
+        client = get_client(palace_path)
+        col = get_palace_collection(palace_path, create=True)
 
         test_file = os.path.join(tmpdir, "test.txt")
         with open(test_file, "w") as f:

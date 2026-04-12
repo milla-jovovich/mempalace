@@ -8,6 +8,8 @@ via monkeypatch to avoid touching real data.
 
 import json
 
+from mempalace.palace import get_client, get_collection as get_palace_collection
+
 
 def _patch_mcp_server(monkeypatch, config, kg):
     """Patch the mcp_server module globals to use test fixtures."""
@@ -23,12 +25,10 @@ def _get_collection(palace_path, create=False):
     Returns (client, collection) so callers can clean up the client
     when they are done.
     """
-    import chromadb
-
-    client = chromadb.PersistentClient(path=palace_path)
+    client = get_client(palace_path)
     if create:
-        return client, client.get_or_create_collection("mempalace_drawers")
-    return client, client.get_collection("mempalace_drawers")
+        return client, get_palace_collection(palace_path, create=True)
+    return client, get_palace_collection(palace_path, create=False)
 
 
 # ── Protocol Layer ──────────────────────────────────────────────────────

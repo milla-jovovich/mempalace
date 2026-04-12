@@ -7,15 +7,47 @@ Returns verbatim text — the actual words, never summaries.
 """
 
 import logging
+import re
 from pathlib import Path
 
 import chromadb
 
+from .palace import distance_to_similarity, get_embedding_function
+
 logger = logging.getLogger("mempalace_mcp")
+_TOKEN_RE = re.compile(r"[a-z0-9_]+")
 
 
 class SearchError(Exception):
     """Raised when search cannot proceed (e.g. no palace found)."""
+
+
+def _query_terms(query: str) -> set[str]:
+    return {token for token in _TOKEN_RE.findall(query.lower()) if len(token) >= 2}
+
+
+def _overlap_score(query_terms: set[str], text: str) -> tuple[int, int]:
+    if not query_terms:
+        return 0, 0
+    text_lower = text.lower()
+    doc_terms = set(_TOKEN_RE.findall(text_lower))
+    overlap = len(query_terms & doc_terms)
+    phrase_bonus = int(any(term in text_lower for term in query_terms))
+    return overlap, phrase_bonus
+
+
+def _rerank_hits(query: str, hits: list[dict]) -> list[dict]:
+    query_terms = _query_terms(query)
+    if not query_terms:
+        return hits
+
+    ranked = []
+    for index, hit in enumerate(hits):
+        overlap, phrase_bonus = _overlap_score(query_terms, hit["text"])
+        ranked.append((overlap, phrase_bonus, hit["similarity"], -index, hit))
+
+    ranked.sort(reverse=True)
+    return [hit for *_scores, hit in ranked]
 
 
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
@@ -25,7 +57,10 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     """
     try:
         client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = client.get_collection(
+            "mempalace_drawers",
+            embedding_function=get_embedding_function(),
+        )
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
@@ -71,8 +106,23 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"  Room: {room}")
     print(f"{'=' * 60}\n")
 
-    for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
-        similarity = round(1 - dist, 3)
+    hits = _rerank_hits(
+        query,
+        [
+            {
+                "text": doc,
+                "meta": meta,
+                "distance": dist,
+                "similarity": distance_to_similarity(dist),
+            }
+            for doc, meta, dist in zip(docs, metas, dists)
+        ],
+    )
+
+    for i, hit in enumerate(hits, 1):
+        doc = hit["text"]
+        meta = hit["meta"]
+        similarity = hit["similarity"]
         source = Path(meta.get("source_file", "?")).name
         wing_name = meta.get("wing", "?")
         room_name = meta.get("room", "?")
@@ -104,7 +154,10 @@ def search_memories(
     """
     try:
         client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = client.get_collection(
+            "mempalace_drawers",
+            embedding_function=get_embedding_function(),
+        )
     except Exception as e:
         logger.error("No palace found at %s: %s", palace_path, e)
         return {
@@ -140,7 +193,7 @@ def search_memories(
 
     hits = []
     for doc, meta, dist in zip(docs, metas, dists):
-        similarity = round(1 - dist, 3)
+        similarity = distance_to_similarity(dist)
         if similarity < min_similarity:
             continue
         hits.append(
@@ -152,6 +205,8 @@ def search_memories(
                 "similarity": similarity,
             }
         )
+
+    hits = _rerank_hits(query, hits)
 
     return {
         "query": query,

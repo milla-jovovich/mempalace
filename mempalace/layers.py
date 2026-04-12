@@ -24,6 +24,7 @@ from collections import defaultdict
 import chromadb
 
 from .config import MempalaceConfig
+from .palace import distance_to_similarity
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +296,7 @@ class Layer3:
 
         lines = [f'## L3 — SEARCH RESULTS for "{query}"']
         for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
-            similarity = round(1 - dist, 3)
+            similarity = distance_to_similarity(dist)
             wing_name = meta.get("wing", "?")
             room_name = meta.get("room", "?")
             source = Path(meta.get("source_file", "")).name if meta.get("source_file") else ""
@@ -354,7 +355,7 @@ class Layer3:
                     "wing": meta.get("wing", "unknown"),
                     "room": meta.get("room", "unknown"),
                     "source_file": Path(meta.get("source_file", "?")).name,
-                    "similarity": round(1 - dist, 3),
+                    "similarity": distance_to_similarity(dist),
                     "metadata": meta,
                 }
             )
