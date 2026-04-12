@@ -1,11 +1,12 @@
 """
 palace.py — Shared palace operations.
 
-Consolidates ChromaDB access patterns used by both miners and the MCP server.
+Consolidates collection access patterns used by both miners and the MCP server.
 """
 
 import os
-import chromadb
+
+from .backends.chroma import ChromaBackend
 
 SKIP_DIRS = {
     ".git",
@@ -33,19 +34,20 @@ SKIP_DIRS = {
     "target",
 }
 
+_DEFAULT_BACKEND = ChromaBackend()
 
-def get_collection(palace_path: str, collection_name: str = "mempalace_drawers"):
-    """Get or create the palace ChromaDB collection."""
-    os.makedirs(palace_path, exist_ok=True)
-    try:
-        os.chmod(palace_path, 0o700)
-    except (OSError, NotImplementedError):
-        pass
-    client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection(collection_name)
-    except Exception:
-        return client.create_collection(collection_name)
+
+def get_collection(
+    palace_path: str,
+    collection_name: str = "mempalace_drawers",
+    create: bool = True,
+):
+    """Get the palace collection through the backend layer."""
+    return _DEFAULT_BACKEND.get_collection(
+        palace_path,
+        collection_name=collection_name,
+        create=create,
+    )
 
 
 def file_already_mined(collection, source_file: str, check_mtime: bool = False) -> bool:
@@ -65,7 +67,7 @@ def file_already_mined(collection, source_file: str, check_mtime: bool = False) 
             if stored_mtime is None:
                 return False
             current_mtime = os.path.getmtime(source_file)
-            return float(stored_mtime) == current_mtime
+            return abs(float(stored_mtime) - current_mtime) < 0.001
         return True
     except Exception:
         return False

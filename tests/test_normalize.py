@@ -3,6 +3,8 @@ from unittest.mock import patch
 
 from mempalace.normalize import (
     _extract_content,
+    _format_tool_result,
+    _format_tool_use,
     _messages_to_transcript,
     _try_chatgpt_json,
     _try_claude_ai_json,
@@ -81,7 +83,7 @@ def test_extract_content_string():
 
 
 def test_extract_content_list_of_strings():
-    assert _extract_content(["hello", "world"]) == "hello world"
+    assert _extract_content(["hello", "world"]) == "hello\nworld"
 
 
 def test_extract_content_list_of_blocks():
@@ -99,7 +101,232 @@ def test_extract_content_none():
 
 def test_extract_content_mixed_list():
     blocks = ["plain", {"type": "text", "text": "block"}]
-    assert _extract_content(blocks) == "plain block"
+    assert _extract_content(blocks) == "plain\nblock"
+
+
+# ── _format_tool_use ──────────────────────────────────────────────────
+
+
+def test_format_tool_use_bash():
+    block = {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "Bash",
+        "input": {"command": "lsusb | grep razer", "description": "Check USB"},
+    }
+    result = _format_tool_use(block)
+    assert result == "[Bash] lsusb | grep razer"
+
+
+def test_format_tool_use_bash_truncates_long_command():
+    block = {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "x" * 300}}
+    result = _format_tool_use(block)
+    assert len(result) <= len("[Bash] ") + 200 + len("...")
+    assert result.endswith("...")
+
+
+def test_format_tool_use_read():
+    block = {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "Read",
+        "input": {"file_path": "/home/jp/file.py"},
+    }
+    result = _format_tool_use(block)
+    assert result == "[Read /home/jp/file.py]"
+
+
+def test_format_tool_use_read_with_range():
+    block = {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "Read",
+        "input": {"file_path": "/home/jp/file.py", "offset": 10, "limit": 50},
+    }
+    result = _format_tool_use(block)
+    assert result == "[Read /home/jp/file.py:10-60]"
+
+
+def test_format_tool_use_grep():
+    block = {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "Grep",
+        "input": {"pattern": "firmware", "path": "/home/jp/proj"},
+    }
+    result = _format_tool_use(block)
+    assert result == "[Grep] firmware in /home/jp/proj"
+
+
+def test_format_tool_use_grep_with_glob():
+    block = {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "Grep",
+        "input": {"pattern": "TODO", "glob": "*.py"},
+    }
+    result = _format_tool_use(block)
+    assert result == "[Grep] TODO in *.py"
+
+
+def test_format_tool_use_glob():
+    block = {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "Glob",
+        "input": {"pattern": "/home/jp/proj/**/*.py"},
+    }
+    result = _format_tool_use(block)
+    assert result == "[Glob] /home/jp/proj/**/*.py"
+
+
+def test_format_tool_use_edit():
+    block = {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "Edit",
+        "input": {"file_path": "/home/jp/file.py", "old_string": "x", "new_string": "y"},
+    }
+    result = _format_tool_use(block)
+    assert result == "[Edit /home/jp/file.py]"
+
+
+def test_format_tool_use_write():
+    block = {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "Write",
+        "input": {"file_path": "/home/jp/file.py", "content": "..."},
+    }
+    result = _format_tool_use(block)
+    assert result == "[Write /home/jp/file.py]"
+
+
+def test_format_tool_use_unknown_tool():
+    block = {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "mcp__mempalace__search",
+        "input": {"query": "firmware probe", "limit": 5},
+    }
+    result = _format_tool_use(block)
+    assert result.startswith("[mcp__mempalace__search]")
+    assert "firmware probe" in result
+
+
+def test_format_tool_use_unknown_tool_truncates():
+    block = {"type": "tool_use", "id": "t1", "name": "SomeTool", "input": {"data": "x" * 300}}
+    result = _format_tool_use(block)
+    assert result.endswith("...")
+    assert len(result) <= len("[SomeTool] ") + 200 + len("...")
+
+
+# ── _format_tool_result ──────────────────────────────────────────────
+
+
+def test_format_tool_result_bash_short():
+    """Short Bash output is preserved in full."""
+    content = "Bus 002 Device 005: ID 1532:0e05 Razer Kiyo Pro"
+    result = _format_tool_result(content, "Bash")
+    assert result == "→ Bus 002 Device 005: ID 1532:0e05 Razer Kiyo Pro"
+
+
+def test_format_tool_result_bash_head_tail():
+    """Long Bash output gets head+tail with gap marker."""
+    lines = [f"line {i}" for i in range(60)]
+    content = "\n".join(lines)
+    result = _format_tool_result(content, "Bash")
+    assert "line 0" in result
+    assert "line 19" in result
+    assert "line 40" in result
+    assert "line 59" in result
+    assert "20 lines omitted" in result
+    # Lines 20-39 should be gone
+    assert "line 20\n" not in result
+
+
+def test_format_tool_result_bash_exactly_40_lines():
+    """Bash output at exactly 40 lines is not truncated."""
+    lines = [f"line {i}" for i in range(40)]
+    content = "\n".join(lines)
+    result = _format_tool_result(content, "Bash")
+    assert "omitted" not in result
+    assert "line 0" in result
+    assert "line 39" in result
+
+
+def test_format_tool_result_read_omitted():
+    """Read results are omitted (content already in palace from project mining)."""
+    result = _format_tool_result("lots of file content here...", "Read")
+    assert result == ""
+
+
+def test_format_tool_result_edit_omitted():
+    """Edit results are omitted (diff is in git)."""
+    result = _format_tool_result("file updated", "Edit")
+    assert result == ""
+
+
+def test_format_tool_result_write_omitted():
+    """Write results are omitted."""
+    result = _format_tool_result("file created", "Write")
+    assert result == ""
+
+
+def test_format_tool_result_grep_short():
+    """Short Grep output is kept."""
+    content = "src/foo.py\nsrc/bar.py\nsrc/baz.py"
+    result = _format_tool_result(content, "Grep")
+    assert "→ src/foo.py" in result
+    assert "→ src/baz.py" in result
+
+
+def test_format_tool_result_grep_caps_at_20():
+    """Grep output beyond 20 lines is truncated."""
+    lines = [f"match_{i}.py" for i in range(30)]
+    content = "\n".join(lines)
+    result = _format_tool_result(content, "Grep")
+    assert "match_19.py" in result
+    assert "match_20.py" not in result
+    assert "10 more matches" in result
+
+
+def test_format_tool_result_glob_caps_at_20():
+    """Glob output beyond 20 lines is truncated."""
+    lines = [f"/path/file_{i}.py" for i in range(25)]
+    content = "\n".join(lines)
+    result = _format_tool_result(content, "Glob")
+    assert "file_19.py" in result
+    assert "file_20.py" not in result
+    assert "5 more matches" in result
+
+
+def test_format_tool_result_unknown_short():
+    """Unknown tool with short output is kept."""
+    result = _format_tool_result("some output", "mcp__mempalace__search")
+    assert result == "→ some output"
+
+
+def test_format_tool_result_unknown_truncates():
+    """Unknown tool output over 2KB is truncated."""
+    content = "x" * 3000
+    result = _format_tool_result(content, "SomeTool")
+    assert result.endswith("... [truncated, 3000 chars]")
+    assert len(result) < 2200
+
+
+def test_format_tool_result_list_content():
+    """tool_result content can be a list of text blocks."""
+    content = [{"type": "text", "text": "result line 1"}, {"type": "text", "text": "result line 2"}]
+    result = _format_tool_result(content, "Bash")
+    assert "result line 1" in result
+    assert "result line 2" in result
+
+
+def test_format_tool_result_empty():
+    """Empty result returns empty string."""
+    result = _format_tool_result("", "Bash")
+    assert result == ""
 
 
 # ── _try_claude_code_jsonl ─────────────────────────────────────────────
@@ -499,6 +726,205 @@ def test_messages_to_transcript_assistant_first():
     result = _messages_to_transcript(msgs, spellcheck=False)
     assert "preamble" in result
     assert "> Q" in result
+
+
+# ── Tool block integration (Task 3) ───────────────────────────────────
+
+
+def test_extract_content_with_tool_use():
+    """_extract_content includes formatted tool_use blocks."""
+    content = [
+        {"type": "text", "text": "Let me check."},
+        {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "lsusb"}},
+    ]
+    result = _extract_content(content)
+    assert "Let me check." in result
+    assert "[Bash] lsusb" in result
+
+
+def test_extract_content_with_tool_result():
+    """_extract_content includes formatted tool_result blocks (needs tool_use_map)."""
+    content = [
+        {"type": "tool_result", "tool_use_id": "t1", "content": "some output"},
+    ]
+    result = _extract_content(content, tool_use_map={"t1": "Bash"})
+    assert "→ some output" in result
+
+
+def test_extract_content_tool_result_without_map_uses_fallback():
+    """tool_result without a map entry uses fallback strategy."""
+    content = [
+        {"type": "tool_result", "tool_use_id": "t1", "content": "some output"},
+    ]
+    result = _extract_content(content)
+    assert "→ some output" in result
+
+
+def test_claude_code_jsonl_captures_tool_output():
+    """Full integration: tool_use + tool_result appear in normalized transcript."""
+    lines = [
+        json.dumps({"type": "human", "message": {"content": "Check the camera"}}),
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "Let me check."},
+                        {
+                            "type": "tool_use",
+                            "id": "t1",
+                            "name": "Bash",
+                            "input": {"command": "lsusb | grep razer"},
+                        },
+                    ]
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "human",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": "Bus 002 Device 005: ID 1532:0e05 Razer Kiyo Pro",
+                        },
+                    ]
+                },
+            }
+        ),
+        json.dumps({"type": "assistant", "message": {"content": "Found it."}}),
+    ]
+    result = _try_claude_code_jsonl("\n".join(lines))
+    assert result is not None
+    assert "> Check the camera" in result
+    assert "[Bash] lsusb | grep razer" in result
+    assert "→ Bus 002 Device 005" in result
+    assert "Found it." in result
+
+
+def test_claude_code_jsonl_read_result_omitted():
+    """Read tool results are omitted but the path breadcrumb is kept."""
+    lines = [
+        json.dumps({"type": "human", "message": {"content": "Show me the file"}}),
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "Reading it."},
+                        {
+                            "type": "tool_use",
+                            "id": "t1",
+                            "name": "Read",
+                            "input": {"file_path": "/home/jp/file.py"},
+                        },
+                    ]
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "human",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": "entire file contents here that should not appear",
+                        },
+                    ]
+                },
+            }
+        ),
+        json.dumps({"type": "assistant", "message": {"content": "Here it is."}}),
+    ]
+    result = _try_claude_code_jsonl("\n".join(lines))
+    assert result is not None
+    assert "[Read /home/jp/file.py]" in result
+    assert "entire file contents here" not in result
+
+
+def test_claude_code_jsonl_tool_only_user_message_not_counted():
+    """A user message containing ONLY tool_results (no text) should not
+    be added as a separate user turn with '>'."""
+    lines = [
+        json.dumps({"type": "human", "message": {"content": "Do it"}}),
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "Running."},
+                        {
+                            "type": "tool_use",
+                            "id": "t1",
+                            "name": "Bash",
+                            "input": {"command": "echo hi"},
+                        },
+                    ]
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "human",
+                "message": {
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "t1", "content": "hi"},
+                    ]
+                },
+            }
+        ),
+        json.dumps({"type": "assistant", "message": {"content": "Done."}}),
+    ]
+    result = _try_claude_code_jsonl("\n".join(lines))
+    assert result is not None
+    # Only one user turn marker — the original "Do it"
+    user_turns = [line for line in result.split("\n") if line.strip().startswith(">")]
+    assert len(user_turns) == 1
+    assert "> Do it" in result
+
+
+def test_extract_content_text_only_backward_compat():
+    """Text-only content blocks still work (backward compat)."""
+    content = [
+        {"type": "text", "text": "Hello"},
+        {"type": "text", "text": "World"},
+    ]
+    result = _extract_content(content)
+    assert "Hello" in result
+    assert "World" in result
+
+
+def test_extract_content_string_unchanged():
+    """Plain string content still works."""
+    result = _extract_content("just a string")
+    assert result == "just a string"
+
+
+def test_claude_code_jsonl_thinking_blocks_ignored():
+    """Thinking blocks are still ignored."""
+    lines = [
+        json.dumps({"type": "human", "message": {"content": "Q"}}),
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "thinking", "thinking": "", "signature": "abc"},
+                        {"type": "text", "text": "A"},
+                    ]
+                },
+            }
+        ),
+    ]
+    result = _try_claude_code_jsonl("\n".join(lines))
+    assert result is not None
+    assert "thinking" not in result.lower()
+    assert "signature" not in result
+    assert "A" in result
 
 
 def test_normalize_rejects_large_file():
