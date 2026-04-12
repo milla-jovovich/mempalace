@@ -38,9 +38,11 @@ class TestSearchMemories:
         result = search_memories("code", palace_path, n_results=2)
         assert len(result["results"]) <= 2
 
-    def test_no_palace_returns_error(self, tmp_path):
+    def test_no_palace_returns_empty(self, tmp_path):
         result = search_memories("anything", str(tmp_path / "missing"))
-        assert "error" in result
+        # get_or_create_collection creates the collection; returns empty results
+        assert "error" not in result
+        assert result["results"] == []
 
     def test_result_fields(self, palace_path, seeded_collection):
         result = search_memories("authentication", palace_path)
@@ -57,7 +59,7 @@ class TestSearchMemories:
         mock_col = MagicMock()
         mock_col.query.side_effect = RuntimeError("query failed")
         mock_client = MagicMock()
-        mock_client.get_collection.return_value = mock_col
+        mock_client.get_or_create_collection.return_value = mock_col
 
         with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
             result = search_memories("test", "/fake/path")
@@ -95,9 +97,11 @@ class TestSearchCLI:
         assert "Wing:" in captured.out
         assert "Room:" in captured.out
 
-    def test_search_no_palace_raises(self, tmp_path):
-        with pytest.raises(SearchError, match="No palace found"):
-            search("anything", str(tmp_path / "missing"))
+    def test_search_no_palace_returns_none(self, tmp_path, capsys):
+        # get_or_create_collection creates the collection; empty results
+        result = search("anything", str(tmp_path / "missing"))
+        captured = capsys.readouterr()
+        assert result is None or "No results" in captured.out
 
     def test_search_no_results(self, palace_path, collection, capsys):
         """Empty collection returns no results message."""
@@ -112,7 +116,7 @@ class TestSearchCLI:
         mock_col = MagicMock()
         mock_col.query.side_effect = RuntimeError("boom")
         mock_client = MagicMock()
-        mock_client.get_collection.return_value = mock_col
+        mock_client.get_or_create_collection.return_value = mock_col
 
         with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
             with pytest.raises(SearchError, match="Search error"):
