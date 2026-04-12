@@ -98,6 +98,27 @@ def cmd_mine(args):
         )
 
 
+def cmd_git_mine(args):
+    from .git_miner import mine_git
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    mine_git(
+        repo_dir=args.repo_dir,
+        palace_path=palace_path,
+        wing=args.wing,
+        room=args.room,
+        agent=args.agent,
+        max_commits=args.max_commits,
+        max_prs=args.max_prs,
+        since=args.since,
+        include_all=args.all_commits,
+        no_reviews=args.no_reviews,
+        decision_only=args.decision_only,
+        dry_run=args.dry_run,
+        diff_summary=args.diff_summary,
+    )
+
+
 def cmd_search(args):
     from .searcher import search, SearchError
 
@@ -553,6 +574,53 @@ def main():
 
     sub.add_parser("status", help="Show what's been filed")
 
+    # git-mine
+    p_git_mine = sub.add_parser(
+        "git-mine",
+        help="Mine git commits and GitHub PRs into the palace",
+    )
+    p_git_mine.add_argument("repo_dir", help="Path to the git repository root")
+    p_git_mine.add_argument(
+        "--wing", default=None, help="Wing to file into (default: repo directory name)"
+    )
+    p_git_mine.add_argument(
+        "--room", default="git-decisions", help="Room to file into (default: git-decisions)"
+    )
+    p_git_mine.add_argument(
+        "--agent", default="git-mine", help="Agent name recorded in metadata"
+    )
+    p_git_mine.add_argument(
+        "--since", default="", help="Only include commits after this date (e.g. 2025-01-01)"
+    )
+    p_git_mine.add_argument(
+        "--max-commits", type=int, default=0, help="Max commits to process (0 = all)"
+    )
+    p_git_mine.add_argument(
+        "--max-prs", type=int, default=25, help="Max PRs to fetch via gh (default: 25)"
+    )
+    p_git_mine.add_argument(
+        "--diff-summary",
+        default="fallback",
+        choices=["always", "fallback", "never"],
+        help="Append structured diff summary to PR drawers: fallback (default, only when no description), always (every PR — one extra gh api call per PR), never",
+    )
+    p_git_mine.add_argument(
+        "--no-reviews", action="store_true", help="Skip folding review threads into PR drawers"
+    )
+    p_git_mine.add_argument(
+        "--all-commits",
+        action="store_true",
+        help="Include commits without a body or decision signal",
+    )
+    p_git_mine.add_argument(
+        "--decision-only",
+        action="store_true",
+        help="Only file entries matching decision-signal keywords",
+    )
+    p_git_mine.add_argument(
+        "--dry-run", action="store_true", help="Show what would be filed without filing"
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -579,6 +647,7 @@ def main():
     dispatch = {
         "init": cmd_init,
         "mine": cmd_mine,
+        "git-mine": cmd_git_mine,
         "split": cmd_split,
         "search": cmd_search,
         "mcp": cmd_mcp,

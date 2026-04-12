@@ -650,6 +650,92 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         return {"error": str(e)}
 
 
+# ==================== GIT MINE ====================
+
+
+def tool_git_mine(
+    repo_dir: str,
+    wing: str = None,
+    room: str = "git-decisions",
+    since: str = "",
+    max_commits: int = 0,
+    max_prs: int = 25,
+    all_commits: bool = False,
+    no_reviews: bool = False,
+    decision_only: bool = False,
+    dry_run: bool = False,
+    diff_summary: str = "fallback",
+):
+    """
+    Mine a git repository for merged PRs (with review threads and diff summary
+    folded in) and standalone commits, filing one drawer per entry into the palace.
+
+    Commit mining uses ``git log`` (no auth required). PR and review mining
+    requires the ``gh`` CLI to be installed and authenticated. When ``gh``
+    is unavailable the tool still files commits and reports the gap.
+    """
+    from .git_miner import mine_git, collect_entries
+
+    palace_path = _config.palace_path
+
+    if dry_run:
+        try:
+            from pathlib import Path
+
+            entries = collect_entries(
+                str(Path(repo_dir).expanduser().resolve()),
+                max_commits=max_commits,
+                max_prs=max_prs,
+                since=since,
+                include_all=all_commits,
+                no_reviews=no_reviews,
+                decision_only=decision_only,
+                diff_summary=diff_summary,
+            )
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+        preview = [
+            {
+                "source": e.source,
+                "ref": e.ref,
+                "author": e.author,
+                "date": e.date,
+                "title": e.title,
+                "body": e.body[:200] if e.body else "",
+            }
+            for e in entries
+        ]
+        return {"dry_run": True, "entries": preview, "total": len(entries)}
+
+    result = mine_git(
+        repo_dir=repo_dir,
+        palace_path=palace_path,
+        wing=wing,
+        room=room,
+        max_commits=max_commits,
+        max_prs=max_prs,
+        since=since,
+        include_all=all_commits,
+        no_reviews=no_reviews,
+        decision_only=decision_only,
+        dry_run=False,
+        diff_summary=diff_summary,
+    )
+    if "error" in result:
+        return {"success": False, "error": result["error"]}
+
+    return {
+        "success": True,
+        "commits_scanned": result["commits"],
+        "prs_scanned": result["prs"],
+        "drawers_filed": result["filed"],
+        "wing": result.get("wing", wing),
+        "room": room,
+        "errors": result.get("errors", []),
+    }
+
+
 # ==================== MCP PROTOCOL ====================
 
 TOOLS = {
@@ -906,6 +992,67 @@ TOOLS = {
             "required": ["agent_name"],
         },
         "handler": tool_diary_read,
+    },
+    "mempalace_git_mine": {
+        "description": (
+            "Mine a git repository for merged PRs (with review threads folded into each PR drawer) "
+            "and standalone commits, filing one drawer per entry into the palace under the "
+            "repository's own wing (derived from the repo directory name) in git-decisions. "
+            "Commit mining requires only git. PR and review mining requires the gh CLI "
+            "(https://cli.github.com) to be installed and authenticated — it degrades "
+            "gracefully when gh is unavailable."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo_dir": {
+                    "type": "string",
+                    "description": "Absolute or relative path to the git repository root",
+                },
+                "wing": {
+                    "type": "string",
+                    "description": "Wing to file into (default: derived from repo directory name, e.g. 'mempalace' for /path/to/mempalace)",
+                },
+                "room": {
+                    "type": "string",
+                    "description": "Room to file into (default: git-decisions)",
+                },
+                "since": {
+                    "type": "string",
+                    "description": "Only include commits after this date (e.g. 2025-01-01)",
+                },
+                "diff_summary": {
+                    "type": "string",
+                    "description": "When to append structured diff summary (changed files + touched functions) to PR drawers: 'fallback' (default, only when PR has no description), 'always' (every PR — one extra gh api call per PR, may hit rate limits on large repos), or 'never'",
+                },
+                "max_commits": {
+                    "type": "integer",
+                    "description": "Max commits to process (0 = all)",
+                },
+                "max_prs": {
+                    "type": "integer",
+                    "description": "Max PRs to fetch via gh (default: 25)",
+                },
+                "all_commits": {
+                    "type": "boolean",
+                    "description": "Include commits without a body or decision signal",
+                },
+                "no_reviews": {
+                    "type": "boolean",
+                    "description": "Skip folding review threads into PR drawers (faster for large repos)",
+                },
+                "decision_only": {
+                    "type": "boolean",
+                    "description": "Only file entries matching decision-signal keywords",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Return entries without writing to the palace",
+                },
+            },
+            "required": ["repo_dir"],
+        },
+        "handler": tool_git_mine,
     },
 }
 
