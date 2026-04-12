@@ -401,6 +401,26 @@ class TestWriteTools:
         assert result2["success"] is True
         assert result2["reason"] == "already_exists"
 
+    def test_add_drawer_shared_header_no_collision(self, monkeypatch, config, palace_path, kg):
+        """Documents sharing a >100-char header must get distinct IDs (full-content hash)."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer
+
+        header = "# ACME Corp Knowledge Base\n**Project:** Alpha | **Team:** Backend | **Status:** Active\n\n"
+        doc1 = header + "Decision: Use PostgreSQL for primary storage. Rationale: ACID compliance required."
+        doc2 = header + "Decision: Use Redis for session caching. Rationale: sub-ms latency needed."
+
+        result1 = tool_add_drawer(wing="work", room="decisions", content=doc1)
+        result2 = tool_add_drawer(wing="work", room="decisions", content=doc2)
+
+        assert result1["success"] is True
+        assert result2["success"] is True
+        assert result1["drawer_id"] != result2["drawer_id"], (
+            "Documents with shared header but different content must have distinct drawer IDs"
+        )
+
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_delete_drawer
