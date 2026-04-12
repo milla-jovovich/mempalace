@@ -43,8 +43,8 @@ features:
   - icon:
       src: /icons/wrench.svg
       alt: 19 MCP Tools
-    title: 19 MCP Tools
-    details: MCP tools expose search, filing, knowledge graph, graph navigation, and diary operations to compatible clients.
+    title: 24 MCP Tools
+    details: MCP tools expose search, filing, knowledge graph, graph navigation, diary, and settings operations to compatible clients.
   - icon:
       src: /icons/shield-check.svg
       alt: Zero Cloud

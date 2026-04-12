@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-Detailed parameter schemas for all 19 MCP tools.
+Detailed parameter schemas for all 24 MCP tools.
 
 ## Palace — Read Tools
 
@@ -52,12 +52,14 @@ Semantic search. Returns verbatim drawer content with similarity scores.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | **Yes** | What to search for |
-| `limit` | integer | No | Max results (default: 5) |
+| `query` | string | **Yes** | Short search query — keywords or a question. Max 200 chars recommended. |
+| `limit` | integer | No | Max results (default: 5, max: 100) |
 | `wing` | string | No | Filter by wing |
 | `room` | string | No | Filter by room |
+| `max_distance` | number | No | Max cosine distance threshold (0=identical, 2=opposite). Results further than this are dropped. Default 1.5. Set to 0 to disable. |
+| `context` | string | No | Background context for the search. Not used for embedding — only for future re-ranking. |
 
-**Returns:** `{ query, filters, results: [{ text, wing, room, source_file, similarity }] }`
+**Returns:** `{ query, filters, results: [{ text, wing, room, source_file, similarity, distance }] }`
 
 ---
 
@@ -111,6 +113,73 @@ Delete a drawer by ID. Irreversible.
 | `drawer_id` | string | **Yes** | ID of the drawer to delete |
 
 **Returns:** `{ success, drawer_id }`
+
+---
+
+### `mempalace_get_drawer`
+
+Fetch a single drawer by ID — returns full content and metadata.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `drawer_id` | string | **Yes** | ID of the drawer to fetch |
+
+**Returns:** `{ drawer_id, content, wing, room, source_file, metadata }`
+
+---
+
+### `mempalace_list_drawers`
+
+List drawers with pagination. Optional wing/room filter. Returns IDs, wings, rooms, and content previews.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `wing` | string | No | Filter by wing |
+| `room` | string | No | Filter by room |
+| `limit` | integer | No | Max results per page (default: 20, max: 100) |
+| `offset` | integer | No | Offset for pagination (default: 0) |
+
+**Returns:** `{ drawers: [{ id, wing, room, preview }], total, offset, limit }`
+
+---
+
+### `mempalace_update_drawer`
+
+Update an existing drawer's content and/or metadata (wing, room). Returns error if drawer not found.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `drawer_id` | string | **Yes** | ID of the drawer to update |
+| `content` | string | No | New content (omit to keep existing) |
+| `wing` | string | No | New wing (omit to keep existing) |
+| `room` | string | No | New room (omit to keep existing) |
+
+**Returns:** `{ success, drawer_id, updated_fields }`
+
+---
+
+## Settings Tools
+
+### `mempalace_hook_settings`
+
+Get or set hook behavior. Call with no arguments to view current settings.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `silent_save` | boolean | No | True = silent direct save, False = legacy blocking MCP calls |
+| `desktop_toast` | boolean | No | True = show desktop notification via notify-send |
+
+**Returns:** `{ silent_save, desktop_toast }`
+
+---
+
+### `mempalace_memories_filed_away`
+
+Check if a recent palace checkpoint was saved. Returns message count and timestamp.
+
+**Parameters:** None
+
+**Returns:** `{ last_save, message_count, timestamp }`
 
 ---
 

@@ -24,9 +24,10 @@ mempalace search "deploy process" --results 10
 ## How Search Works
 
 1. Your query is embedded using ChromaDB's default model (`all-MiniLM-L6-v2`)
-2. The embedding is compared against all drawers using cosine similarity
+2. The embedding is compared against all drawers using cosine distance
 3. Optional wing/room filters narrow the search scope
-4. Results are returned with similarity scores and source metadata
+4. Results beyond `max_distance` are filtered out (default: 1.5, lower = stricter)
+5. Results are returned with similarity scores, distances, and source metadata
 
 ### Why Structure Matters
 
@@ -54,6 +55,7 @@ results = search_memories(
     wing="myapp",
     room="auth",
     n_results=5,
+    max_distance=1.0,  # only close matches (0=identical, 2=opposite)
 )
 
 for hit in results["results"]:
@@ -74,9 +76,11 @@ The `search_memories()` function returns a dict:
             "room": "auth-migration",
             "source_file": "session_2026-01-15.md",
             "similarity": 0.892,
+            "distance": 0.108,
         },
         # ...
     ],
+    "total_before_filter": 5,
 }
 ```
 
