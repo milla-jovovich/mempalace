@@ -466,6 +466,32 @@ def test_chunk_text_preserves_content():
     assert len(all_chunk_text) >= len(content)
 
 
+def test_mine_dry_run_with_tiny_file_no_crash():
+    """Dry-run must not crash when process_file returns 0 drawers (room was None)."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        # One normal file and one that falls below MIN_CHUNK_SIZE
+        write_file(project_root / "good.py", "def main():\n    print('hello world')\n" * 20)
+        write_file(project_root / "tiny.txt", "x")
+
+        with open(project_root / "mempalace.yaml", "w") as f:
+            yaml.dump(
+                {
+                    "wing": "test_project",
+                    "rooms": [{"name": "general", "description": "General"}],
+                },
+                f,
+            )
+
+        palace_path = project_root / "palace"
+        # Should not raise TypeError on the summary print
+        mine(str(project_root), str(palace_path), dry_run=True)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 # =============================================================================
 # status tests (upstream addition)
 # =============================================================================

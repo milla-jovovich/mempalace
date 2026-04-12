@@ -1434,8 +1434,21 @@ def handle_request(request):
             }
         # Whitelist arguments to declared schema properties only.
         # Prevents callers from spoofing internal params like added_by/source_file.
+        # Skip filtering if handler explicitly accepts **kwargs (pass-through).
+        # Default to filtering on inspect failure (safe fallback).
+        import inspect
+
         schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
-        tool_args = {k: v for k, v in tool_args.items() if k in schema_props}
+        try:
+            handler = TOOLS[tool_name]["handler"]
+            sig = inspect.signature(handler)
+            accepts_var_keyword = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            )
+        except (ValueError, TypeError):
+            accepts_var_keyword = False
+        if not accepts_var_keyword:
+            tool_args = {k: v for k, v in tool_args.items() if k in schema_props}
         # Coerce argument types based on input_schema.
         # MCP JSON transport may deliver integers as floats or strings;
         # ChromaDB and Python slicing require native int.

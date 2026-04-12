@@ -2,7 +2,7 @@
 name: mempalace
 description: "MemPalace — Local AI memory with 96.6% recall. Semantic search, temporal knowledge graph, palace architecture (wings/rooms/drawers). Free, no cloud, no API keys."
 version: 3.1.0
-homepage: https://github.com/milla-jovovich/mempalace
+homepage: https://github.com/MemPalace/mempalace
 user-invocable: true
 metadata:
   openclaw:
@@ -151,4 +151,4 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 
 ## License
 
-[MemPalace](https://github.com/milla-jovovich/mempalace) is MIT licensed. Created by Milla Jovovich, Ben Sigman, Igor Lins e Silva, and contributors.
+[MemPalace](https://github.com/MemPalace/mempalace) is MIT licensed. Created by Milla Jovovich, Ben Sigman, Igor Lins e Silva, and contributors.

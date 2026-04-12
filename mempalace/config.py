@@ -16,7 +16,7 @@ from pathlib import Path
 # in file paths, SQLite, or ChromaDB metadata.
 
 MAX_NAME_LENGTH = 128
-_SAFE_NAME_RE = re.compile(r"^[\w][\w .'-]{0,126}[\w]?$")
+_SAFE_NAME_RE = re.compile(r"^(?:[^\W_]|[^\W_][\w .'-]{0,126}[^\W_])$")
 
 
 def sanitize_name(value: str, field_name: str = "name") -> str:
