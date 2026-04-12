@@ -43,12 +43,15 @@ from datetime import date, datetime
 from pathlib import Path
 
 
-DEFAULT_KG_PATH = os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
+def get_default_kg_path():
+    if "MEMPALACE_CONFIG_DIR" in os.environ:
+        return os.path.join(os.environ["MEMPALACE_CONFIG_DIR"], "knowledge_graph.sqlite3")
+    return os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
 
 
 class KnowledgeGraph:
     def __init__(self, db_path: str = None):
-        self.db_path = db_path or DEFAULT_KG_PATH
+        self.db_path = db_path or get_default_kg_path()
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._connection = None
         self._init_db()
@@ -191,6 +194,58 @@ class KnowledgeGraph:
                 (ended, sub_id, pred, obj_id),
             )
 
+    def add_bridge(self, room_a: str, room_b: str, score: float, reason: str = "") -> str:
+        """Create a semantic wormhole between two rooms."""
+        self.add_entity(room_a, "room")
+        self.add_entity(room_b, "room")
+        # Store score as confidence
+        return self.add_triple(
+            room_a, "semantically_bridges", room_b, confidence=score, source_file=reason
+        )
+
+    def evolve_fact(self, old_triple_id: str, new_triple_id: str, reason: str = "") -> None:
+        """Mark an old fact as evolved into a new fact."""
+        conn = self._conn()
+        with conn:
+            # Invalidate old triple
+            ended = datetime.now().isoformat()
+            conn.execute("UPDATE triples SET valid_to=? WHERE id=?", (ended, old_triple_id))
+
+            # Look up original subject/object for human-readable metadata
+            old_row = conn.execute(
+                "SELECT t.*, s.name as sub_name, o.name as obj_name "
+                "FROM triples t JOIN entities s ON t.subject = s.id "
+                "JOIN entities o ON t.object = o.id WHERE t.id = ?",
+                (old_triple_id,),
+            ).fetchone()
+            new_row = conn.execute(
+                "SELECT t.*, s.name as sub_name, o.name as obj_name "
+                "FROM triples t JOIN entities s ON t.subject = s.id "
+                "JOIN entities o ON t.object = o.id WHERE t.id = ?",
+                (new_triple_id,),
+            ).fetchone()
+
+            old_label = (
+                f"{old_row['sub_name']} {old_row['predicate']} {old_row['obj_name']}"
+                if old_row
+                else old_triple_id
+            )
+            new_label = (
+                f"{new_row['sub_name']} {new_row['predicate']} {new_row['obj_name']}"
+                if new_row
+                else new_triple_id
+            )
+
+            # Create meta-entity for triples with human-readable metadata
+            self.add_entity(old_triple_id, "fact")
+            self.add_entity(new_triple_id, "fact")
+            self.add_triple(
+                old_triple_id,
+                "evolved_into",
+                new_triple_id,
+                source_file=f"{old_label} → {new_label}; {reason}",
+            )
+
     # ── Query operations ──────────────────────────────────────────────────
 
     def query_entity(self, name: str, as_of: str = None, direction: str = "outgoing"):
@@ -269,6 +324,7 @@ class KnowledgeGraph:
         for row in conn.execute(query, params).fetchall():
             results.append(
                 {
+                    "id": row["id"],
                     "subject": row["sub_name"],
                     "predicate": pred,
                     "object": row["obj_name"],

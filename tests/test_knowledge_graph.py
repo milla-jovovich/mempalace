@@ -137,3 +137,38 @@ class TestStats:
         assert stats["triples"] == 5
         assert stats["current_facts"] == 4  # 1 expired (Acme Corp)
         assert stats["expired_facts"] == 1
+
+
+def test_meta_triples(tmp_path):
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(db_path=str(tmp_path / "kg.db"))
+
+    # Test wormhole bridge
+    bid = kg.add_bridge("room_a", "room_b", score=0.95, reason="similar text")
+    assert bid is not None
+    res = kg.query_relationship("semantically_bridges")
+    assert len(res) == 1
+    assert res[0]["subject"] == "room_a"
+    assert res[0]["object"] == "room_b"
+
+    # Test evolution
+    t1 = kg.add_triple("Max", "loves", "apples")
+    t2 = kg.add_triple("Max", "hates", "apples")
+    kg.evolve_fact(t1, t2, reason="taste changed")
+
+    # t1 should be invalid, evolved_into should exist
+    evolutions = kg.query_relationship("evolved_into")
+    assert len(evolutions) == 1
+    assert evolutions[0]["subject"] == t1
+    assert evolutions[0]["object"] == t2
+
+    # Check metadata includes human-readable reason
+    conn = kg._conn()
+    source = conn.execute(
+        "SELECT source_file FROM triples WHERE id = ?", (evolutions[0]["id"],)
+    ).fetchone()[0]
+    assert "Max loves apples" in source
+    assert "taste changed" in source
+
+    kg.close()
