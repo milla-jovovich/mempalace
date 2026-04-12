@@ -961,7 +961,7 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
 
 
-def tool_kg_search(query: str, limit: int = 5, kind: str = None):
+def tool_kg_search(query: str, limit: int = 5, kind: str = None, sort_by: str = "hybrid"):
     """Semantic search over KG entities. Returns matching entities with their relationships.
 
     Unlike kg_query (exact entity ID match), this uses vector similarity to find
@@ -974,7 +974,11 @@ def tool_kg_search(query: str, limit: int = 5, kind: str = None):
         limit: Max entities to return (default 5).
         kind: Filter by entity kind: 'entity', 'predicate', 'class', 'literal'.
               If omitted, searches all kinds.
+        sort_by: "hybrid" (DEFAULT) — similarity + importance bonus + time-decay.
+                 "similarity" — pure vector match, no importance/decay influence.
     """
+    from .layers import compute_decay_score
+
     ecol = _get_entity_collection(create=False)
     if not ecol:
         return {"success": False, "error": "Entity collection not found. No entities declared yet."}
@@ -984,16 +988,18 @@ def tool_kg_search(query: str, limit: int = 5, kind: str = None):
         if count == 0:
             return {"query": query, "results": [], "count": 0}
 
+        # Fetch extra candidates for re-ranking
+        fetch_limit = max(limit * 5, 50) if sort_by == "hybrid" else limit
         query_kwargs = {
             "query_texts": [query],
-            "n_results": min(limit * 3, count),  # fetch extra for filtering
+            "n_results": min(fetch_limit, count),
             "include": ["documents", "metadatas", "distances"],
         }
         if kind:
             query_kwargs["where"] = {"kind": kind}
 
         results = ecol.query(**query_kwargs)
-        entities = []
+        candidates = []
 
         if results["ids"] and results["ids"][0]:
             for i, eid in enumerate(results["ids"][0]):
@@ -1002,26 +1008,43 @@ def tool_kg_search(query: str, limit: int = 5, kind: str = None):
                 meta = results["metadatas"][0][i] or {}
                 doc = results["documents"][0][i]
 
-                # Fetch KG edges for this entity
-                edges = _kg.query_entity(eid, direction="both")
-                current_edges = [e for e in edges if e.get("current", True)]
+                importance = meta.get("importance", 3)
+                last_touched = meta.get("last_touched", "")
 
-                entity_result = {
+                # Compute hybrid score: similarity dominates, importance + decay break ties
+                if sort_by == "hybrid":
+                    try:
+                        imp = float(importance)
+                    except (TypeError, ValueError):
+                        imp = 3.0
+                    decay_score = compute_decay_score(imp, last_touched)
+                    # Normalize decay_score to a small bonus (0-0.2 range)
+                    hybrid = similarity + (imp - 3) * 0.1 - (50 - min(decay_score, 50)) * 0.004
+                else:
+                    hybrid = similarity
+
+                candidates.append({
                     "entity_id": eid,
                     "name": meta.get("name", eid),
                     "description": doc,
                     "kind": meta.get("kind", "entity"),
-                    "importance": meta.get("importance", 3),
+                    "importance": importance,
                     "similarity": similarity,
-                    "edges": current_edges,
-                    "edge_count": len(current_edges),
-                }
-                entities.append(entity_result)
+                    "score": round(hybrid, 4),
+                })
 
-                if len(entities) >= limit:
-                    break
+        # Sort by score and take top N
+        candidates.sort(key=lambda x: x["score"], reverse=True)
+        top = candidates[:limit]
 
-        return {"query": query, "results": entities, "count": len(entities)}
+        # Fetch KG edges for top results only (avoid expensive queries on all candidates)
+        for entity_result in top:
+            edges = _kg.query_entity(entity_result["entity_id"], direction="both")
+            current_edges = [e for e in edges if e.get("current", True)]
+            entity_result["edges"] = current_edges
+            entity_result["edge_count"] = len(current_edges)
+
+        return {"query": query, "results": top, "count": len(top), "sort_by": sort_by}
     except Exception as e:
         return {"success": False, "error": f"KG search failed: {e}"}
 
