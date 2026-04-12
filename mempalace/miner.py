@@ -15,16 +15,17 @@ from pathlib import Path
 from datetime import datetime
 
 
-def file_content_hash(filepath: Path) -> str:
-    """Compute content hash for a file — single source of truth for sync."""
-    content = filepath.read_text(encoding="utf-8", errors="replace").strip()
-    return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
-
 from collections import defaultdict
 
 import chromadb
 
 from .palace import SKIP_DIRS, get_collection, file_already_mined
+
+
+def file_content_hash(filepath: Path) -> str:
+    """Compute content hash for a file — single source of truth for sync."""
+    content = filepath.read_text(encoding="utf-8", errors="replace").strip()
+    return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -375,24 +376,6 @@ def chunk_text(content: str, source_file: str) -> list:
 # =============================================================================
 # PALACE — ChromaDB operations
 # =============================================================================
-
-
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
-
-
-def file_already_mined(collection, source_file: str) -> bool:
-    """Fast check: has this file been filed before?"""
-    try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
-        return len(results.get("ids", [])) > 0
-    except Exception:
-        return False
 
 
 

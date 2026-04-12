@@ -474,9 +474,17 @@ def test_cmd_repair_success(mock_config_cls, tmp_path, capsys):
     mock_client = MagicMock()
     mock_client.get_collection.return_value = mock_col
     mock_new_col = MagicMock()
+    mock_new_col.count.return_value = 2  # must match len(all_ids) for verification to pass
     mock_client.create_collection.return_value = mock_new_col
     mock_chromadb.PersistentClient.return_value = mock_client
-    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+    # cmd_repair rebuilds to a fresh palace dir then atomically swaps:
+    # os.rename(palace_path, palace.backup); os.rename(rebuild_path, palace_path).
+    # ChromaDB is mocked so the rebuild dir is never actually created — patch
+    # the filesystem swap so the test stays mock-based without real DB I/O.
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}), \
+         patch("shutil.rmtree"), \
+         patch("os.rename"), \
+         patch("mempalace.cli.os.path.exists", return_value=False):
         cmd_repair(args)
     out = capsys.readouterr().out
     assert "Repair complete" in out

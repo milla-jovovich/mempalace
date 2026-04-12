@@ -542,7 +542,6 @@ def tool_add_drawer(
     )
 
     # Idempotency: if this exact drawer ID already exists, return success
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((effective_source + '0').encode(), usedforsecurity=False).hexdigest()[:16]}"
     try:
         existing = col.get(ids=[drawer_id])
         if existing["ids"]:
@@ -570,7 +569,6 @@ def tool_add_drawer(
             agent=added_by,
         )
         if added:
-            drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((effective_source + '0').encode(), usedforsecurity=False).hexdigest()[:16]}"
             logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
             return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
         else:

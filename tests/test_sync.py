@@ -298,7 +298,6 @@ def test_sync_atomic_remine_project_file():
         dry_run=False,
     )
     assert col.count() > 0, "Should have drawers after mining"
-    original_count = col.count()
 
     # Step 2: modify the file
     src_file.write_text("def updated():\n    return 'v2'\n" * 10)

@@ -145,7 +145,7 @@ def _force_clean(palace_path: str, source_dir: str):
         print(f"\n  --force: deleting {len(to_delete)} existing drawers from {source_prefix}...")
         for i in range(0, len(to_delete), 100):
             col.delete(ids=to_delete[i:i + 100])
-        print(f"  Deleted. Re-mining fresh.\n")
+        print("  Deleted. Re-mining fresh.\n")
 
 
 def cmd_search(args):
@@ -328,10 +328,9 @@ def cmd_repair(args):
 
 
 
-def cmd_sync(args):
+def cmd_sync(args):  # noqa: C901
     """Sync palace with source files — re-mine changed files, report stale drawers."""
     import chromadb
-    import hashlib
     from pathlib import Path
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
@@ -527,7 +526,7 @@ def cmd_sync(args):
     elif missing:
         print(f"  Skipped {len(missing)} missing files (use --clean to remove orphaned drawers)")
 
-    print(f"\n  Sync complete.")
+    print("\n  Sync complete.")
     print(f"  Deleted: {deleted} stale drawers")
     if re_mined:
         print(f"  Re-mined: {re_mined} files")
