@@ -918,10 +918,10 @@ def tool_kg_stats():
 # ==================== AGENT DIARY ====================
 
 
-def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
+def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: str = ""):
     """
-    Write a diary entry for this agent. Each agent gets its own wing
-    with a diary room. Entries are timestamped and accumulate over time.
+    Write a diary entry for this agent. Entries are timestamped and
+    accumulate over time in a diary room.
 
     This is the agent's personal journal — observations, thoughts,
     what it worked on, what it noticed, what it thinks matters.
@@ -932,7 +932,10 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
-    wing = f"wing_{agent_name.lower().replace(' ', '_')}"
+    if wing:
+        wing = wing.lower().replace(" ", "_")
+    else:
+        wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     room = "diary"
     col = _get_collection(create=True)
     if not col:
@@ -987,7 +990,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return {"success": False, "error": str(e)}
 
 
-def tool_diary_read(agent_name: str, last_n: int = 10):
+def tool_diary_read(agent_name: str, last_n: int = 10, wing: str = ""):
     """
     Read an agent's recent diary entries. Returns the last N entries
     in chronological order — the agent's personal journal.
@@ -997,7 +1000,10 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
     except ValueError as e:
         return {"error": str(e)}
     last_n = max(1, min(last_n, 100))
-    wing = f"wing_{agent_name.lower().replace(' ', '_')}"
+    if wing:
+        wing = wing.lower().replace(" ", "_")
+    else:
+        wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -1497,6 +1503,10 @@ TOOLS = {
                     "type": "string",
                     "description": "Topic tag (optional, default: general)",
                 },
+                "wing": {
+                    "type": "string",
+                    "description": "Target wing for this diary entry (optional). If omitted, uses wing_{agent_name}. Use this to write diary entries to a project wing instead of an agent-specific wing.",
+                },
             },
             "required": ["agent_name", "entry"],
         },
@@ -1514,6 +1524,10 @@ TOOLS = {
                 "last_n": {
                     "type": "integer",
                     "description": "Number of recent entries to read (default: 10)",
+                },
+                "wing": {
+                    "type": "string",
+                    "description": "Wing to read diary entries from (optional). If omitted, reads from wing_{agent_name}.",
                 },
             },
             "required": ["agent_name"],

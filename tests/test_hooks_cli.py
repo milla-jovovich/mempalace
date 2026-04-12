@@ -233,7 +233,8 @@ def test_stop_hook_saves_silently_at_interval(tmp_path):
     # Saves silently — systemMessage notification with themes, no block
     assert result["systemMessage"].startswith("\u2726 15 memories woven into the palace")
     assert "hooks" in result["systemMessage"]
-    mock_save.assert_called_once_with(str(transcript), "test", toast=False)
+    # tmp_path has no "-Projects-" segment, so _wing_from_transcript_path falls back to "sessions"
+    mock_save.assert_called_once_with(str(transcript), "test", wing="sessions", toast=False)
 
 
 def test_stop_hook_tracks_save_point(tmp_path):
