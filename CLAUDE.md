@@ -48,6 +48,9 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 16. **fix: chromadb BLOB seq_id migration** — auto-repairs 0.6.x→1.5.x migration bug where `seq_id` stored as BLOB crashes the Rust compactor, runs before every `PersistentClient` init
 17. **perf: graph cache** — `build_graph()` cached module-level with 60s TTL, invalidated on writes via `invalidate_graph_cache()`
 18. **perf: L1 importance pre-filter** — `_fetch_drawers()` tries `importance >= 3` filter first, falls back to full scan only if < 15 results
+19. **fix: MCP stale HNSW index** — `_get_client()` detects external writes via mtime (not just inode), new `mempalace_reconnect` MCP tool for manual cache invalidation
+20. **fix: diary wing assignment** — `tool_diary_write()` accepts optional `wing` param, stop hook derives project wing from transcript path instead of hardcoding `wing_session-hook`
+21. **merge: upstream/develop** — backend seam (`backends/chroma.py`), expanded room detector, fixed `_fix_blob_seq_ids` import path after upstream refactor
 
 ## Upstream PRs
 
@@ -71,4 +74,4 @@ Claude Code has two complementary memory layers — neither has automatic consol
 
 ## Testing
 
-Always run `python -m pytest tests/ -x -q` after changes. 692 tests expected to pass. Benchmark and stress tests are excluded by default (use `-m benchmark` or `-m stress` to include).
+Always run `python -m pytest tests/ -x -q` after changes. 701 tests expected to pass. Benchmark and stress tests are excluded by default (use `-m benchmark` or `-m stress` to include).
