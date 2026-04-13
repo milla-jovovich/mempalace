@@ -6,8 +6,10 @@ from unittest.mock import patch
 
 import pytest
 
+# Default save interval used by existing tests (matches config default)
+SAVE_INTERVAL = 15
+
 from mempalace.hooks_cli import (
-    SAVE_INTERVAL,
     STOP_BLOCK_REASON,
     PRECOMPACT_BLOCK_REASON,
     _count_human_messages,
@@ -116,9 +118,14 @@ def _capture_hook_output(hook_fn, data, harness="claude-code", state_dir=None):
     patches = [patch("mempalace.hooks_cli._output", side_effect=lambda d: buf.write(json.dumps(d)))]
     if state_dir:
         patches.append(patch("mempalace.hooks_cli.STATE_DIR", state_dir))
+    # If MempalaceConfig is not already patched by caller, provide defaults
+    mock_cfg = patch("mempalace.hooks_cli.MempalaceConfig")
+    patches.append(mock_cfg)
     with contextlib.ExitStack() as stack:
-        for p in patches:
-            stack.enter_context(p)
+        mocks = [stack.enter_context(p) for p in patches]
+        cfg_mock = mocks[-1]
+        cfg_mock.return_value.hooks_save_interval = SAVE_INTERVAL
+        cfg_mock.return_value.hooks_precompact = True
         hook_fn(data, harness)
     return json.loads(buf.getvalue())
 
@@ -418,3 +425,106 @@ def test_run_hook_invalid_json(tmp_path):
             with patch("mempalace.hooks_cli._output") as mock_output:
                 run_hook("session-start", "claude-code")
     mock_output.assert_called_once_with({})
+
+
+# --- configurable save interval ---
+
+
+def _capture_hook_with_config(hook_fn, data, state_dir, save_interval=15, precompact=True):
+    """Run a hook with specific config values and capture output."""
+    import io
+
+    buf = io.StringIO()
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(
+            patch("mempalace.hooks_cli._output", side_effect=lambda d: buf.write(json.dumps(d)))
+        )
+        stack.enter_context(patch("mempalace.hooks_cli.STATE_DIR", state_dir))
+        mock_cfg = stack.enter_context(patch("mempalace.hooks_cli.MempalaceConfig"))
+        mock_cfg.return_value.hooks_save_interval = save_interval
+        mock_cfg.return_value.hooks_precompact = precompact
+        hook_fn(data, "claude-code")
+    return json.loads(buf.getvalue())
+
+
+def test_stop_hook_disabled_by_zero_interval(tmp_path):
+    """save_interval=0 disables the stop hook entirely."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(30)],
+    )
+    result = _capture_hook_with_config(
+        hook_stop,
+        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        state_dir=tmp_path,
+        save_interval=0,
+    )
+    assert result == {}
+
+
+def test_stop_hook_custom_interval(tmp_path):
+    """save_interval=5 triggers after 5 messages, not 15."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(5)],
+    )
+    result = _capture_hook_with_config(
+        hook_stop,
+        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        state_dir=tmp_path,
+        save_interval=5,
+    )
+    assert result["decision"] == "block"
+
+
+def test_stop_hook_custom_interval_not_reached(tmp_path):
+    """save_interval=50 does NOT trigger at 15 messages."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(15)],
+    )
+    result = _capture_hook_with_config(
+        hook_stop,
+        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        state_dir=tmp_path,
+        save_interval=50,
+    )
+    assert result == {}
+
+
+def test_precompact_disabled_by_config(tmp_path):
+    """hooks.precompact=false disables the precompact hook."""
+    result = _capture_hook_with_config(
+        hook_precompact,
+        {"session_id": "test"},
+        state_dir=tmp_path,
+        precompact=False,
+    )
+    assert result == {}
+
+
+def test_precompact_enabled_by_default(tmp_path):
+    """Precompact blocks by default even when stop hook is disabled."""
+    result = _capture_hook_with_config(
+        hook_precompact,
+        {"session_id": "test"},
+        state_dir=tmp_path,
+        save_interval=0,
+        precompact=True,
+    )
+    assert result["decision"] == "block"
+
+
+def test_stop_disabled_precompact_still_works(tmp_path):
+    """save_interval=0 doesn't affect precompact — they're independent."""
+    result = _capture_hook_with_config(
+        hook_precompact,
+        {"session_id": "test"},
+        state_dir=tmp_path,
+        save_interval=0,
+        precompact=True,
+    )
+    assert result["decision"] == "block"

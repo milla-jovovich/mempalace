@@ -179,6 +179,36 @@ class MempalaceConfig:
         return self._file_config.get("hooks", {}).get("silent_save", True)
 
     @property
+    def hooks_save_interval(self):
+        """Number of human messages between auto-save checkpoints.
+
+        Set to 0 to disable the stop hook entirely.
+        Env var MEMPALACE_HOOKS_SAVE_INTERVAL overrides config file.
+        Default: 15.
+        """
+        env_val = os.environ.get("MEMPALACE_HOOKS_SAVE_INTERVAL")
+        if env_val is not None:
+            try:
+                return max(0, int(env_val))
+            except ValueError:
+                pass
+        return self._file_config.get("hooks", {}).get("save_interval", 15)
+
+    @property
+    def hooks_precompact(self):
+        """Whether the precompact hook blocks before context compaction.
+
+        This is the last chance to save before context is lost.
+        Disabled only by explicit opt-out.
+        Env var MEMPALACE_HOOKS_PRECOMPACT overrides config file.
+        Default: True.
+        """
+        env_val = os.environ.get("MEMPALACE_HOOKS_PRECOMPACT")
+        if env_val is not None:
+            return env_val.lower() not in ("false", "0", "no")
+        return self._file_config.get("hooks", {}).get("precompact", True)
+
+    @property
     def hook_desktop_toast(self):
         """Whether the stop hook shows a desktop notification via notify-send."""
         return self._file_config.get("hooks", {}).get("desktop_toast", False)

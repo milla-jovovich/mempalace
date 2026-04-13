@@ -66,3 +66,86 @@ def test_sanitize_name_rejects_path_traversal():
 def test_sanitize_name_rejects_empty():
     with pytest.raises(ValueError):
         sanitize_name("")
+
+
+# --- hooks config ---
+
+
+def test_hooks_save_interval_default():
+    cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+    assert cfg.hooks_save_interval == 15
+
+
+def test_hooks_save_interval_from_config():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"hooks": {"save_interval": 50}}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.hooks_save_interval == 50
+
+
+def test_hooks_save_interval_zero_disables():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"hooks": {"save_interval": 0}}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.hooks_save_interval == 0
+
+
+def test_hooks_save_interval_env_override():
+    os.environ["MEMPALACE_HOOKS_SAVE_INTERVAL"] = "30"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.hooks_save_interval == 30
+    finally:
+        del os.environ["MEMPALACE_HOOKS_SAVE_INTERVAL"]
+
+
+def test_hooks_save_interval_env_zero():
+    os.environ["MEMPALACE_HOOKS_SAVE_INTERVAL"] = "0"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.hooks_save_interval == 0
+    finally:
+        del os.environ["MEMPALACE_HOOKS_SAVE_INTERVAL"]
+
+
+def test_hooks_save_interval_negative_clamped():
+    os.environ["MEMPALACE_HOOKS_SAVE_INTERVAL"] = "-5"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.hooks_save_interval == 0
+    finally:
+        del os.environ["MEMPALACE_HOOKS_SAVE_INTERVAL"]
+
+
+def test_hooks_precompact_default():
+    cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+    assert cfg.hooks_precompact is True
+
+
+def test_hooks_precompact_disabled():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"hooks": {"precompact": False}}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.hooks_precompact is False
+
+
+def test_hooks_precompact_env_override():
+    os.environ["MEMPALACE_HOOKS_PRECOMPACT"] = "false"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.hooks_precompact is False
+    finally:
+        del os.environ["MEMPALACE_HOOKS_PRECOMPACT"]
+
+
+def test_hooks_save_interval_and_precompact_independent():
+    """Disabling stop hook doesn't affect precompact and vice versa."""
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"hooks": {"save_interval": 0, "precompact": True}}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.hooks_save_interval == 0
+    assert cfg.hooks_precompact is True
