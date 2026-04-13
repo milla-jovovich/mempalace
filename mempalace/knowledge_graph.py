@@ -176,18 +176,19 @@ class KnowledgeGraph:
                     "INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (obj_id, obj)
                 )
 
-                # Deterministic ID for active triples so INSERT OR IGNORE
-                # deduplicates correctly with the partial UNIQUE index.
-                # Expired triples keep a timestamp component so re-adds after
-                # invalidation always produce a fresh row (different primary key).
-                if valid_to is None:
-                    id_seed = f"{sub_id}|{pred}|{obj_id}|active"
-                else:
-                    id_seed = f"{sub_id}|{pred}|{obj_id}|{valid_from}|{valid_to}|{datetime.now().isoformat()}"
-                triple_id = f"t_{sub_id}_{pred}_{obj_id}_{hashlib.sha256(id_seed.encode()).hexdigest()[:12]}"
+                # Always use a timestamp-based ID so that a re-add after
+                # invalidation produces a genuinely new row with a different PK.
+                # The partial UNIQUE index on (subject, predicate, object)
+                # WHERE valid_to IS NULL is what closes the TOCTOU race for
+                # active triples — INSERT OR IGNORE on that index silently
+                # discards the loser when two threads race, regardless of
+                # whether their generated IDs differ.
+                triple_id = f"t_{sub_id}_{pred}_{obj_id}_{hashlib.sha256(f'{valid_from}{datetime.now().isoformat()}'.encode()).hexdigest()[:12]}"
 
-                # INSERT OR IGNORE: if the UNIQUE index blocks insertion (concurrent
-                # duplicate), we silently discard the loser and return the winner.
+                # INSERT OR IGNORE: the partial UNIQUE index blocks a second active
+                # insert for the same (subject, predicate, object).  Expired rows
+                # (valid_to IS NOT NULL) are outside the index so re-adds after
+                # invalidation always succeed.
                 conn.execute(
                     """INSERT OR IGNORE INTO triples
                        (id, subject, predicate, object, valid_from, valid_to, confidence, source_closet, source_file)
@@ -204,10 +205,9 @@ class KnowledgeGraph:
                         source_file,
                     ),
                 )
-                # For active triples, fetch whichever row won (ours or a concurrent
-                # insert's) — their IDs may differ if two threads raced here.
-                # Expired triples have no UNIQUE index constraint, so triple_id is
-                # always the inserted row.
+                # For active triples, return the winner's ID — may differ from
+                # triple_id if a concurrent insert beat us and INSERT OR IGNORE
+                # silently discarded our row.
                 if valid_to is None:
                     winner = conn.execute(
                         "SELECT id FROM triples WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
