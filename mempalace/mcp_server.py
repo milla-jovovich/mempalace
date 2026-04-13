@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-MemPalace MCP Server — read/write palace access for Claude Code
-================================================================
-Install: claude mcp add mempalace -- python -m mempalace.mcp_server [--palace /path/to/palace]
+MemPalace MCP Server
+====================
+Supports both:
+  - stdio transport for local MCP clients such as Claude Code
+  - Streamable HTTP transport for remote MCP clients such as ChatGPT custom apps
 
 Tools (read):
   mempalace_status          — total drawers, wing/room breakdown
@@ -18,22 +20,25 @@ Tools (write):
 """
 
 import argparse
+import json
+import hashlib
+import logging
 import os
 import sys
-import json
-import logging
-import hashlib
 from datetime import datetime
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from .config import MempalaceConfig, sanitize_name, sanitize_content
-from .version import __version__
-from .query_sanitizer import sanitize_query
-from .searcher import search_memories
-from .palace_graph import traverse, find_tunnels, graph_stats
 import chromadb
 
+from .config import MempalaceConfig, sanitize_content, sanitize_name
 from .knowledge_graph import KnowledgeGraph
+from .palace_graph import find_tunnels, graph_stats, traverse
+from .query_sanitizer import sanitize_query
+from .searcher import search_memories
+from .version import __version__
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
@@ -921,93 +926,236 @@ TOOLS = {
     },
 }
 
-
 SUPPORTED_PROTOCOL_VERSIONS = [
     "2025-11-25",
     "2025-06-18",
     "2025-03-26",
     "2024-11-05",
 ]
+DEFAULT_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[-1]
+LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
+DEFAULT_HTTP_HOST = "127.0.0.1"
+DEFAULT_HTTP_PORT = 8000
+DEFAULT_HTTP_PATH = "/mcp"
+DEFAULT_ALLOWED_ORIGINS = (
+    "https://chatgpt.com",
+    "https://chat.openai.com",
+)
+
+READ_ONLY_TOOLS = {
+    "mempalace_status",
+    "mempalace_list_wings",
+    "mempalace_list_rooms",
+    "mempalace_get_taxonomy",
+    "mempalace_get_aaak_spec",
+    "mempalace_kg_query",
+    "mempalace_kg_timeline",
+    "mempalace_kg_stats",
+    "mempalace_traverse",
+    "mempalace_find_tunnels",
+    "mempalace_graph_stats",
+    "mempalace_search",
+    "mempalace_check_duplicate",
+    "mempalace_diary_read",
+}
+
+TOOL_ANNOTATIONS = {tool_name: {"readOnlyHint": True} for tool_name in READ_ONLY_TOOLS}
+TOOL_ANNOTATIONS["mempalace_delete_drawer"] = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+}
+
+
+def _normalize_http_path(path: str) -> str:
+    path = (path or DEFAULT_HTTP_PATH).strip() or DEFAULT_HTTP_PATH
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return path.rstrip("/") or "/"
+
+
+def _parse_allowed_origins(values):
+    items = []
+    for value in values or []:
+        items.extend(part.strip() for part in value.split(",") if part.strip())
+    return items
+
+
+def _tool_definitions():
+    tools = []
+    for name, spec in TOOLS.items():
+        tool = {
+            "name": name,
+            "description": spec["description"],
+            "inputSchema": spec["input_schema"],
+        }
+        annotations = TOOL_ANNOTATIONS.get(name)
+        if annotations:
+            tool["annotations"] = annotations
+        tools.append(tool)
+    return tools
+
+
+def _jsonrpc_error(req_id, code, message, data=None):
+    error = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
+    return {"jsonrpc": "2.0", "id": req_id, "error": error}
+
+
+def _negotiate_protocol_version(params):
+    requested = params.get("protocolVersion") if isinstance(params, dict) else None
+    if requested is None:
+        return DEFAULT_PROTOCOL_VERSION
+    if requested in SUPPORTED_PROTOCOL_VERSIONS:
+        return requested
+    return LATEST_PROTOCOL_VERSION
+
+
+def _validate_http_protocol_header(protocol_header):
+    if protocol_header is None:
+        return DEFAULT_PROTOCOL_VERSION, None
+    if protocol_header in SUPPORTED_PROTOCOL_VERSIONS:
+        return protocol_header, None
+    return None, (
+        HTTPStatus.BAD_REQUEST,
+        _jsonrpc_error(
+            None,
+            -32602,
+            f"Unsupported protocol version: {protocol_header}",
+            {"supported": list(SUPPORTED_PROTOCOL_VERSIONS)},
+        ),
+    )
+
+
+def _message_kind(message):
+    if not isinstance(message, dict):
+        return "invalid"
+    if "method" in message:
+        return "request" if "id" in message else "notification"
+    if "result" in message or "error" in message:
+        return "response"
+    return "invalid"
+
+
+def _payload_contains_requests(payload):
+    if isinstance(payload, list):
+        return any(_message_kind(item) == "request" for item in payload)
+    return _message_kind(payload) == "request"
+
+
+def _tool_result_is_error(result):
+    if not isinstance(result, dict):
+        return False
+    if result.get("success") is False:
+        return True
+    return "error" in result
+
+
+def _response_contains_errors(response):
+    if isinstance(response, dict):
+        return "error" in response
+    if isinstance(response, list):
+        return any(isinstance(item, dict) and "error" in item for item in response)
+    return False
+
+
+def _coerce_tool_arguments(tool_name, tool_args):
+    # MCP JSON transport may deliver integers as floats or strings;
+    # ChromaDB and Python slicing require native ints/floats.
+    schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
+    coerced = dict(tool_args)
+    for key, value in list(coerced.items()):
+        prop_schema = schema_props.get(key, {})
+        declared_type = prop_schema.get("type")
+        if declared_type == "integer" and not isinstance(value, int):
+            coerced[key] = int(value)
+        elif declared_type == "number" and not isinstance(value, (int, float)):
+            coerced[key] = float(value)
+    return coerced
 
 
 def handle_request(request):
+    if not isinstance(request, dict):
+        return _jsonrpc_error(None, -32600, "Invalid Request")
+
     method = request.get("method", "")
     params = request.get("params", {})
     req_id = request.get("id")
 
     if method == "initialize":
-        client_version = params.get("protocolVersion", SUPPORTED_PROTOCOL_VERSIONS[-1])
-        negotiated = (
-            client_version
-            if client_version in SUPPORTED_PROTOCOL_VERSIONS
-            else SUPPORTED_PROTOCOL_VERSIONS[0]
-        )
+        protocol_version = _negotiate_protocol_version(params)
         return {
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
-                "protocolVersion": negotiated,
-                "capabilities": {"tools": {}},
+                "protocolVersion": protocol_version,
+                "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": "mempalace", "version": __version__},
             },
         }
-    elif method == "notifications/initialized":
+
+    if method == "notifications/initialized":
         return None
-    elif method == "tools/list":
+
+    if method == "ping":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
+
+    if not isinstance(params, dict):
+        return _jsonrpc_error(req_id, -32602, "Invalid params")
+
+    if method == "tools/list":
         return {
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
-                "tools": [
-                    {"name": n, "description": t["description"], "inputSchema": t["input_schema"]}
-                    for n, t in TOOLS.items()
-                ]
+                "tools": _tool_definitions(),
             },
         }
-    elif method == "tools/call":
+
+    if method == "tools/call":
         tool_name = params.get("name")
-        tool_args = params.get("arguments") or {}
+        tool_args = params.get("arguments")
         if tool_name not in TOOLS:
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
-            }
-        # Coerce argument types based on input_schema.
-        # MCP JSON transport may deliver integers as floats or strings;
-        # ChromaDB and Python slicing require native int.
-        schema_props = TOOLS[tool_name]["input_schema"].get("properties", {})
-        for key, value in list(tool_args.items()):
-            prop_schema = schema_props.get(key, {})
-            declared_type = prop_schema.get("type")
-            if declared_type == "integer" and not isinstance(value, int):
-                tool_args[key] = int(value)
-            elif declared_type == "number" and not isinstance(value, (int, float)):
-                tool_args[key] = float(value)
+            return _jsonrpc_error(req_id, -32601, f"Unknown tool: {tool_name}")
+        if tool_args is None:
+            tool_args = {}
+        if not isinstance(tool_args, dict):
+            return _jsonrpc_error(req_id, -32602, "Tool arguments must be an object")
         try:
+            tool_args = _coerce_tool_arguments(tool_name, tool_args)
             result = TOOLS[tool_name]["handler"](**tool_args)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(result, indent=2)}],
+                    "isError": _tool_result_is_error(result),
+                },
             }
+        except (TypeError, ValueError) as exc:
+            return _jsonrpc_error(req_id, -32602, f"Invalid arguments for {tool_name}: {exc}")
         except Exception:
-            logger.exception(f"Tool error in {tool_name}")
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32000, "message": "Internal tool error"},
-            }
+            logger.exception("Tool error in %s", tool_name)
+            return _jsonrpc_error(req_id, -32000, "Internal tool error")
 
-    return {
-        "jsonrpc": "2.0",
-        "id": req_id,
-        "error": {"code": -32601, "message": f"Unknown method: {method}"},
-    }
+    return _jsonrpc_error(req_id, -32601, f"Unknown method: {method}")
 
 
-def main():
-    logger.info("MemPalace MCP Server starting...")
+def handle_jsonrpc_payload(payload):
+    if isinstance(payload, list):
+        if not payload:
+            return _jsonrpc_error(None, -32600, "Invalid Request")
+        responses = []
+        for item in payload:
+            response = handle_request(item)
+            if response is not None:
+                responses.append(response)
+        return responses or None
+    return handle_request(payload)
+
+
+def run_stdio_server():
+    logger.info("MemPalace MCP Server starting over stdio...")
     while True:
         try:
             line = sys.stdin.readline()
@@ -1016,15 +1164,265 @@ def main():
             line = line.strip()
             if not line:
                 continue
-            request = json.loads(line)
-            response = handle_request(request)
+            response = handle_jsonrpc_payload(json.loads(line))
             if response is not None:
                 sys.stdout.write(json.dumps(response) + "\n")
                 sys.stdout.flush()
         except KeyboardInterrupt:
             break
-        except Exception as e:
-            logger.error(f"Server error: {e}")
+        except Exception as exc:
+            logger.error(f"Server error: {exc}")
+
+
+class StreamableMCPHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, server_address, request_handler_cls, endpoint_path, allowed_origins):
+        super().__init__(server_address, request_handler_cls)
+        self.endpoint_path = _normalize_http_path(endpoint_path)
+        self.allowed_origins = set(allowed_origins or [])
+
+
+class StreamableMCPRequestHandler(BaseHTTPRequestHandler):
+    server_version = "MemPalaceMCP/1.0"
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt, *args):  # pragma: no cover - routed to logger
+        logger.info("%s - %s", self.address_string(), fmt % args)
+
+    def _request_path(self):
+        return urlsplit(self.path).path
+
+    def _matches_endpoint(self):
+        return self._request_path() == self.server.endpoint_path
+
+    def _origin_allowed(self):
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        allowed = getattr(self.server, "allowed_origins", set())
+        return "*" in allowed or origin in allowed
+
+    def _send_common_headers(self, content_type=None, content_length=None, protocol_version=None):
+        origin = self.headers.get("Origin")
+        allowed = getattr(self.server, "allowed_origins", set())
+        if origin and ("*" in allowed or origin in allowed):
+            self.send_header("Access-Control-Allow-Origin", origin if "*" not in allowed else "*")
+            self.send_header("Vary", "Origin")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Allow", "GET, POST, DELETE, OPTIONS")
+        if content_type:
+            self.send_header("Content-Type", content_type)
+        if content_length is not None:
+            self.send_header("Content-Length", str(content_length))
+        if protocol_version:
+            self.send_header("MCP-Protocol-Version", protocol_version)
+
+    def _send_bytes(
+        self, status, body=b"", content_type="text/plain; charset=utf-8", protocol=None
+    ):
+        self.send_response(status)
+        self._send_common_headers(
+            content_type=content_type,
+            content_length=len(body),
+            protocol_version=protocol,
+        )
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def _send_json(self, status, payload, protocol=None):
+        body = json.dumps(payload).encode("utf-8")
+        self._send_bytes(status, body=body, content_type="application/json", protocol=protocol)
+
+    def _reject_if_needed(self):
+        if not self._matches_endpoint():
+            self._send_bytes(HTTPStatus.NOT_FOUND, b"Not found\n")
+            return True
+        if not self._origin_allowed():
+            self._send_bytes(HTTPStatus.FORBIDDEN, b"Origin not allowed\n")
+            return True
+        return False
+
+    def do_OPTIONS(self):  # pragma: no cover - exercised indirectly by clients
+        if self._reject_if_needed():
+            return
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self._send_common_headers()
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version",
+        )
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.end_headers()
+
+    def do_GET(self):
+        if self._reject_if_needed():
+            return
+        protocol_header = self.headers.get("MCP-Protocol-Version")
+        negotiated_protocol, error = _validate_http_protocol_header(protocol_header)
+        if error:
+            status, payload = error
+            self._send_json(status, payload, protocol=DEFAULT_PROTOCOL_VERSION)
+            return
+        self._send_bytes(
+            HTTPStatus.METHOD_NOT_ALLOWED,
+            b"SSE stream not implemented\n",
+            protocol=negotiated_protocol,
+        )
+
+    def do_DELETE(self):
+        if self._reject_if_needed():
+            return
+        protocol_header = self.headers.get("MCP-Protocol-Version")
+        negotiated_protocol, error = _validate_http_protocol_header(protocol_header)
+        if error:
+            status, payload = error
+            self._send_json(status, payload, protocol=DEFAULT_PROTOCOL_VERSION)
+            return
+        self._send_bytes(
+            HTTPStatus.METHOD_NOT_ALLOWED,
+            b"Session deletion is not supported\n",
+            protocol=negotiated_protocol,
+        )
+
+    def do_POST(self):
+        if self._reject_if_needed():
+            return
+
+        protocol_header = self.headers.get("MCP-Protocol-Version")
+
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send_bytes(HTTPStatus.BAD_REQUEST, b"Invalid Content-Length\n")
+            return
+
+        raw_body = self.rfile.read(content_length)
+
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_bytes(HTTPStatus.BAD_REQUEST, b"Invalid JSON body\n")
+            return
+
+        negotiated_protocol, error = _validate_http_protocol_header(protocol_header)
+        if error:
+            status, payload = error
+            self._send_json(status, payload, protocol=DEFAULT_PROTOCOL_VERSION)
+            return
+
+        response = handle_jsonrpc_payload(payload)
+        response_protocol = negotiated_protocol
+        if isinstance(response, dict):
+            result = response.get("result", {})
+            if isinstance(result, dict) and "protocolVersion" in result:
+                response_protocol = result["protocolVersion"]
+
+        if not _payload_contains_requests(payload):
+            if response is not None and _response_contains_errors(response):
+                self._send_json(HTTPStatus.BAD_REQUEST, response, protocol=response_protocol)
+                return
+            self._send_bytes(HTTPStatus.ACCEPTED, protocol=response_protocol)
+            return
+
+        if response is None:
+            self._send_bytes(HTTPStatus.ACCEPTED, protocol=response_protocol)
+            return
+
+        self._send_json(HTTPStatus.OK, response, protocol=response_protocol)
+
+
+def build_http_server(
+    host=DEFAULT_HTTP_HOST, port=DEFAULT_HTTP_PORT, path=DEFAULT_HTTP_PATH, allowed_origins=None
+):
+    return StreamableMCPHTTPServer(
+        (host, port),
+        StreamableMCPRequestHandler,
+        endpoint_path=path,
+        allowed_origins=allowed_origins,
+    )
+
+
+def run_streamable_http_server(
+    host=DEFAULT_HTTP_HOST, port=DEFAULT_HTTP_PORT, path=DEFAULT_HTTP_PATH, allowed_origins=None
+):
+    server = build_http_server(host=host, port=port, path=path, allowed_origins=allowed_origins)
+    logger.info(
+        "MemPalace MCP Server starting over streamable HTTP at http://%s:%s%s",
+        host,
+        port,
+        server.endpoint_path,
+    )
+    logger.info(
+        "Allowed origins: %s",
+        ", ".join(sorted(server.allowed_origins))
+        if server.allowed_origins
+        else "(none configured)",
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Run the MemPalace MCP server.")
+    parser.add_argument(
+        "--palace",
+        metavar="PATH",
+        default=_args.palace,
+        help="Path to the palace directory (overrides config file and env var).",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default=os.environ.get("MEMPALACE_MCP_TRANSPORT", "stdio"),
+        help="MCP transport to expose (default: stdio).",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("MEMPALACE_MCP_HOST", DEFAULT_HTTP_HOST),
+        help="HTTP bind host for streamable-http transport.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("MEMPALACE_MCP_PORT", DEFAULT_HTTP_PORT)),
+        help="HTTP bind port for streamable-http transport.",
+    )
+    parser.add_argument(
+        "--path",
+        default=os.environ.get("MEMPALACE_MCP_PATH", DEFAULT_HTTP_PATH),
+        help="Endpoint path for streamable-http transport (default: /mcp).",
+    )
+    parser.add_argument(
+        "--allow-origin",
+        action="append",
+        default=[],
+        help="Allowed Origin header value for HTTP requests. Repeat or pass comma-separated values.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    if args.transport == "stdio":
+        run_stdio_server()
+        return
+
+    configured_origins = _parse_allowed_origins(args.allow_origin)
+    env_origins = _parse_allowed_origins([os.environ.get("MEMPALACE_ALLOWED_ORIGINS", "")])
+    allowed_origins = configured_origins or env_origins or list(DEFAULT_ALLOWED_ORIGINS)
+    run_streamable_http_server(
+        host=args.host,
+        port=args.port,
+        path=args.path,
+        allowed_origins=allowed_origins,
+    )
 
 
 if __name__ == "__main__":

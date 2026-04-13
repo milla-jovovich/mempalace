@@ -7,6 +7,14 @@ via monkeypatch to avoid touching real data.
 """
 
 import json
+import threading
+import urllib.error
+import urllib.request
+
+import pytest
+
+from mempalace import __version__
+from mempalace.mcp_server import build_http_server
 
 
 def _patch_mcp_server(monkeypatch, config, kg):
@@ -92,6 +100,12 @@ class TestHandleRequest:
         resp = handle_request({"method": "notifications/initialized", "id": None, "params": {}})
         assert resp is None
 
+    def test_ping_returns_empty_result(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request({"method": "ping", "id": 99, "params": {}})
+        assert resp == {"jsonrpc": "2.0", "id": 99, "result": {}}
+
     def test_tools_list(self):
         from mempalace.mcp_server import handle_request
 
@@ -102,6 +116,10 @@ class TestHandleRequest:
         assert "mempalace_search" in names
         assert "mempalace_add_drawer" in names
         assert "mempalace_kg_add" in names
+
+        tool_map = {tool["name"]: tool for tool in tools}
+        assert tool_map["mempalace_search"]["annotations"]["readOnlyHint"] is True
+        assert tool_map["mempalace_delete_drawer"]["annotations"]["destructiveHint"] is True
 
     def test_null_arguments_does_not_hang(self, monkeypatch, config, palace_path, seeded_kg):
         """Sending arguments: null should return a result, not hang (#394)."""
@@ -156,6 +174,21 @@ class TestHandleRequest:
         assert "result" in resp
         content = json.loads(resp["result"]["content"][0]["text"])
         assert "total_drawers" in content
+
+    def test_tool_call_sets_is_error_for_successful_result(self):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(
+            {
+                "method": "tools/call",
+                "id": 6,
+                "params": {"name": "mempalace_get_aaak_spec", "arguments": {}},
+            }
+        )
+
+        assert resp["result"]["isError"] is False
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        assert "aaak_spec" in payload
 
 
 # ── Read Tools ──────────────────────────────────────────────────────────
@@ -403,3 +436,174 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+
+def _start_http_server():
+    server = build_http_server(
+        host="127.0.0.1",
+        port=0,
+        path="/mcp",
+        allowed_origins=["https://chatgpt.com"],
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/mcp"
+    return server, thread, url
+
+
+def _post_json(url, payload, origin=None):
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+    }
+    if origin:
+        headers["Origin"] = origin
+
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        body = response.read().decode("utf-8")
+        return response.status, response.headers, body
+
+
+class TestStreamableHTTP:
+    def test_rejects_bad_origin(self):
+        server, thread, url = _start_http_server()
+        try:
+            with pytest.raises(urllib.error.HTTPError) as excinfo:
+                _post_json(
+                    url,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {"protocolVersion": "2025-03-26"},
+                    },
+                    origin="https://evil.example",
+                )
+            assert excinfo.value.code == 403
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_handles_initialize_requests(self):
+        server, thread, url = _start_http_server()
+        try:
+            status, headers, body = _post_json(
+                url,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"protocolVersion": "2025-03-26"},
+                },
+                origin="https://chatgpt.com",
+            )
+            response = json.loads(body)
+
+            assert status == 200
+            assert headers["MCP-Protocol-Version"] == "2025-03-26"
+            assert response["result"]["protocolVersion"] == "2025-03-26"
+            assert response["result"]["capabilities"]["tools"]["listChanged"] is False
+            assert response["result"]["serverInfo"]["version"] == __version__
+
+            request = urllib.request.Request(
+                url,
+                headers={"Accept": "text/event-stream", "Origin": "https://chatgpt.com"},
+                method="GET",
+            )
+            with pytest.raises(urllib.error.HTTPError) as excinfo:
+                urllib.request.urlopen(request, timeout=5)
+            assert excinfo.value.code == 405
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_handles_ping_requests(self):
+        server, thread, url = _start_http_server()
+        try:
+            status, headers, body = _post_json(
+                url,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "ping",
+                    "params": {},
+                },
+                origin="https://chatgpt.com",
+            )
+            response = json.loads(body)
+
+            assert status == 200
+            assert headers.get("MCP-Protocol-Version") in (None, "", "2024-11-05", "2025-03-26")
+            assert response["result"] == {}
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_rejects_unsupported_protocol_header(self):
+        server, thread, url = _start_http_server()
+        try:
+            request = urllib.request.Request(
+                url,
+                data=json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/list",
+                        "params": {},
+                    }
+                ).encode("utf-8"),
+                headers={
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json",
+                    "Origin": "https://chatgpt.com",
+                    "MCP-Protocol-Version": "9999-99-99",
+                },
+                method="POST",
+            )
+            with pytest.raises(urllib.error.HTTPError) as excinfo:
+                urllib.request.urlopen(request, timeout=5)
+            body = excinfo.value.read().decode("utf-8")
+            assert excinfo.value.code == 400
+            assert "Unsupported protocol version" in body
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_rejects_unknown_notification(self):
+        server, thread, url = _start_http_server()
+        try:
+            request = urllib.request.Request(
+                url,
+                data=json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "notifications/not-real",
+                        "params": {},
+                    }
+                ).encode("utf-8"),
+                headers={
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json",
+                    "Origin": "https://chatgpt.com",
+                },
+                method="POST",
+            )
+            with pytest.raises(urllib.error.HTTPError) as excinfo:
+                urllib.request.urlopen(request, timeout=5)
+            body = excinfo.value.read().decode("utf-8")
+            assert excinfo.value.code == 400
+            assert "Unknown method: notifications/not-real" in body
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
