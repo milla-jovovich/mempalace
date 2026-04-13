@@ -13,6 +13,7 @@ from mempalace.backends import (
     get_backend,
 )
 from mempalace.backends.chroma import (
+    CHROMA_SETTINGS,
     ChromaBackend,
     ChromaCollection,
     _fix_blob_seq_ids,
@@ -257,7 +258,9 @@ def test_chroma_cache_picks_up_db_created_after_first_open(tmp_path):
     # Use a real chromadb call so _fix_blob_seq_ids and PersistentClient succeed.
     import chromadb as _chromadb
 
-    _chromadb.PersistentClient(path=str(palace_path)).get_or_create_collection("seed")
+    _chromadb.PersistentClient(
+        path=str(palace_path), settings=CHROMA_SETTINGS
+    ).get_or_create_collection("seed")
     assert (palace_path / "chroma.sqlite3").is_file()
 
     # Next _client() call must detect the 0 → nonzero transition and rebuild.
@@ -316,7 +319,7 @@ def test_chroma_backend_create_true_creates_directory_and_collection(tmp_path):
     assert palace_path.is_dir()
     assert isinstance(collection, ChromaCollection)
 
-    client = chromadb.PersistentClient(path=str(palace_path))
+    client = chromadb.PersistentClient(path=str(palace_path), settings=CHROMA_SETTINGS)
     client.get_collection("mempalace_drawers")
 
 
@@ -329,7 +332,7 @@ def test_chroma_backend_creates_collection_with_cosine_distance(tmp_path):
         create=True,
     )
 
-    client = chromadb.PersistentClient(path=str(palace_path))
+    client = chromadb.PersistentClient(path=str(palace_path), settings=CHROMA_SETTINGS)
     col = client.get_collection("mempalace_drawers")
     assert col.metadata.get("hnsw:space") == "cosine"
 

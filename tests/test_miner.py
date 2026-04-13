@@ -6,6 +6,8 @@ from pathlib import Path
 import chromadb
 import yaml
 
+from mempalace.backends.chroma import CHROMA_SETTINGS
+
 from mempalace.miner import load_config, mine, scan_project, status
 from mempalace.palace import NORMALIZE_VERSION, file_already_mined
 
@@ -45,7 +47,7 @@ def test_project_mining():
         palace_path = project_root / "palace"
         mine(str(project_root), str(palace_path))
 
-        client = chromadb.PersistentClient(path=str(palace_path))
+        client = chromadb.PersistentClient(settings=CHROMA_SETTINGS, path=str(palace_path))
         col = client.get_collection("mempalace_drawers")
         assert col.count() > 0
     finally:
@@ -246,7 +248,7 @@ def test_file_already_mined_check_mtime():
     try:
         palace_path = os.path.join(tmpdir, "palace")
         os.makedirs(palace_path)
-        client = chromadb.PersistentClient(path=palace_path)
+        client = chromadb.PersistentClient(settings=CHROMA_SETTINGS, path=palace_path)
         col = client.get_or_create_collection(
             "mempalace_drawers", metadata={"hnsw:space": "cosine"}
         )
@@ -386,7 +388,7 @@ def test_file_already_mined_returns_false_for_stale_normalize_version():
     try:
         palace_path = os.path.join(tmpdir, "palace")
         os.makedirs(palace_path)
-        client = chromadb.PersistentClient(path=palace_path)
+        client = chromadb.PersistentClient(settings=CHROMA_SETTINGS, path=palace_path)
         col = client.get_or_create_collection("mempalace_drawers")
 
         # Pre-v2 drawer: no normalize_version field at all
@@ -428,7 +430,7 @@ def test_add_drawer_stamps_normalize_version(tmp_path):
 
     palace_path = tmp_path / "palace"
     palace_path.mkdir()
-    client = chromadb.PersistentClient(path=str(palace_path))
+    client = chromadb.PersistentClient(settings=CHROMA_SETTINGS, path=str(palace_path))
     col = client.get_or_create_collection("mempalace_drawers")
     try:
         added = add_drawer(

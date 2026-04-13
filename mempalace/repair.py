@@ -34,6 +34,7 @@ import time
 
 from .backends.chroma import ChromaBackend
 
+from .backends.chroma import CHROMA_SETTINGS
 
 COLLECTION_NAME = "mempalace_drawers"
 

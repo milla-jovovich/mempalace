@@ -29,6 +29,7 @@ from collections import defaultdict
 
 from .backends.chroma import ChromaBackend
 
+from .backends.chroma import CHROMA_SETTINGS
 
 COLLECTION_NAME = "mempalace_drawers"
 # Cosine DISTANCE threshold (not similarity). Lower = stricter.
