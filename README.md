@@ -462,12 +462,124 @@ Letta charges $20–200/mo for agent-managed memory. MemPalace does it with a wi
 ## MCP Server
 
 ```bash
-# Via plugin (recommended)
-claude plugin marketplace add milla-jovovich/mempalace
-claude plugin install --scope user mempalace
 
-# Or manually
+
+### 19 Tools
+
+The MCP server provides 19 tools for AI agents to interact with MemPalace capabilities, including search functions, memory management, knowledge graph operations, and diary utilities for specialist agents.
+
+Once connected, your AI automatically gains access to MemPalace tools without requiring manual command invocation. The agent can call functions like `mempalace_search` to retrieve memories, `mempalace_diary_write` and `mempalace_diary_read` for agent persistence, and `mempalace_list_agents` to discover configured specialist agents.
+
+### Quick Setup (Claude Code CLI)
+
+```
 claude mcp add mempalace -- python -m mempalace.mcp_server
+```
+
+### Client Compatibility
+
+Setup varies slightly depending on which client you use — mainly around whether to use `uvx` (recommended where supported) or a direct Python path.
+
+| Client | Recommended Approach | Transport | Notes |
+|--------|---------------------|-----------|-------|
+| Claude Desktop | `uvx` | stdio | Longer launch timeout handles `uvx` startup cleanly |
+| Cursor | `uvx` | stdio | Works out of the box |
+| VS Code (Copilot) | `uvx` | stdio | Via MCP extension settings |
+| LM Studio | Direct Python path | stdio | `uvx` fails due to subprocess handshake timing — use full path to `python.exe` |
+
+### Claude Desktop / Cursor / VS Code
+
+These clients handle the `uvx` startup sequence reliably, so the `uvx` approach is preferred — it manages Python environment isolation automatically and avoids "which Python has mempalace installed" issues.
+
+Add to your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "mempalace": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/milla-jovovich/mempalace.git",
+        "python",
+        "-m",
+        "mempalace.mcp_server"
+      ]
+    }
+  }
+}
+```
+
+**Prerequisites:** **Prerequisites:** Install [uv](https://github.com/astral-sh/uv) first. On Windows: `winget install astral-sh.uv`. On macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`. Ensure `uvx` is on your system PATH.
+
+**Config file locations:**
+
+- **Claude Desktop (standalone installer):** `%APPDATA%\Claude\claude_desktop_config.json`
+- **Claude Desktop (Microsoft Store):** `%LOCALAPPDATA%\Packages\Claude_<hash>\LocalCache\Roaming\Claude\claude_desktop_config.json`
+- **Cursor:** `%APPDATA%\Cursor\User\globalStorage\cursor-mcp\config.json`
+
+> **Note for Claude Desktop (Microsoft Store):** The config path is sandboxed. Use **Settings > Developer > Edit Config** inside the app to find the correct path — it won't be at the standard `%APPDATA%\Claude\` location.
+
+### LM Studio
+
+LM Studio spawns MCP servers as subprocesses and expects an immediate stdio handshake. The `uvx` startup sequence can exceed this timeout, causing the server to exit with code 1. Use a direct Python path instead.
+
+**Config file:** `%USERPROFILE%\.lmstudio\mcp.json` (or edit via **Developer tab > Edit mcp.json** inside LM Studio)
+
+```json
+{
+  "mcpServers": {
+    "mempalace": {
+      "command": "C:\\Users\\<you>\\path\\to\\python.exe",
+      "args": ["-m", "mempalace.mcp_server"]
+    }
+  }
+}
+```
+
+**Prerequisites:** MemPalace must be installed in the same Python environment that the config points to. Verify with:
+
+```
+"C:\Users\<you>\path\to\python.exe" -m pip show mempalace
+```
+
+If it says "not found," install it with that same Python:
+
+```
+"C:\Users\<you>\path\to\python.exe" -m pip install mempalace
+```
+
+**Finding your Python path:** Run `where.exe python` or `py -c "import sys; print(sys.executable)"` in a terminal to get the full path.
+
+> **Tip:** After saving `mcp.json`, LM Studio auto-loads the server — no restart needed. Enable the `mempalace` tool from the sidebar tools list in your chat. Use a tool-capable model (Qwen 2.5/3 Instruct 14B+ recommended).
+
+**Loading GGUF models into LM Studio:** Place the `.gguf` file inside a two-level folder structure under the models directory:
+
+```
+%USERPROFILE%\.lmstudio\models\<publisher>\<model-name>\<file.gguf>
+```
+
+LM Studio won't see files dropped directly into the models root — the publisher/model-name subfolders are required.
+
+### Transport Modes
+
+MemPalace uses **stdio** transport by default, which is what most desktop MCP clients expect. If your client requires SSE (Server-Sent Events) transport instead, you can start the server with:
+
+```
+python -m mempalace.mcp_server --transport sse
+```
+
+Most clients (Claude Desktop, Cursor, LM Studio) use stdio. You only need `--transport sse` for web-based MCP clients or ChatGPT connectors that require a network endpoint.
+
+### Troubleshooting
+
+| Problem | Likely Cause | Fix |
+|---------|-------------|-----|
+| `No module named mempalace` | MemPalace not installed in the Python that the config points to | Run `pip install mempalace` using the same Python path from your config |
+| `Plugin process exited with code 1` (LM Studio) | `uvx` handshake timeout | Switch to direct Python path (see LM Studio section above) |
+| No tools icon in client | Config file not being read | Check config file location — especially on Microsoft Store installs where the path is sandboxed |
+| Multiple Python installs causing confusion | pip installed mempalace in a different Python than the config uses | Use full path to `python.exe` in config and verify with `python.exe -m pip show mempalace` |
+
 ```
 
 ### 19 Tools
