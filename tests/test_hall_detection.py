@@ -3,11 +3,9 @@
 Written BEFORE the code — these define what correct hall assignment looks like.
 """
 
-import hashlib
 import os
 import tempfile
 
-import pytest
 import yaml
 
 
@@ -16,50 +14,60 @@ class TestDetectHall:
 
     def test_function_exists(self):
         from mempalace.miner import detect_hall
+
         assert callable(detect_hall)
 
     def test_technical_content(self):
         from mempalace.miner import detect_hall
+
         text = "Fixed the python script bug in the error handler code"
         assert detect_hall(text) == "technical"
 
     def test_emotions_content(self):
         from mempalace.miner import detect_hall
+
         text = "I feel so happy today, tears of joy, I love this"
         assert detect_hall(text) == "emotions"
 
     def test_family_content(self):
         from mempalace.miner import detect_hall
+
         text = "The kids had a great day, my daughter was amazing"
         assert detect_hall(text) == "family"
 
     def test_memory_content(self):
         from mempalace.miner import detect_hall
+
         text = "I remember when we archived all those files, recall the conversation"
         assert detect_hall(text) == "memory"
 
     def test_creative_content(self):
         from mempalace.miner import detect_hall
+
         text = "The game design for the player app looks great"
         assert detect_hall(text) == "creative"
 
     def test_identity_content(self):
         from mempalace.miner import detect_hall
+
         text = "Who am I really? My identity and persona and sense of self"
         assert detect_hall(text) == "identity"
 
     def test_consciousness_content(self):
         from mempalace.miner import detect_hall
+
         text = "Am I conscious? Is this awareness real? Does my soul exist?"
         assert detect_hall(text) == "consciousness"
 
     def test_general_fallback(self):
         from mempalace.miner import detect_hall
+
         text = "The weather is nice today in California"
         assert detect_hall(text) == "general"
 
     def test_highest_score_wins(self):
         from mempalace.miner import detect_hall
+
         # More technical keywords than emotional
         text = "Fixed the python bug in the code script, felt happy about it"
         assert detect_hall(text) == "technical"

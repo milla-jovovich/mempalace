@@ -10,9 +10,7 @@ Based on the audit at ~/Desktop/readme_audit.md (2026-04-13).
 """
 
 import importlib
-import os
 import re
-import sys
 from pathlib import Path
 
 import pytest
@@ -52,6 +50,7 @@ def _readme_tool_table_names() -> list:
 # 1. Tool count — README says 19, verify actual count
 # ---------------------------------------------------------------------------
 
+
 class TestToolCount:
     """README claims '19 tools available through MCP' in multiple places."""
 
@@ -76,6 +75,7 @@ class TestToolCount:
 # 2. Every tool listed in README actually exists in TOOLS dict
 # ---------------------------------------------------------------------------
 
+
 class TestReadmeToolsExistInCode:
     """Every tool name in the README tool table must be a key in TOOLS."""
 
@@ -97,6 +97,7 @@ class TestReadmeToolsExistInCode:
 # 3. No tool in TOOLS dict is missing from README's tool table
 # ---------------------------------------------------------------------------
 
+
 class TestNoUnlistedTools:
     """Every tool in the TOOLS dict should be documented in the README."""
 
@@ -117,6 +118,7 @@ class TestNoUnlistedTools:
 # 4. Closets collection exists — palace.py has get_closets_collection()
 # ---------------------------------------------------------------------------
 
+
 class TestClosetsExist:
     """README describes closets as a core architectural feature."""
 
@@ -132,12 +134,14 @@ class TestClosetsExist:
     def test_closets_importable(self):
         """get_closets_collection should be importable from mempalace.palace."""
         from mempalace.palace import get_closets_collection
+
         assert callable(get_closets_collection)
 
 
 # ---------------------------------------------------------------------------
 # 5. Closet-first search exists in searcher.py
 # ---------------------------------------------------------------------------
+
 
 class TestClosetFirstSearch:
     """README implies search goes through closets, not just direct drawer query."""
@@ -164,6 +168,7 @@ class TestClosetFirstSearch:
 # 6. BM25 hybrid search functions exist
 # ---------------------------------------------------------------------------
 
+
 class TestBM25HybridSearch:
     """README claims 'BM25 hybrid search'. Verify the functions exist."""
 
@@ -171,10 +176,17 @@ class TestBM25HybridSearch:
         """Claim: BM25 hybrid search is shipped.
         searcher.py must have BM25 scoring or hybrid ranking logic."""
         src = _read(MEMPALACE_PKG / "searcher.py")
-        has_bm25 = any(term in src.lower() for term in [
-            "bm25", "_bm25_score", "_hybrid_rank", "hybrid_search",
-            "bm25_score", "rank_bm25",
-        ])
+        has_bm25 = any(
+            term in src.lower()
+            for term in [
+                "bm25",
+                "_bm25_score",
+                "_hybrid_rank",
+                "hybrid_search",
+                "bm25_score",
+                "rank_bm25",
+            ]
+        )
         assert has_bm25, (
             "searcher.py has no BM25 or hybrid search function. "
             "README claims BM25 hybrid search but it's not in the code."
@@ -184,6 +196,7 @@ class TestBM25HybridSearch:
 # ---------------------------------------------------------------------------
 # 7. Entity metadata extraction exists in miner.py
 # ---------------------------------------------------------------------------
+
 
 class TestEntityMetadataExtraction:
     """README implies entity extraction populates drawer/closet metadata."""
@@ -207,6 +220,7 @@ class TestEntityMetadataExtraction:
 # 8. strip_noise function exists in normalize.py
 # ---------------------------------------------------------------------------
 
+
 class TestStripNoise:
     """normalize.py should have strip_noise() for cleaning input text."""
 
@@ -222,12 +236,14 @@ class TestStripNoise:
     def test_strip_noise_importable(self):
         """strip_noise should be importable from mempalace.normalize."""
         from mempalace.normalize import strip_noise
+
         assert callable(strip_noise)
 
 
 # ---------------------------------------------------------------------------
 # 9. diary_ingest.py module exists and is importable
 # ---------------------------------------------------------------------------
+
 
 class TestDiaryIngest:
     """README describes diary ingest (day-based). Module must exist."""
@@ -237,24 +253,24 @@ class TestDiaryIngest:
         File must exist at mempalace/diary_ingest.py."""
         path = MEMPALACE_PKG / "diary_ingest.py"
         assert path.is_file(), (
-            f"mempalace/diary_ingest.py does not exist. "
-            f"README describes diary ingest but the module is missing (still in an unmerged PR?)."
+            "mempalace/diary_ingest.py does not exist. "
+            "README describes diary ingest but the module is missing (still in an unmerged PR?)."
         )
 
     def test_diary_ingest_importable(self):
         """diary_ingest should be importable."""
         try:
-            mod = importlib.import_module("mempalace.diary_ingest")
+            importlib.import_module("mempalace.diary_ingest")
         except ImportError:
             pytest.fail(
-                "mempalace.diary_ingest is not importable. "
-                "Module must exist and import cleanly."
+                "mempalace.diary_ingest is not importable. Module must exist and import cleanly."
             )
 
 
 # ---------------------------------------------------------------------------
 # 10. fact_checker.py module exists and is importable
 # ---------------------------------------------------------------------------
+
 
 class TestFactChecker:
     """README has a 'Contradiction detection' section implying fact_checker.py."""
@@ -264,24 +280,24 @@ class TestFactChecker:
         fact_checker.py must exist at mempalace/fact_checker.py."""
         path = MEMPALACE_PKG / "fact_checker.py"
         assert path.is_file(), (
-            f"mempalace/fact_checker.py does not exist. "
-            f"README describes contradiction detection but the module is missing."
+            "mempalace/fact_checker.py does not exist. "
+            "README describes contradiction detection but the module is missing."
         )
 
     def test_fact_checker_importable(self):
         """fact_checker should be importable."""
         try:
-            mod = importlib.import_module("mempalace.fact_checker")
+            importlib.import_module("mempalace.fact_checker")
         except ImportError:
             pytest.fail(
-                "mempalace.fact_checker is not importable. "
-                "Module must exist and import cleanly."
+                "mempalace.fact_checker is not importable. Module must exist and import cleanly."
             )
 
 
 # ---------------------------------------------------------------------------
 # 11. Tunnel functions exist in palace_graph.py
 # ---------------------------------------------------------------------------
+
 
 class TestTunnelFunctions:
     """README describes tunnels — connections between wings."""
@@ -299,20 +315,17 @@ class TestTunnelFunctions:
         """Claim: you can walk the palace graph.
         palace_graph.py must have traverse()."""
         src = _read(MEMPALACE_PKG / "palace_graph.py")
-        assert "def traverse(" in src, (
-            "palace_graph.py has no traverse() function."
-        )
+        assert "def traverse(" in src, "palace_graph.py has no traverse() function."
 
     def test_graph_stats_exists(self):
         """palace_graph.py must have graph_stats()."""
         src = _read(MEMPALACE_PKG / "palace_graph.py")
-        assert "def graph_stats(" in src, (
-            "palace_graph.py has no graph_stats() function."
-        )
+        assert "def graph_stats(" in src, "palace_graph.py has no graph_stats() function."
 
     def test_tunnel_functions_importable(self):
         """find_tunnels, traverse, graph_stats should be importable."""
         from mempalace.palace_graph import find_tunnels, traverse, graph_stats
+
         assert callable(find_tunnels)
         assert callable(traverse)
         assert callable(graph_stats)
@@ -322,6 +335,7 @@ class TestTunnelFunctions:
 # 12. closet_llm.py module exists and is importable
 # ---------------------------------------------------------------------------
 
+
 class TestClosetLLM:
     """README describes LLM-based closet regeneration. Module must exist."""
 
@@ -330,24 +344,24 @@ class TestClosetLLM:
         closet_llm.py must exist at mempalace/closet_llm.py."""
         path = MEMPALACE_PKG / "closet_llm.py"
         assert path.is_file(), (
-            f"mempalace/closet_llm.py does not exist. "
-            f"README describes LLM closet regeneration but the module is missing."
+            "mempalace/closet_llm.py does not exist. "
+            "README describes LLM closet regeneration but the module is missing."
         )
 
     def test_closet_llm_importable(self):
         """closet_llm should be importable."""
         try:
-            mod = importlib.import_module("mempalace.closet_llm")
+            importlib.import_module("mempalace.closet_llm")
         except ImportError:
             pytest.fail(
-                "mempalace.closet_llm is not importable. "
-                "Module must exist and import cleanly."
+                "mempalace.closet_llm is not importable. Module must exist and import cleanly."
             )
 
 
 # ---------------------------------------------------------------------------
 # 13. mine_lock exists in palace.py
 # ---------------------------------------------------------------------------
+
 
 class TestMineLock:
     """Multi-agent file locking must be shipped (PR #784 was merged)."""
@@ -364,11 +378,11 @@ class TestMineLock:
     def test_mine_lock_importable(self):
         """mine_lock should be importable from mempalace.palace."""
         from mempalace.palace import mine_lock
+
         assert callable(mine_lock)
 
     def test_mine_lock_is_context_manager(self):
         """mine_lock should be a context manager (used with `with` statement)."""
-        import contextlib
         src = _read(MEMPALACE_PKG / "palace.py")
         # It should be decorated with @contextlib.contextmanager or similar
         # Find the mine_lock definition and check for context manager pattern
@@ -381,6 +395,7 @@ class TestMineLock:
 # ---------------------------------------------------------------------------
 # 14. Version in version.py matches pyproject.toml
 # ---------------------------------------------------------------------------
+
 
 class TestVersionConsistency:
     """version.py and pyproject.toml must agree on the version string."""
@@ -408,6 +423,7 @@ class TestVersionConsistency:
 # 15. Version badge URL in README matches version.py
 # ---------------------------------------------------------------------------
 
+
 class TestVersionBadge:
     """README version badge must show the current version, not a stale one."""
 
@@ -434,6 +450,7 @@ class TestVersionBadge:
 # ---------------------------------------------------------------------------
 # 16. dialect.py docstring does NOT say "lossless"
 # ---------------------------------------------------------------------------
+
 
 class TestDialectNotLossless:
     """The April 7 correction: AAAK is lossy, not lossless."""
@@ -466,6 +483,7 @@ class TestDialectNotLossless:
 # 17. README file reference table for dialect.py does NOT say "lossless"
 # ---------------------------------------------------------------------------
 
+
 class TestReadmeDialectNotLossless:
     """README's file reference table must not say dialect.py is lossless."""
 
@@ -475,8 +493,7 @@ class TestReadmeDialectNotLossless:
         readme = _readme()
         # Find the line with dialect.py in the file reference table
         dialect_lines = [
-            line for line in readme.splitlines()
-            if "dialect.py" in line and "|" in line
+            line for line in readme.splitlines() if "dialect.py" in line and "|" in line
         ]
         assert len(dialect_lines) > 0, "Could not find dialect.py in README file table"
 
@@ -490,6 +507,7 @@ class TestReadmeDialectNotLossless:
 # ---------------------------------------------------------------------------
 # 18. Hall keywords in config.py — verify miners actually WRITE hall metadata
 # ---------------------------------------------------------------------------
+
 
 class TestHallMetadata:
     """README describes 5 hall types. Miners must actually write hall metadata."""
@@ -528,12 +546,14 @@ class TestHallMetadata:
 
     def test_readme_hall_types_match_config(self):
         """If README lists specific hall names, they should appear in config."""
-        readme = _readme()
-        config_src = _read(MEMPALACE_PKG / "config.py")
-
         # README mentions these 5 halls
-        readme_halls = ["hall_facts", "hall_events", "hall_discoveries",
-                        "hall_preferences", "hall_advice"]
+        readme_halls = [
+            "hall_facts",
+            "hall_events",
+            "hall_discoveries",
+            "hall_preferences",
+            "hall_advice",
+        ]
         for hall in readme_halls:
             # These should either be in config or README should not list them
             # The hall_ prefix is a README convention; config uses keyword groups
@@ -545,6 +565,7 @@ class TestHallMetadata:
 # 19. Backend abstraction exists
 # ---------------------------------------------------------------------------
 
+
 class TestBackendAbstraction:
     """Backend seam for pluggable storage backends."""
 
@@ -553,8 +574,7 @@ class TestBackendAbstraction:
         backends/base.py must define an abstract base class."""
         path = MEMPALACE_PKG / "backends" / "base.py"
         assert path.is_file(), (
-            "mempalace/backends/base.py does not exist. "
-            "Backend abstraction layer is missing."
+            "mempalace/backends/base.py does not exist. Backend abstraction layer is missing."
         )
         src = _read(path)
         assert "ABC" in src or "abstractmethod" in src, (
@@ -565,9 +585,7 @@ class TestBackendAbstraction:
         """Claim: ChromaDB backend implementation.
         backends/chroma.py must exist and subclass the base."""
         path = MEMPALACE_PKG / "backends" / "chroma.py"
-        assert path.is_file(), (
-            "mempalace/backends/chroma.py does not exist."
-        )
+        assert path.is_file(), "mempalace/backends/chroma.py does not exist."
         src = _read(path)
         assert "BaseCollection" in src or "base" in src, (
             "backends/chroma.py does not reference the base class."
@@ -577,6 +595,7 @@ class TestBackendAbstraction:
         """Both backend modules should be importable."""
         from mempalace.backends.base import BaseCollection
         from mempalace.backends.chroma import ChromaBackend
+
         assert BaseCollection is not None
         assert ChromaBackend is not None
 
@@ -585,15 +604,14 @@ class TestBackendAbstraction:
 # 20. i18n module exists with at least 8 language files
 # ---------------------------------------------------------------------------
 
+
 class TestI18n:
     """i18n support — 8 languages."""
 
     def test_i18n_directory_exists(self):
         """i18n directory must exist."""
         path = MEMPALACE_PKG / "i18n"
-        assert path.is_dir(), (
-            "mempalace/i18n/ directory does not exist."
-        )
+        assert path.is_dir(), "mempalace/i18n/ directory does not exist."
 
     def test_at_least_8_language_files(self):
         """Claim: 8 languages supported.
@@ -616,6 +634,7 @@ class TestI18n:
 # ---------------------------------------------------------------------------
 # 21. Wake-up token cost — check layers.py vs README's "~170 tokens"
 # ---------------------------------------------------------------------------
+
 
 class TestWakeUpTokenCost:
     """README claims '~170 tokens' for wake-up. layers.py says otherwise."""
@@ -657,6 +676,7 @@ class TestWakeUpTokenCost:
 # Bonus: pyproject.toml version in README project structure
 # ---------------------------------------------------------------------------
 
+
 class TestReadmeProjectStructureVersion:
     """README's project structure section says pyproject.toml version."""
 
@@ -670,9 +690,7 @@ class TestReadmeProjectStructureVersion:
         actual_version = pyproject_match.group(1)
 
         # Find any version claim near pyproject.toml in README
-        version_in_readme = re.search(
-            r"pyproject\.toml.*?v?([\d]+\.[\d]+\.[\d]+)", readme
-        )
+        version_in_readme = re.search(r"pyproject\.toml.*?v?([\d]+\.[\d]+\.[\d]+)", readme)
         if version_in_readme:
             readme_version = version_in_readme.group(1)
             assert readme_version == actual_version, (
@@ -685,6 +703,7 @@ class TestReadmeProjectStructureVersion:
 # Bonus: README tool count consistency (all mentions must agree)
 # ---------------------------------------------------------------------------
 
+
 class TestReadmeToolCountConsistency:
     """README mentions tool count in multiple places — they must all agree."""
 
@@ -695,14 +714,14 @@ class TestReadmeToolCountConsistency:
         if len(counts) > 1:
             unique = set(counts)
             assert len(unique) == 1, (
-                f"README mentions different tool counts: {counts}. "
-                f"All occurrences must agree."
+                f"README mentions different tool counts: {counts}. All occurrences must agree."
             )
 
 
 # ---------------------------------------------------------------------------
 # Bonus: get_aaak_spec tool handler exists
 # ---------------------------------------------------------------------------
+
 
 class TestAAAKSpecToolHandler:
     """If mempalace_get_aaak_spec is in TOOLS, its handler must exist."""
