@@ -57,6 +57,12 @@ def _count_human_messages(transcript_path: str) -> int:
                             if "<command-message>" in content:
                                 continue
                         elif isinstance(content, list):
+                            # Skip pure tool_result messages (Bash/Read/Grep/subagent returns) — these have
+                            # role "user" in Claude Code JSONL but are NOT real human turns (issue #549)
+                            if content and all(
+                                isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+                            ):
+                                continue
                             text = " ".join(
                                 b.get("text", "") for b in content if isinstance(b, dict)
                             )
