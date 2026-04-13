@@ -629,11 +629,11 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room (batch to avoid SQLite variable limit)
+    # Count by wing and room (batch to avoid SQLite variable limit ~32k vars)
     total = col.count()
     metas = []
     if total:
-        batch_size = 5000
+        batch_size = 5000  # matches cli.py / repair.py; keep under SQLite limit
         offset = 0
         while offset < total:
             r = col.get(limit=batch_size, offset=offset, include=["metadatas"])
