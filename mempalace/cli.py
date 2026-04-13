@@ -98,6 +98,19 @@ def cmd_mine(args):
         )
 
 
+def cmd_mine_file(args):
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    from .miner import mine_file
+
+    mine_file(
+        file_path=args.file,
+        palace_path=palace_path,
+        wing_override=args.wing,
+        agent=args.agent,
+        dry_run=args.dry_run,
+    )
+
+
 def cmd_search(args):
     from .searcher import search, SearchError
 
@@ -471,6 +484,15 @@ def main():
         help="Extraction strategy for convos mode: 'exchange' (default) or 'general' (5 memory types)",
     )
 
+    # mine-file
+    p_mine_file = sub.add_parser("mine-file", help="Mine a single file into the palace")
+    p_mine_file.add_argument("file", help="Path to the file to mine")
+    p_mine_file.add_argument("--wing", default=None, help="Wing name (default: from mempalace.yaml)")
+    p_mine_file.add_argument("--agent", default="mempalace", help="Your name (default: mempalace)")
+    p_mine_file.add_argument(
+        "--dry-run", action="store_true", help="Show what would be filed without filing"
+    )
+
     # search
     p_search = sub.add_parser("search", help="Find anything, exact words")
     p_search.add_argument("query", help="What to search for")
@@ -601,6 +623,7 @@ def main():
     dispatch = {
         "init": cmd_init,
         "mine": cmd_mine,
+        "mine-file": cmd_mine_file,
         "split": cmd_split,
         "search": cmd_search,
         "mcp": cmd_mcp,
