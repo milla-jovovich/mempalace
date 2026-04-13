@@ -1,0 +1,44 @@
+{
+  "lang": "id",
+  "label": "Bahasa Indonesia",
+  "terms": {
+    "palace": "istana",
+    "wing": "sayap",
+    "hall": "lorong",
+    "closet": "lemari",
+    "drawer": "laci",
+    "mine": "tambang",
+    "search": "cari",
+    "status": "status",
+    "init": "inisialisasi",
+    "repair": "perbaiki",
+    "migrate": "migrasi",
+    "entity": "entitas",
+    "topic": "topik"
+  },
+  "cli": {
+    "mine_start": "Menambang {path}...",
+    "mine_complete": "Selesai. {closets} lemari, {drawers} laci berhasil dibuat.",
+    "mine_skip": "Sudah pernah ditambang. Gunakan --force untuk menambang ulang.",
+    "search_no_results": "Tidak ada hasil untuk: {query}",
+    "search_results": "Ditemukan {count} hasil:",
+    "status_palace": "Istana: {path}",
+    "status_wings": "{count} sayap",
+    "status_closets": "{count} lemari",
+    "status_drawers": "{count} laci",
+    "init_complete": "Istana diinisialisasi pada {path}",
+    "init_exists": "Istana sudah ada pada {path}",
+    "repair_complete": "Perbaikan selesai. {fixed} masalah telah diperbaiki.",
+    "migrate_complete": "Migrasi selesai.",
+    "no_palace": "Istana tidak ditemukan. Jalankan: mempalace init <dir>"
+  },
+  "aaak": {
+    "instruction": "Kompres ke format indeks. Gunakan tanda hubung (-) antar kata, dan garis vertikal (|) antar konsep. Buang kata sandang (artikula) dan kata pengisi (filler). Pertahankan nama dan angka menjadi sama persis."
+  },
+  "regex": {
+    "topic_pattern": "[A-Z][a-z]{2,}|[A-Za-z][A-Za-z0-9_]{2,}",
+    "stop_words": "yang untuk pada ke para namun menurut antara dia dua ia seperti jika jika sehingga kembali dan tidak ini karena kepada oleh saat harus sementara setelah belum kami sekitar bagi serta di dari telah sebagai masih hal ketika adalah itu dalam bisa bahwa atau hanya kita dengan akan juga ada mereka sudah saya terhadap secara agar lain anda begitu mengapa kenapa yaitu yakni daripada itulah lagi maka tentang demi dimana kemana pula sambil sebelum sesudah supaya guna kah pun sampai sedangkan selagi sementara tetapi apakah kecuali sebab selain seolah seraya seterusnya tanpa agak boleh dapat dsb dst dll dahulu dulunya anu demikian tapi ingin juga nggak mari nanti melainkan oh ok seharusnya sebetulnya setiap setidaknya sesuatu pasti saja toh ya walau tolong tentu amat apalagi bagaimanapun",
+    "quote_pattern": "\"([^\"]{20,200})\"",
+    "action_pattern": "(?:dibangun|diperbaiki|ditulis|ditambahkan|terdorong|diukur|teruji|diulas|dibuat|terhapus|diperbarui|ter-konfigurasi|ter-deploy|ter-migrasi)\\s+[\\w\\s]{3,30}"
+  }
+}
