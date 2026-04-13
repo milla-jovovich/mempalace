@@ -272,7 +272,7 @@ def cmd_instructions(args):
 
 def cmd_mcp(args):
     """Show how to wire MemPalace into MCP-capable hosts."""
-    base_server_cmd = "python -m mempalace.mcp_server"
+    base_server_cmd = "mempalace mcp run"
 
     if args.palace:
         resolved_palace = str(Path(args.palace).expanduser())
@@ -289,6 +289,16 @@ def cmd_mcp(args):
         print("\nOptional custom palace:")
         print(f"  claude mcp add mempalace -- {base_server_cmd} --palace /path/to/palace")
         print(f"  {base_server_cmd} --palace /path/to/palace")
+
+
+def cmd_mcp_run(args):
+    """Start the MCP server (JSON-RPC over stdin/stdout)."""
+    if args.palace:
+        os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(args.palace)
+
+    from .mcp_server import main as mcp_main
+
+    mcp_main()
 
 
 def cmd_compress(args):
@@ -553,9 +563,19 @@ def main():
     ).add_argument("--yes", action="store_true", help="Skip confirmation for destructive changes")
 
     # mcp
-    sub.add_parser(
+    p_mcp = sub.add_parser(
         "mcp",
-        help="Show MCP setup command for connecting MemPalace to your AI client",
+        help="MCP server — run the server or show setup instructions",
+    )
+    mcp_sub = p_mcp.add_subparsers(dest="mcp_action")
+    p_mcp_run = mcp_sub.add_parser(
+        "run",
+        help="Start the MCP server (JSON-RPC over stdin/stdout)",
+    )
+    p_mcp_run.add_argument(
+        "--palace",
+        default=None,
+        help="Path to the palace directory (overrides config file and env var)",
     )
 
     # status
@@ -598,12 +618,18 @@ def main():
         cmd_instructions(args)
         return
 
+    if args.command == "mcp":
+        if getattr(args, "mcp_action", None) == "run":
+            cmd_mcp_run(args)
+        else:
+            cmd_mcp(args)
+        return
+
     dispatch = {
         "init": cmd_init,
         "mine": cmd_mine,
         "split": cmd_split,
         "search": cmd_search,
-        "mcp": cmd_mcp,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
