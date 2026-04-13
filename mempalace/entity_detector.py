@@ -397,31 +397,106 @@ STOPWORDS = {
 
 # Technical/architecture terms that appear capitalized in docs but are never
 # real entity names on their own (issue #476)
-_TECH_STOPWORDS: frozenset = frozenset({
-    # Architecture / design patterns
-    "handler", "service", "manager", "controller", "middleware",
-    "provider", "factory", "builder", "registry", "resolver",
-    "listener", "dispatcher", "adapter", "wrapper", "plugin",
-    # Runtime / infrastructure
-    "node", "client", "server", "worker", "thread", "process",
-    "queue", "cache", "buffer", "socket", "router", "proxy",
-    # Code constructs
-    "module", "package", "instance", "event", "callback",
-    "promise", "object", "function", "method", "boolean",
-    "integer", "string", "array", "default",
-    # Common doc/config terms
-    "config", "context", "session", "token", "schema",
-    "index", "record", "message", "action", "state",
-    "task", "job", "hook", "flag", "stage", "batch",
-    "chunk", "block", "stream", "channel", "driver",
-    "backend", "frontend", "endpoint", "payload",
-    "header", "body", "query", "filter", "timeout",
-    "retry", "log", "build", "deploy", "release",
-    "pipeline", "migration", "seed", "reset", "repair",
-    # Extremely common sentence-opening words
-    "one", "two", "three", "four", "five", "six",
-    "seven", "eight", "nine", "ten",
-})
+_TECH_STOPWORDS: frozenset = frozenset(
+    {
+        # Architecture / design patterns
+        "handler",
+        "service",
+        "manager",
+        "controller",
+        "middleware",
+        "provider",
+        "factory",
+        "builder",
+        "registry",
+        "resolver",
+        "listener",
+        "dispatcher",
+        "adapter",
+        "wrapper",
+        "plugin",
+        # Runtime / infrastructure
+        "node",
+        "client",
+        "server",
+        "worker",
+        "thread",
+        "process",
+        "queue",
+        "cache",
+        "buffer",
+        "socket",
+        "router",
+        "proxy",
+        # Code constructs
+        "module",
+        "package",
+        "instance",
+        "event",
+        "callback",
+        "promise",
+        "object",
+        "function",
+        "method",
+        "boolean",
+        "integer",
+        "string",
+        "array",
+        "default",
+        # Common doc/config terms
+        "config",
+        "context",
+        "session",
+        "token",
+        "schema",
+        "index",
+        "record",
+        "message",
+        "action",
+        "state",
+        "task",
+        "job",
+        "hook",
+        "flag",
+        "stage",
+        "batch",
+        "chunk",
+        "block",
+        "stream",
+        "channel",
+        "driver",
+        "backend",
+        "frontend",
+        "endpoint",
+        "payload",
+        "header",
+        "body",
+        "query",
+        "filter",
+        "timeout",
+        "retry",
+        "log",
+        "build",
+        "deploy",
+        "release",
+        "pipeline",
+        "migration",
+        "seed",
+        "reset",
+        "repair",
+        # Extremely common sentence-opening words
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+    }
+)
 
 # Merge tech stopwords into the main set
 STOPWORDS = STOPWORDS | _TECH_STOPWORDS
@@ -495,7 +570,7 @@ def extract_candidates(text: str) -> dict:
         if start == 0:
             continue
         # Skip words that follow a sentence-ending punctuation or newline
-        preceding = text[max(0, start - 50):start].rstrip()
+        preceding = text[max(0, start - 50) : start].rstrip()
         if not preceding or _SENTENCE_END_RE.search(preceding):
             continue
         counts[word] += 1
