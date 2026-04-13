@@ -288,9 +288,9 @@ class TestRegenerateClosets:
         survivors = closets.get(where={"source_file": source}, include=["documents", "metadatas"])
         assert survivors["ids"], "LLM closets should have been written"
         joined = "\n".join(survivors["documents"])
-        assert (
-            "STALE_REGEX_TOPIC" not in joined
-        ), "pre-existing regex closet was not purged before LLM write"
+        assert "STALE_REGEX_TOPIC" not in joined, (
+            "pre-existing regex closet was not purged before LLM write"
+        )
         assert "jwt auth" in joined
         for meta in survivors["metadatas"]:
             assert meta.get("generated_by", "").startswith("llm:")
