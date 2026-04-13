@@ -88,6 +88,27 @@ class KnowledgeGraph:
             CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
             CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);
         """)
+        # Dedup any existing active triples before adding the UNIQUE index so
+        # CREATE UNIQUE INDEX doesn't fail on pre-existing duplicates.
+        conn.execute("""
+            DELETE FROM triples
+            WHERE rowid NOT IN (
+                SELECT MIN(rowid)
+                FROM triples
+                WHERE valid_to IS NULL
+                GROUP BY subject, predicate, object
+            )
+            AND valid_to IS NULL
+        """)
+        # Partial UNIQUE index: only one active (non-invalidated) triple per
+        # (subject, predicate, object) is allowed at any time.  This is the
+        # database-level guard that prevents TOCTOU race duplicates regardless
+        # of how many threads or processes share the same SQLite file.
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_triples_active
+                ON triples(subject, predicate, object)
+                WHERE valid_to IS NULL
+        """)
         conn.commit()
 
     def _conn(self):
@@ -155,19 +176,21 @@ class KnowledgeGraph:
                     "INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (obj_id, obj)
                 )
 
-                # Check for existing identical triple
-                existing = conn.execute(
-                    "SELECT id FROM triples WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
-                    (sub_id, pred, obj_id),
-                ).fetchone()
+                # Deterministic ID for active triples so INSERT OR IGNORE
+                # deduplicates correctly with the partial UNIQUE index.
+                # Expired triples keep a timestamp component so re-adds after
+                # invalidation always produce a fresh row (different primary key).
+                if valid_to is None:
+                    id_seed = f"{sub_id}|{pred}|{obj_id}|active"
+                else:
+                    id_seed = f"{sub_id}|{pred}|{obj_id}|{valid_from}|{valid_to}|{datetime.now().isoformat()}"
+                triple_id = f"t_{sub_id}_{pred}_{obj_id}_{hashlib.sha256(id_seed.encode()).hexdigest()[:12]}"
 
-                if existing:
-                    return existing["id"]  # Already exists and still valid
-
-                triple_id = f"t_{sub_id}_{pred}_{obj_id}_{hashlib.sha256(f'{valid_from}{datetime.now().isoformat()}'.encode()).hexdigest()[:12]}"
-
+                # INSERT OR IGNORE: if the UNIQUE index blocks insertion (concurrent
+                # duplicate), we silently discard the loser and return the winner.
                 conn.execute(
-                    """INSERT INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, source_closet, source_file)
+                    """INSERT OR IGNORE INTO triples
+                       (id, subject, predicate, object, valid_from, valid_to, confidence, source_closet, source_file)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         triple_id,
@@ -181,7 +204,12 @@ class KnowledgeGraph:
                         source_file,
                     ),
                 )
-        return triple_id
+                # Fetch whichever row won (ours or a concurrent insert's)
+                row = conn.execute(
+                    "SELECT id FROM triples WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
+                    (sub_id, pred, obj_id),
+                ).fetchone()
+        return row["id"] if row else triple_id
 
     def invalidate(self, subject: str, predicate: str, obj: str, ended: str = None):
         """Mark a relationship as no longer valid (set valid_to date)."""
