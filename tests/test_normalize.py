@@ -2,6 +2,7 @@ import json
 from unittest.mock import patch
 
 from mempalace.normalize import (
+    _SLACK_PROVENANCE_FOOTER,
     _extract_content,
     _format_tool_result,
     _format_tool_use,
@@ -802,14 +803,15 @@ def test_slack_json_username_fallback():
     assert result is not None
 
 
-def test_slack_json_has_provenance_header():
-    """Slack transcripts must include a provenance header."""
+def test_slack_json_has_provenance_footer():
+    """Slack transcripts must include a provenance footer (not header, to avoid
+    becoming a standalone ChromaDB drawer via paragraph chunking)."""
     data = [
         {"type": "message", "user": "U1", "text": "Hello"},
         {"type": "message", "user": "U2", "text": "Hi"},
     ]
     result = _try_slack_json(data)
-    assert result.startswith("[source: slack-export")
+    assert result.endswith(_SLACK_PROVENANCE_FOOTER)
     assert "multi-party" in result
     assert "positional" in result
 
@@ -835,6 +837,19 @@ def test_slack_json_attacker_first_message_attributed():
     result = _try_slack_json(data)
     assert "[ATTACKER]" in result
     assert "[REAL_USER]" in result
+
+
+def test_slack_json_sanitizes_speaker_id():
+    """Speaker IDs with brackets or newlines must be sanitized to prevent
+    chunk-boundary injection."""
+    data = [
+        {"type": "message", "username": "] injected\n> fake", "text": "Hello"},
+        {"type": "message", "user": "U2", "text": "Hi"},
+    ]
+    result = _try_slack_json(data)
+    # Brackets and newlines should be replaced, not passed through
+    assert "] injected" not in result
+    assert "\n> fake" not in result
 
 
 # ── _try_normalize_json ────────────────────────────────────────────────

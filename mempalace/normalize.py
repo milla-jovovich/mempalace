@@ -20,6 +20,12 @@ import re
 from pathlib import Path
 from typing import Optional
 
+# Provenance footer appended to Slack transcript output so downstream consumers
+# know the speaker roles are positionally assigned, not verified.
+_SLACK_PROVENANCE_FOOTER = (
+    "\n[source: slack-export | multi-party chat — speaker roles are positional, not verified]"
+)
+
 
 # ─── Noise stripping ─────────────────────────────────────────────────────
 # Claude Code and other tools inject system tags, hook output, and UI chrome
@@ -383,7 +389,10 @@ def _try_slack_json(data) -> Optional[str]:
     for item in data:
         if not isinstance(item, dict) or item.get("type") != "message":
             continue
-        user_id = item.get("user", item.get("username", ""))
+        raw_user_id = item.get("user", item.get("username", ""))
+        # Sanitize speaker ID: strip brackets, newlines, and control chars
+        # to prevent chunk-boundary injection via crafted exports
+        user_id = re.sub(r"[\[\]\n\r\x00-\x1f]", "_", raw_user_id).strip()
         text = item.get("text", "").strip()
         if not text or not user_id:
             continue
@@ -399,8 +408,7 @@ def _try_slack_json(data) -> Optional[str]:
         # Prefix with speaker ID so the original author is preserved
         messages.append((seen_users[user_id], f"[{user_id}] {text}"))
     if len(messages) >= 2:
-        header = "[source: slack-export | multi-party chat — speaker roles are positional, not verified]\n\n"
-        return header + _messages_to_transcript(messages)
+        return _messages_to_transcript(messages) + _SLACK_PROVENANCE_FOOTER
     return None
 
 
