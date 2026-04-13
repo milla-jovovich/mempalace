@@ -59,7 +59,7 @@ Semantic search. Returns verbatim drawer content with similarity scores.
 | `max_distance` | number | No | Max cosine distance threshold (0=identical, 2=opposite). Results further than this are dropped. Default 1.5. Set to 0 to disable. |
 | `context` | string | No | Background context for the search. Not used for embedding — only for future re-ranking. |
 
-**Returns:** `{ query, filters, keyword_fallback, total_before_filter, results: [{ text, wing, room, source_file, similarity, distance }] }`
+**Returns:** `{ query, filters, total_before_filter, results: [{ text, wing, room, source_file, similarity, distance }] }`
 
 May also include `query_sanitized` and `sanitizer` if the query was cleaned, and `context_received` if context was provided.
 
