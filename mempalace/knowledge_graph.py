@@ -204,12 +204,17 @@ class KnowledgeGraph:
                         source_file,
                     ),
                 )
-                # Fetch whichever row won (ours or a concurrent insert's)
-                row = conn.execute(
-                    "SELECT id FROM triples WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
-                    (sub_id, pred, obj_id),
-                ).fetchone()
-        return row["id"] if row else triple_id
+                # For active triples, fetch whichever row won (ours or a concurrent
+                # insert's) — their IDs may differ if two threads raced here.
+                # Expired triples have no UNIQUE index constraint, so triple_id is
+                # always the inserted row.
+                if valid_to is None:
+                    winner = conn.execute(
+                        "SELECT id FROM triples WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
+                        (sub_id, pred, obj_id),
+                    ).fetchone()
+                    triple_id = winner["id"] if winner else triple_id
+        return triple_id
 
     def invalidate(self, subject: str, predicate: str, obj: str, ended: str = None):
         """Mark a relationship as no longer valid (set valid_to date)."""
