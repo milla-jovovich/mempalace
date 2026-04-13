@@ -6,6 +6,7 @@ dispatch layer (integration-level). Uses isolated palace + KG fixtures
 via monkeypatch to avoid touching real data.
 """
 
+from datetime import datetime
 import json
 import sys
 
@@ -642,6 +643,48 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+    def test_diary_write_same_second_shared_prefix_no_collision(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+
+        from mempalace import mcp_server
+
+        class FrozenDateTime:
+            calls = [
+                datetime(2026, 4, 13, 22, 15, 30, 123456),
+                datetime(2026, 4, 13, 22, 15, 30, 123457),
+            ]
+            fallback = datetime(2026, 4, 13, 22, 15, 30, 123457)
+
+            @classmethod
+            def now(cls):
+                if cls.calls:
+                    return cls.calls.pop(0)
+                return cls.fallback
+
+        monkeypatch.setattr(mcp_server, "datetime", FrozenDateTime)
+
+        from mempalace.mcp_server import tool_diary_read, tool_diary_write
+
+        entry1 = "A" * 50 + " entry one"
+        entry2 = "A" * 50 + " entry two"
+
+        result1 = tool_diary_write(agent_name="TestAgent", entry=entry1, topic="status")
+        result2 = tool_diary_write(agent_name="TestAgent", entry=entry2, topic="status")
+
+        assert result1["success"] is True
+        assert result2["success"] is True
+        assert result1["entry_id"] != result2["entry_id"]
+
+        read_result = tool_diary_read(agent_name="TestAgent")
+        contents = [entry["content"] for entry in read_result["entries"]]
+        assert read_result["total"] == 2
+        assert entry1 in contents
+        assert entry2 in contents
 
 
 # ── Cache Invalidation (inode/mtime) ──────────────────────────────────

@@ -836,7 +836,10 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return _no_palace()
 
     now = datetime.now()
-    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.sha256(entry[:50].encode()).hexdigest()[:12]}"
+    entry_id = (
+        f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S%f')}_"
+        f"{hashlib.sha256(entry.encode()).hexdigest()[:12]}"
+    )
 
     _wal_log(
         "diary_write",
