@@ -61,11 +61,47 @@ mkdir -p "$STATE_DIR"
 # Leave empty to skip auto-ingest (AI handles saving via the block reason).
 MEMPAL_DIR=""
 
+# Prefer the MemPalace interpreter when installed via pipx or an active venv.
+# Falling back to bare python3 is what broke hook installs in #545.
+resolve_python() {
+    if [ -n "${MEMPALACE_PYTHON:-}" ] && [ -x "$MEMPALACE_PYTHON" ]; then
+        printf '%s\n' "$MEMPALACE_PYTHON"
+        return
+    fi
+
+    if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
+        printf '%s\n' "$VIRTUAL_ENV/bin/python"
+        return
+    fi
+
+    if command -v mempalace >/dev/null 2>&1; then
+        MEMPAL_BIN="$(command -v mempalace)"
+        MEMPAL_BIN_DIR="$(cd "$(dirname "$MEMPAL_BIN")" && pwd)"
+        if [ -x "$MEMPAL_BIN_DIR/python" ]; then
+            printf '%s\n' "$MEMPAL_BIN_DIR/python"
+            return
+        fi
+        if [ -x "$MEMPAL_BIN_DIR/python3" ]; then
+            printf '%s\n' "$MEMPAL_BIN_DIR/python3"
+            return
+        fi
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "python3"
+        return
+    fi
+
+    printf '%s\n' "python"
+}
+
+PYTHON_BIN="$(resolve_python)"
+
 # Read JSON input from stdin
 INPUT=$(cat)
 
 # Parse all fields in a single Python call (3x faster than separate invocations)
-eval $(echo "$INPUT" | python3 -c "
+eval $(echo "$INPUT" | "$PYTHON_BIN" -c "
 import sys, json
 data = json.load(sys.stdin)
 sid = data.get('session_id', 'unknown')
@@ -92,7 +128,7 @@ fi
 # Count human messages in the JSONL transcript
 # SECURITY: Pass transcript path as sys.argv to avoid shell injection via crafted paths
 if [ -f "$TRANSCRIPT_PATH" ]; then
-    EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
+    EXCHANGE_COUNT=$("$PYTHON_BIN" - "$TRANSCRIPT_PATH" <<'PYEOF'
 import json, sys
 count = 0
 with open(sys.argv[1]) as f:
@@ -135,9 +171,7 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
 
     # Optional: run mempalace ingest in background if MEMPAL_DIR is set
     if [ -n "$MEMPAL_DIR" ] && [ -d "$MEMPAL_DIR" ]; then
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        REPO_DIR="$(dirname "$SCRIPT_DIR")"
-        python3 -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
+        "$PYTHON_BIN" -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
     fi
 
     # Block the AI and tell it to save

@@ -1,6 +1,9 @@
 # MemPalace Hooks — Auto-Save for Terminal AI Tools
 
-These hook scripts make MemPalace save automatically. No manual "save" commands needed.
+MemPalace can run hooks directly through `mempalace hook run`. That Python hook
+runner is the preferred, tested path for Claude Code and Codex. The shell
+scripts in this directory remain available as editable wrappers when you want a
+host-specific script instead of a direct CLI command.
 
 ## What They Do
 
@@ -22,24 +25,19 @@ Add to `.claude/settings.local.json`:
       "matcher": "*",
       "hooks": [{
         "type": "command",
-        "command": "/absolute/path/to/hooks/mempal_save_hook.sh",
+        "command": "python -m mempalace hook run --hook stop --harness claude-code",
         "timeout": 30
       }]
     }],
     "PreCompact": [{
       "hooks": [{
         "type": "command",
-        "command": "/absolute/path/to/hooks/mempal_precompact_hook.sh",
+        "command": "python -m mempalace hook run --hook precompact --harness claude-code",
         "timeout": 30
       }]
     }]
   }
 }
-```
-
-Make them executable:
-```bash
-chmod +x hooks/mempal_save_hook.sh hooks/mempal_precompact_hook.sh
 ```
 
 ## Install — Codex CLI (OpenAI)
@@ -50,35 +48,47 @@ Add to `.codex/hooks.json`:
 {
   "Stop": [{
     "type": "command",
-    "command": "/absolute/path/to/hooks/mempal_save_hook.sh",
+    "command": "python -m mempalace hook run --hook stop --harness codex",
     "timeout": 30
   }],
   "PreCompact": [{
     "type": "command",
-    "command": "/absolute/path/to/hooks/mempal_precompact_hook.sh",
+    "command": "python -m mempalace hook run --hook precompact --harness codex",
     "timeout": 30
   }]
 }
 ```
 
-## Configuration
+## Current Behavior
 
-Edit `mempal_save_hook.sh` to change:
+The Python hook runner currently uses:
 
-- **`SAVE_INTERVAL=15`** — How many human messages between saves. Lower = more frequent saves, higher = less interruption.
-- **`STATE_DIR`** — Where hook state is stored (defaults to `~/.mempalace/hook_state/`)
-- **`MEMPAL_DIR`** — Optional. Set to a conversations directory to auto-run `mempalace mine <dir>` on each save trigger. Leave blank (default) to let the AI handle saving via the block reason message.
+- **15-message stop cadence** for automatic save checkpoints
+- **`~/.mempalace/hook_state/`** for hook state and logs
+- **Optional `MEMPAL_DIR`** to auto-run `mempalace mine <dir>` on each save trigger
+- **Single-flight stop-hook ingest** so repeated hook firings do not stack concurrent miners
+- **Timeout-safe precompact ingest** so a slow `mine` run still returns the block decision
+
+If you need hard-coded local overrides, the legacy shell wrappers in this
+directory are still editable. Make them executable first:
+
+```bash
+chmod +x hooks/mempal_save_hook.sh hooks/mempal_precompact_hook.sh
+```
 
 ### mempalace CLI
 
 The relevant commands are:
 
 ```bash
+mempalace hook run --hook stop --harness codex
+mempalace hook run --hook precompact --harness claude-code
 mempalace mine <dir>               # Mine all files in a directory
 mempalace mine <dir> --mode convos # Mine conversation transcripts only
 ```
 
-The hooks resolve the repo root automatically from their own path, so they work regardless of where you install the repo.
+The direct CLI hook path does not depend on repo-relative shell wrappers, which
+also makes pipx and venv installs behave more predictably.
 
 ## How It Works (Technical)
 
@@ -104,6 +114,9 @@ User sends message → AI responds → Claude Code fires Stop hook
 
 The `stop_hook_active` flag prevents infinite loops: block once → AI saves → tries to stop → flag is true → we let it through.
 
+If `MEMPAL_DIR` is set, the stop hook launches at most one background miner at a
+time and cleans up stale pid markers automatically.
+
 ### PreCompact Hook
 
 ```
@@ -117,6 +130,10 @@ Context window getting full → Claude Code fires PreCompact
 ```
 
 No counting needed — compaction always warrants a save.
+
+If `MEMPAL_DIR` is set, precompact runs a best-effort foreground ingest. On slow
+or wedged runs it logs, terminates the child process, and still returns the
+block response instead of failing open.
 
 ## Debugging
 

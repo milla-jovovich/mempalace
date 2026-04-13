@@ -33,14 +33,94 @@ PRECOMPACT_BLOCK_REASON = (
 )
 
 
+def _auto_ingest_pid_file() -> Path:
+    """Return the pid file used to debounce background mining.
+
+    Hooks can fire repeatedly while one `mempalace mine` is still running. A
+    small pid file is enough to make the auto-ingest path single-flight without
+    introducing new dependencies or a long-lived daemon.
+    """
+    return STATE_DIR / "auto_ingest.pid"
+
+
 def _sanitize_session_id(session_id: str) -> str:
     """Only allow alnum, dash, underscore to prevent path traversal."""
     sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", session_id)
     return sanitized or "unknown"
 
 
+def _extract_text_content(content) -> str:
+    """Extract user-authored text from a hook transcript content payload.
+
+    The hook save cadence should advance on actual human turns, not on tool
+    plumbing. We therefore ignore non-text blocks here even though the full
+    transcript normalizer retains them for richer mining.
+    """
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text", "")))
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _is_tool_result_only(content) -> bool:
+    """Return True for Claude Code synthetic turns that only carry tool output.
+
+    Claude Code records tool_result blocks as human messages so the session
+    transcript can represent the tool loop. Those entries are not fresh user
+    intent and should not push MemPalace closer to an auto-save checkpoint.
+    """
+    return (
+        isinstance(content, list)
+        and bool(content)
+        and all(isinstance(block, dict) and block.get("type") == "tool_result" for block in content)
+    )
+
+
+def _is_real_human_turn(entry: dict) -> bool:
+    """Recognize countable human turns across supported raw hook transcripts.
+
+    Hooks receive the harness-native JSONL transcript, not the normalized
+    MemPalace transcript. This helper keeps the stop-hook threshold aligned with
+    the actual conversation across both Claude Code and Codex logs.
+    """
+    if not isinstance(entry, dict):
+        return False
+
+    # Codex stores canonical user turns as event_msg payloads.
+    if entry.get("type") == "event_msg":
+        payload = entry.get("payload", {})
+        if not isinstance(payload, dict) or payload.get("type") != "user_message":
+            return False
+        msg_text = payload.get("message", "")
+        return isinstance(msg_text, str) and bool(msg_text.strip()) and "<command-message>" not in msg_text
+
+    message = entry.get("message", {})
+    if not isinstance(message, dict):
+        return False
+
+    entry_type = entry.get("type", "")
+    role = message.get("role", "")
+    if entry_type not in ("human", "user") and role != "user":
+        return False
+
+    content = message.get("content", "")
+    if _is_tool_result_only(content):
+        return False
+
+    text = _extract_text_content(content)
+    return bool(text) and "<command-message>" not in text
+
+
 def _count_human_messages(transcript_path: str) -> int:
-    """Count human messages in a JSONL transcript, skipping command-messages."""
+    """Count human messages in a JSONL transcript, skipping harness noise."""
     path = Path(transcript_path).expanduser()
     if not path.is_file():
         return 0
@@ -50,27 +130,8 @@ def _count_human_messages(transcript_path: str) -> int:
             for line in f:
                 try:
                     entry = json.loads(line)
-                    msg = entry.get("message", {})
-                    if isinstance(msg, dict) and msg.get("role") == "user":
-                        content = msg.get("content", "")
-                        if isinstance(content, str):
-                            if "<command-message>" in content:
-                                continue
-                        elif isinstance(content, list):
-                            text = " ".join(
-                                b.get("text", "") for b in content if isinstance(b, dict)
-                            )
-                            if "<command-message>" in text:
-                                continue
+                    if _is_real_human_turn(entry):
                         count += 1
-                    # Also handle Codex CLI transcript format
-                    # {"type": "event_msg", "payload": {"type": "user_message", "message": "..."}}
-                    elif entry.get("type") == "event_msg":
-                        payload = entry.get("payload", {})
-                        if isinstance(payload, dict) and payload.get("type") == "user_message":
-                            msg_text = payload.get("message", "")
-                            if isinstance(msg_text, str) and "<command-message>" not in msg_text:
-                                count += 1
                 except (json.JSONDecodeError, AttributeError):
                     pass
     except OSError:
@@ -95,20 +156,121 @@ def _output(data: dict):
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
+def _active_auto_ingest_pid() -> int | None:
+    """Return the active auto-ingest pid, clearing stale pid files on sight."""
+    pid_file = _auto_ingest_pid_file()
+    if not pid_file.is_file():
+        return None
+
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except (ValueError, OSError):
+        pid_file.unlink(missing_ok=True)
+        return None
+
+    try:
+        os.kill(pid, 0)
+        return pid
+    except ProcessLookupError:
+        pid_file.unlink(missing_ok=True)
+        return None
+    except PermissionError:
+        # Treat permission failures as "still running" so we do not start a
+        # second miner against the same palace when process ownership differs.
+        return pid
+    except OSError:
+        pid_file.unlink(missing_ok=True)
+        return None
+
+
+def _write_auto_ingest_pid(pid: int):
+    """Persist the pid of the active auto-ingest process."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    _auto_ingest_pid_file().write_text(str(pid), encoding="utf-8")
+
+
+def _clear_auto_ingest_pid(pid: int | None = None):
+    """Remove the pid file once the matching ingest process is finished.
+
+    The optional pid guard prevents one older cleanup path from deleting the
+    marker for a newer process that started after a race or retry.
+    """
+    pid_file = _auto_ingest_pid_file()
+    if not pid_file.is_file():
+        return
+    if pid is not None:
+        try:
+            recorded = int(pid_file.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            pid_file.unlink(missing_ok=True)
+            return
+        if recorded != pid:
+            return
+    pid_file.unlink(missing_ok=True)
+
+
+def _spawn_auto_ingest(log_f):
+    """Start `mempalace mine` if one is not already running."""
+    mempal_dir = os.environ.get("MEMPAL_DIR", "")
+    if not mempal_dir or not os.path.isdir(mempal_dir):
+        return None
+
+    active_pid = _active_auto_ingest_pid()
+    if active_pid is not None:
+        _log(f"Auto-ingest already running (pid {active_pid}); skipping new spawn")
+        return None
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "mempalace", "mine", mempal_dir],
+        stdout=log_f,
+        stderr=log_f,
+    )
+    _write_auto_ingest_pid(proc.pid)
+    return proc
+
+
 def _maybe_auto_ingest():
     """If MEMPAL_DIR is set and exists, run mempalace mine in background."""
-    mempal_dir = os.environ.get("MEMPAL_DIR", "")
-    if mempal_dir and os.path.isdir(mempal_dir):
-        try:
-            log_path = STATE_DIR / "hook.log"
-            with open(log_path, "a") as log_f:
-                subprocess.Popen(
-                    [sys.executable, "-m", "mempalace", "mine", mempal_dir],
-                    stdout=log_f,
-                    stderr=log_f,
-                )
-        except OSError:
-            pass
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = STATE_DIR / "hook.log"
+        with open(log_path, "a", encoding="utf-8") as log_f:
+            return _spawn_auto_ingest(log_f) is not None
+    except OSError:
+        return False
+
+
+def _run_auto_ingest_sync(timeout: int = 60):
+    """Run one best-effort foreground ingest without letting hook failures leak.
+
+    Precompact hooks must always return a block decision. Slow or wedged mining
+    should therefore degrade to "log and continue" instead of aborting the hook
+    with TimeoutExpired or by launching a second overlapping miner.
+    """
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = STATE_DIR / "hook.log"
+        with open(log_path, "a", encoding="utf-8") as log_f:
+            proc = _spawn_auto_ingest(log_f)
+            if proc is None:
+                return False
+
+            try:
+                proc.wait(timeout=timeout)
+                return True
+            except subprocess.TimeoutExpired:
+                _log(f"Auto-ingest timed out after {timeout}s; terminating pid {proc.pid}")
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                return False
+            finally:
+                _clear_auto_ingest_pid(proc.pid)
+    except OSError:
+        return False
 
 
 SUPPORTED_HARNESSES = {"claude-code", "codex"}
@@ -193,20 +355,9 @@ def hook_precompact(data: dict, harness: str):
 
     _log(f"PRE-COMPACT triggered for session {session_id}")
 
-    # Optional: auto-ingest synchronously before compaction (so memories land first)
-    mempal_dir = os.environ.get("MEMPAL_DIR", "")
-    if mempal_dir and os.path.isdir(mempal_dir):
-        try:
-            log_path = STATE_DIR / "hook.log"
-            with open(log_path, "a") as log_f:
-                subprocess.run(
-                    [sys.executable, "-m", "mempalace", "mine", mempal_dir],
-                    stdout=log_f,
-                    stderr=log_f,
-                    timeout=60,
-                )
-        except OSError:
-            pass
+    # Optional: auto-ingest synchronously before compaction (so memories land first).
+    # This remains best-effort: the hook itself must never fail open or crash.
+    _run_auto_ingest_sync(timeout=60)
 
     # Always block -- compaction = save everything
     _output({"decision": "block", "reason": PRECOMPACT_BLOCK_REASON})

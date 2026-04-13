@@ -61,9 +61,9 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 >
 > - **"+34% palace boost" was misleading.** That number compares unfiltered search to wing+room metadata filtering. Metadata filtering is a standard ChromaDB feature, not a novel retrieval mechanism. Real and useful, but not a moat.
 >
-> - **"Contradiction detection"** exists as a separate utility (`fact_checker.py`) but is not currently wired into the knowledge graph operations as the README implied.
+> - **"Contradiction detection"** launched as a separate utility (`fact_checker.py`) before it was wired into the knowledge graph operations. That wiring now exists via `mempalace_kg_check`, and `mempalace_kg_add` returns conflict warnings when a live fact would be contradicted.
 >
-> - **"100% with Haiku rerank"** is real (we have the result files) but the rerank pipeline is not in the public benchmark scripts. We're adding it.
+> - **"100% with Haiku rerank"** is real, but it belongs to the benchmark-tuned `hybrid_v4 + rerank` path and should be read separately from the zero-API baseline. The public benchmark docs cover that rerank path explicitly; the clean local-only headline remains the raw baseline.
 >
 > **What's still true and reproducible:**
 >
@@ -75,7 +75,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 >
 > 1. Rewriting the AAAK example with real tokenizer counts and a scenario where AAAK actually demonstrates compression
 > 2. Adding `mode raw / aaak / rooms` clearly to the benchmark documentation so the trade-offs are visible
-> 3. Wiring `fact_checker.py` into the KG ops so the contradiction detection claim becomes true
+> 3. Wiring `fact_checker.py` into the KG ops so the contradiction detection claim becomes true. Done in 3.1.0 via `mempalace_kg_check` + `mempalace_kg_add` warnings.
 > 4. Pinning ChromaDB to a tested range (Issue #100), fixing the shell injection in hooks (#110), and addressing the macOS ARM64 segfault (#74)
 >
 > **Thank you to everyone who poked holes in this.** Brutal honest criticism is exactly what makes open source work, and it's what we asked for. Special thanks to [@panuhorsmalahti](https://github.com/milla-jovovich/mempalace/issues/43), [@lhl](https://github.com/milla-jovovich/mempalace/issues/27), [@gizmax](https://github.com/milla-jovovich/mempalace/issues/39), and everyone who filed an issue or a PR in the first 48 hours. We're listening, we're fixing, and we'd rather be right than impressive.
@@ -99,6 +99,8 @@ Stay safe out there.
 ## Quick Start
 
 ```bash
+# Recommended for now: Python 3.12 or 3.13.
+# ChromaDB 0.6.x is currently incompatible with Python 3.14.
 pip install mempalace
 
 # Set up your world — who you work with, what your projects are
@@ -115,6 +117,9 @@ mempalace search "why did we switch to GraphQL"
 # Your AI remembers
 mempalace status
 ```
+
+If you're installing with `uv tool install`, pin the interpreter explicitly for
+now: `uv tool install --python 3.12 mempalace`.
 
 Three mining modes: **projects** (code and docs), **convos** (conversation exports), and **general** (auto-classifies into decisions, preferences, milestones, problems, and emotional context). Everything stays on your machine.
 
@@ -135,6 +140,17 @@ claude plugin install --scope user mempalace
 
 Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 
+### With Codex
+
+MemPalace ships a repo-local Codex plugin in `.codex-plugin/`.
+
+```bash
+# From this repo, or after copying .codex-plugin/ into your own repo root
+codex
+```
+
+The plugin starts `python3 -m mempalace.mcp_server` automatically and includes the save hooks plus the guided MemPalace skills.
+
 ### With Claude, ChatGPT, Cursor, Gemini (MCP-compatible tools)
 
 ```bash
@@ -142,7 +158,7 @@ Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-Now your AI has 19 tools available through MCP. Ask it anything:
+Now your AI has 26 tools available through MCP. Ask it anything:
 
 > *"What did we decide about auth last month?"*
 
@@ -161,7 +177,7 @@ mempalace wake-up > context.txt
 # Paste context.txt into your local model's system prompt
 ```
 
-This gives your local model ~170 tokens of critical facts (in AAAK if you prefer) before you ask a single question.
+This gives your local model roughly 600-900 tokens of critical facts before you ask a single question.
 
 **2. CLI search** — query on demand, feed results into your prompt:
 
@@ -192,10 +208,10 @@ Decisions happen in conversations now. Not in docs. Not in Jira. In conversation
 |----------|--------------|-------------|
 | Paste everything | 19.5M — doesn't fit any context window | Impossible |
 | LLM summaries | ~650K | ~$507/yr |
-| **MemPalace wake-up** | **~170 tokens** | **~$0.70/yr** |
+| **MemPalace wake-up** | **~600-900 tokens** | **Still tiny vs summary-heavy approaches** |
 | **MemPalace + 5 searches** | **~13,500 tokens** | **~$10/yr** |
 
-MemPalace loads 170 tokens of critical facts on wake-up — your team, your projects, your preferences. Then searches only when needed. $10/year to remember everything vs $507/year for summaries that lose context.
+MemPalace loads a compact wake-up bundle — your team, your projects, your preferences — and then searches only when needed. The point is not "zero tokens"; the point is "small, stable context plus deep retrieval when the topic actually comes up."
 
 ---
 
@@ -293,7 +309,7 @@ Wings and rooms aren't cosmetic. They're a **34% retrieval improvement**. The pa
 | **L2** | Room recall — recent sessions, current project | On demand | When topic comes up |
 | **L3** | Deep search — semantic query across all closets | On demand | When explicitly asked |
 
-Your AI wakes up with L0 + L1 (~170 tokens) and knows your world. Searches only fire when needed.
+Your AI wakes up with L0 + L1 (~600-900 tokens) and knows your world. Searches only fire when needed.
 
 ### AAAK Dialect (experimental)
 
@@ -309,22 +325,21 @@ AAAK is a lossy abbreviation system — entity codes, structural markers, and se
 
 We're iterating on the dialect spec, adding a real tokenizer for stats, and exploring better break points for when to use it. Track progress in [Issue #43](https://github.com/milla-jovovich/mempalace/issues/43) and [#27](https://github.com/milla-jovovich/mempalace/issues/27).
 
-### Contradiction Detection (experimental, not yet wired into KG)
+### Contradiction Detection
 
-A separate utility (`fact_checker.py`) can check assertions against entity facts. It's not currently called automatically by the knowledge graph operations — this is being fixed (track in [Issue #27](https://github.com/milla-jovovich/mempalace/issues/27)). When enabled it catches things like:
+MemPalace now ships a standalone checker (`python -m mempalace.fact_checker`) and exposes the same logic through `mempalace_kg_check`. `mempalace_kg_add` also includes the check result in its response so MCP clients can spot live contradictions before they treat a new fact as settled truth.
+
+Use explicit triples for the check:
 
 ```
-Input:  "Soren finished the auth migration"
-Output: 🔴 AUTH-MIGRATION: attribution conflict — Maya was assigned, not Soren
+python -m mempalace.fact_checker Maya assigned_to auth-migration
+# → clear / duplicate / conflict
 
-Input:  "Kai has been here 2 years"
-Output: 🟡 KAI: wrong_tenure — records show 3 years (started 2023-04)
-
-Input:  "The sprint ends Friday"
-Output: 🟡 SPRINT: stale_date — current sprint ends Thursday (updated 2 days ago)
+mempalace_kg_check("Maya", "assigned_to", "dark-mode")
+# → conflict: Maya is currently assigned_to auth-migration
 ```
 
-Facts checked against the knowledge graph. Ages, dates, and tenures calculated dynamically — not hardcoded.
+Facts are checked against the current knowledge graph state. If a relationship is one that usually has one current value at a time, the checker tells you to invalidate the old fact before filing the replacement.
 
 ---
 
@@ -424,6 +439,8 @@ Now queries for Kai's current work won't return Orion. Historical queries still 
 
 Create agents that focus on specific areas. Each agent gets its own wing and diary in the palace — not in your CLAUDE.md. Add 50 agents, your config stays the same size.
 
+`mempalace init` now scaffolds the three default specialists below, and you can add more by dropping JSON files into `~/.mempalace/agents/`.
+
 ```
 ~/.mempalace/agents/
   ├── reviewer.json       # code quality, patterns, bugs
@@ -470,7 +487,7 @@ claude plugin install --scope user mempalace
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-### 19 Tools
+### 26 Tools
 
 **Palace (read)**
 
@@ -483,12 +500,15 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 | `mempalace_search` | Semantic search with wing/room filters |
 | `mempalace_check_duplicate` | Check before filing |
 | `mempalace_get_aaak_spec` | AAAK dialect reference |
+| `mempalace_get_drawer` | Fetch one drawer with full content + metadata |
+| `mempalace_list_drawers` | Paginated drawer listing with previews |
 
 **Palace (write)**
 
 | Tool | What |
 |------|------|
 | `mempalace_add_drawer` | File verbatim content |
+| `mempalace_update_drawer` | Update a drawer's content or taxonomy |
 | `mempalace_delete_drawer` | Remove by ID |
 
 **Knowledge Graph**
@@ -496,6 +516,7 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 | Tool | What |
 |------|------|
 | `mempalace_kg_query` | Entity relationships with time filtering |
+| `mempalace_kg_check` | Check a proposed fact for duplicates/conflicts |
 | `mempalace_kg_add` | Add facts |
 | `mempalace_kg_invalidate` | Mark facts as ended |
 | `mempalace_kg_timeline` | Chronological entity story |
@@ -509,12 +530,15 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 | `mempalace_find_tunnels` | Find rooms bridging two wings |
 | `mempalace_graph_stats` | Graph connectivity overview |
 
-**Agent Diary**
+**Agents + Hooks**
 
 | Tool | What |
 |------|------|
+| `mempalace_list_agents` | Discover specialist agents from `~/.mempalace/agents` |
 | `mempalace_diary_write` | Write AAAK diary entry |
 | `mempalace_diary_read` | Read recent diary entries |
+| `mempalace_hook_settings` | Configure silent-save / desktop toast behavior |
+| `mempalace_memories_filed_away` | Acknowledge the latest silent checkpoint |
 
 The AI learns AAAK and the memory protocol automatically from the `mempalace_status` response. No manual configuration.
 
@@ -522,22 +546,31 @@ The AI learns AAAK and the memory protocol automatically from the `mempalace_sta
 
 ## Auto-Save Hooks
 
-Two hooks for Claude Code that automatically save memories during work:
+Two hooks automatically save memories during work. The preferred, tested path
+is the Python hook runner via `mempalace hook run`; the shell scripts under
+`hooks/` remain available as editable wrappers.
 
-**Save Hook** — every 15 messages, triggers a structured save. Topics, decisions, quotes, code changes. Also regenerates the critical facts layer.
+**Save Hook** — every 15 messages, triggers a structured save. Topics,
+decisions, quotes, code changes. Also regenerates the critical facts layer.
 
-**PreCompact Hook** — fires before context compression. Emergency save before the window shrinks.
+**PreCompact Hook** — fires before context compression. Emergency save before
+the window shrinks.
 
 ```json
 {
   "hooks": {
-    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "/path/to/mempalace/hooks/mempal_save_hook.sh"}]}],
-    "PreCompact": [{"matcher": "", "hooks": [{"type": "command", "command": "/path/to/mempalace/hooks/mempal_precompact_hook.sh"}]}]
+    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "python -m mempalace hook run --hook stop --harness claude-code"}]}],
+    "PreCompact": [{"matcher": "", "hooks": [{"type": "command", "command": "python -m mempalace hook run --hook precompact --harness claude-code"}]}]
   }
 }
 ```
 
-**Optional auto-ingest:** Set the `MEMPAL_DIR` environment variable to a directory path and the hooks will automatically run `mempalace mine` on that directory during each save trigger (background on stop, synchronous on precompact).
+For Codex CLI, use the same commands with `--harness codex`.
+
+**Optional auto-ingest:** Set `MEMPAL_DIR` to a directory path and the hook
+runner will auto-run `mempalace mine` on that directory during each save
+trigger. Stop-hook ingest is single-flight, and precompact ingest is best-effort
+with a timeout so the hook still returns its block decision on slow runs.
 
 ---
 
@@ -548,18 +581,21 @@ Tested on standard academic benchmarks — reproducible, published datasets.
 | Benchmark | Mode | Score | API Calls |
 |-----------|------|-------|-----------|
 | **LongMemEval R@5** | Raw (ChromaDB only) | **96.6%** | Zero |
-| **LongMemEval R@5** | Hybrid + Haiku rerank | **100%** (500/500) | ~500 |
+| **LongMemEval R@5** | Hybrid v4 + Haiku rerank | **100%** (500/500) | ~500 |
 | **LoCoMo R@10** | Raw, session level | **60.3%** | Zero |
 | **Personal palace R@10** | Heuristic bench | **85%** | Zero |
 | **Palace structure impact** | Wing+room filtering | **+34%** R@10 | Zero |
 
-The 96.6% raw score is the highest published LongMemEval result requiring no API key, no cloud, and no LLM at any stage.
+The 96.6% raw score is the highest published LongMemEval result requiring no
+API key, no cloud, and no LLM at any stage. The 100% rerank number comes from
+the benchmark-tuned `hybrid_v4 + Haiku rerank` path documented in
+`benchmarks/BENCHMARKS.md`.
 
 ### vs Published Systems
 
 | System | LongMemEval R@5 | API Required | Cost |
 |--------|----------------|--------------|------|
-| **MemPalace (hybrid)** | **100%** | Optional | Free |
+| **MemPalace (hybrid v4 + rerank)** | **100%** | Optional | Free |
 | Supermemory ASMR | ~99% | Yes | — |
 | **MemPalace (raw)** | **96.6%** | **None** | **Free** |
 | Mastra | 94.87% | Yes (GPT) | API costs |
@@ -587,6 +623,7 @@ mempalace split <dir> --dry-run                   # preview
 mempalace search "query"                          # search everything
 mempalace search "query" --wing myapp             # within a wing
 mempalace search "query" --room auth-migration    # within a room
+mempalace search "query" --strategy raw_v2        # improved local-only rerank
 
 # Memory stack
 mempalace wake-up                                 # load L0 + L1 context
@@ -595,8 +632,17 @@ mempalace wake-up --wing driftwood                # project-specific
 # Compression
 mempalace compress --wing myapp                   # AAAK compress
 
+# Repair
+mempalace repair                                  # rebuild the raw vector index
+mempalace repair --signals --dry-run              # preview retrieval-signal backfill
+mempalace repair --signals                        # backfill halls + support docs for older palaces
+
 # Status
 mempalace status                                  # palace overview
+
+# Hooks
+mempalace hook run --hook stop --harness codex         # evaluate stop hook from stdin
+mempalace hook run --hook precompact --harness claude-code
 
 # MCP
 mempalace mcp                                     # show MCP setup command
@@ -645,15 +691,17 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `cli.py` | CLI entry point |
 | `config.py` | Configuration loading and defaults |
 | `normalize.py` | Converts 5 chat formats to standard transcript |
-| `mcp_server.py` | MCP server — 19 tools, AAAK auto-teach, memory protocol |
+| `mcp_server.py` | MCP server — 26 tools, AAAK auto-teach, memory protocol |
 | `miner.py` | Project file ingest |
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |
 | `searcher.py` | Semantic search via ChromaDB |
 | `layers.py` | 4-layer memory stack |
-| `dialect.py` | AAAK compression — 30x lossless |
+| `dialect.py` | AAAK compression — lossy shorthand for context loading |
 | `knowledge_graph.py` | Temporal entity-relationship graph (SQLite) |
+| `fact_checker.py` | KG contradiction checker for explicit triples |
 | `palace_graph.py` | Room-based navigation graph |
-| `onboarding.py` | Guided setup — generates AAAK bootstrap + wing config |
+| `onboarding.py` | Guided setup — generates AAAK bootstrap, wing config, identity scaffold, and default agents |
+| `agents.py` | Specialist agent registry in `~/.mempalace/agents/*.json` |
 | `entity_registry.py` | Entity code registry |
 | `entity_detector.py` | Auto-detect people and projects from content |
 | `split_mega_files.py` | Split concatenated transcripts into per-session files |
@@ -669,7 +717,7 @@ mempalace/
 ├── README.md                  ← you are here
 ├── mempalace/                 ← core package (README)
 │   ├── cli.py                 ← CLI entry point
-│   ├── mcp_server.py          ← MCP server (19 tools)
+│   ├── mcp_server.py          ← MCP server (26 tools)
 │   ├── knowledge_graph.py     ← temporal entity graph
 │   ├── palace_graph.py        ← room navigation graph
 │   ├── dialect.py             ← AAAK compression

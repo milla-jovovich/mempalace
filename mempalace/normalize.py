@@ -226,12 +226,18 @@ def _try_claude_ai_json(data) -> Optional[str]:
     return None
 
 
-def _try_chatgpt_json(data) -> Optional[str]:
-    """ChatGPT conversations.json with mapping tree."""
-    if not isinstance(data, dict) or "mapping" not in data:
-        return None
-    mapping = data["mapping"]
+def _chatgpt_mapping_to_messages(mapping: dict) -> list:
+    """Walk a ChatGPT mapping tree and return ordered user/assistant messages.
+
+    ChatGPT exports are effectively linked lists hanging off a synthetic root.
+    Keeping the traversal in a helper lets us support both a single-conversation
+    JSON object and the full privacy-export list without duplicating logic.
+    """
+    if not isinstance(mapping, dict):
+        return []
+
     messages = []
+
     # Find root: prefer node with parent=None AND no message (synthetic root)
     root_id = None
     fallback_root = None
@@ -262,8 +268,34 @@ def _try_chatgpt_json(data) -> Optional[str]:
                     messages.append(("assistant", text))
             children = node.get("children", [])
             current_id = children[0] if children else None
-    if len(messages) >= 2:
-        return _messages_to_transcript(messages)
+    return messages
+
+
+def _try_chatgpt_json(data) -> Optional[str]:
+    """ChatGPT conversations.json with mapping tree.
+
+    Supports both a single conversation object and the list-root privacy export
+    that bundles many conversations into one file.
+    """
+    if isinstance(data, list):
+        conversations = data
+    elif isinstance(data, dict) and "mapping" in data:
+        conversations = [data]
+    else:
+        return None
+
+    transcripts = []
+    for convo in conversations:
+        if not isinstance(convo, dict) or "mapping" not in convo:
+            continue
+        messages = _chatgpt_mapping_to_messages(convo["mapping"])
+        if len(messages) >= 2:
+            transcripts.append(_messages_to_transcript(messages))
+
+    if transcripts:
+        # Separators preserve conversation boundaries for downstream chunking
+        # when a full privacy export is mined as one file.
+        return "\n---\n\n".join(transcripts)
     return None
 
 

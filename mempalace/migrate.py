@@ -22,8 +22,10 @@ import sqlite3
 from collections import defaultdict
 from datetime import datetime
 
+from .palace import DRAWERS_COLLECTION_NAME
 
-def extract_drawers_from_sqlite(db_path: str) -> list:
+
+def extract_drawers_from_sqlite(db_path: str, collection_name: str = DRAWERS_COLLECTION_NAME) -> list:
     """Read all drawers directly from ChromaDB's SQLite, bypassing the API.
 
     Works regardless of which ChromaDB version created the database.
@@ -32,14 +34,23 @@ def extract_drawers_from_sqlite(db_path: str) -> list:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    # Get all embedding IDs and their documents
-    rows = conn.execute("""
+    # Chroma stores each collection behind its own metadata segment. Filtering
+    # through segments/collections keeps migration from mixing support docs or
+    # any future sibling collections back into the raw drawer collection.
+    rows = conn.execute(
+        """
         SELECT e.embedding_id,
                MAX(CASE WHEN em.key = 'chroma:document' THEN em.string_value END) as document
         FROM embeddings e
+        JOIN segments s ON s.id = e.segment_id
+        JOIN collections c ON c.id = s.collection
         JOIN embedding_metadata em ON em.id = e.id
+        WHERE c.name = ?
+          AND s.scope = 'METADATA'
         GROUP BY e.embedding_id
-    """).fetchall()
+    """,
+        (collection_name,),
+    ).fetchall()
 
     drawers = []
     for row in rows:
@@ -54,10 +65,14 @@ def extract_drawers_from_sqlite(db_path: str) -> list:
             SELECT em.key, em.string_value, em.int_value, em.float_value, em.bool_value
             FROM embedding_metadata em
             JOIN embeddings e ON e.id = em.id
+            JOIN segments s ON s.id = e.segment_id
+            JOIN collections c ON c.id = s.collection
             WHERE e.embedding_id = ?
+              AND c.name = ?
+              AND s.scope = 'METADATA'
               AND em.key NOT LIKE 'chroma:%'
         """,
-            (embedding_id,),
+            (embedding_id, collection_name),
         ).fetchall()
 
         metadata = {}
@@ -130,7 +145,7 @@ def migrate(palace_path: str, dry_run: bool = False):
     # Try reading with current chromadb first
     try:
         client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = client.get_collection(DRAWERS_COLLECTION_NAME)
         count = col.count()
         print(f"\n  Palace is already readable by chromadb {chromadb.__version__}.")
         print(f"  {count} drawers found. No migration needed.")
@@ -140,7 +155,7 @@ def migrate(palace_path: str, dry_run: bool = False):
         print("  Extracting from SQLite directly...")
 
     # Extract all drawers via raw SQL
-    drawers = extract_drawers_from_sqlite(db_path)
+    drawers = extract_drawers_from_sqlite(db_path, collection_name=DRAWERS_COLLECTION_NAME)
     print(f"  Extracted {len(drawers)} drawers from SQLite")
 
     if not drawers:
@@ -178,7 +193,10 @@ def migrate(palace_path: str, dry_run: bool = False):
     temp_palace = tempfile.mkdtemp(prefix="mempalace_migrate_")
     print(f"  Creating fresh palace in {temp_palace}...")
     client = chromadb.PersistentClient(path=temp_palace)
-    col = client.get_or_create_collection("mempalace_drawers")
+    col = client.get_or_create_collection(
+        DRAWERS_COLLECTION_NAME,
+        metadata={"hnsw:space": "cosine"},
+    )
 
     # Re-import in batches
     batch_size = 500
@@ -202,6 +220,17 @@ def migrate(palace_path: str, dry_run: bool = False):
     print("  Swapping old palace for migrated version...")
     shutil.rmtree(palace_path)
     shutil.move(temp_palace, palace_path)
+
+    # Support docs are derived state, not primary data. Rebuilding them after
+    # the raw collection lands is safer than copying sibling collections
+    # blindly across versions and keeps hybrid_v3/palace working post-migration.
+    try:
+        from .repair import backfill_retrieval_signals
+
+        print("  Rebuilding retrieval support signals...")
+        backfill_retrieval_signals(palace_path=palace_path, dry_run=False)
+    except Exception as e:
+        print(f"  Warning: migrated raw drawers, but support signal rebuild failed: {e}")
 
     print("\n  Migration complete.")
     print(f"  Drawers migrated: {final_count}")

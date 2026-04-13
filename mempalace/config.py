@@ -183,25 +183,57 @@ class MempalaceConfig:
         """Whether the stop hook shows a desktop notification via notify-send."""
         return self._file_config.get("hooks", {}).get("desktop_toast", False)
 
+    def _ensure_config_dir(self):
+        """
+        Create the config directory before any write.
+
+        Several features now write adjacent bootstrap files during init, so we
+        keep the directory-creation logic in one place instead of repeating it.
+        """
+        self._config_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self._config_dir.chmod(0o700)
+        except (OSError, NotImplementedError):
+            pass
+
+    def _write_config(self):
+        """
+        Persist the in-memory config atomically enough for local use.
+
+        Centralizing the write path keeps hook settings, onboarding state, and
+        future config mutations consistent.
+        """
+        self._ensure_config_dir()
+        with open(self._config_file, "w", encoding="utf-8") as f:
+            json.dump(self._file_config, f, indent=2, ensure_ascii=False)
+        try:
+            self._config_file.chmod(0o600)
+        except (OSError, NotImplementedError):
+            pass
+        return self._config_file
+
     def set_hook_setting(self, key: str, value: bool):
         """Update a hook setting and write config to disk."""
         if "hooks" not in self._file_config:
             self._file_config["hooks"] = {}
         self._file_config["hooks"][key] = value
-        try:
-            with open(self._config_file, "w", encoding="utf-8") as f:
-                json.dump(self._file_config, f, indent=2, ensure_ascii=False)
-        except OSError:
-            pass
+        return self._write_config()
+
+    def set_topic_wings(self, wings):
+        """
+        Persist the user-selected top-level wings from onboarding/init.
+
+        The README has long implied that guided setup establishes a durable wing
+        taxonomy. Without saving it here, onboarding would ask for wings but the
+        config would silently fall back to defaults on the next run.
+        """
+        cleaned = [sanitize_name(wing, "topic wing") for wing in wings if str(wing).strip()]
+        self._file_config["topic_wings"] = cleaned or DEFAULT_TOPIC_WINGS
+        return self._write_config()
 
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
-        self._config_dir.mkdir(parents=True, exist_ok=True)
-        # Restrict directory permissions to owner only (Unix)
-        try:
-            self._config_dir.chmod(0o700)
-        except (OSError, NotImplementedError):
-            pass  # Windows doesn't support Unix permissions
+        self._ensure_config_dir()
         if not self._config_file.exists():
             default_config = {
                 "palace_path": DEFAULT_PALACE_PATH,
@@ -209,13 +241,8 @@ class MempalaceConfig:
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,
             }
-            with open(self._config_file, "w") as f:
-                json.dump(default_config, f, indent=2)
-            # Restrict config file to owner read/write only
-            try:
-                self._config_file.chmod(0o600)
-            except (OSError, NotImplementedError):
-                pass
+            self._file_config = default_config
+            self._write_config()
         return self._config_file
 
     def save_people_map(self, people_map):
@@ -224,7 +251,7 @@ class MempalaceConfig:
         Args:
             people_map: Dict mapping name variants to canonical names.
         """
-        self._config_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_config_dir()
         with open(self._people_map_file, "w") as f:
             json.dump(people_map, f, indent=2)
         return self._people_map_file

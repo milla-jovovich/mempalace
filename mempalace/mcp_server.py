@@ -24,14 +24,21 @@ import json
 import logging
 import hashlib
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
+from .agents import list_agents
 from .config import MempalaceConfig, sanitize_name, sanitize_content
+from .fact_checker import check_assertion
+from .miner import add_drawer as miner_add_drawer
+from .miner import build_retrieval_artifacts
+from .palace import get_support_collection as get_support_collection_adapter
+from .retrieval_signals import classify_document_hall
 from .version import __version__
 import chromadb
 from .query_sanitizer import sanitize_query
-from .searcher import search_memories
+from .searcher import DEFAULT_SEARCH_STRATEGY, search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
 
 from .knowledge_graph import KnowledgeGraph
@@ -69,6 +76,7 @@ else:
 
 _client_cache = None
 _collection_cache = None
+_support_collection_cache = None
 _palace_db_inode = 0  # inode of chroma.sqlite3 at cache time
 
 
@@ -126,7 +134,7 @@ def _get_client():
     Detects palace rebuilds (repair/nuke/purge) by checking the inode of
     chroma.sqlite3.  A full rebuild replaces the file, changing the inode.
     """
-    global _client_cache, _collection_cache, _palace_db_inode, _metadata_cache, _metadata_cache_time
+    global _client_cache, _collection_cache, _support_collection_cache, _palace_db_inode, _metadata_cache, _metadata_cache_time
     db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
     try:
         current_inode = os.stat(db_path).st_ino
@@ -136,6 +144,7 @@ def _get_client():
     if _client_cache is None or current_inode != _palace_db_inode:
         _client_cache = chromadb.PersistentClient(path=_config.palace_path)
         _collection_cache = None
+        _support_collection_cache = None
         _metadata_cache = None
         _metadata_cache_time = 0
         _palace_db_inode = current_inode
@@ -159,6 +168,36 @@ def _get_collection(create=False):
             _metadata_cache_time = 0
         return _collection_cache
     except Exception:
+        return None
+
+
+def _get_support_collection(create=False):
+    """Return the retrieval-support collection used for mined helper docs.
+
+    The MCP server maintains its own small cache rather than going through the
+    higher-level palace adapter so repeated tool calls keep one client alive.
+    This matches the existing raw drawer path and lets manual MCP writes benefit
+    from the same support docs as project/conversation mining.
+    """
+    global _support_collection_cache
+    try:
+        client = _get_client()
+        if create:
+            _support_collection_cache = client.get_or_create_collection(
+                "mempalace_support", metadata={"hnsw:space": "cosine"}
+            )
+        elif _support_collection_cache is None:
+            _support_collection_cache = client.get_collection("mempalace_support")
+        return _support_collection_cache
+    except Exception:
+        if create:
+            try:
+                # Fall back to the shared adapter path if direct cached access
+                # fails for a create case. This keeps the MCP write path robust
+                # across older palaces or partial local states.
+                return get_support_collection_adapter(_config.palace_path, create=True)._collection
+            except Exception:
+                return None
         return None
 
 
@@ -230,6 +269,17 @@ def tool_status():
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
     }
+    # Agent discovery belongs in the wake-up payload because specialist agents
+    # are a first-class feature of the README and Codex/Claude prompts. We keep
+    # the summary short here and leave full details to mempalace_list_agents.
+    try:
+        agents = list_agents()
+        result["specialist_agents"] = {
+            "count": agents["count"],
+            "names": [agent["name"] for agent in agents["agents"]],
+        }
+    except Exception as e:
+        result["specialist_agents_error"] = str(e)
     try:
         all_meta = _get_cached_metadata(col)
         for m in all_meta:
@@ -250,10 +300,12 @@ def tool_status():
 
 PALACE_PROTOCOL = """IMPORTANT — MemPalace Memory Protocol:
 1. ON WAKE-UP: Call mempalace_status to load palace overview + AAAK spec.
+1a. IF specialist agents are configured: call mempalace_list_agents and choose the best lens for the task.
 2. BEFORE RESPONDING about any person, project, or past event: call mempalace_kg_query or mempalace_search FIRST. Never guess — verify.
-3. IF UNSURE about a fact (name, gender, age, relationship): say "let me check" and query the palace. Wrong is worse than slow.
-4. AFTER EACH SESSION: call mempalace_diary_write to record what happened, what you learned, what matters.
-5. WHEN FACTS CHANGE: call mempalace_kg_invalidate on the old fact, mempalace_kg_add for the new one.
+3. IF YOU ARE ABOUT TO ADD OR CHANGE A FACT: call mempalace_kg_check first. If it shows a conflict, invalidate the old fact before adding the new one.
+4. IF UNSURE about a fact (name, gender, age, relationship): say "let me check" and query the palace. Wrong is worse than slow.
+5. AFTER EACH SESSION: call mempalace_diary_write to record what happened, what you learned, what matters.
+6. WHEN FACTS CHANGE: call mempalace_kg_invalidate on the old fact, mempalace_kg_add for the new one.
 
 This protocol ensures the AI KNOWS before it speaks. Storage is not memory — but storage + this protocol = memory."""
 
@@ -343,6 +395,7 @@ def tool_search(
     max_distance: float = 1.5,
     min_similarity: float = None,
     context: str = None,
+    strategy: str = DEFAULT_SEARCH_STRATEGY,
 ):
     limit = max(1, min(limit, _MAX_RESULTS))
     # Backwards compat: accept old name
@@ -358,6 +411,7 @@ def tool_search(
         room=room,
         n_results=limit,
         max_distance=dist,
+        strategy=strategy,
     )
     # Attach sanitizer metadata for transparency
     if sanitized["was_sanitized"]:
@@ -377,6 +431,10 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
     col = _get_collection()
     if not col:
         return _no_palace()
+    try:
+        content = sanitize_content(content)
+    except ValueError as e:
+        return {"error": str(e)}
     try:
         results = col.query(
             query_texts=[content],
@@ -457,8 +515,10 @@ def tool_add_drawer(
     col = _get_collection(create=True)
     if not col:
         return _no_palace()
+    support_col = _get_support_collection(create=True)
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content[:100]).encode()).hexdigest()[:24]}"
+    drawer_hash = hashlib.sha256(f"{wing}\0{room}\0{content}".encode("utf-8")).hexdigest()[:24]
+    drawer_id = f"drawer_{wing}_{room}_{drawer_hash}"
 
     _wal_log(
         "add_drawer",
@@ -481,23 +541,31 @@ def tool_add_drawer(
         pass
 
     try:
-        col.upsert(
-            ids=[drawer_id],
-            documents=[content],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file or "",
-                    "chunk_index": 0,
-                    "added_by": added_by,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
+        # Reuse the miner's drawer-writing path so manual MCP writes store the
+        # same hall metadata and preference-support helpers as one-time mining.
+        # That keeps retrieval behavior consistent regardless of how a memory
+        # entered the palace.
+        miner_add_drawer(
+            collection=col,
+            support_collection=support_col,
+            wing=wing,
+            room=room,
+            content=content,
+            source_file=source_file or f"mcp://manual/{drawer_id}",
+            chunk_index=0,
+            agent=added_by,
+            ingest_mode="mcp",
+            drawer_id_override=drawer_id,
         )
         _metadata_cache = None
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
-        return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
+        return {
+            "success": True,
+            "drawer_id": drawer_id,
+            "wing": wing,
+            "room": room,
+            "hall": classify_document_hall(content, ingest_mode="mcp"),
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -526,6 +594,9 @@ def tool_delete_drawer(drawer_id: str):
 
     try:
         col.delete(ids=[drawer_id])
+        support_col = _get_support_collection()
+        if support_col:
+            support_col.delete(where={"parent_drawer_id": drawer_id})
         _metadata_cache = None
         logger.info(f"Deleted drawer: {drawer_id}")
         return {"success": True, "drawer_id": drawer_id}
@@ -638,6 +709,31 @@ def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, ro
             except ValueError as e:
                 return {"success": False, "error": str(e)}
 
+        # MCP updates must keep the derived hall/support state in lockstep with
+        # the raw drawer. Otherwise hybrid_v3/palace can keep retrieving a stale
+        # preference helper after the underlying verbatim content changed.
+        derived_extra_meta = {
+            key: value
+            for key, value in new_meta.items()
+            if key not in {"wing", "room", "source_file", "chunk_index", "added_by", "hall", "ingest_mode"}
+        }
+        try:
+            chunk_index = int(new_meta.get("chunk_index", 0) or 0)
+        except (TypeError, ValueError):
+            chunk_index = 0
+
+        derived = build_retrieval_artifacts(
+            wing=new_meta.get("wing", ""),
+            room=new_meta.get("room", ""),
+            content=new_doc,
+            source_file=new_meta.get("source_file", f"mcp://manual/{drawer_id}"),
+            chunk_index=chunk_index,
+            agent=new_meta.get("added_by", "mcp"),
+            ingest_mode=new_meta.get("ingest_mode", "mcp"),
+            extra_metadata=derived_extra_meta,
+            drawer_id_override=drawer_id,
+        )
+
         _wal_log(
             "update_drawer",
             {
@@ -651,11 +747,23 @@ def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, ro
             },
         )
 
-        update_kwargs = {"ids": [drawer_id]}
-        if content is not None:
-            update_kwargs["documents"] = [new_doc]
-        update_kwargs["metadatas"] = [new_meta]
-        col.update(**update_kwargs)
+        col.upsert(
+            ids=[drawer_id],
+            documents=[new_doc],
+            metadatas=[derived["metadata"]],
+        )
+
+        support_col = _get_support_collection(create=False)
+        if support_col is None and derived["support_row"] is not None:
+            support_col = _get_support_collection(create=True)
+        if support_col is not None:
+            support_col.delete(where={"parent_drawer_id": drawer_id})
+            if derived["support_row"] is not None:
+                support_col.upsert(
+                    ids=[derived["support_row"]["id"]],
+                    documents=[derived["support_row"]["document"]],
+                    metadatas=[derived["support_row"]["metadata"]],
+                )
 
         _metadata_cache = None
 
@@ -663,8 +771,9 @@ def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, ro
         return {
             "success": True,
             "drawer_id": drawer_id,
-            "wing": new_meta.get("wing", ""),
-            "room": new_meta.get("room", ""),
+            "wing": derived["metadata"].get("wing", ""),
+            "room": derived["metadata"].get("room", ""),
+            "hall": derived["metadata"].get("hall", ""),
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -683,6 +792,25 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
         return {"error": "direction must be 'outgoing', 'incoming', or 'both'"}
     results = _kg.query_entity(entity, as_of=as_of, direction=direction)
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
+
+
+def tool_kg_check(subject: str, predicate: str, object: str, as_of: str = None):
+    """
+    Check whether a proposed fact conflicts with current KG state.
+
+    This gives MCP clients a safe read-before-write path and lets open-source
+    users reproduce the README's contradiction-detection claims without needing
+    a hidden cloud service or a second database.
+    """
+    try:
+        subject = sanitize_name(subject, "subject")
+        predicate = sanitize_name(predicate, "predicate")
+        object = sanitize_name(object, "object")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    check = check_assertion(_kg, subject, predicate, object, as_of=as_of)
+    return {"success": True, "check": check}
 
 
 def tool_kg_add(
@@ -706,10 +834,23 @@ def tool_kg_add(
             "source_closet": source_closet,
         },
     )
+    # We check first so callers can see whether they are reinforcing an existing
+    # fact or creating a live contradiction that should be resolved explicitly.
+    fact_check = check_assertion(_kg, subject, predicate, object)
     triple_id = _kg.add_triple(
         subject, predicate, object, valid_from=valid_from, source_closet=source_closet
     )
-    return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {object}"}
+    result = {
+        "success": True,
+        "triple_id": triple_id,
+        "fact": f"{subject} → {predicate} → {object}",
+        "fact_check": fact_check,
+    }
+    if fact_check["status"] == "duplicate":
+        result["reason"] = "already_exists"
+    elif fact_check["status"] in {"warning", "conflict"}:
+        result["warning"] = fact_check["message"]
+    return result
 
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
@@ -748,6 +889,19 @@ def tool_kg_stats():
     return _kg.stats()
 
 
+# ==================== SPECIALIST AGENTS ====================
+
+
+def tool_list_agents():
+    """
+    List specialist agents discovered from ~/.mempalace/agents/*.json.
+
+    The tool returns both working agents and parse errors so users can repair
+    hand-edited JSON files without losing the rest of the registry.
+    """
+    return list_agents()
+
+
 # ==================== AGENT DIARY ====================
 
 
@@ -772,7 +926,9 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return _no_palace()
 
     now = datetime.now()
-    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.sha256(entry[:50].encode()).hexdigest()[:12]}"
+    entry_id = (
+        f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:12]}"
+    )
 
     _wal_log(
         "diary_write",
@@ -887,12 +1043,15 @@ def tool_hook_settings(silent_save: bool = None, desktop_toast: bool = None):
         return {"success": False, "error": str(e)}
 
     changed = []
-    if silent_save is not None:
-        config.set_hook_setting("silent_save", silent_save)
-        changed.append(f"silent_save → {silent_save}")
-    if desktop_toast is not None:
-        config.set_hook_setting("desktop_toast", desktop_toast)
-        changed.append(f"desktop_toast → {desktop_toast}")
+    try:
+        if silent_save is not None:
+            config.set_hook_setting("silent_save", silent_save)
+            changed.append(f"silent_save → {silent_save}")
+        if desktop_toast is not None:
+            config.set_hook_setting("desktop_toast", desktop_toast)
+            changed.append(f"desktop_toast → {desktop_toast}")
+    except OSError as e:
+        return {"success": False, "error": f"Failed to persist hook settings: {e}"}
 
     # Re-read to return current state
     try:
@@ -998,6 +1157,29 @@ TOOLS = {
         },
         "handler": tool_kg_query,
     },
+    "mempalace_kg_check": {
+        "description": "Check whether a proposed fact conflicts with the current knowledge graph before writing it. Use this before mempalace_kg_add when a fact may have changed over time.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "description": "The entity doing/being something"},
+                "predicate": {
+                    "type": "string",
+                    "description": "The relationship type to evaluate",
+                },
+                "object": {
+                    "type": "string",
+                    "description": "The entity/value being asserted",
+                },
+                "as_of": {
+                    "type": "string",
+                    "description": "Optional date filter for time-scoped checks (YYYY-MM-DD)",
+                },
+            },
+            "required": ["subject", "predicate", "object"],
+        },
+        "handler": tool_kg_check,
+    },
     "mempalace_kg_add": {
         "description": "Add a fact to the knowledge graph. Subject → predicate → object with optional time window. E.g. ('Max', 'started_school', 'Year 7', valid_from='2026-09-01').",
         "input_schema": {
@@ -1092,7 +1274,7 @@ TOOLS = {
         "handler": tool_graph_stats,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY search keywords. Use 'context' for background. Results with cosine distance > max_distance are filtered out.",
+        "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY search keywords. Use 'context' for background. Results with cosine distance > max_distance are filtered out. Strategy defaults to hybrid_v3, which uses mined retrieval signals plus lexical/time reranking while preserving raw-distance filtering.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1116,6 +1298,11 @@ TOOLS = {
                 "context": {
                     "type": "string",
                     "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking.",
+                },
+                "strategy": {
+                    "type": "string",
+                    "enum": ["hybrid_v3", "raw_v2", "hybrid_v2", "palace", "raw"],
+                    "description": "Retrieval strategy. Default hybrid_v3 uses mined preference helpers, palace adds hall-aware routing, raw_v2 is the improved raw rerank (legacy alias: hybrid_v2), and raw is one-shot vector search.",
                 },
             },
             "required": ["query"],
@@ -1224,6 +1411,11 @@ TOOLS = {
             "required": ["drawer_id"],
         },
         "handler": tool_update_drawer,
+    },
+    "mempalace_list_agents": {
+        "description": "List specialist agents discovered from ~/.mempalace/agents. Each agent has a focus, a wing, and a diary room.",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_list_agents,
     },
     "mempalace_diary_write": {
         "description": "Write to your personal agent diary in AAAK format. Your observations, thoughts, what you worked on, what matters. Each agent has their own diary with full history. Write in AAAK for compression — e.g. 'SESSION:2026-04-04|built.palace.graph+diary.tools|ALC.req:agent.diaries.in.aaak|★★★'. Use entity codes from the AAAK spec.",
