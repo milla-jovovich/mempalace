@@ -93,7 +93,7 @@ def _parse_args():
 _args = _parse_args()
 
 if _args.palace:
-    os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
+    os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(os.path.expanduser(_args.palace))
 
 _config = MempalaceConfig()
 # Only override KG path when --palace is explicitly provided; otherwise use

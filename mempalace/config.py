@@ -167,13 +167,12 @@ class MempalaceConfig:
     def palace_path(self):
         """Path to the memory palace data directory.
 
-        Environment variables are normalized with expanduser + abspath
-        to prevent path traversal via crafted values like ``../../tmp/evil``.
+        All sources (env var, config file, default) are normalized with
+        expanduser + abspath to prevent path traversal via crafted values.
         """
         env_val = os.environ.get("MEMPALACE_PALACE_PATH") or os.environ.get("MEMPAL_PALACE_PATH")
-        if env_val:
-            return os.path.abspath(os.path.expanduser(env_val))
-        return self._file_config.get("palace_path", DEFAULT_PALACE_PATH)
+        raw = env_val if env_val else self._file_config.get("palace_path", DEFAULT_PALACE_PATH)
+        return os.path.abspath(os.path.expanduser(raw))
 
     @property
     def collection_name(self):
