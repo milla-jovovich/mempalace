@@ -20,6 +20,8 @@ import os
 from pathlib import Path
 from collections import defaultdict
 
+from .output import safe_separator
+
 
 # ==================== SIGNAL PATTERNS ====================
 
@@ -743,7 +745,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
         )
         return {"people": confirmed_people, "projects": confirmed_projects}
 
-    print(f"\n{'─' * 58}")
+    print(f"\n{safe_separator(58)}")
     print("  Options:")
     print("    [enter]  Accept all")
     print("    [edit]   Remove wrong entries or reclassify uncertain")
