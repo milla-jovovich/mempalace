@@ -1,0 +1,8 @@
+{"type":"session_meta","payload":{"id":"sess-001"}}
+{"type":"response_item","payload":{"type":"assistant_message","message":"synthetic context that should not appear in the normalized transcript"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"Review the storage migration checklist and call out the rollback risks before deployment."}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"The main rollback hazards are schema writes, background reindex jobs, and stale workers still serving old assumptions."}}
+{"type":"event_msg","payload":{"type":"status_update","message":"thinking"}}
+{"type":"response_item","payload":{"type":"user_message","message":"duplicate tool context that should also be ignored"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"Then write down the guardrails the release owner should verify during the cutover."}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"Capture health checks, abort conditions, and explicit ownership for each phase of the cutover."}}

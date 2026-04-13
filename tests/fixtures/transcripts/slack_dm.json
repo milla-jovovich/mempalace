@@ -1,0 +1,27 @@
+[
+  {
+    "type": "message",
+    "user": "U1",
+    "text": "Can you review the migration notes and flag any rollback hazards before tonight's deploy?"
+  },
+  {
+    "type": "message",
+    "user": "U2",
+    "text": "Yes. I want checkpoints around schema writes, cache invalidation, and worker restarts."
+  },
+  {
+    "type": "channel_join",
+    "user": "U1",
+    "text": "joined"
+  },
+  {
+    "type": "message",
+    "user": "U1",
+    "text": "Also list the ownership handoff so the release captain knows who confirms each phase."
+  },
+  {
+    "type": "message",
+    "user": "U2",
+    "text": "I will capture the health checks, abort gates, and named owners for each checkpoint."
+  }
+]

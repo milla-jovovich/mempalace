@@ -54,7 +54,12 @@ def test_cmd_status_custom_palace(mock_config_cls):
 def test_cmd_search_calls_search(mock_config_cls):
     mock_config_cls.return_value.palace_path = "/fake/palace"
     args = argparse.Namespace(
-        palace=None, query="test query", wing="mywing", room="myroom", results=3
+        palace=None,
+        query="test query",
+        wing="mywing",
+        room="myroom",
+        results=3,
+        strategy="hybrid_v3",
     )
     with patch("mempalace.searcher.search") as mock_search:
         cmd_search(args)
@@ -64,19 +69,36 @@ def test_cmd_search_calls_search(mock_config_cls):
             wing="mywing",
             room="myroom",
             n_results=3,
+            strategy="hybrid_v3",
         )
 
 
 @patch("mempalace.cli.MempalaceConfig")
 def test_cmd_search_error_exits(mock_config_cls):
     mock_config_cls.return_value.palace_path = "/fake/palace"
-    args = argparse.Namespace(palace=None, query="q", wing=None, room=None, results=5)
+    args = argparse.Namespace(
+        palace=None,
+        query="q",
+        wing=None,
+        room=None,
+        results=5,
+        strategy="hybrid_v3",
+    )
     from mempalace.searcher import SearchError
 
     with patch("mempalace.searcher.search", side_effect=SearchError("fail")):
         with pytest.raises(SystemExit) as exc_info:
             cmd_search(args)
         assert exc_info.value.code == 1
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_search_backwards_compat_default_strategy(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(palace=None, query="test query", wing=None, room=None, results=3)
+    with patch("mempalace.searcher.search") as mock_search:
+        cmd_search(args)
+        assert mock_search.call_args.kwargs["strategy"] == "hybrid_v3"
 
 
 # ── cmd_instructions ───────────────────────────────────────────────────
@@ -107,9 +129,11 @@ def test_cmd_init_no_entities(mock_config_cls, tmp_path):
     args = argparse.Namespace(dir=str(tmp_path), yes=True)
     with (
         patch("mempalace.entity_detector.scan_for_detection", return_value=[]),
+        patch("mempalace.onboarding.bootstrap_from_entities") as mock_bootstrap,
         patch("mempalace.room_detector_local.detect_rooms_local") as mock_rooms,
     ):
         cmd_init(args)
+        mock_bootstrap.assert_called_once()
         mock_rooms.assert_called_once_with(project_dir=str(tmp_path), yes=True)
         mock_config_cls.return_value.init.assert_called_once()
 
@@ -124,6 +148,7 @@ def test_cmd_init_with_entities(mock_config_cls, tmp_path):
         patch("mempalace.entity_detector.scan_for_detection", return_value=fake_files),
         patch("mempalace.entity_detector.detect_entities", return_value=detected),
         patch("mempalace.entity_detector.confirm_entities", return_value=confirmed),
+        patch("mempalace.onboarding.bootstrap_from_entities"),
         patch("mempalace.room_detector_local.detect_rooms_local"),
         patch("builtins.open", MagicMock()),
     ):
@@ -139,11 +164,39 @@ def test_cmd_init_with_entities_zero_total(mock_config_cls, tmp_path, capsys):
     with (
         patch("mempalace.entity_detector.scan_for_detection", return_value=fake_files),
         patch("mempalace.entity_detector.detect_entities", return_value=detected),
+        patch("mempalace.onboarding.bootstrap_from_entities"),
         patch("mempalace.room_detector_local.detect_rooms_local"),
     ):
         cmd_init(args)
     out = capsys.readouterr().out
     assert "No entities detected" in out
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_init_interactive_runs_onboarding(mock_config_cls, tmp_path, monkeypatch):
+    args = argparse.Namespace(dir=str(tmp_path), yes=False)
+    fake_registry = MagicMock()
+    fake_registry.projects = ["Acme"]
+    fake_registry.people = {"Alice": {"source": "onboarding"}}
+
+    class _TTY:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdin", _TTY())
+
+    with (
+        patch("mempalace.onboarding.run_onboarding", return_value=fake_registry) as mock_onboarding,
+        patch(
+            "mempalace.onboarding.registry_project_entities",
+            return_value={"people": ["Alice"], "projects": ["Acme"]},
+        ),
+        patch("mempalace.room_detector_local.detect_rooms_local") as mock_rooms,
+    ):
+        cmd_init(args)
+
+    mock_onboarding.assert_called_once_with(directory=str(tmp_path.resolve()))
+    mock_rooms.assert_called_once_with(project_dir=str(tmp_path.resolve()), yes=False)
 
 
 # ── cmd_mine ───────────────────────────────────────────────────────────
@@ -284,11 +337,22 @@ def test_main_status_dispatches():
 
 def test_main_search_dispatches():
     with (
-        patch("sys.argv", ["mempalace", "search", "my query"]),
+        patch("sys.argv", ["mempalace", "search", "my query", "--strategy", "palace"]),
         patch("mempalace.cli.cmd_search") as mock_cmd,
     ):
         main()
         mock_cmd.assert_called_once()
+        assert mock_cmd.call_args.args[0].strategy == "palace"
+
+
+def test_main_search_accepts_raw_v2_strategy():
+    with (
+        patch("sys.argv", ["mempalace", "search", "my query", "--strategy", "raw_v2"]),
+        patch("mempalace.cli.cmd_search") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+        assert mock_cmd.call_args.args[0].strategy == "raw_v2"
 
 
 def test_main_init_dispatches():
@@ -335,6 +399,8 @@ def test_mcp_command_prints_setup_guidance(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "MemPalace MCP quick setup:" in captured.out
     assert "claude mcp add mempalace -- python -m mempalace.mcp_server" in captured.out
+    assert "Codex plugin: copy .codex-plugin/ into your repo root or run Codex inside this repo" in captured.out
+    assert "Codex server command: python -m mempalace.mcp_server" in captured.out
     assert "\nOptional custom palace:\n" in captured.out
     assert "python -m mempalace.mcp_server --palace /path/to/palace" in captured.out
     assert "[--palace /path/to/palace]" not in captured.out
@@ -350,6 +416,7 @@ def test_mcp_command_uses_custom_palace_path_when_provided(monkeypatch, capsys):
     expanded = str(Path("~/tmp/my palace").expanduser())
 
     assert "python -m mempalace.mcp_server --palace" in captured.out
+    assert f"Codex server command: python -m mempalace.mcp_server --palace '{expanded}'" in captured.out
     assert expanded in captured.out
     assert "Optional custom palace:" not in captured.out
     assert "[--palace /path/to/palace]" not in captured.out
@@ -413,74 +480,33 @@ def test_main_compress_dispatches():
 
 
 @patch("mempalace.cli.MempalaceConfig")
-def test_cmd_repair_no_palace(mock_config_cls, tmp_path, capsys):
-    mock_config_cls.return_value.palace_path = str(tmp_path / "nonexistent")
-    args = argparse.Namespace(palace=None)
-    mock_chromadb = MagicMock()
-    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+def test_cmd_repair_delegates_rebuild(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/configured/palace"
+    args = argparse.Namespace(palace=None, signals=False, dry_run=False)
+    with patch("mempalace.repair.rebuild_index") as mock_rebuild:
         cmd_repair(args)
-    out = capsys.readouterr().out
-    assert "No palace found" in out
+    mock_rebuild.assert_called_once_with(palace_path="/configured/palace")
 
 
 @patch("mempalace.cli.MempalaceConfig")
-def test_cmd_repair_error_reading(mock_config_cls, tmp_path, capsys):
-    palace_dir = tmp_path / "palace"
-    palace_dir.mkdir()
-    mock_config_cls.return_value.palace_path = str(palace_dir)
-    args = argparse.Namespace(palace=None)
-    mock_chromadb = MagicMock()
-    mock_client = MagicMock()
-    mock_client.get_collection.side_effect = Exception("corrupt db")
-    mock_chromadb.PersistentClient.return_value = mock_client
-    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+def test_cmd_repair_delegates_signal_backfill(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/configured/palace"
+    args = argparse.Namespace(palace=None, signals=True, dry_run=True)
+    with patch("mempalace.repair.backfill_retrieval_signals") as mock_backfill:
         cmd_repair(args)
-    out = capsys.readouterr().out
-    assert "Error reading palace" in out
+    mock_backfill.assert_called_once_with(
+        palace_path="/configured/palace",
+        dry_run=True,
+    )
 
 
 @patch("mempalace.cli.MempalaceConfig")
-def test_cmd_repair_zero_drawers(mock_config_cls, tmp_path, capsys):
-    palace_dir = tmp_path / "palace"
-    palace_dir.mkdir()
-    mock_config_cls.return_value.palace_path = str(palace_dir)
+def test_cmd_repair_backwards_compat_without_new_args(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/configured/palace"
     args = argparse.Namespace(palace=None)
-    mock_chromadb = MagicMock()
-    mock_col = MagicMock()
-    mock_col.count.return_value = 0
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
-    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+    with patch("mempalace.repair.rebuild_index") as mock_rebuild:
         cmd_repair(args)
-    out = capsys.readouterr().out
-    assert "Nothing to repair" in out
-
-
-@patch("mempalace.cli.MempalaceConfig")
-def test_cmd_repair_success(mock_config_cls, tmp_path, capsys):
-    palace_dir = tmp_path / "palace"
-    palace_dir.mkdir()
-    mock_config_cls.return_value.palace_path = str(palace_dir)
-    args = argparse.Namespace(palace=None)
-    mock_chromadb = MagicMock()
-    mock_col = MagicMock()
-    mock_col.count.return_value = 2
-    mock_col.get.return_value = {
-        "ids": ["id1", "id2"],
-        "documents": ["doc1", "doc2"],
-        "metadatas": [{"wing": "a"}, {"wing": "b"}],
-    }
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_new_col = MagicMock()
-    mock_client.create_collection.return_value = mock_new_col
-    mock_chromadb.PersistentClient.return_value = mock_client
-    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
-        cmd_repair(args)
-    out = capsys.readouterr().out
-    assert "Repair complete" in out
-    assert "2 drawers rebuilt" in out
+    mock_rebuild.assert_called_once_with(palace_path="/configured/palace")
 
 
 # ── cmd_compress ───────────────────────────────────────────────────────
@@ -644,13 +670,8 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
 
 
 def test_cmd_repair_trailing_slash_does_not_recurse():
-    """Repair with trailing slash should put backup outside palace dir (#395)."""
-    import os
-
-    args = argparse.Namespace(palace="/tmp/fake_palace/")
-    with patch("mempalace.cli.os.path.isdir", return_value=False):
+    """Explicit palace paths should pass through unchanged to the repair layer."""
+    args = argparse.Namespace(palace="/tmp/fake_palace/", signals=False, dry_run=False)
+    with patch("mempalace.repair.rebuild_index") as mock_rebuild:
         cmd_repair(args)
-    # Verify the rstrip logic: palace_path should not end with separator
-    palace_path = os.path.expanduser(args.palace).rstrip(os.sep)
-    backup_path = palace_path + ".backup"
-    assert not backup_path.startswith(palace_path + os.sep)
+    mock_rebuild.assert_called_once_with(palace_path="/tmp/fake_palace/")

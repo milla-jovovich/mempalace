@@ -1,8 +1,9 @@
 import contextlib
 import io
 import json
+import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -264,6 +265,20 @@ def test_maybe_auto_ingest_oserror(tmp_path):
                 _maybe_auto_ingest()  # should not raise
 
 
+def test_maybe_auto_ingest_skips_when_another_mine_is_active(tmp_path):
+    """A live pid file should debounce overlapping background miners."""
+    mempal_dir = tmp_path / "project"
+    mempal_dir.mkdir()
+    (tmp_path / "auto_ingest.pid").write_text("4242", encoding="utf-8")
+
+    with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
+        with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
+            with patch("mempalace.hooks_cli.os.kill", return_value=None):
+                with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
+                    _maybe_auto_ingest()
+                    mock_popen.assert_not_called()
+
+
 # --- _parse_harness_input ---
 
 
@@ -332,18 +347,18 @@ def test_stop_hook_oserror_on_write(tmp_path):
 
 
 def test_precompact_with_mempal_dir(tmp_path):
-    """Precompact runs subprocess.run when MEMPAL_DIR is set."""
+    """Precompact runs the same guarded auto-ingest path as stop hooks."""
     mempal_dir = tmp_path / "project"
     mempal_dir.mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
-        with patch("mempalace.hooks_cli.subprocess.run") as mock_run:
+        with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
             result = _capture_hook_output(
                 hook_precompact,
                 {"session_id": "test"},
                 state_dir=tmp_path,
             )
     assert result["decision"] == "block"
-    mock_run.assert_called_once()
+    mock_popen.assert_called_once()
 
 
 def test_precompact_with_mempal_dir_oserror(tmp_path):
@@ -351,13 +366,33 @@ def test_precompact_with_mempal_dir_oserror(tmp_path):
     mempal_dir = tmp_path / "project"
     mempal_dir.mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
-        with patch("mempalace.hooks_cli.subprocess.run", side_effect=OSError("fail")):
+        with patch("mempalace.hooks_cli.subprocess.Popen", side_effect=OSError("fail")):
             result = _capture_hook_output(
                 hook_precompact,
                 {"session_id": "test"},
                 state_dir=tmp_path,
             )
     assert result["decision"] == "block"
+
+
+def test_precompact_timeout_still_blocks_and_terminates_ingest(tmp_path):
+    """TimeoutExpired should not leak out of the hook or leave it undecided."""
+    mempal_dir = tmp_path / "project"
+    mempal_dir.mkdir()
+    fake_proc = MagicMock()
+    fake_proc.pid = 4242
+    fake_proc.wait.side_effect = [subprocess.TimeoutExpired(cmd=["mine"], timeout=60), None]
+
+    with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
+        with patch("mempalace.hooks_cli.subprocess.Popen", return_value=fake_proc):
+            result = _capture_hook_output(
+                hook_precompact,
+                {"session_id": "test"},
+                state_dir=tmp_path,
+            )
+
+    assert result["decision"] == "block"
+    fake_proc.terminate.assert_called_once()
 
 
 # --- run_hook ---

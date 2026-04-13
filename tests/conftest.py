@@ -44,6 +44,7 @@ def _reset_mcp_cache():
 
             mcp_server._client_cache = None
             mcp_server._collection_cache = None
+            mcp_server._support_collection_cache = None
         except (ImportError, AttributeError):
             pass
 
@@ -101,7 +102,10 @@ def config(tmp_dir, palace_path):
 def collection(palace_path):
     """A ChromaDB collection pre-seeded in the temp palace."""
     client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
+    col = client.get_or_create_collection(
+        "mempalace_drawers",
+        metadata={"hnsw:space": "cosine"},
+    )
     yield col
     client.delete_collection("mempalace_drawers")
     del client

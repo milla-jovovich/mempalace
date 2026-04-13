@@ -1,0 +1,28 @@
+[
+  {
+    "uuid": "convo-1",
+    "chat_messages": [
+      {
+        "role": "user",
+        "content": "Summarize the migration risks before we cut the release candidate."
+      },
+      {
+        "role": "assistant",
+        "content": "The main risks are schema drift, stale caches, and missing rollback checkpoints."
+      }
+    ]
+  },
+  {
+    "uuid": "convo-2",
+    "chat_messages": [
+      {
+        "role": "user",
+        "content": "Write down the rollout guardrails so the ops handoff is explicit."
+      },
+      {
+        "role": "assistant",
+        "content": "Document the health checks, abort conditions, and ownership for each phase."
+      }
+    ]
+  }
+]

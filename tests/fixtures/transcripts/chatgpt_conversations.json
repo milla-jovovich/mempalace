@@ -1,0 +1,86 @@
+[
+  {
+    "title": "Migration review",
+    "mapping": {
+      "root": {
+        "parent": null,
+        "message": null,
+        "children": [
+          "msg-1"
+        ]
+      },
+      "msg-1": {
+        "parent": "root",
+        "message": {
+          "author": {
+            "role": "user"
+          },
+          "content": {
+            "parts": [
+              "Review the storage migration plan and call out the rollback hazards before deployment."
+            ]
+          }
+        },
+        "children": [
+          "msg-2"
+        ]
+      },
+      "msg-2": {
+        "parent": "msg-1",
+        "message": {
+          "author": {
+            "role": "assistant"
+          },
+          "content": {
+            "parts": [
+              "Rollback risk is highest around schema writes and background reindex jobs, so capture checkpoints before either step."
+            ]
+          }
+        },
+        "children": []
+      }
+    }
+  },
+  {
+    "title": "Ops handoff",
+    "mapping": {
+      "root-2": {
+        "parent": null,
+        "message": null,
+        "children": [
+          "msg-3"
+        ]
+      },
+      "msg-3": {
+        "parent": "root-2",
+        "message": {
+          "author": {
+            "role": "user"
+          },
+          "content": {
+            "parts": [
+              "List the release-owner guardrails that must be checked during cutover."
+            ]
+          }
+        },
+        "children": [
+          "msg-4"
+        ]
+      },
+      "msg-4": {
+        "parent": "msg-3",
+        "message": {
+          "author": {
+            "role": "assistant"
+          },
+          "content": {
+            "parts": [
+              "Verify health checks, abort conditions, and owner acknowledgements for each deployment phase."
+            ]
+          }
+        },
+        "children": []
+      }
+    }
+  }
+]

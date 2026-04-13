@@ -70,6 +70,13 @@ quote-style = "double"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-m 'not benchmark and not slow and not stress'"
+# Keep the test signal focused on MemPalace regressions. These two warnings are
+# emitted by upstream dependencies during normal operation in the current tested
+# stack and are not actionable in this repo.
+filterwarnings = [
+    "ignore:Accessing the 'model_fields' attribute on the instance is deprecated:DeprecationWarning",
+    "ignore:Python 3.14 will, by default, filter extracted tar archives:DeprecationWarning",
+]
 markers = [
     "benchmark: scale/performance benchmark tests",
     "slow: tests that take more than 30 seconds",

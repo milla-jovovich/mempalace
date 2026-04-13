@@ -1,6 +1,7 @@
 """Tests for mempalace.onboarding."""
 
 import os
+import json
 from unittest.mock import patch
 
 from mempalace.onboarding import (
@@ -14,6 +15,8 @@ from mempalace.onboarding import (
     _generate_aaak_bootstrap,
     _header,
     _hr,
+    bootstrap_from_entities,
+    registry_project_entities,
     _warn_ambiguous,
     _yn,
     quick_setup,
@@ -149,6 +152,60 @@ def test_generate_aaak_bootstrap_creates_files(tmp_path):
 
     assert (tmp_path / "aaak_entities.md").exists()
     assert (tmp_path / "critical_facts.md").exists()
+
+
+def test_bootstrap_from_entities_creates_full_init_artifacts(tmp_path):
+    people = [{"name": "Riley", "relationship": "daughter", "context": "personal"}]
+    result = bootstrap_from_entities(
+        people,
+        ["MemPalace"],
+        wings=["family", "projects"],
+        mode="combo",
+        config_dir=tmp_path,
+    )
+
+    assert (tmp_path / "aaak_entities.md").exists()
+    assert (tmp_path / "critical_facts.md").exists()
+    assert (tmp_path / "wing_config.json").exists()
+    assert (tmp_path / "identity.txt").exists()
+    assert (tmp_path / "agents" / "reviewer.json").exists()
+    assert result["mode"] == "combo"
+
+    wing_config = json.loads((tmp_path / "wing_config.json").read_text())
+    assert wing_config["wings"]["wing_riley"]["type"] == "person"
+    assert wing_config["wings"]["wing_mempalace"]["type"] == "project"
+    config = json.loads((tmp_path / "config.json").read_text())
+    assert config["topic_wings"] == ["family", "projects"]
+
+
+def test_bootstrap_from_entities_preserves_existing_identity_file(tmp_path):
+    identity = tmp_path / "identity.txt"
+    identity.write_text("custom identity\n", encoding="utf-8")
+
+    bootstrap_from_entities(
+        [{"name": "Riley", "relationship": "daughter", "context": "personal"}],
+        [],
+        wings=["family"],
+        mode="personal",
+        config_dir=tmp_path,
+    )
+
+    assert identity.read_text(encoding="utf-8") == "custom identity\n"
+
+
+def test_registry_project_entities_skips_alias_records(tmp_path):
+    registry = quick_setup(
+        mode="personal",
+        people=[{"name": "Riley", "relationship": "daughter", "context": "personal"}],
+        aliases={"Rye": "Riley"},
+        projects=["MemPalace"],
+        config_dir=tmp_path,
+    )
+
+    entities = registry_project_entities(registry)
+
+    assert entities["people"] == ["Riley"]
+    assert entities["projects"] == ["MemPalace"]
 
 
 def test_generate_aaak_bootstrap_entities_content(tmp_path):
@@ -434,6 +491,9 @@ def test_run_onboarding_basic_flow(tmp_path):
         registry = run_onboarding(directory=".", config_dir=tmp_path, auto_detect=False)
     assert "Bob" in registry.people
     assert "Acme" in registry.projects
+    assert (tmp_path / "wing_config.json").exists()
+    assert (tmp_path / "identity.txt").exists()
+    assert (tmp_path / "agents" / "reviewer.json").exists()
 
 
 def test_run_onboarding_with_ambiguous_names(tmp_path):

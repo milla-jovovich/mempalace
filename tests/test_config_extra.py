@@ -77,3 +77,13 @@ def test_collection_name_from_config(tmp_path):
     )
     cfg = MempalaceConfig(config_dir=str(tmp_path))
     assert cfg.collection_name == "custom_col"
+
+
+def test_set_hook_setting_creates_missing_config_dir(tmp_path):
+    cfg_dir = tmp_path / "missing-config"
+    cfg = MempalaceConfig(config_dir=str(cfg_dir))
+    result = cfg.set_hook_setting("silent_save", False)
+    assert result.exists()
+    with open(result, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["hooks"]["silent_save"] is False

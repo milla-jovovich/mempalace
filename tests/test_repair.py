@@ -63,6 +63,15 @@ def test_paginate_ids_offset_exception_fallback():
     assert "id1" in ids
 
 
+def test_paginate_drawers_empty_and_chunk_index_fallback():
+    col = MagicMock()
+    col.get.return_value = {"ids": []}
+
+    assert list(repair._paginate_drawers(col)) == []
+    assert repair._coerce_chunk_index("bad") == 0
+    assert repair._coerce_chunk_index(None) == 0
+
+
 # ── scan_palace ───────────────────────────────────────────────────────
 
 
@@ -264,3 +273,233 @@ def test_rebuild_index_error_reading(mock_chromadb, mock_shutil, tmp_path):
 
     repair.rebuild_index(palace_path=str(tmp_path))
     mock_client.delete_collection.assert_not_called()
+
+
+# ── backfill_retrieval_signals ────────────────────────────────────────
+
+
+def test_backfill_retrieval_signals_missing_palace(tmp_path):
+    result = repair.backfill_retrieval_signals(palace_path=str(tmp_path / "missing"))
+    assert result["success"] is False
+    assert result["reason"] == "missing_palace"
+
+
+@patch("mempalace.repair.build_retrieval_artifacts")
+@patch("mempalace.repair.chromadb")
+def test_backfill_retrieval_signals_dry_run(mock_chromadb, mock_build, tmp_path):
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [
+            {"wing": "w", "room": "r", "source_file": "one.txt", "chunk_index": "7"},
+            {
+                "wing": "w",
+                "room": "r",
+                "source_file": "two.txt",
+                "chunk_index": 1,
+                "hall": "hall_general",
+                "ingest_mode": "project",
+            },
+        ],
+    }
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+
+    mock_build.side_effect = [
+        {
+            "drawer_id": "id1",
+            "metadata": {"hall": "hall_preferences", "ingest_mode": "convos"},
+            "support_row": {
+                "id": "support1",
+                "document": "support text",
+                "metadata": {"parent_drawer_id": "id1"},
+            },
+        },
+        {
+            "drawer_id": "id2",
+            "metadata": {"hall": "hall_general", "ingest_mode": "project"},
+            "support_row": None,
+        },
+    ]
+
+    result = repair.backfill_retrieval_signals(palace_path=str(palace_dir), dry_run=True)
+
+    assert result == {
+        "success": True,
+        "dry_run": True,
+        "raw_scanned": 2,
+        "raw_updated": 1,
+        "support_docs": 1,
+    }
+    assert mock_build.call_args_list[0].kwargs["chunk_index"] == 7
+    mock_col.upsert.assert_not_called()
+    mock_client.delete_collection.assert_not_called()
+
+
+@patch("mempalace.repair.chromadb")
+def test_backfill_retrieval_signals_read_error(mock_chromadb, tmp_path):
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+
+    mock_client = MagicMock()
+    mock_client.get_collection.side_effect = RuntimeError("broken")
+    mock_chromadb.PersistentClient.return_value = mock_client
+
+    result = repair.backfill_retrieval_signals(palace_path=str(palace_dir))
+    assert result == {"success": False, "reason": "read_error", "error": "broken"}
+
+
+@patch("mempalace.repair.build_retrieval_artifacts")
+@patch("mempalace.repair.chromadb")
+def test_backfill_retrieval_signals_updates_raw_and_support(mock_chromadb, mock_build, tmp_path):
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [
+            {
+                "wing": "w",
+                "room": "r",
+                "source_file": "one.txt",
+                "chunk_index": 0,
+                "hall": "hall_general",
+                "ingest_mode": "project",
+            },
+            {
+                "wing": "w",
+                "room": "r",
+                "source_file": "two.txt",
+                "chunk_index": 1,
+                "hall": "hall_general",
+                "ingest_mode": "project",
+            },
+        ],
+    }
+    mock_support = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_client.create_collection.return_value = mock_support
+    mock_chromadb.PersistentClient.return_value = mock_client
+
+    mock_build.side_effect = [
+        {
+            "drawer_id": "id1",
+            "metadata": {"hall": "hall_preferences", "ingest_mode": "convos"},
+            "support_row": {
+                "id": "support1",
+                "document": "support text 1",
+                "metadata": {"parent_drawer_id": "id1"},
+            },
+        },
+        {
+            "drawer_id": "id2",
+            "metadata": {"hall": "hall_general", "ingest_mode": "project"},
+            "support_row": {
+                "id": "support2",
+                "document": "support text 2",
+                "metadata": {"parent_drawer_id": "id2"},
+            },
+        },
+    ]
+
+    result = repair.backfill_retrieval_signals(palace_path=str(palace_dir))
+
+    assert result == {
+        "success": True,
+        "dry_run": False,
+        "raw_scanned": 2,
+        "raw_updated": 1,
+        "support_docs": 2,
+    }
+    mock_col.upsert.assert_called_once_with(
+        ids=["id1"],
+        documents=["doc1"],
+        metadatas=[{"hall": "hall_preferences", "ingest_mode": "convos"}],
+    )
+    mock_client.delete_collection.assert_called_once_with(repair.SUPPORT_COLLECTION_NAME)
+    mock_client.create_collection.assert_called_once_with(
+        repair.SUPPORT_COLLECTION_NAME,
+        metadata={"hnsw:space": "cosine"},
+    )
+    mock_support.upsert.assert_called_once_with(
+        ids=["support1", "support2"],
+        documents=["support text 1", "support text 2"],
+        metadatas=[{"parent_drawer_id": "id1"}, {"parent_drawer_id": "id2"}],
+    )
+
+
+@patch("mempalace.repair.build_retrieval_artifacts")
+@patch("mempalace.repair.chromadb")
+def test_backfill_retrieval_signals_logs_progress_and_tolerates_missing_support_collection(
+    mock_chromadb, mock_build, tmp_path, capsys
+):
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+
+    total = 5000
+    mock_col = MagicMock()
+    mock_col.count.return_value = total
+    batch_size = 1000
+    paged_rows = []
+    for start in range(0, total, batch_size):
+        stop = start + batch_size
+        paged_rows.append(
+            {
+                "ids": [f"id{i}" for i in range(start, stop)],
+                "documents": ["doc"] * batch_size,
+                "metadatas": [
+                    {
+                        "wing": "w",
+                        "room": "r",
+                        "source_file": f"f{i}.txt",
+                        "hall": "hall_general",
+                        "ingest_mode": "project",
+                    }
+                    for i in range(start, stop)
+                ],
+            }
+        )
+    paged_rows.append({"ids": [], "documents": [], "metadatas": []})
+    mock_col.get.side_effect = paged_rows
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_client.delete_collection.side_effect = RuntimeError("missing support")
+    mock_chromadb.PersistentClient.return_value = mock_client
+    mock_build.return_value = {
+        "drawer_id": "ignored",
+        "metadata": {"hall": "hall_general", "ingest_mode": "project"},
+        "support_row": None,
+    }
+
+    result = repair.backfill_retrieval_signals(palace_path=str(palace_dir))
+
+    assert result["raw_scanned"] == total
+    assert result["support_docs"] == 0
+    assert "scanned 5000/5000 drawers" in capsys.readouterr().out
+    mock_client.create_collection.assert_not_called()
+
+
+@patch("mempalace.repair.chromadb")
+def test_backfill_retrieval_signals_empty_palace(mock_chromadb, tmp_path):
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+
+    mock_col = MagicMock()
+    mock_col.count.return_value = 0
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+
+    result = repair.backfill_retrieval_signals(palace_path=str(palace_dir))
+    assert result["success"] is True
+    assert result["raw_scanned"] == 0

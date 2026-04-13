@@ -1,0 +1,6 @@
+{"type":"human","message":{"content":"Please checkpoint the release notes draft after this response."}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I will gather the relevant file names first."},{"type":"tool_use","id":"toolu_2","name":"Read","input":{"file_path":"/tmp/release-notes.md"}}]}}
+{"type":"human","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"release notes body"}]}}
+{"type":"human","message":{"content":"<command-message>status</command-message>"}}
+{"type":"human","message":{"content":[{"type":"text","text":"Also note the rollback checklist and owner handoff requirements."}]}}
+{"type":"assistant","message":{"content":"I will include the rollback checklist and the owner handoff section."}}

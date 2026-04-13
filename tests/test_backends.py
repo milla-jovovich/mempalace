@@ -79,7 +79,8 @@ def test_chroma_backend_create_true_creates_directory_and_collection(tmp_path):
     assert isinstance(collection, ChromaCollection)
 
     client = chromadb.PersistentClient(path=str(palace_path))
-    client.get_collection("mempalace_drawers")
+    raw = client.get_collection("mempalace_drawers")
+    assert raw.metadata["hnsw:space"] == "cosine"
 
 
 def test_fix_blob_seq_ids_converts_blobs_to_integers(tmp_path):

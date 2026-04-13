@@ -7,6 +7,7 @@ via monkeypatch to avoid touching real data.
 """
 
 import json
+from unittest.mock import patch
 
 
 def _patch_mcp_server(monkeypatch, config, kg):
@@ -27,7 +28,10 @@ def _get_collection(palace_path, create=False):
 
     client = chromadb.PersistentClient(path=palace_path)
     if create:
-        return client, client.get_or_create_collection("mempalace_drawers")
+        return client, client.get_or_create_collection(
+            "mempalace_drawers",
+            metadata={"hnsw:space": "cosine"},
+        )
     return client, client.get_collection("mempalace_drawers")
 
 
@@ -109,6 +113,8 @@ class TestHandleRequest:
         assert "mempalace_search" in names
         assert "mempalace_add_drawer" in names
         assert "mempalace_kg_add" in names
+        assert "mempalace_kg_check" in names
+        assert "mempalace_list_agents" in names
 
     def test_null_arguments_does_not_hang(self, monkeypatch, config, palace_path, seeded_kg):
         """Sending arguments: null should return a result, not hang (#394)."""
@@ -223,6 +229,7 @@ class TestReadTools:
         assert result["total_drawers"] == 4
         assert "project" in result["wings"]
         assert "notes" in result["wings"]
+        assert "specialist_agents" in result
 
     def test_list_wings(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
@@ -295,6 +302,33 @@ class TestSearchTool:
         result = tool_search(query="database", room="backend")
         assert all(r["room"] == "backend" for r in result["results"])
 
+    def test_search_default_strategy_is_hybrid_v3(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_search
+
+        result = tool_search(query="database")
+        assert result["strategy"] == "hybrid_v3"
+
+    def test_search_strategy_passthrough(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        seen = {}
+
+        def fake_search_memories(*args, **kwargs):
+            seen["strategy"] = kwargs["strategy"]
+            return {"strategy": kwargs["strategy"], "results": []}
+
+        monkeypatch.setattr(mcp_server, "search_memories", fake_search_memories)
+
+        result = mcp_server.tool_search(query="database", strategy="raw")
+        assert result["strategy"] == "raw"
+        assert seen["strategy"] == "raw"
+
     def test_search_min_similarity_backwards_compat(
         self, monkeypatch, config, palace_path, seeded_collection, kg
     ):
@@ -331,6 +365,7 @@ class TestWriteTools:
         assert result["wing"] == "test_wing"
         assert result["room"] == "test_room"
         assert result["drawer_id"].startswith("drawer_test_wing_test_room_")
+        assert result["hall"] == "hall_general"
 
     def test_add_drawer_duplicate_detection(self, monkeypatch, config, palace_path, kg):
         _patch_mcp_server(monkeypatch, config, kg)
@@ -345,6 +380,49 @@ class TestWriteTools:
         result2 = tool_add_drawer(wing="w", room="r", content=content)
         assert result2["success"] is True
         assert result2["reason"] == "already_exists"
+
+    def test_add_drawer_creates_support_docs_and_delete_drawer_removes_them(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        client, _col = _get_collection(palace_path, create=True)
+        from mempalace.mcp_server import tool_add_drawer, tool_delete_drawer
+
+        result = tool_add_drawer(
+            wing="prefs",
+            room="wellbeing",
+            content="I've been struggling with battery life on my laptop lately.",
+        )
+
+        support = client.get_collection("mempalace_support")
+        support_rows = support.get(where={"parent_drawer_id": result["drawer_id"]})
+        assert result["success"] is True
+        assert result["hall"] == "hall_preferences"
+        assert support_rows["ids"]
+        assert support_rows["metadatas"][0]["support_kind"] == "preference"
+
+        deleted = tool_delete_drawer(result["drawer_id"])
+        support_after = support.get(where={"parent_drawer_id": result["drawer_id"]})
+        assert deleted["success"] is True
+        assert support_after["ids"] == []
+
+    def test_add_drawer_distinct_content_same_prefix(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer
+
+        prefix = "A" * 100
+        result1 = tool_add_drawer(wing="w", room="r", content=prefix + "first")
+        result2 = tool_add_drawer(wing="w", room="r", content=prefix + "second")
+
+        stored = col.get(include=["documents"])
+
+        assert result1["success"] is True
+        assert result2["success"] is True
+        assert result2.get("reason") != "already_exists"
+        assert col.count() == 2
+        assert sorted(stored["documents"]) == sorted([prefix + "first", prefix + "second"])
 
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
@@ -379,6 +457,16 @@ class TestWriteTools:
             threshold=0.99,
         )
         assert result["is_duplicate"] is False
+
+    def test_check_duplicate_reuses_write_path_content_limits(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_check_duplicate
+
+        result = tool_check_duplicate("x" * 100001)
+
+        assert result["error"] == "content exceeds maximum length of 100000 characters"
 
     def test_get_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
@@ -455,6 +543,38 @@ class TestWriteTools:
         fetched = tool_get_drawer("drawer_proj_backend_aaa")
         assert fetched["content"] == "Updated content about auth."
 
+    def test_update_drawer_refreshes_support_docs(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        client, _col = _get_collection(palace_path, create=True)
+        from mempalace.mcp_server import tool_add_drawer, tool_update_drawer
+
+        added = tool_add_drawer(
+            wing="prefs",
+            room="wellbeing",
+            content="I have been struggling with battery life on my laptop lately.",
+        )
+        support = client.get_collection("mempalace_support")
+        support_before = support.get(where={"parent_drawer_id": added["drawer_id"]})
+
+        updated = tool_update_drawer(
+            added["drawer_id"],
+            content="Plain neutral note with no preference signal anymore.",
+        )
+        support_after = support.get(where={"parent_drawer_id": added["drawer_id"]})
+        raw_after = client.get_collection("mempalace_drawers").get(
+            ids=[added["drawer_id"]],
+            include=["metadatas", "documents"],
+        )
+
+        assert support_before["ids"]
+        assert updated["success"] is True
+        assert updated["hall"] == "hall_general"
+        assert raw_after["documents"] == ["Plain neutral note with no preference signal anymore."]
+        assert raw_after["metadatas"][0]["hall"] == "hall_general"
+        assert support_after["ids"] == []
+
     def test_update_drawer_wing_and_room(
         self, monkeypatch, config, palace_path, seeded_collection, kg
     ):
@@ -486,6 +606,26 @@ class TestWriteTools:
 
 
 class TestKGTools:
+    def test_kg_check_clear(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_check
+
+        result = tool_kg_check(subject="Alice", predicate="likes", object="tea")
+
+        assert result["success"] is True
+        assert result["check"]["status"] == "clear"
+
+    def test_kg_check_conflict(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_add, tool_kg_check
+
+        tool_kg_add(subject="Maya", predicate="assigned_to", object="auth-migration")
+        result = tool_kg_check(subject="Maya", predicate="assigned_to", object="dark-mode")
+
+        assert result["success"] is True
+        assert result["check"]["status"] == "conflict"
+        assert result["check"]["conflicts"][0]["object"] == "auth-migration"
+
     def test_kg_add(self, monkeypatch, config, palace_path, kg):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_kg_add
@@ -497,6 +637,30 @@ class TestKGTools:
             valid_from="2025-01-01",
         )
         assert result["success"] is True
+        assert result["fact_check"]["status"] == "clear"
+
+    def test_kg_add_reports_duplicate(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_kg_add
+
+        first = tool_kg_add(subject="Alice", predicate="likes", object="coffee")
+        second = tool_kg_add(subject="Alice", predicate="likes", object="coffee")
+
+        assert first["success"] is True
+        assert second["success"] is True
+        assert second["reason"] == "already_exists"
+        assert second["fact_check"]["status"] == "duplicate"
+
+    def test_kg_add_reports_conflict_warning(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_kg_add
+
+        tool_kg_add(subject="Maya", predicate="assigned_to", object="auth-migration")
+        result = tool_kg_add(subject="Maya", predicate="assigned_to", object="dark-mode")
+
+        assert result["success"] is True
+        assert "warning" in result
+        assert result["fact_check"]["status"] == "conflict"
 
     def test_kg_query(self, monkeypatch, config, palace_path, seeded_kg):
         _patch_mcp_server(monkeypatch, config, seeded_kg)
@@ -563,3 +727,57 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+    def test_diary_write_same_second_same_prefix_keeps_both(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        import datetime as real_datetime
+
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_diary_read, tool_diary_write
+
+        prefix = "B" * 50
+        fixed = real_datetime.datetime(2026, 1, 1, 12, 0, 0)
+        with patch("mempalace.mcp_server.datetime") as mock_datetime:
+            mock_datetime.now.return_value = fixed
+            first = tool_diary_write(agent_name="TestAgent", entry=prefix + "one", topic="t1")
+            second = tool_diary_write(agent_name="TestAgent", entry=prefix + "two", topic="t2")
+
+        result = tool_diary_read(agent_name="TestAgent")
+
+        assert first["success"] is True
+        assert second["success"] is True
+        assert first["entry_id"] != second["entry_id"]
+        assert result["total"] == 2
+        assert {entry["topic"] for entry in result["entries"]} == {"t1", "t2"}
+
+
+class TestAgentTools:
+    def test_list_agents_reads_registry(self, monkeypatch, config, palace_path, kg, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        from mempalace.agents import ensure_default_agents
+        from mempalace.mcp_server import tool_list_agents
+
+        ensure_default_agents()
+        _patch_mcp_server(monkeypatch, config, kg)
+
+        result = tool_list_agents()
+
+        assert result["count"] >= 3
+        assert {agent["name"] for agent in result["agents"]} >= {"reviewer", "architect", "ops"}
+
+
+class TestHookSettings:
+    def test_hook_settings_persist_on_fresh_install(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        from mempalace.mcp_server import tool_hook_settings
+
+        result = tool_hook_settings(silent_save=False)
+
+        assert result["success"] is True
+        assert result["settings"]["silent_save"] is False
+        assert (tmp_path / ".mempalace" / "config.json").exists()
