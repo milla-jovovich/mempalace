@@ -224,7 +224,7 @@ def _collect_claude_messages(items) -> list:
         if not isinstance(item, dict):
             continue
         role = item.get("role") or item.get("sender", "")
-        text = _extract_content(item.get("content", "")) or item.get("text", "").strip()
+        text = _extract_content(item.get("content", "")) or (item.get("text") or "").strip()
         if role in ("user", "human") and text:
             messages.append(("user", text))
         elif role in ("assistant", "ai") and text:

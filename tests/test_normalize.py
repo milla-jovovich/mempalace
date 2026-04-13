@@ -571,6 +571,21 @@ def test_claude_ai_privacy_export_text_fallback():
     assert "> Q1" in result
 
 
+def test_claude_ai_privacy_export_null_text():
+    """Privacy export where text field is explicitly null must not crash."""
+    data = [
+        {
+            "chat_messages": [
+                {"sender": "human", "text": None, "content": "Q1"},
+                {"sender": "assistant", "text": None, "content": "A1"},
+            ]
+        }
+    ]
+    result = _try_claude_ai_json(data)
+    assert result is not None
+    assert "> Q1" in result
+
+
 def test_claude_ai_privacy_export_per_conversation():
     """Multiple conversations produce separate transcripts."""
     data = [
