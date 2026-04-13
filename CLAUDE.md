@@ -5,7 +5,7 @@
 JP's fork of [milla-jovovich/mempalace](https://github.com/milla-jovovich/mempalace) — a local AI memory system using ChromaDB for verbatim storage and semantic search.
 
 - **Fork**: `jphein/mempalace` (origin) / `milla-jovovich/mempalace` (upstream)
-- **Version**: 3.1.0 + local fixes
+- **Version**: 3.2.0 (merged upstream v3.2.0 on 2026-04-13)
 - **Python**: venv at `./venv/`, editable install with dev deps
 - **Palace data**: `~/.mempalace/palace` (ChromaDB) + `~/.mempalace/config.json`
 
@@ -68,7 +68,7 @@ All fork changes submitted as separate focused PRs targeting `develop`. First PR
 | #660 | open | L1 importance pre-filter |
 | #661 | open | Graph cache with write-invalidation |
 | #662 | open | Hybrid search fallback |
-| #663 | open | Stale HNSW mtime detection |
+| #663 | **closed** | Stale HNSW mtime detection (upstream wrote #757) |
 | #664 | **merged** | BLOB seq_id migration repair |
 | #673 | open | Deterministic hook saves (replaces #633) |
 | #681 | open | Unicode checkmark → ASCII (#535) |

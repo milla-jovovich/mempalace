@@ -976,8 +976,13 @@ def tool_reconnect():
     try:
         _get_client()
         col = _get_collection()
-        count = col.count() if col else 0
-        return {"success": True, "message": "Reconnected to palace", "drawers": count}
+        if col is None:
+            return {
+                "success": False,
+                "message": "No palace found after reconnect",
+                "drawers": 0,
+            }
+        return {"success": True, "message": "Reconnected to palace", "drawers": col.count()}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1055,32 +1060,6 @@ def tool_memories_filed_away():
             "count": 0,
             "timestamp": None,
         }
-
-
-# ==================== SETTINGS TOOLS ====================
-
-
-def tool_reconnect():
-    """Force the MCP server to drop the cached ChromaDB collection and reconnect.
-
-    Use after external scripts or CLI commands modify the palace database
-    directly, which can leave the in-memory HNSW index stale.
-    """
-    global _collection_cache, _palace_db_inode, _palace_db_mtime
-    _collection_cache = None
-    _palace_db_inode = 0
-    _palace_db_mtime = 0.0
-    try:
-        col = _get_collection()
-        if col is None:
-            return {
-                "success": False,
-                "message": "No palace found after reconnect",
-                "drawers": 0,
-            }
-        return {"success": True, "message": "Reconnected to palace", "drawers": col.count()}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
 
 
 # ==================== MCP PROTOCOL ====================
@@ -1450,17 +1429,6 @@ TOOLS = {
         "description": "Check if a recent palace checkpoint was saved. Returns message count and timestamp.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_memories_filed_away,
-    },
-    "mempalace_reconnect": {
-        "description": (
-            "Force reconnect to the palace database. Use after external scripts or CLI commands"
-            " modified the palace directly, which can leave the in-memory HNSW index stale."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "handler": tool_reconnect,
     },
 }
 

@@ -525,8 +525,6 @@ def process_file(
     min_chunk_size: int = None,
 ) -> tuple:
     """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
-    effective_min = min_chunk_size if min_chunk_size is not None else MIN_CHUNK_SIZE
-
     # Skip if already filed
     source_file = str(filepath)
     if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
