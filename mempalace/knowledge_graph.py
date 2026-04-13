@@ -108,7 +108,7 @@ class KnowledgeGraph:
 
     # ── Write operations ──────────────────────────────────────────────────
 
-    def add_entity(self, name: str, entity_type: str = "unknown", properties: dict = None):
+    def add_entity(self, name: str, entity_type: str = "unknown", properties: dict = None) -> str:
         """Add or update an entity node."""
         eid = self._entity_id(name)
         props = json.dumps(properties or {})
@@ -131,7 +131,7 @@ class KnowledgeGraph:
         confidence: float = 1.0,
         source_closet: str = None,
         source_file: str = None,
-    ):
+    ) -> str:
         """
         Add a relationship triple: subject → predicate → object.
 
@@ -183,7 +183,7 @@ class KnowledgeGraph:
                 )
         return triple_id
 
-    def invalidate(self, subject: str, predicate: str, obj: str, ended: str = None):
+    def invalidate(self, subject: str, predicate: str, obj: str, ended: str = None) -> None:
         """Mark a relationship as no longer valid (set valid_to date)."""
         sub_id = self._entity_id(subject)
         obj_id = self._entity_id(obj)
@@ -200,7 +200,7 @@ class KnowledgeGraph:
 
     # ── Query operations ──────────────────────────────────────────────────
 
-    def query_entity(self, name: str, as_of: str = None, direction: str = "outgoing"):
+    def query_entity(self, name: str, as_of: str = None, direction: str = "outgoing") -> list[dict]:
         """
         Get all relationships for an entity.
 
