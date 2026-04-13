@@ -61,11 +61,20 @@ mkdir -p "$STATE_DIR"
 # Leave empty to skip auto-ingest (AI handles saving via the block reason).
 MEMPAL_DIR=""
 
+# Find the right Python interpreter (fixes #545 — bare python3 breaks on Windows/pipx/uv)
+find_python() {
+    if [ -n "${MEMPALACE_PYTHON:-}" ]; then echo "$MEMPALACE_PYTHON"
+    elif command -v python3 &>/dev/null; then echo "python3"
+    elif command -v python &>/dev/null; then echo "python"
+    else echo "python3"; fi
+}
+PYTHON=$(find_python)
+
 # Read JSON input from stdin
 INPUT=$(cat)
 
 # Parse all fields in a single Python call (3x faster than separate invocations)
-eval $(echo "$INPUT" | python3 -c "
+eval $(echo "$INPUT" | $PYTHON -c "
 import sys, json
 data = json.load(sys.stdin)
 sid = data.get('session_id', 'unknown')
@@ -92,7 +101,7 @@ fi
 # Count human messages in the JSONL transcript
 # SECURITY: Pass transcript path as sys.argv to avoid shell injection via crafted paths
 if [ -f "$TRANSCRIPT_PATH" ]; then
-    EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
+    EXCHANGE_COUNT=$($PYTHON - "$TRANSCRIPT_PATH" <<'PYEOF'
 import json, sys
 count = 0
 with open(sys.argv[1]) as f:
@@ -137,7 +146,7 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
     if [ -n "$MEMPAL_DIR" ] && [ -d "$MEMPAL_DIR" ]; then
         SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         REPO_DIR="$(dirname "$SCRIPT_DIR")"
-        python3 -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
+        $PYTHON -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
     fi
 
     # Block the AI and tell it to save
