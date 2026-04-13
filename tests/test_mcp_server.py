@@ -572,7 +572,7 @@ class TestKGTools:
         result = tool_kg_add(
             subject="Alice",
             predicate="likes",
-            object="coffee",
+            obj="coffee",
             valid_from="2025-01-01",
         )
         assert result["success"] is True
@@ -591,7 +591,7 @@ class TestKGTools:
         result = tool_kg_invalidate(
             subject="Max",
             predicate="does",
-            object="chess",
+            obj="chess",
             ended="2026-03-01",
         )
         assert result["success"] is True
