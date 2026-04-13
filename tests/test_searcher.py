@@ -43,7 +43,8 @@ class TestSearchMemories:
         assert "error" in result
 
     def test_result_fields(self, palace_path, seeded_collection):
-        result = search_memories("authentication", palace_path)
+        result = search_memories("JWT authentication tokens session management", palace_path)
+        assert len(result["results"]) > 0, "No results with positive similarity"
         hit = result["results"][0]
         assert "text" in hit
         assert "wing" in hit
@@ -61,6 +62,38 @@ class TestSearchMemories:
             result = search_memories("test", "/fake/path")
         assert "error" in result
         assert "query failed" in result["error"]
+
+    def test_min_similarity_filters_low_scores(self, palace_path, seeded_collection):
+        result = search_memories("authentication", palace_path, min_similarity=0.99)
+        assert len(result["results"]) == 0
+
+    def test_min_similarity_keeps_high_scores(self, palace_path, seeded_collection):
+        result_all = search_memories("JWT authentication", palace_path)
+        assert len(result_all["results"]) > 0
+        top_score = result_all["results"][0]["similarity"]
+        result_filtered = search_memories("JWT authentication", palace_path, min_similarity=top_score - 0.01)
+        assert len(result_filtered["results"]) >= 1
+        assert all(r["similarity"] >= top_score - 0.01 for r in result_filtered["results"])
+
+    def test_min_similarity_default_filters_negatives(self, palace_path, seeded_collection):
+        result = search_memories("code", palace_path)
+        assert all(r["similarity"] >= 0.0 for r in result["results"])
+
+    def test_min_similarity_negative_threshold(self, palace_path, seeded_collection):
+        result = search_memories("authentication", palace_path, min_similarity=-0.5)
+        assert "results" in result
+        assert all(r["similarity"] >= -0.5 for r in result["results"])
+
+    def test_min_similarity_out_of_range_returns_error(self, palace_path, seeded_collection):
+        result = search_memories("anything", palace_path, min_similarity=2.0)
+        assert "error" in result
+        result = search_memories("anything", palace_path, min_similarity=-1.5)
+        assert "error" in result
+
+    def test_total_before_filter(self, palace_path, seeded_collection):
+        result = search_memories("authentication", palace_path, min_similarity=0.99)
+        assert result["total_before_filter"] > 0
+        assert len(result["results"]) == 0
 
     def test_search_memories_filters_in_result(self, palace_path, seeded_collection):
         result = search_memories("test", palace_path, wing="project", room="backend")
@@ -115,7 +148,7 @@ class TestSearchCLI:
                 search("test", "/fake/path")
 
     def test_search_n_results(self, palace_path, seeded_collection, capsys):
-        search("code", palace_path, n_results=1)
+        search("React frontend TanStack Query API calls", palace_path, n_results=1)
         captured = capsys.readouterr()
         # Should have output with at least one result block
         assert "[1]" in captured.out
