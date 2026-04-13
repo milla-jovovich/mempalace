@@ -67,7 +67,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 >
 > **What's still true and reproducible:**
 >
-> - **96.6% R@5 on LongMemEval in raw mode**, on 500 questions, zero API calls — independently reproduced on M2 Ultra in under 5 minutes by [@gizmax](https://github.com/milla-jovovich/mempalace/issues/39).
+> - **96.6% R@5 on LongMemEval in raw mode**, on 500 questions, zero API calls — independently reproduced on M2 Ultra in under 5 minutes by [@gizmax](https://github.com/MemPalace/mempalace/issues/39).
 > - Local, free, no subscription, no cloud, no data leaving your machine.
 > - The architecture (wings, rooms, closets, drawers) is real and useful, even if it's not a magical retrieval boost.
 >
@@ -78,7 +78,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 > 3. Wiring `fact_checker.py` into the KG ops so the contradiction detection claim becomes true
 > 4. Pinning ChromaDB to a tested range (Issue #100), fixing the shell injection in hooks (#110), and addressing the macOS ARM64 segfault (#74)
 >
-> **Thank you to everyone who poked holes in this.** Brutal honest criticism is exactly what makes open source work, and it's what we asked for. Special thanks to [@panuhorsmalahti](https://github.com/milla-jovovich/mempalace/issues/43), [@lhl](https://github.com/milla-jovovich/mempalace/issues/27), [@gizmax](https://github.com/milla-jovovich/mempalace/issues/39), and everyone who filed an issue or a PR in the first 48 hours. We're listening, we're fixing, and we'd rather be right than impressive.
+> **Thank you to everyone who poked holes in this.** Brutal honest criticism is exactly what makes open source work, and it's what we asked for. Special thanks to [@panuhorsmalahti](https://github.com/MemPalace/mempalace/issues/43), [@lhl](https://github.com/MemPalace/mempalace/issues/27), [@gizmax](https://github.com/MemPalace/mempalace/issues/39), and everyone who filed an issue or a PR in the first 48 hours. We're listening, we're fixing, and we'd rather be right than impressive.
 >
 > — *Milla Jovovich & Ben Sigman*
 
@@ -129,7 +129,7 @@ After the one-time setup (install → init → mine), you don't run MemPalace co
 Native marketplace install:
 
 ```bash
-claude plugin marketplace add milla-jovovich/mempalace
+claude plugin marketplace add MemPalace/mempalace
 claude plugin install --scope user mempalace
 ```
 
@@ -251,7 +251,7 @@ You say what you're looking for and boom, it already knows which wing to go to. 
 **Rooms** — specific topics within a wing. Auth, billing, deploy — endless rooms.
 **Halls** — connections between related rooms *within* the same wing. If Room A (auth) and Room B (security) are related, a hall links them.
 **Tunnels** — connections *between* wings. When Person A and a Project both have a room about "auth," a tunnel cross-references them automatically.
-**Closets** — summaries that point to the original content. (In v3.0.0 these are plain-text summaries; AAAK-encoded closets are coming in a future update — see [Task #30](https://github.com/milla-jovovich/mempalace/issues/30).)
+**Closets** — summaries that point to the original content. (In v3.0.0 these are plain-text summaries; AAAK-encoded closets are coming in a future update — see [Task #30](https://github.com/MemPalace/mempalace/issues/30).)
 **Drawers** — the original verbatim files. The exact words, never summarized.
 
 **Halls** are memory types — the same in every wing, acting as corridors:
@@ -307,11 +307,11 @@ AAAK is a lossy abbreviation system — entity codes, structural markers, and se
 - **AAAK currently regresses LongMemEval** vs raw verbatim retrieval (84.2% R@5 vs 96.6%). The 96.6% headline number is from **raw mode**, not AAAK mode.
 - **The MemPalace storage default is raw verbatim text in ChromaDB** — that's where the benchmark wins come from. AAAK is a separate compression layer for context loading, not the storage format.
 
-We're iterating on the dialect spec, adding a real tokenizer for stats, and exploring better break points for when to use it. Track progress in [Issue #43](https://github.com/milla-jovovich/mempalace/issues/43) and [#27](https://github.com/milla-jovovich/mempalace/issues/27).
+We're iterating on the dialect spec, adding a real tokenizer for stats, and exploring better break points for when to use it. Track progress in [Issue #43](https://github.com/MemPalace/mempalace/issues/43) and [#27](https://github.com/MemPalace/mempalace/issues/27).
 
 ### Contradiction Detection (experimental, not yet wired into KG)
 
-A separate utility (`fact_checker.py`) can check assertions against entity facts. It's not currently called automatically by the knowledge graph operations — this is being fixed (track in [Issue #27](https://github.com/milla-jovovich/mempalace/issues/27)). When enabled it catches things like:
+A separate utility (`fact_checker.py`) can check assertions against entity facts. It's not currently called automatically by the knowledge graph operations — this is being fixed (track in [Issue #27](https://github.com/MemPalace/mempalace/issues/27)). When enabled it catches things like:
 
 ```
 Input:  "Soren finished the auth migration"
@@ -463,7 +463,7 @@ Letta charges $20–200/mo for agent-managed memory. MemPalace does it with a wi
 
 ```bash
 # Via plugin (recommended)
-claude plugin marketplace add milla-jovovich/mempalace
+claude plugin marketplace add MemPalace/mempalace
 claude plugin install --scope user mempalace
 
 # Or manually
@@ -722,11 +722,11 @@ PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
 MIT — see [LICENSE](LICENSE).
 
 <!-- Link Definitions -->
-[version-shield]: https://img.shields.io/badge/version-3.1.0-4dc9f6?style=flat-square&labelColor=0a0e14
-[release-link]: https://github.com/milla-jovovich/mempalace/releases
+[version-shield]: https://img.shields.io/badge/version-3.2.0-4dc9f6?style=flat-square&labelColor=0a0e14
+[release-link]: https://github.com/MemPalace/mempalace/releases
 [python-shield]: https://img.shields.io/badge/python-3.9+-7dd8f8?style=flat-square&labelColor=0a0e14&logo=python&logoColor=7dd8f8
 [python-link]: https://www.python.org/
 [license-shield]: https://img.shields.io/badge/license-MIT-b0e8ff?style=flat-square&labelColor=0a0e14
-[license-link]: https://github.com/milla-jovovich/mempalace/blob/main/LICENSE
+[license-link]: https://github.com/MemPalace/mempalace/blob/main/LICENSE
 [discord-shield]: https://img.shields.io/badge/discord-join-5865F2?style=flat-square&labelColor=0a0e14&logo=discord&logoColor=5865F2
 [discord-link]: https://discord.com/invite/ycTQQCu6kn

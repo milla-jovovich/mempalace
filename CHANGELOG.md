@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to [MemPalace](https://github.com/milla-jovovich/mempalace) are documented in this file.
+All notable changes to [MemPalace](https://github.com/MemPalace/mempalace) are documented in this file.
 
 ---
 

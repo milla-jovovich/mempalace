@@ -17,7 +17,7 @@ hero:
       link: /concepts/the-palace
     - theme: alt
       text: GitHub ↗
-      link: https://github.com/milla-jovovich/mempalace
+      link: https://github.com/MemPalace/mempalace
 
 features:
   - icon:

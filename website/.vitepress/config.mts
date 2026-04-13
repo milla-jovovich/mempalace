@@ -86,7 +86,7 @@ export default withMermaid(
       },
 
       socialLinks: [
-        { icon: 'github', link: 'https://github.com/milla-jovovich/mempalace' },
+        { icon: 'github', link: 'https://github.com/MemPalace/mempalace' },
         { icon: 'discord', link: 'https://discord.com/invite/ycTQQCu6kn' },
       ],
 
@@ -100,7 +100,7 @@ export default withMermaid(
       },
 
       editLink: {
-        pattern: `https://github.com/milla-jovovich/mempalace/edit/${editBranch}/website/:path`,
+        pattern: `https://github.com/MemPalace/mempalace/edit/${editBranch}/website/:path`,
         text: 'Edit this page on GitHub',
       },
     },
