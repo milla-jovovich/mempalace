@@ -22,7 +22,6 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Common English words that could be confused with names
 # These get flagged as AMBIGUOUS and require context disambiguation
@@ -522,7 +521,11 @@ class EntityRegistry:
         return result
 
     def confirm_research(
-        self, word: str, entity_type: str, relationship: str = "", context: str = "personal"
+        self,
+        word: str,
+        entity_type: str,
+        relationship: str = "",
+        context: str = "personal",
     ):
         """Mark a researched word as confirmed and add to people registry."""
         cache = self._data.get("wiki_cache", {})
@@ -552,7 +555,11 @@ class EntityRegistry:
         Scan session text for new entity candidates.
         Returns list of newly discovered candidates for review.
         """
-        from mempalace.entity_detector import extract_candidates, score_entity, classify_entity
+        from mempalace.entity_detector import (
+            extract_candidates,
+            score_entity,
+            classify_entity,
+        )
 
         lines = text.splitlines()
         candidates = extract_candidates(text)

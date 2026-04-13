@@ -18,7 +18,6 @@ from collections import defaultdict
 from .normalize import normalize
 from .palace import SKIP_DIRS, get_collection, file_already_mined
 
-
 # File types that might contain conversations
 CONVO_EXTENSIONS = {
     ".txt",

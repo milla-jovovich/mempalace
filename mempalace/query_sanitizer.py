@@ -146,7 +146,9 @@ def sanitize_query(raw_query: str) -> dict:
     # Nothing worked — just take the last MAX_QUERY_LENGTH characters.
     candidate = raw_query[-MAX_QUERY_LENGTH:].strip()
     logger.warning(
-        "Query sanitized: %d → %d chars (method=tail_truncation)", original_length, len(candidate)
+        "Query sanitized: %d → %d chars (method=tail_truncation)",
+        original_length,
+        len(candidate),
     )
     return {
         "clean_query": candidate,

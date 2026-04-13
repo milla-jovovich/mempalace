@@ -184,7 +184,7 @@ def split_file(filepath, output_dir, dry_run=False):
     path = Path(filepath)
     max_size = 500 * 1024 * 1024  # 500 MB safety limit
     if path.stat().st_size > max_size:
-        print(f"  SKIP: {path.name} exceeds {max_size // (1024*1024)} MB limit")
+        print(f"  SKIP: {path.name} exceeds {max_size // (1024 * 1024)} MB limit")
         return []
     lines = path.read_text(errors="replace").splitlines(keepends=True)
 
@@ -242,7 +242,10 @@ def main():
         help="Source directory (default: MEMPALACE_SOURCE_DIR or ~/Desktop/transcripts)",
     )
     parser.add_argument(
-        "--output-dir", type=str, default=None, help="Output directory (default: same as source)"
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Output directory (default: same as source)",
     )
     parser.add_argument(
         "--min-sessions",
@@ -251,7 +254,9 @@ def main():
         help="Only split files with at least N sessions (default: 2)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="Show what would happen without writing files"
+        "--dry-run",
+        action="store_true",
+        help="Show what would happen without writing files",
     )
     parser.add_argument(
         "--file",
@@ -273,7 +278,7 @@ def main():
     max_scan_size = 500 * 1024 * 1024  # 500 MB
     for f in files:
         if f.stat().st_size > max_scan_size:
-            print(f"  SKIP: {f.name} exceeds {max_scan_size // (1024*1024)} MB limit")
+            print(f"  SKIP: {f.name} exceeds {max_scan_size // (1024 * 1024)} MB limit")
             continue
         lines = f.read_text(errors="replace").splitlines(keepends=True)
         boundaries = find_session_boundaries(lines)

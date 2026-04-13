@@ -20,7 +20,6 @@ from pathlib import Path
 from mempalace.entity_registry import EntityRegistry
 from mempalace.entity_detector import detect_entities, scan_for_detection
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Default wing taxonomies by mode
 # ─────────────────────────────────────────────────────────────────────────────

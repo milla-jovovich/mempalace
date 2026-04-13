@@ -22,6 +22,8 @@ import sqlite3
 from collections import defaultdict
 from datetime import datetime
 
+from .utils import is_valid_palace_dir, confirm_deletion
+
 
 def extract_drawers_from_sqlite(db_path: str) -> list:
     """Read all drawers directly from ChromaDB's SQLite, bypassing the API.
@@ -200,6 +202,15 @@ def migrate(palace_path: str, dry_run: bool = False):
 
     # Swap: remove old palace, move new one into place
     print("  Swapping old palace for migrated version...")
+    if not is_valid_palace_dir(palace_path):
+        raise ValueError(
+            f"Unsafe deletion blocked: '{palace_path}' is not a valid MemPalace directory."
+        )
+
+    if not confirm_deletion(palace_path):
+        print("  Aborted.")
+        return
+
     shutil.rmtree(palace_path)
     shutil.move(temp_palace, palace_path)
 

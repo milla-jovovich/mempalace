@@ -574,7 +574,11 @@ def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offse
         elif len(conditions) > 1:
             where = {"$and": conditions}
 
-        kwargs = {"include": ["documents", "metadatas"], "limit": limit, "offset": offset}
+        kwargs = {
+            "include": ["documents", "metadatas"],
+            "limit": limit,
+            "offset": offset,
+        }
         if where:
             kwargs["where"] = where
         result = col.get(**kwargs)
@@ -686,7 +690,11 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
 
 
 def tool_kg_add(
-    subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
+    subject: str,
+    predicate: str,
+    object: str,
+    valid_from: str = None,
+    source_closet: str = None,
 ):
     """Add a relationship to the knowledge graph."""
     try:
@@ -709,7 +717,11 @@ def tool_kg_add(
     triple_id = _kg.add_triple(
         subject, predicate, object, valid_from=valid_from, source_closet=source_closet
     )
-    return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {object}"}
+    return {
+        "success": True,
+        "triple_id": triple_id,
+        "fact": f"{subject} → {predicate} → {object}",
+    }
 
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
@@ -840,7 +852,11 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         )
 
         if not results["ids"]:
-            return {"agent": agent_name, "entries": [], "message": "No diary entries yet."}
+            return {
+                "agent": agent_name,
+                "entries": [],
+                "message": "No diary entries yet.",
+            }
 
         # Combine and sort by timestamp
         entries = []
@@ -961,7 +977,10 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "wing": {"type": "string", "description": "Wing to list rooms for (optional)"},
+                "wing": {
+                    "type": "string",
+                    "description": "Wing to list rooms for (optional)",
+                },
             },
         },
         "handler": tool_list_rooms,
@@ -977,7 +996,11 @@ TOOLS = {
         "handler": tool_get_aaak_spec,
     },
     "mempalace_kg_query": {
-        "description": "Query the knowledge graph for an entity's relationships. Returns typed facts with temporal validity. E.g. 'Max' → child_of Alice, loves chess, does swimming. Filter by date with as_of to see what was true at a point in time.",
+        "description": (
+            "Query the knowledge graph for an entity's relationships. "
+            "Returns typed facts with temporal validity. "
+            "E.g. 'Max' → child_of Alice, loves chess, does swimming."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1003,12 +1026,18 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "subject": {"type": "string", "description": "The entity doing/being something"},
+                "subject": {
+                    "type": "string",
+                    "description": "The entity doing/being something",
+                },
                 "predicate": {
                     "type": "string",
                     "description": "The relationship type (e.g. 'loves', 'works_on', 'daughter_of')",
                 },
-                "object": {"type": "string", "description": "The entity being connected to"},
+                "object": {
+                    "type": "string",
+                    "description": "The entity being connected to",
+                },
                 "valid_from": {
                     "type": "string",
                     "description": "When this became true (YYYY-MM-DD, optional)",
@@ -1058,7 +1087,10 @@ TOOLS = {
         "handler": tool_kg_stats,
     },
     "mempalace_traverse": {
-        "description": "Walk the palace graph from a room. Shows connected ideas across wings — the tunnels. Like following a thread through the palace: start at 'chromadb-setup' in wing_code, discover it connects to wing_myproject (planning) and wing_user (feelings about it).",
+        "description": (
+            "Walk the palace graph from a room. Shows connected ideas across wings "
+            "— the tunnels. Like following a thread through the palace."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1092,7 +1124,10 @@ TOOLS = {
         "handler": tool_graph_stats,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY search keywords. Use 'context' for background. Results with cosine distance > max_distance are filtered out.",
+        "description": (
+            "Semantic search. Returns verbatim drawer content with similarity scores. "
+            "Query must contain ONLY your search keywords or question."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1115,7 +1150,10 @@ TOOLS = {
                 },
                 "context": {
                     "type": "string",
-                    "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking.",
+                    "description": (
+                        "Background context for the search (optional). "
+                        "Not used for embedding — only for future re-ranking."
+                    ),
                 },
             },
             "required": ["query"],
@@ -1151,8 +1189,14 @@ TOOLS = {
                     "type": "string",
                     "description": "Verbatim content to store — exact words, never summarized",
                 },
-                "source_file": {"type": "string", "description": "Where this came from (optional)"},
-                "added_by": {"type": "string", "description": "Who is filing this (default: mcp)"},
+                "source_file": {
+                    "type": "string",
+                    "description": "Where this came from (optional)",
+                },
+                "added_by": {
+                    "type": "string",
+                    "description": "Who is filing this (default: mcp)",
+                },
             },
             "required": ["wing", "room", "content"],
         },
@@ -1163,7 +1207,10 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "drawer_id": {"type": "string", "description": "ID of the drawer to delete"},
+                "drawer_id": {
+                    "type": "string",
+                    "description": "ID of the drawer to delete",
+                },
             },
             "required": ["drawer_id"],
         },
@@ -1174,7 +1221,10 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "drawer_id": {"type": "string", "description": "ID of the drawer to fetch"},
+                "drawer_id": {
+                    "type": "string",
+                    "description": "ID of the drawer to fetch",
+                },
             },
             "required": ["drawer_id"],
         },
@@ -1207,7 +1257,10 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "drawer_id": {"type": "string", "description": "ID of the drawer to update"},
+                "drawer_id": {
+                    "type": "string",
+                    "description": "ID of the drawer to update",
+                },
                 "content": {
                     "type": "string",
                     "description": "New content (optional — omit to keep existing)",
@@ -1226,7 +1279,10 @@ TOOLS = {
         "handler": tool_update_drawer,
     },
     "mempalace_diary_write": {
-        "description": "Write to your personal agent diary in AAAK format. Your observations, thoughts, what you worked on, what matters. Each agent has their own diary with full history. Write in AAAK for compression — e.g. 'SESSION:2026-04-04|built.palace.graph+diary.tools|ALC.req:agent.diaries.in.aaak|★★★'. Use entity codes from the AAAK spec.",
+        "description": (
+            "Write to your personal agent diary in AAAK format. "
+            "Record your observations, thoughts, and what you worked on."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1334,7 +1390,11 @@ def handle_request(request):
             "id": req_id,
             "result": {
                 "tools": [
-                    {"name": n, "description": t["description"], "inputSchema": t["input_schema"]}
+                    {
+                        "name": n,
+                        "description": t["description"],
+                        "inputSchema": t["input_schema"],
+                    }
                     for n, t in TOOLS.items()
                 ]
             },
@@ -1380,7 +1440,10 @@ def handle_request(request):
                 return {
                     "jsonrpc": "2.0",
                     "id": req_id,
-                    "error": {"code": -32602, "message": f"Invalid value for parameter '{key}'"},
+                    "error": {
+                        "code": -32602,
+                        "message": f"Invalid value for parameter '{key}'",
+                    },
                 }
         try:
             tool_args.pop("wait_for_previous", None)
@@ -1388,7 +1451,14 @@ def handle_request(request):
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(result, indent=2, ensure_ascii=False),
+                        }
+                    ]
+                },
             }
         except Exception:
             logger.exception(f"Tool error in {tool_name}")
@@ -1421,7 +1491,7 @@ def main():
             request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
+                sys.stdout.write(json.dumps(response, ensure_ascii=False, errors="replace") + "\n")
                 sys.stdout.flush()
         except KeyboardInterrupt:
             break

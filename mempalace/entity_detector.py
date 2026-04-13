@@ -20,7 +20,6 @@ import os
 from pathlib import Path
 from collections import defaultdict
 
-
 # ==================== SIGNAL PATTERNS ====================
 
 # Person signals — things people do

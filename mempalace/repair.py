@@ -34,7 +34,6 @@ import time
 
 import chromadb
 
-
 COLLECTION_NAME = "mempalace_drawers"
 
 

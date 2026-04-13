@@ -25,7 +25,6 @@ from .config import MempalaceConfig
 from .palace import get_collection as _get_collection
 from .searcher import build_where_filter
 
-
 # ---------------------------------------------------------------------------
 # Layer 0 — Identity
 # ---------------------------------------------------------------------------
@@ -101,7 +100,11 @@ class Layer1:
         docs, metas = [], []
         offset = 0
         while True:
-            kwargs = {"include": ["documents", "metadatas"], "limit": _BATCH, "offset": offset}
+            kwargs = {
+                "include": ["documents", "metadatas"],
+                "limit": _BATCH,
+                "offset": offset,
+            }
             if self.wing:
                 kwargs["where"] = {"wing": self.wing}
             try:

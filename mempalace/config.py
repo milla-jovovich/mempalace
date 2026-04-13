@@ -9,7 +9,6 @@ import os
 import re
 from pathlib import Path
 
-
 # ── Input validation ──────────────────────────────────────────────────────────
 # Shared sanitizers for wing/room/entity names. Prevents path traversal,
 # excessively long strings, and special characters that could cause issues
@@ -107,8 +106,26 @@ DEFAULT_HALL_KEYWORDS = {
         "server",
     ],
     "identity": ["identity", "name", "who am i", "persona", "self"],
-    "family": ["family", "kids", "children", "daughter", "son", "parent", "mother", "father"],
-    "creative": ["game", "gameplay", "player", "app", "design", "art", "music", "story"],
+    "family": [
+        "family",
+        "kids",
+        "children",
+        "daughter",
+        "son",
+        "parent",
+        "mother",
+        "father",
+    ],
+    "creative": [
+        "game",
+        "gameplay",
+        "player",
+        "app",
+        "design",
+        "art",
+        "music",
+        "story",
+    ],
 }
 
 

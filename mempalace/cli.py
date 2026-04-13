@@ -34,6 +34,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .utils import is_valid_palace_dir, confirm_deletion
 
 
 def cmd_init(args):
@@ -215,7 +216,15 @@ def cmd_repair(args):
     # Backup and rebuild
     palace_path = palace_path.rstrip(os.sep)
     backup_path = palace_path + ".backup"
+    if os.path.exists(backup_path) and not is_valid_palace_dir(backup_path):
+        raise ValueError(
+            f"Unsafe deletion blocked: '{backup_path}' is not a valid MemPalace directory."
+        )
+
     if os.path.exists(backup_path):
+        if not confirm_deletion(backup_path):
+            print("Aborted.")
+            return
         shutil.rmtree(backup_path)
     print(f"  Backing up to {backup_path}...")
     shutil.copytree(palace_path, backup_path)
@@ -310,7 +319,11 @@ def cmd_compress(args):
     offset = 0
     while True:
         try:
-            kwargs = {"include": ["documents", "metadatas"], "limit": _BATCH, "offset": offset}
+            kwargs = {
+                "include": ["documents", "metadatas"],
+                "limit": _BATCH,
+                "offset": offset,
+            }
             if where:
                 kwargs["where"] = where
             batch = col.get(**kwargs)
@@ -413,7 +426,9 @@ def main():
     p_init = sub.add_parser("init", help="Detect rooms from your folder structure")
     p_init.add_argument("dir", help="Project directory to set up")
     p_init.add_argument(
-        "--yes", action="store_true", help="Auto-accept all detected entities (non-interactive)"
+        "--yes",
+        action="store_true",
+        help="Auto-accept all detected entities (non-interactive)",
     )
 
     # mine

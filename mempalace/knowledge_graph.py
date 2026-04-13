@@ -43,7 +43,6 @@ import threading
 from datetime import date, datetime
 from pathlib import Path
 
-
 DEFAULT_KG_PATH = os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
 
 
@@ -149,10 +148,12 @@ class KnowledgeGraph:
             conn = self._conn()
             with conn:
                 conn.execute(
-                    "INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (sub_id, subject)
+                    "INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)",
+                    (sub_id, subject),
                 )
                 conn.execute(
-                    "INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", (obj_id, obj)
+                    "INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)",
+                    (obj_id, obj),
                 )
 
                 # Check for existing identical triple
@@ -373,7 +374,10 @@ class KnowledgeGraph:
             parent = facts.get("parent")
             if parent:
                 self.add_triple(
-                    name, "child_of", parent.capitalize(), valid_from=facts.get("birthday")
+                    name,
+                    "child_of",
+                    parent.capitalize(),
+                    valid_from=facts.get("birthday"),
                 )
 
             partner = facts.get("partner")
