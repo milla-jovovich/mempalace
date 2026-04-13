@@ -102,7 +102,6 @@ _WAL_FILE = _WAL_DIR / "write_log.jsonl"
 try:
     _fd = os.open(str(_WAL_FILE), os.O_CREAT | os.O_WRONLY, 0o600)
     os.close(_fd)
-    _WAL_FILE.chmod(0o600)
 except (OSError, NotImplementedError):
     pass
 

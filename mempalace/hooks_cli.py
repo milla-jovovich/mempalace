@@ -82,22 +82,30 @@ def _count_human_messages(transcript_path: str) -> int:
     return count
 
 
+_state_dir_initialized = False
+
+
 def _log(message: str):
     """Append to hook state log file."""
+    global _state_dir_initialized
     try:
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        try:
-            STATE_DIR.chmod(0o700)
-        except (OSError, NotImplementedError):
-            pass
+        if not _state_dir_initialized:
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            try:
+                STATE_DIR.chmod(0o700)
+            except (OSError, NotImplementedError):
+                pass
+            _state_dir_initialized = True
         log_path = STATE_DIR / "hook.log"
+        is_new = not log_path.exists()
         timestamp = datetime.now().strftime("%H:%M:%S")
         with open(log_path, "a") as f:
             f.write(f"[{timestamp}] {message}\n")
-        try:
-            log_path.chmod(0o600)
-        except (OSError, NotImplementedError):
-            pass
+        if is_new:
+            try:
+                log_path.chmod(0o600)
+            except (OSError, NotImplementedError):
+                pass
     except OSError:
         pass
 
