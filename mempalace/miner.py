@@ -631,8 +631,12 @@ def status(palace_path: str):
 
     # Count by wing and room
     total = col.count()
-    r = col.get(limit=total, include=["metadatas"]) if total else {"metadatas": []}
-    metas = r["metadatas"]
+    metas = []
+    if total:
+        _batch = 5000
+        for _off in range(0, total, _batch):
+            _r = col.get(limit=_batch, offset=_off, include=["metadatas"])
+            metas.extend(_r["metadatas"])
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:
