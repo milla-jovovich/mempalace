@@ -7,6 +7,7 @@ via monkeypatch to avoid touching real data.
 """
 
 import json
+import sys
 
 import pytest
 
@@ -688,6 +689,10 @@ class TestCacheInvalidation:
         col2 = mcp_server._get_collection()
         assert col2 is not None
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows holds chroma.sqlite3 open while the client is cached, blocking os.remove",
+    )
     def test_missing_db_invalidates_cache(self, monkeypatch, config, palace_path, kg):
         """When chroma.sqlite3 disappears, a cached collection should be invalidated."""
         _patch_mcp_server(monkeypatch, config, kg)
@@ -709,7 +714,7 @@ class TestCacheInvalidation:
 
         # Cache should be invalidated; _get_collection returns None
         # because the backend can't open a missing DB without create=True
-        result = mcp_server._get_collection()
+        mcp_server._get_collection()
         # The key assertion: the old cached collection was dropped
         assert mcp_server._palace_db_inode == 0
         assert mcp_server._palace_db_mtime == 0.0
