@@ -50,7 +50,12 @@ DEFAULT_KG_PATH = os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
 class KnowledgeGraph:
     def __init__(self, db_path: str = None):
         self.db_path = db_path or DEFAULT_KG_PATH
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        db_parent = Path(self.db_path).parent
+        db_parent.mkdir(parents=True, exist_ok=True)
+        try:
+            db_parent.chmod(0o700)
+        except (OSError, NotImplementedError):
+            pass
         self._connection = None
         self._lock = threading.Lock()
         self._init_db()

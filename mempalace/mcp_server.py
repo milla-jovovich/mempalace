@@ -96,14 +96,15 @@ try:
 except (OSError, NotImplementedError):
     pass
 _WAL_FILE = _WAL_DIR / "write_log.jsonl"
-# Pre-create WAL file with restricted permissions to avoid race condition
-if not _WAL_FILE.exists():
-    _WAL_FILE.touch(mode=0o600)
-else:
-    try:
-        _WAL_FILE.chmod(0o600)
-    except (OSError, NotImplementedError):
-        pass
+# Atomically create WAL file with restricted permissions (no TOCTOU race).
+# os.open with O_CREAT|O_WRONLY and mode 0o600 creates the file if absent
+# or opens it if present, both in a single syscall.
+try:
+    _fd = os.open(str(_WAL_FILE), os.O_CREAT | os.O_WRONLY, 0o600)
+    os.close(_fd)
+    _WAL_FILE.chmod(0o600)
+except (OSError, NotImplementedError):
+    pass
 
 # Keys whose values should be redacted in WAL entries to avoid logging sensitive content
 _WAL_REDACT_KEYS = frozenset(

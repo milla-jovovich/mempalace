@@ -49,6 +49,10 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
         return {"wings": 0, "rooms": 0, "drawers": 0}
 
     os.makedirs(output_dir, exist_ok=True)
+    try:
+        os.chmod(output_dir, 0o700)
+    except (OSError, NotImplementedError):
+        pass
 
     # Track which room files have been opened (so we can append vs overwrite)
     opened_rooms: set[tuple[str, str]] = set()
@@ -83,6 +87,10 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
             safe_wing = _safe_path_component(wing)
             wing_dir = os.path.join(output_dir, safe_wing)
             os.makedirs(wing_dir, exist_ok=True)
+            try:
+                os.chmod(wing_dir, 0o700)
+            except (OSError, NotImplementedError):
+                pass
 
             for room, drawers in rooms.items():
                 safe_room = _safe_path_component(room)

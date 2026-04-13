@@ -86,10 +86,18 @@ def _log(message: str):
     """Append to hook state log file."""
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            STATE_DIR.chmod(0o700)
+        except (OSError, NotImplementedError):
+            pass
         log_path = STATE_DIR / "hook.log"
         timestamp = datetime.now().strftime("%H:%M:%S")
         with open(log_path, "a") as f:
             f.write(f"[{timestamp}] {message}\n")
+        try:
+            log_path.chmod(0o600)
+        except (OSError, NotImplementedError):
+            pass
     except OSError:
         pass
 

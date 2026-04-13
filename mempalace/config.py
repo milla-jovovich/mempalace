@@ -227,4 +227,8 @@ class MempalaceConfig:
         self._config_dir.mkdir(parents=True, exist_ok=True)
         with open(self._people_map_file, "w") as f:
             json.dump(people_map, f, indent=2)
+        try:
+            self._people_map_file.chmod(0o600)
+        except (OSError, NotImplementedError):
+            pass
         return self._people_map_file

@@ -309,7 +309,15 @@ class EntityRegistry:
 
     def save(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._path.parent.chmod(0o700)
+        except (OSError, NotImplementedError):
+            pass
         self._path.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
+        try:
+            self._path.chmod(0o600)
+        except (OSError, NotImplementedError):
+            pass
 
     @staticmethod
     def _empty() -> dict:
