@@ -73,6 +73,24 @@ class TestSeedFromEntityFacts:
         predicates = {r["predicate"] for r in results}
         assert "is_pet_of" in predicates
 
+    def test_seed_dog_without_owner(self, kg):
+        """Dog with no owner key must not create a reflexive triple."""
+        facts = {
+            "buddy": {
+                "full_name": "Buddy",
+                "type": "animal",
+                "relationship": "dog",
+                # no "owner" key
+            }
+        }
+        kg.seed_from_entity_facts(facts)
+        results = kg.query_entity("Buddy", direction="outgoing")
+        # is_pet_of should be absent — no owner to point to
+        assert not any(r["predicate"] == "is_pet_of" for r in results)
+        # Entity should still be registered as an animal
+        stats = kg.stats()
+        assert stats["entities"] >= 1
+
     def test_seed_with_interests(self, kg):
         facts = {
             "max": {

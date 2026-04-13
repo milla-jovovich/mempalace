@@ -393,7 +393,9 @@ class KnowledgeGraph:
             elif relationship == "brother":
                 self.add_triple(name, "is_sibling_of", facts.get("sibling", name).capitalize())
             elif relationship == "dog":
-                self.add_triple(name, "is_pet_of", facts.get("owner", name).capitalize())
+                owner = facts.get("owner", "")
+                if owner:
+                    self.add_triple(name, "is_pet_of", owner.capitalize())
                 self.add_entity(name, "animal")
 
             # Interests
