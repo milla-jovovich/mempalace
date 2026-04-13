@@ -711,6 +711,9 @@ No API key. No internet after install. Everything local.
 pip install mempalace
 ```
 
+**Platform guides:**
+- [macOS Apple Silicon (M1+)](docs/macos-m1-install-guide.md) — ARM64 Python, ChromaDB crash fixes, concurrent mining
+
 ---
 
 ## Contributing
