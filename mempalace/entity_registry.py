@@ -523,8 +523,8 @@ class EntityRegistry:
         Caches result.  If *auto_confirm* is ``False``, marks the entry
         as unconfirmed (needs user review).
         """
-        # Already cached?
-        cache = self._data.setdefault("wiki_cache", {})
+        # Check cache (read-only — no mutation when allow_network is False)
+        cache = self._data.get("wiki_cache", {})
         if word in cache:
             return cache[word]
 
@@ -539,9 +539,11 @@ class EntityRegistry:
                 "note": "network lookup disabled — pass allow_network=True to query Wikipedia",
             }
 
+        # Network path — ensure wiki_cache key exists before writing
+        cache = self._data.setdefault("wiki_cache", {})
         result = _wikipedia_lookup(word)
-        result["word"] = word
-        result["confirmed"] = auto_confirm
+        result.setdefault("word", word)
+        result.setdefault("confirmed", auto_confirm)
 
         cache[word] = result
         self.save()

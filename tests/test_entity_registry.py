@@ -8,6 +8,14 @@ from mempalace.entity_registry import (
     EntityRegistry,
 )
 
+# Shared mock result for Wikipedia person lookup tests
+_MOCK_SAOIRSE_PERSON = {
+    "inferred_type": "person",
+    "confidence": 0.80,
+    "wiki_summary": "Saoirse is an Irish given name.",
+    "wiki_title": "Saoirse",
+}
+
 
 # ── COMMON_ENGLISH_WORDS ────────────────────────────────────────────────
 
@@ -238,14 +246,10 @@ def test_research_with_allow_network(tmp_path):
     registry = EntityRegistry.load(config_dir=tmp_path)
     registry.seed(mode="personal", people=[], projects=[])
 
-    mock_result = {
-        "inferred_type": "person",
-        "confidence": 0.80,
-        "wiki_summary": "Saoirse is an Irish given name.",
-        "wiki_title": "Saoirse",
-    }
-
-    with patch("mempalace.entity_registry._wikipedia_lookup", return_value=mock_result):
+    with patch(
+        "mempalace.entity_registry._wikipedia_lookup",
+        return_value=dict(_MOCK_SAOIRSE_PERSON),
+    ):
         result = registry.research("Saoirse", auto_confirm=True, allow_network=True)
     assert result["inferred_type"] == "person"
 
@@ -255,14 +259,10 @@ def test_research_caches_result(tmp_path):
     registry = EntityRegistry.load(config_dir=tmp_path)
     registry.seed(mode="personal", people=[], projects=[])
 
-    mock_result = {
-        "inferred_type": "person",
-        "confidence": 0.80,
-        "wiki_summary": "Saoirse is an Irish given name.",
-        "wiki_title": "Saoirse",
-    }
-
-    with patch("mempalace.entity_registry._wikipedia_lookup", return_value=mock_result):
+    with patch(
+        "mempalace.entity_registry._wikipedia_lookup",
+        return_value=dict(_MOCK_SAOIRSE_PERSON),
+    ):
         result = registry.research("Saoirse", auto_confirm=True, allow_network=True)
     assert result["inferred_type"] == "person"
 
@@ -288,13 +288,10 @@ def test_confirm_research_adds_to_people(tmp_path):
     registry = EntityRegistry.load(config_dir=tmp_path)
     registry.seed(mode="personal", people=[], projects=[])
 
-    mock_result = {
-        "inferred_type": "person",
-        "confidence": 0.80,
-        "wiki_summary": "Saoirse is a name",
-        "wiki_title": "Saoirse",
-    }
-    with patch("mempalace.entity_registry._wikipedia_lookup", return_value=mock_result):
+    with patch(
+        "mempalace.entity_registry._wikipedia_lookup",
+        return_value=dict(_MOCK_SAOIRSE_PERSON),
+    ):
         registry.research("Saoirse", auto_confirm=False, allow_network=True)
 
     registry.confirm_research("Saoirse", entity_type="person", relationship="friend")
