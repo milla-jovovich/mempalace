@@ -84,6 +84,18 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 
 ---
 
+## An important follow up note regarding fake MemPalace websites - April 11, 2026
+
+Several Community Members (#267, #326, #506) have pointed out there are fake MemPalace websites popping up, including ones with Malware.
+
+To be super clear, MemPalace *has no website* (at least for now), so anything claiming to be one is false.
+
+Thanks to our Community Members for letting us know about the problem.
+
+Stay safe out there.
+
+---
+
 ## Quick Start
 
 ```bash
@@ -570,6 +582,9 @@ mempalace compress --wing myapp                   # AAAK compress
 
 # Status
 mempalace status                                  # palace overview
+
+# MCP
+mempalace mcp                                     # show MCP setup command
 ```
 
 All commands accept `--palace <path>` to override the default location.
@@ -692,7 +707,7 @@ PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
 MIT — see [LICENSE](LICENSE).
 
 <!-- Link Definitions -->
-[version-shield]: https://img.shields.io/badge/version-3.0.0-4dc9f6?style=flat-square&labelColor=0a0e14
+[version-shield]: https://img.shields.io/badge/version-3.1.0-4dc9f6?style=flat-square&labelColor=0a0e14
 [release-link]: https://github.com/milla-jovovich/mempalace/releases
 [python-shield]: https://img.shields.io/badge/python-3.9+-7dd8f8?style=flat-square&labelColor=0a0e14&logo=python&logoColor=7dd8f8
 [python-link]: https://www.python.org/

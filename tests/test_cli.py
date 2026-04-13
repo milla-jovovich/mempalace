@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -326,6 +327,35 @@ def test_main_split_dispatches():
         mock_cmd.assert_called_once()
 
 
+def test_mcp_command_prints_setup_guidance(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["mempalace", "mcp"])
+
+    main()
+
+    captured = capsys.readouterr()
+    assert "MemPalace MCP quick setup:" in captured.out
+    assert "claude mcp add mempalace -- python -m mempalace.mcp_server" in captured.out
+    assert "\nOptional custom palace:\n" in captured.out
+    assert "python -m mempalace.mcp_server --palace /path/to/palace" in captured.out
+    assert "[--palace /path/to/palace]" not in captured.out
+    assert captured.err == ""
+
+
+def test_mcp_command_uses_custom_palace_path_when_provided(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["mempalace", "--palace", "~/tmp/my palace", "mcp"])
+
+    main()
+
+    captured = capsys.readouterr()
+    expanded = str(Path("~/tmp/my palace").expanduser())
+
+    assert "python -m mempalace.mcp_server --palace" in captured.out
+    assert expanded in captured.out
+    assert "Optional custom palace:" not in captured.out
+    assert "[--palace /path/to/palace]" not in captured.out
+    assert captured.err == ""
+
+
 def test_main_hook_no_subcommand_prints_help(capsys):
     with patch("sys.argv", ["mempalace", "hook"]):
         main()
@@ -394,9 +424,23 @@ def test_cmd_repair_no_palace(mock_config_cls, tmp_path, capsys):
 
 
 @patch("mempalace.cli.MempalaceConfig")
+def test_cmd_repair_requires_palace_database(mock_config_cls, tmp_path, capsys):
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+    mock_config_cls.return_value.palace_path = str(palace_dir)
+    args = argparse.Namespace(palace=None)
+    mock_chromadb = MagicMock()
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        cmd_repair(args)
+    out = capsys.readouterr().out
+    assert "No palace database found" in out
+
+
+@patch("mempalace.cli.MempalaceConfig")
 def test_cmd_repair_error_reading(mock_config_cls, tmp_path, capsys):
     palace_dir = tmp_path / "palace"
     palace_dir.mkdir()
+    (palace_dir / "chroma.sqlite3").write_text("db")
     mock_config_cls.return_value.palace_path = str(palace_dir)
     args = argparse.Namespace(palace=None)
     mock_chromadb = MagicMock()
@@ -413,6 +457,7 @@ def test_cmd_repair_error_reading(mock_config_cls, tmp_path, capsys):
 def test_cmd_repair_zero_drawers(mock_config_cls, tmp_path, capsys):
     palace_dir = tmp_path / "palace"
     palace_dir.mkdir()
+    (palace_dir / "chroma.sqlite3").write_text("db")
     mock_config_cls.return_value.palace_path = str(palace_dir)
     args = argparse.Namespace(palace=None)
     mock_chromadb = MagicMock()
@@ -431,8 +476,9 @@ def test_cmd_repair_zero_drawers(mock_config_cls, tmp_path, capsys):
 def test_cmd_repair_success(mock_config_cls, tmp_path, capsys):
     palace_dir = tmp_path / "palace"
     palace_dir.mkdir()
+    (palace_dir / "chroma.sqlite3").write_text("db")
     mock_config_cls.return_value.palace_path = str(palace_dir)
-    args = argparse.Namespace(palace=None)
+    args = argparse.Namespace(palace=None, yes=True)
     mock_chromadb = MagicMock()
     mock_col = MagicMock()
     mock_col.count.return_value = 2
@@ -451,6 +497,29 @@ def test_cmd_repair_success(mock_config_cls, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Repair complete" in out
     assert "2 drawers rebuilt" in out
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_repair_aborts_without_confirmation(mock_config_cls, tmp_path, capsys):
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+    (palace_dir / "chroma.sqlite3").write_text("db")
+    mock_config_cls.return_value.palace_path = str(palace_dir)
+    args = argparse.Namespace(palace=None)
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.count.return_value = 1
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with (
+        patch.dict("sys.modules", {"chromadb": mock_chromadb}),
+        patch("builtins.input", return_value="n"),
+    ):
+        cmd_repair(args)
+    out = capsys.readouterr().out
+    assert "Aborted." in out
+    mock_client.create_collection.assert_not_called()
 
 
 # ── cmd_compress ───────────────────────────────────────────────────────
@@ -516,10 +585,11 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
+        "note": "Estimates only.",
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -534,6 +604,7 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     out = capsys.readouterr().out
     assert "dry run" in out.lower()
     assert "Compressing" in out
+    assert "Total:" in out
 
 
 @patch("mempalace.cli.MempalaceConfig")
@@ -589,10 +660,11 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
+        "note": "Estimates only.",
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -606,4 +678,18 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
         cmd_compress(args)
     out = capsys.readouterr().out
     assert "Stored" in out
+    assert "Total:" in out
     mock_comp_col.upsert.assert_called_once()
+
+
+def test_cmd_repair_trailing_slash_does_not_recurse():
+    """Repair with trailing slash should put backup outside palace dir (#395)."""
+    import os
+
+    args = argparse.Namespace(palace="/tmp/fake_palace/")
+    with patch("mempalace.cli.os.path.isdir", return_value=False):
+        cmd_repair(args)
+    # Verify the rstrip logic: palace_path should not end with separator
+    palace_path = os.path.expanduser(args.palace).rstrip(os.sep)
+    backup_path = palace_path + ".backup"
+    assert not backup_path.startswith(palace_path + os.sep)

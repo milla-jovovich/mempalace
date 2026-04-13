@@ -1,0 +1,215 @@
+/* ── MemPalace Custom Theme ──────────────────────────────────────────── */
+/* Deep indigo / cyan palette — evoking architectural grandeur          */
+
+:root {
+  /* Brand palette */
+  --mp-indigo: #4f46e5;
+  --mp-indigo-light: #6366f1;
+  --mp-indigo-dark: #3730a3;
+  --mp-cyan: #06b6d4;
+  --mp-cyan-light: #22d3ee;
+  --mp-purple: #8b5cf6;
+  --mp-purple-light: #a78bfa;
+  --mp-emerald: #10b981;
+  --mp-amber: #f59e0b;
+
+  /* VitePress overrides */
+  --vp-c-brand-1: var(--mp-indigo);
+  --vp-c-brand-2: var(--mp-indigo-light);
+  --vp-c-brand-3: var(--mp-purple);
+  --vp-c-brand-soft: rgba(79, 70, 229, 0.14);
+
+  --vp-font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Home hero gradient */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(135deg, var(--mp-indigo) 0%, var(--mp-cyan) 50%, var(--mp-purple) 100%);
+  --vp-home-hero-image-background-image: linear-gradient(135deg, rgba(79, 70, 229, 0.25) 0%, rgba(6, 182, 212, 0.25) 50%, rgba(139, 92, 246, 0.15) 100%);
+  --vp-home-hero-image-filter: blur(56px);
+
+  /* Button colors */
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-bg: var(--mp-indigo);
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-hover-bg: var(--mp-indigo-light);
+
+  --vp-button-alt-border: rgba(79, 70, 229, 0.25);
+  --vp-button-alt-text: var(--mp-indigo);
+  --vp-button-alt-bg: rgba(79, 70, 229, 0.08);
+  --vp-button-alt-hover-border: rgba(79, 70, 229, 0.4);
+  --vp-button-alt-hover-text: var(--mp-indigo-dark);
+  --vp-button-alt-hover-bg: rgba(79, 70, 229, 0.14);
+}
+
+/* Dark mode overrides */
+.dark {
+  --vp-c-brand-1: var(--mp-cyan-light);
+  --vp-c-brand-2: var(--mp-cyan);
+  --vp-c-brand-3: var(--mp-purple-light);
+  --vp-c-brand-soft: rgba(6, 182, 212, 0.14);
+
+  --vp-button-brand-bg: var(--mp-indigo-light);
+  --vp-button-brand-hover-bg: var(--mp-indigo);
+
+  --vp-button-alt-border: rgba(34, 211, 238, 0.25);
+  --vp-button-alt-text: var(--mp-cyan-light);
+  --vp-button-alt-bg: rgba(34, 211, 238, 0.08);
+  --vp-button-alt-hover-border: rgba(34, 211, 238, 0.4);
+  --vp-button-alt-hover-text: var(--mp-cyan);
+  --vp-button-alt-hover-bg: rgba(34, 211, 238, 0.14);
+
+  --vp-home-hero-image-background-image: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(6, 182, 212, 0.3) 50%, rgba(139, 92, 246, 0.2) 100%);
+}
+
+/* ── Hero section ───────────────────────────────────────────────────── */
+
+.VPHero .VPImage {
+  max-width: 180px;
+  border-radius: 20px;
+}
+
+.VPHero .name {
+  font-weight: 700 !important;
+}
+
+.VPHero .text {
+  font-weight: 500;
+  background: linear-gradient(135deg, var(--vp-c-text-1) 0%, var(--mp-indigo-light) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.dark .VPHero .text {
+  background: linear-gradient(135deg, var(--vp-c-text-1) 0%, var(--mp-cyan-light) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Feature cards ──────────────────────────────────────────────────── */
+
+.VPFeature {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid var(--vp-c-divider);
+}
+
+.VPFeature:hover {
+  transform: translateY(-4px);
+  border-color: var(--mp-indigo);
+  box-shadow: 0 12px 40px rgba(79, 70, 229, 0.12);
+}
+
+.dark .VPFeature:hover {
+  border-color: var(--mp-cyan);
+  box-shadow: 0 12px 40px rgba(6, 182, 212, 0.12);
+}
+
+.VPFeature .title {
+  font-weight: 600;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────────────── */
+
+.VPSidebar .VPSidebarItem .text {
+  transition: color 0.2s ease;
+}
+
+.VPSidebar .VPSidebarItem.is-active .text {
+  color: var(--mp-indigo) !important;
+  font-weight: 600;
+}
+
+.dark .VPSidebar .VPSidebarItem.is-active .text {
+  color: var(--mp-cyan-light) !important;
+}
+
+/* ── Code blocks ────────────────────────────────────────────────────── */
+
+.vp-doc div[class*='language-'] {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+}
+
+.dark .vp-doc div[class*='language-'] {
+  border-color: rgba(6, 182, 212, 0.15);
+}
+
+/* ── Custom containers ──────────────────────────────────────────────── */
+
+.vp-doc .custom-block.tip {
+  border-color: var(--mp-cyan);
+}
+
+.vp-doc .custom-block.warning {
+  border-color: var(--mp-amber);
+}
+
+.vp-doc .custom-block.info {
+  border-color: var(--mp-indigo);
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+
+.vp-doc table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.vp-doc th {
+  background: rgba(79, 70, 229, 0.06);
+  font-weight: 600;
+}
+
+.dark .vp-doc th {
+  background: rgba(6, 182, 212, 0.08);
+}
+
+/* ── Nav ────────────────────────────────────────────────────────────── */
+
+.VPNavBar .VPNavBarTitle .title {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────── */
+
+.VPFooter {
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--vp-c-divider);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--mp-indigo);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--mp-cyan);
+}
+
+/* ── Smooth transitions ─────────────────────────────────────────────── */
+
+a, .VPLink {
+  transition: color 0.2s ease;
+}
+
+.VPButton {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.VPButton:hover {
+  transform: translateY(-1px);
+}
