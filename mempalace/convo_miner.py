@@ -272,7 +272,7 @@ def scan_convos(convo_dir: str) -> list:
 # =============================================================================
 
 
-def mine_convos(
+def mine_convos(  # noqa: C901
     convo_dir: str,
     palace_path: str,
     wing: str = None,
