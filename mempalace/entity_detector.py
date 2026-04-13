@@ -89,7 +89,7 @@ PROJECT_VERB_PATTERNS = [
 ]
 
 # Words that are almost certainly NOT entities
-STOPWORDS = {
+GENERIC_STOPWORDS = {
     "the",
     "a",
     "an",
@@ -393,7 +393,11 @@ STOPWORDS = {
     "networks",
     "training",
     "inference",
-    # Common technical documentation terms that appear capitalized but aren't entities
+}
+
+# Technical terms that appear capitalized in docs but aren't entities.
+# Kept separate so projects can override without losing generic stopwords.
+TECHNICAL_STOPWORDS = {
     "handler",
     "node",
     "service",
@@ -412,9 +416,17 @@ STOPWORDS = {
     "builder",
     "factory",
     "one",
+    # Cloud/SaaS terms -- use compound forms so bare "azure" / "notion" (which
+    # could be legitimate entity names) are not suppressed.
     "azure_functions",
+    "azure_devops",
+    "azure_pipelines",
     "notion_api",
+    "notion_workspace",
 }
+
+# Combined set used by the detector
+STOPWORDS = GENERIC_STOPWORDS | TECHNICAL_STOPWORDS
 
 # For entity detection — prose only, no code files
 # Code files have too many capitalized names (classes, functions) that aren't entities

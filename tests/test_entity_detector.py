@@ -378,3 +378,41 @@ def test_scan_for_detection_max_files(tmp_path):
         (tmp_path / f"note{i}.md").write_text(f"content {i}")
     files = scan_for_detection(str(tmp_path), max_files=5)
     assert len(files) <= 5
+
+
+# ── stopwords in prose context (#476) ──────────────────────────────────
+
+
+def test_stopwords_suppress_handler_in_prose():
+    """'Handler' inside a compound word like 'EventHandler' should not be
+    extracted because the regex only matches standalone capitalized words
+    and 'Handler' on its own is a stopword."""
+    text = (
+        "The EventHandler processes incoming requests. "
+        "The EventHandler is fast. "
+        "The EventHandler scales well. "
+        "The EventHandler is reliable."
+    )
+    result = extract_candidates(text)
+    # "Handler" alone should not appear — it is a technical stopword
+    assert "Handler" not in result
+
+
+def test_stopwords_case_insensitive_lookup():
+    """Verify that capitalized terms like 'Handler' still match the
+    lowercase stopword entry."""
+    # "Handler" appears capitalized 4 times but should be blocked by
+    # the stopword "handler".
+    text = "Handler runs. Handler logs. Handler waits. Handler exits."
+    result = extract_candidates(text)
+    assert "Handler" not in result
+
+
+def test_generic_and_technical_stopwords_are_separate():
+    """GENERIC_STOPWORDS and TECHNICAL_STOPWORDS should be distinct sets
+    that combine into STOPWORDS."""
+    from mempalace.entity_detector import GENERIC_STOPWORDS, TECHNICAL_STOPWORDS
+    assert "the" in GENERIC_STOPWORDS
+    assert "handler" in TECHNICAL_STOPWORDS
+    assert "handler" in STOPWORDS
+    assert "the" in STOPWORDS

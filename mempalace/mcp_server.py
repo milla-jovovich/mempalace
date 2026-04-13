@@ -740,7 +740,7 @@ TOOLS = {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "What to search for"},
-                "limit": {"type": "integer", "description": "Max results, 1-100 (default 5)"},
+                "limit": {"type": "integer", "description": "Max results (default 5). Clamped to 1-100.", "minimum": 1, "maximum": 100},
                 "wing": {"type": "string", "description": "Filter by wing (optional)"},
                 "room": {"type": "string", "description": "Filter by room (optional)"},
             },
