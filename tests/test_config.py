@@ -23,7 +23,10 @@ def test_config_from_file():
 def test_env_override():
     os.environ["MEMPALACE_PALACE_PATH"] = "/env/palace"
     cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
-    assert cfg.palace_path == "/env/palace"
+    result = cfg.palace_path
+    # abspath normalizes the env var; on Windows this prefixes a drive letter
+    assert result.replace("\\", "/").endswith("/env/palace")
+    assert os.path.isabs(result)
     del os.environ["MEMPALACE_PALACE_PATH"]
 
 

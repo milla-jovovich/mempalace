@@ -61,14 +61,44 @@ def test_save_people_map(tmp_path):
 
 
 def test_env_mempal_palace_path(tmp_path):
-    """MEMPAL_PALACE_PATH (legacy) should also work."""
+    """MEMPAL_PALACE_PATH (legacy) should also work and be normalized."""
     os.environ.pop("MEMPALACE_PALACE_PATH", None)
     os.environ["MEMPAL_PALACE_PATH"] = "/legacy/path"
     try:
         cfg = MempalaceConfig(config_dir=str(tmp_path))
-        assert cfg.palace_path == "/legacy/path"
+        result = cfg.palace_path
+        assert result.endswith("legacy" + os.sep + "path") or result.endswith("legacy/path")
+        assert os.path.isabs(result)
     finally:
         del os.environ["MEMPAL_PALACE_PATH"]
+
+
+def test_env_palace_path_normalizes_traversal(tmp_path):
+    """Env var palace_path with '../' should be resolved to an absolute path."""
+    os.environ.pop("MEMPAL_PALACE_PATH", None)
+    os.environ["MEMPALACE_PALACE_PATH"] = "../../tmp/evil_palace"
+    try:
+        cfg = MempalaceConfig(config_dir=str(tmp_path))
+        result = cfg.palace_path
+        assert ".." not in result
+        assert os.path.isabs(result)
+    finally:
+        del os.environ["MEMPALACE_PALACE_PATH"]
+
+
+def test_env_palace_path_expands_tilde(tmp_path):
+    """Env var palace_path with '~' should be expanded."""
+    os.environ.pop("MEMPAL_PALACE_PATH", None)
+    os.environ["MEMPALACE_PALACE_PATH"] = "~/my_palace"
+    try:
+        cfg = MempalaceConfig(config_dir=str(tmp_path))
+        result = cfg.palace_path
+        # The path should not start with ~ (expanduser resolves it)
+        assert not result.startswith("~")
+        assert os.path.isabs(result)
+        assert "my_palace" in result
+    finally:
+        del os.environ["MEMPALACE_PALACE_PATH"]
 
 
 def test_collection_name_from_config(tmp_path):
