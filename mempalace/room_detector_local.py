@@ -91,6 +91,87 @@ FOLDER_ROOM_MAP = {
     "infrastructure": "configuration",
     "infra": "configuration",
     "deploy": "configuration",
+    # ── 中文目录名映射 ────────────────────────────────────────────────
+    # 前端
+    "前端": "frontend",
+    "前端开发": "frontend",
+    "客户端": "frontend",
+    "界面": "frontend",
+    "组件": "frontend",
+    "页面": "frontend",
+    # 后端
+    "后端": "backend",
+    "后端开发": "backend",
+    "服务端": "backend",
+    "接口": "backend",
+    "路由": "backend",
+    "控制器": "backend",
+    "数据库": "backend",
+    "数据模型": "backend",
+    # 文档
+    "文档": "documentation",
+    "说明文档": "documentation",
+    "文档说明": "documentation",
+    "使用说明": "documentation",
+    "笔记": "documentation",
+    "备注": "documentation",
+    # 设计
+    "设计": "design",
+    "设计稿": "design",
+    "原型": "design",
+    "线框图": "design",
+    "资源": "design",
+    "素材": "design",
+    # 成本/财务
+    "成本": "costs",
+    "预算": "costs",
+    "财务": "costs",
+    "费用": "costs",
+    "报价": "costs",
+    "发票": "costs",
+    "记账": "costs",
+    # 会议
+    "会议": "meetings",
+    "会议记录": "meetings",
+    "周会": "meetings",
+    "日报": "meetings",
+    "月报": "meetings",
+    "站会": "meetings",
+    # 团队
+    "团队": "team",
+    "员工": "team",
+    "人事": "team",
+    "招聘": "team",
+    "成员": "team",
+    # 研究
+    "研究": "research",
+    "调研": "research",
+    "参考资料": "research",
+    "论文": "research",
+    "文献": "research",
+    # 规划
+    "规划": "planning",
+    "路线图": "planning",
+    "计划": "planning",
+    "需求": "planning",
+    "需求文档": "planning",
+    "方案": "planning",
+    # 测试
+    "测试": "testing",
+    "自动化测试": "testing",
+    "测试用例": "testing",
+    "质量保证": "testing",
+    # 脚本/工具
+    "脚本": "scripts",
+    "工具": "scripts",
+    "工具脚本": "scripts",
+    "辅助工具": "scripts",
+    # 配置/部署
+    "配置": "configuration",
+    "部署": "configuration",
+    "基础设施": "configuration",
+    "运维": "configuration",
+    "环境": "configuration",
 }
 
 
@@ -125,7 +206,11 @@ def detect_rooms_from_folders(project_dir: str) -> list:
                 if room_name not in found_rooms:
                     found_rooms[room_name] = item.name
             # Also check if folder name IS a good room name directly
-            elif len(item.name) > 2 and item.name[0].isalpha():
+            # CJK 名称长度 >= 2 即可（如"后台"、"数据"），ASCII 名称要求 > 2
+            elif item.name[0].isalpha() and (
+                len(item.name) > 2
+                or any("\u4e00" <= c <= "\u9fff" for c in item.name)
+            ):
                 clean = item.name.lower().replace("-", "_").replace(" ", "_")
                 if clean not in found_rooms:
                     found_rooms[clean] = item.name

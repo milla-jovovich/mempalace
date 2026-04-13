@@ -168,6 +168,50 @@ ALL_MARKERS = {
     "emotional": EMOTION_MARKERS,
 }
 
+# =============================================================================
+# CHINESE MARKERS — plain substring matching, no regex / no word boundaries
+# =============================================================================
+
+DECISION_MARKERS_ZH = [
+    "我们决定", "决定使用", "决定采用", "选择了", "改用", "切换到",
+    "迁移到", "替换为", "而不是", "原因是", "所以选", "权衡",
+    "方案是", "策略是", "采用", "基于", "选型", "因此", "这样做是因为",
+]
+
+PREFERENCE_MARKERS_ZH = [
+    "我倾向", "更喜欢", "我喜欢", "我不喜欢", "我讨厌", "总是用",
+    "从不用", "我的规则", "我们习惯", "偏好", "建议使用", "推荐用",
+    "不建议", "最好用", "尽量用", "避免用",
+]
+
+MILESTONE_MARKERS_ZH = [
+    "成功了", "跑通了", "可以了", "好了", "修好了", "解决了",
+    "终于", "第一次", "突破", "发现了", "意识到", "实现了",
+    "完成了", "上线了", "发布了", "搞定了", "跑起来了", "行了",
+    "找到了", "弄明白了", "搞清楚了",
+]
+
+PROBLEM_MARKERS_ZH = [
+    "报错", "崩溃", "失败了", "不工作", "出问题", "问题是",
+    "原因是", "根本原因", "解决方案", "修复方法", "修复了",
+    "异常", "卡住了", "为什么", "怎么", "不行", "报了",
+]
+
+EMOTION_MARKERS_ZH = [
+    "开心", "高兴", "难过", "伤心", "害怕", "担心",
+    "骄傲", "自豪", "感激", "感谢", "愤怒", "生气",
+    "孤独", "想念", "很棒", "太好了", "遗憾", "后悔",
+    "沮丧", "失望", "兴奋", "激动",
+]
+
+ALL_MARKERS_ZH = {
+    "decision": DECISION_MARKERS_ZH,
+    "preference": PREFERENCE_MARKERS_ZH,
+    "milestone": MILESTONE_MARKERS_ZH,
+    "problem": PROBLEM_MARKERS_ZH,
+    "emotional": EMOTION_MARKERS_ZH,
+}
+
 
 # =============================================================================
 # SENTIMENT — for disambiguation
@@ -355,6 +399,16 @@ def _score_markers(text: str, markers: List[str]) -> Tuple[float, List[str]]:
     return score, list(set(keywords))
 
 
+def _score_zh_markers(text: str, markers: List[str]) -> float:
+    """Score text against plain Chinese substring markers (no regex needed)."""
+    score = 0.0
+    for marker in markers:
+        count = text.count(marker)
+        if count:
+            score += count
+    return score
+
+
 # =============================================================================
 # MAIN EXTRACTION
 # =============================================================================
@@ -381,12 +435,18 @@ def extract_memories(text: str, min_confidence: float = 0.3) -> List[Dict]:
 
         prose = _extract_prose(para)
 
-        # Score against all types
+        # Score against all types — English regex markers
         scores = {}
         for mem_type, markers in ALL_MARKERS.items():
             score, _ = _score_markers(prose, markers)
             if score > 0:
                 scores[mem_type] = score
+
+        # Chinese substring markers (no regex, direct containment)
+        for mem_type, zh_markers in ALL_MARKERS_ZH.items():
+            zh_score = _score_zh_markers(prose, zh_markers)
+            if zh_score > 0:
+                scores[mem_type] = scores.get(mem_type, 0) + zh_score
 
         if not scores:
             continue

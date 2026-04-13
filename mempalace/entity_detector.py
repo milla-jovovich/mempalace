@@ -440,10 +440,119 @@ SKIP_DIRS = {
 # ==================== CANDIDATE EXTRACTION ====================
 
 
+# Common Chinese words that are NOT proper nouns — prevent false-positive names
+_CJK_STOPWORDS = {
+    # Single-char function words
+    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都",
+    "也", "这", "那", "它", "他", "她", "们", "上", "下", "中", "大",
+    "小", "来", "去", "说", "做", "一", "用", "到", "着", "过",
+    "会", "能", "可", "要", "将", "被", "把", "让", "为", "以", "从",
+    "于", "但", "而", "或", "与", "及", "等", "如", "其", "所", "已",
+    "又", "还", "很", "更", "最", "多", "少", "之", "地", "得",
+    # Common 2-char function words / everyday words
+    "可以", "什么", "我们", "你们", "他们", "这个", "那个", "一个",
+    "没有", "因为", "所以", "如果", "但是", "然后", "这样", "这里",
+    "知道", "好的", "时候", "一些", "需要", "使用", "应该",
+    "怎么", "一下", "自己", "已经", "不是", "不能", "不要", "一直",
+    "一样", "一起", "还是", "还有", "这些", "那些", "可能", "问题",
+    "就是", "只是", "其实", "虽然", "如何", "进行", "通过", "对于",
+    "关于", "具体", "现在", "之前", "之后", "以及", "包括", "比较",
+    "方法", "功能", "系统", "数据", "用户", "版本", "文件", "目录",
+    "服务", "接口", "代码", "项目", "内容", "结果", "方式", "情况",
+    "相关", "处理", "提供", "支持", "实现", "配置", "设置", "运行",
+    "调用", "返回", "输入", "输出", "操作", "执行", "获取", "请求",
+}
+
+# Chinese verbs following a person name strongly suggest the preceding word is a person
+_CJK_PERSON_VERBS = {
+    "说", "问", "告诉", "回答", "表示", "认为", "指出",
+    "提到", "分享", "建议", "决定", "解释", "补充",
+    "笑", "哭", "回", "道",
+}
+
+
+def _extract_cjk_candidates(text: str) -> dict:
+    """
+    Extract high-frequency 2-3 character CJK sequences as potential entity names.
+
+    Chinese personal names are typically 2-3 CJK characters.
+    Filters out common function words using _CJK_STOPWORDS.
+    Returns {name: count} for sequences appearing 3+ times.
+    """
+    counts = defaultdict(int)
+    # Find all 2-char and 3-char CJK sequences
+    for match in re.finditer(r"[\u4e00-\u9fff\u3400-\u4dbf]{2,3}", text):
+        word = match.group()
+        if word not in _CJK_STOPWORDS and len(word) >= 2:
+            counts[word] += 1
+
+    return {name: count for name, count in counts.items() if count >= 3}
+
+
+def _score_cjk_entity(name: str, text: str) -> dict:
+    """
+    Score a CJK candidate as person vs project.
+
+    Person signals:
+    - Followed by a person-action verb (说/问/告诉...)
+    - Preceded by dialogue markers (> 名字:)
+    - Followed by pronouns 他/她 nearby
+
+    Project signals:
+    - Followed by technical action verbs (构建/部署/迁移...)
+    - Appears with version markers or in code-like contexts
+    """
+    person_score = 0
+    project_score = 0
+    person_signals = []
+    project_signals = []
+
+    # Person signals: name immediately followed by a person verb
+    for verb in _CJK_PERSON_VERBS:
+        pattern = re.escape(name) + verb
+        count = len(re.findall(pattern, text))
+        if count:
+            person_score += count * 2
+            person_signals.append(f"'{name}{verb}' ({count}x)")
+
+    # Person signals: dialogue marker "名字："
+    dialogue_count = len(re.findall(re.escape(name) + r"[：:]", text))
+    if dialogue_count:
+        person_score += dialogue_count * 3
+        person_signals.append(f"dialogue marker ({dialogue_count}x)")
+
+    # Person signals: 他/她 within 30 chars of the name
+    for pronoun in ("他", "她"):
+        window_re = re.compile(
+            r"(?:" + re.escape(name) + r".{0,30}" + pronoun
+            + r"|" + pronoun + r".{0,30}" + re.escape(name) + r")"
+        )
+        hits = len(window_re.findall(text))
+        if hits:
+            person_score += hits
+            person_signals.append(f"pronoun '{pronoun}' nearby ({hits}x)")
+
+    # Project signals: technical action verbs
+    cjk_project_verbs = ["构建", "部署", "迁移", "安装", "升级", "开发", "维护"]
+    for verb in cjk_project_verbs:
+        count = len(re.findall(re.escape(name) + verb, text))
+        if count:
+            project_score += count * 2
+            project_signals.append(f"tech verb ({count}x)")
+
+    return {
+        "person_score": person_score,
+        "project_score": project_score,
+        "person_signals": person_signals[:3],
+        "project_signals": project_signals[:3],
+    }
+
+
 def extract_candidates(text: str) -> dict:
     """
     Extract all capitalized proper noun candidates from text.
     Returns {name: frequency} for names appearing 3+ times.
+    Handles both ASCII (capitalized words) and CJK (frequent short sequences).
     """
     # Find all capitalized words (not at sentence start — harder, so we use frequency as filter)
     raw = re.findall(r"\b([A-Z][a-z]{1,19})\b", text)
@@ -458,6 +567,10 @@ def extract_candidates(text: str) -> dict:
     for phrase in multi:
         if not any(w.lower() in STOPWORDS for w in phrase.split()):
             counts[phrase] += 1
+
+    # CJK candidates (Chinese names / project names)
+    cjk_candidates = _extract_cjk_candidates(text)
+    counts.update(cjk_candidates)
 
     # Filter: must appear at least 3 times to be a candidate
     return {name: count for name, count in counts.items() if count >= 3}
@@ -665,7 +778,7 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
 
     combined_text = "\n".join(all_text)
 
-    # Extract candidates
+    # Extract candidates (ASCII + CJK)
     candidates = extract_candidates(combined_text)
 
     if not candidates:
@@ -677,7 +790,12 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
     uncertain = []
 
     for name, frequency in sorted(candidates.items(), key=lambda x: x[1], reverse=True):
-        scores = score_entity(name, combined_text, all_lines)
+        # Choose scorer based on whether name contains CJK characters
+        is_cjk = any("\u4e00" <= c <= "\u9fff" or "\u3400" <= c <= "\u4dbf" for c in name)
+        if is_cjk:
+            scores = _score_cjk_entity(name, combined_text)
+        else:
+            scores = score_entity(name, combined_text, all_lines)
         entity = classify_entity(name, frequency, scores)
 
         if entity["type"] == "person":

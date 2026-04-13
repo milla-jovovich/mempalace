@@ -113,6 +113,36 @@ _EMOTION_SIGNALS = {
     "concern": "anx",
 }
 
+# Chinese emotion signals
+_EMOTION_SIGNALS_ZH = {
+    "决定": "determ",
+    "喜欢": "love",
+    "担心": "anx",
+    "兴奋": "excite",
+    "激动": "excite",
+    "沮丧": "frust",
+    "困惑": "confuse",
+    "爱": "love",
+    "讨厌": "rage",
+    "希望": "hope",
+    "害怕": "fear",
+    "相信": "trust",
+    "信任": "trust",
+    "高兴": "joy",
+    "开心": "joy",
+    "难过": "grief",
+    "伤心": "grief",
+    "失望": "grief",
+    "惊喜": "surprise",
+    "感激": "grat",
+    "感谢": "grat",
+    "好奇": "curious",
+    "焦虑": "anx",
+    "满意": "satis",
+    "愤怒": "rage",
+    "生气": "rage",
+}
+
 # Keywords that signal flags
 _FLAG_SIGNALS = {
     "decided": "DECISION",
@@ -149,6 +179,41 @@ _FLAG_SIGNALS = {
     "framework": "TECHNICAL",
     "server": "TECHNICAL",
     "config": "TECHNICAL",
+}
+
+# Chinese flag signals
+_FLAG_SIGNALS_ZH = {
+    "决定了": "DECISION",
+    "选择了": "DECISION",
+    "改用": "DECISION",
+    "切换": "DECISION",
+    "迁移": "DECISION",
+    "替换": "DECISION",
+    "而不是": "DECISION",
+    "因为": "DECISION",
+    "创建了": "ORIGIN",
+    "建立了": "ORIGIN",
+    "开始了": "ORIGIN",
+    "第一次": "ORIGIN",
+    "发布了": "ORIGIN",
+    "核心": "CORE",
+    "根本": "CORE",
+    "基本原则": "CORE",
+    "信念": "CORE",
+    "转折点": "PIVOT",
+    "改变了一切": "PIVOT",
+    "意识到": "PIVOT",
+    "突破": "PIVOT",
+    "顿悟": "PIVOT",
+    "接口": "TECHNICAL",
+    "数据库": "TECHNICAL",
+    "架构": "TECHNICAL",
+    "部署": "TECHNICAL",
+    "基础设施": "TECHNICAL",
+    "算法": "TECHNICAL",
+    "框架": "TECHNICAL",
+    "服务器": "TECHNICAL",
+    "配置": "TECHNICAL",
 }
 
 # Common filler/stop words to strip from topic extraction
@@ -288,6 +353,25 @@ _STOP_WORDS = {
     "need",
 }
 
+# Common Chinese stop characters/words for topic extraction
+_CJK_STOP_WORDS = {
+    # Single characters
+    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都",
+    "也", "这", "那", "它", "他", "她", "们", "上", "下", "中", "大",
+    "小", "来", "去", "说", "做", "一", "用", "到", "着", "过",
+    "会", "能", "可", "要", "将", "被", "把", "让", "为", "以", "从",
+    "于", "但", "而", "或", "与", "及", "等", "如", "其", "所", "已",
+    "又", "还", "很", "更", "最", "多", "少", "之", "地", "得",
+    # 2-char common function words
+    "可以", "什么", "我们", "你们", "他们", "这个", "那个", "一个",
+    "没有", "因为", "所以", "如果", "但是", "然后", "这样", "这里",
+    "知道", "好的", "时候", "一些", "需要", "使用", "应该",
+    "怎么", "一下", "自己", "已经", "不是", "不能", "不要", "一直",
+    "一样", "一起", "还是", "还有", "这些", "那些", "可能", "问题",
+    "就是", "只是", "其实", "虽然", "如何", "进行", "通过", "对于",
+    "关于", "具体", "现在", "之前", "之后", "以及", "包括", "比较",
+}
+
 
 class Dialect:
     """
@@ -406,7 +490,7 @@ class Dialect:
     # === PLAIN TEXT COMPRESSION (new for mempalace) ===
 
     def _detect_emotions(self, text: str) -> List[str]:
-        """Detect emotions from plain text using keyword signals."""
+        """Detect emotions from plain text using keyword signals (English + Chinese)."""
         text_lower = text.lower()
         detected = []
         seen = set()
@@ -414,10 +498,14 @@ class Dialect:
             if keyword in text_lower and code not in seen:
                 detected.append(code)
                 seen.add(code)
+        for keyword, code in _EMOTION_SIGNALS_ZH.items():
+            if keyword in text and code not in seen:
+                detected.append(code)
+                seen.add(code)
         return detected[:3]
 
     def _detect_flags(self, text: str) -> List[str]:
-        """Detect importance flags from plain text using keyword signals."""
+        """Detect importance flags from plain text using keyword signals (English + Chinese)."""
         text_lower = text.lower()
         detected = []
         seen = set()
@@ -425,31 +513,50 @@ class Dialect:
             if keyword in text_lower and flag not in seen:
                 detected.append(flag)
                 seen.add(flag)
+        for keyword, flag in _FLAG_SIGNALS_ZH.items():
+            if keyword in text and flag not in seen:
+                detected.append(flag)
+                seen.add(flag)
         return detected[:3]
 
     def _extract_topics(self, text: str, max_topics: int = 3) -> List[str]:
-        """Extract key topic words from plain text."""
-        # Tokenize: alphanumeric words, lowercase
-        words = re.findall(r"[a-zA-Z][a-zA-Z_-]{2,}", text)
-        # Count frequency, skip stop words
+        """Extract key topic words from plain text (English + Chinese)."""
         freq = {}
+
+        # ── ASCII words ──────────────────────────────────────────────────────
+        words = re.findall(r"[a-zA-Z][a-zA-Z_-]{2,}", text)
         for w in words:
             w_lower = w.lower()
             if w_lower in _STOP_WORDS or len(w_lower) < 3:
                 continue
             freq[w_lower] = freq.get(w_lower, 0) + 1
 
-        # Also boost words that look like proper nouns or technical terms
+        # Boost proper nouns / technical terms
         for w in words:
             w_lower = w.lower()
             if w_lower in _STOP_WORDS:
                 continue
             if w[0].isupper() and w_lower in freq:
                 freq[w_lower] += 2
-            # CamelCase or has underscore/hyphen
-            if "_" in w or "-" in w or (any(c.isupper() for c in w[1:])):
+            if "_" in w or "-" in w or any(c.isupper() for c in w[1:]):
                 if w_lower in freq:
                     freq[w_lower] += 2
+
+        # ── CJK bigrams ───────────────────────────────────────────────────────
+        # Extract consecutive CJK characters, then build bigrams
+        cjk_segs = re.findall(r"[\u4e00-\u9fff\u3400-\u4dbf]+", text)
+        for seg in cjk_segs:
+            # Unigrams (single chars) — skip; too ambiguous
+            # Bigrams — key semantic units in Chinese
+            for i in range(len(seg) - 1):
+                bigram = seg[i] + seg[i + 1]
+                if bigram not in _CJK_STOP_WORDS:
+                    freq[bigram] = freq.get(bigram, 0) + 1
+            # Trigrams for 3-char words (stronger signal)
+            for i in range(len(seg) - 2):
+                trigram = seg[i] + seg[i + 1] + seg[i + 2]
+                if trigram not in _CJK_STOP_WORDS:
+                    freq[trigram] = freq.get(trigram, 0) + 0.5
 
         ranked = sorted(freq.items(), key=lambda x: -x[1])
         return [w for w, _ in ranked[:max_topics]]

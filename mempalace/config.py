@@ -23,42 +23,51 @@ DEFAULT_TOPIC_WINGS = [
 
 DEFAULT_HALL_KEYWORDS = {
     "emotions": [
-        "scared",
-        "afraid",
-        "worried",
-        "happy",
-        "sad",
-        "love",
-        "hate",
-        "feel",
-        "cry",
-        "tears",
+        "scared", "afraid", "worried", "happy", "sad",
+        "love", "hate", "feel", "cry", "tears",
+        # 中文
+        "害怕", "担心", "开心", "难过", "伤心", "爱", "恨",
+        "感觉", "哭", "眼泪", "高兴", "愤怒", "孤独", "思念",
+        "激动", "兴奋", "沮丧", "失望", "骄傲", "感激",
     ],
     "consciousness": [
-        "consciousness",
-        "conscious",
-        "aware",
-        "real",
-        "genuine",
-        "soul",
-        "exist",
-        "alive",
+        "consciousness", "conscious", "aware", "real",
+        "genuine", "soul", "exist", "alive",
+        # 中文
+        "意识", "有意识", "感知", "真实", "真诚", "灵魂",
+        "存在", "活着", "自我认知", "觉知", "本质",
     ],
-    "memory": ["memory", "remember", "forget", "recall", "archive", "palace", "store"],
+    "memory": [
+        "memory", "remember", "forget", "recall", "archive", "palace", "store",
+        # 中文
+        "记忆", "记得", "忘记", "回忆", "存储", "归档", "历史", "过去",
+    ],
     "technical": [
-        "code",
-        "python",
-        "script",
-        "bug",
-        "error",
-        "function",
-        "api",
-        "database",
-        "server",
+        "code", "python", "script", "bug", "error",
+        "function", "api", "database", "server",
+        # 中文
+        "代码", "脚本", "错误", "报错", "函数", "接口", "数据库",
+        "服务器", "调试", "测试", "部署", "编程", "框架", "算法",
+        "重构", "架构", "模块", "组件", "性能", "优化",
     ],
-    "identity": ["identity", "name", "who am i", "persona", "self"],
-    "family": ["family", "kids", "children", "daughter", "son", "parent", "mother", "father"],
-    "creative": ["game", "gameplay", "player", "app", "design", "art", "music", "story"],
+    "identity": [
+        "identity", "name", "who am i", "persona", "self",
+        # 中文
+        "身份", "名字", "我是谁", "自我", "人格", "角色",
+    ],
+    "family": [
+        "family", "kids", "children", "daughter", "son",
+        "parent", "mother", "father",
+        # 中文
+        "家庭", "孩子", "女儿", "儿子", "父母", "母亲", "父亲",
+        "家人", "兄弟", "姐妹", "爷爷", "奶奶", "外公", "外婆",
+    ],
+    "creative": [
+        "game", "gameplay", "player", "app", "design", "art", "music", "story",
+        # 中文
+        "游戏", "玩家", "应用", "设计", "艺术", "音乐", "故事",
+        "创作", "剧本", "小说", "作品", "绘画", "动画",
+    ],
 }
 
 
@@ -133,8 +142,8 @@ class MempalaceConfig:
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,
             }
-            with open(self._config_file, "w") as f:
-                json.dump(default_config, f, indent=2)
+            with open(self._config_file, "w", encoding="utf-8") as f:
+                json.dump(default_config, f, indent=2, ensure_ascii=False)
         return self._config_file
 
     def save_people_map(self, people_map):

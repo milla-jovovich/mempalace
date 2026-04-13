@@ -190,15 +190,49 @@ TOPIC_KEYWORDS = {
     ],
 }
 
+# Chinese topic keywords — same rooms, CJK terms
+TOPIC_KEYWORDS_ZH = {
+    "technical": [
+        "代码", "函数", "报错", "接口", "数据库", "服务器", "部署",
+        "调试", "测试", "重构", "编程", "算法", "框架", "模型", "训练",
+    ],
+    "architecture": [
+        "架构", "设计", "模式", "结构", "模块", "组件", "服务", "分层",
+        "微服务", "接口设计",
+    ],
+    "planning": [
+        "计划", "路线图", "里程碑", "截止", "优先级", "需求", "规范",
+        "目标", "进度", "排期",
+    ],
+    "decisions": [
+        "决定", "选择", "切换", "迁移", "替换", "权衡", "方案", "思路",
+        "策略", "选型",
+    ],
+    "problems": [
+        "问题", "故障", "崩溃", "失败", "报错", "异常", "卡住",
+        "解决", "修复", "排查",
+    ],
+}
+
 
 def detect_convo_room(content: str) -> str:
-    """Score conversation content against topic keywords."""
+    """Score conversation content against topic keywords (English + Chinese)."""
     content_lower = content[:3000].lower()
+    content_3000 = content[:3000]
     scores = {}
+
+    # English keywords (case-insensitive via .lower())
     for room, keywords in TOPIC_KEYWORDS.items():
         score = sum(1 for kw in keywords if kw in content_lower)
         if score > 0:
             scores[room] = score
+
+    # Chinese keywords (no lowercasing needed — CJK is case-neutral)
+    for room, keywords in TOPIC_KEYWORDS_ZH.items():
+        score = sum(1 for kw in keywords if kw in content_3000)
+        if score > 0:
+            scores[room] = scores.get(room, 0) + score
+
     if scores:
         return max(scores, key=scores.get)
     return "general"

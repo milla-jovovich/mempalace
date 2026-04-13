@@ -84,10 +84,37 @@ _IS_CODE_OR_EMOJI = re.compile(r"[`*_#{}[\]\\]")
 # like "kno" which autocorrect resolves as "no" rather than "know")
 _MIN_LENGTH = 4
 
+# CJK Unicode ranges: CJK Unified Ideographs, Hiragana, Katakana, Hangul
+_CJK_RANGES = (
+    ("\u4e00", "\u9fff"),   # CJK Unified Ideographs (Chinese)
+    ("\u3040", "\u309f"),   # Hiragana
+    ("\u30a0", "\u30ff"),   # Katakana
+    ("\uac00", "\ud7af"),   # Hangul
+    ("\u3400", "\u4dbf"),   # CJK Extension A
+    ("\u20000", "\u2a6df"), # CJK Extension B (surrogate pair range — checked via ord)
+)
+
+
+def _has_cjk(token: str) -> bool:
+    """Return True if token contains any CJK / East Asian character."""
+    for ch in token:
+        cp = ord(ch)
+        if (
+            0x4E00 <= cp <= 0x9FFF    # CJK Unified Ideographs
+            or 0x3400 <= cp <= 0x4DBF  # CJK Extension A
+            or 0x3040 <= cp <= 0x30FF  # Hiragana + Katakana
+            or 0xAC00 <= cp <= 0xD7AF  # Hangul
+            or 0x20000 <= cp <= 0x2A6DF # CJK Extension B
+        ):
+            return True
+    return False
+
 
 def _should_skip(token: str, known_names: set) -> bool:
     """Return True if this token should be left as-is."""
     if len(token) < _MIN_LENGTH:
+        return True
+    if _has_cjk(token):
         return True
     if _HAS_DIGIT.search(token):
         return True
