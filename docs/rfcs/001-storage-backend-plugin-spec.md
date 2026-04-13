@@ -20,7 +20,7 @@ Six backend PRs are currently in flight. Each one solves the same problem six di
 
 1. A backend ships as a standalone Python package; installing it is sufficient to use it.
 2. All callers in MemPalace core go through the collection interface. No direct `chromadb` imports outside `mempalace/backends/chroma.py`.
-3. Backends are interchangeable: every backend passes the same shared test suite, and `mempalace migrate` moves palaces between them without data loss.
+3. Backends are interchangeable: every backend passes the same shared test suite, and `mempalace migrate` supports lossless movement between them when source/target capabilities allow, with explicit re-embedding as the fallback (§8.2).
 4. The model scales from single-user local (one backend, one palace, no config) to a daemon serving many palaces with heterogeneous backends.
 5. Chroma's current dict-shaped return values are not the long-term contract. Typed results are spec v1.
 
@@ -107,9 +107,25 @@ def close(self) -> None:
 
 def health(self) -> HealthStatus:
     return HealthStatus.ok()
+
+def update(
+    self,
+    *,
+    ids: list[str],
+    documents: list[str] | None = None,
+    metadatas: list[dict] | None = None,
+    embeddings: list[list[float]] | None = None,
+) -> None:
+    """Partial update of existing rows. At least one of documents/metadatas/embeddings must be non-None.
+
+    Default implementation: get(ids=...), merge the provided fields, upsert. Non-atomic
+    and does two round-trips. Backends advertising `supports_update` MUST override with
+    an atomic, single-round-trip implementation.
+    """
+    ...  # default impl in the ABC
 ```
 
-Backends with cheap approximate counters override `estimated_count`. Backends that hold connections must override `close`.
+Backends with cheap approximate counters override `estimated_count`. Backends that hold connections must override `close`. Backends with native partial-update primitives (Postgres `UPDATE`, Lance `merge_insert`) override `update` and advertise `supports_update`; the token signals "atomic + single round-trip," not "supports partial updates at all" — the default implementation already supports them, just non-atomically.
 
 ### 1.3 Typed results (replaces Chroma dict shape)
 
@@ -177,6 +193,16 @@ Dimension matching is necessary but not sufficient. Swapping to a different mode
 
 The `unknown` state exists because existing palaces from #413 and earlier have no recorded identity; hard-failing them on upgrade would be hostile. Once recorded, subsequent opens are strict.
 
+#### `server_embedder` backends are not exempt
+
+A backend advertising `server_embedder` (§2.1) provides its own embedder and MAY ignore the `embedder=` kwarg passed to `get_collection`. That does **not** exempt it from the dimension and identity rules above. Such backends MUST:
+
+- Expose an effective `model_name: str` and `dimension: int` describing the embedder actually in use (via `BaseCollection.effective_embedder_identity() -> EmbedderIdentity`).
+- Persist that effective identity on first write and validate it on open, per the three-state rules above.
+- Raise `DimensionMismatchError` and `EmbedderIdentityMismatchError` on conflicts between the effective identity and any injected `embedder` (if one was passed) or between the stored identity and the current effective identity.
+
+`server_embedder` documents where the embedding happens; it never suspends the safety contract. A backend that cannot report its effective embedder identity does not qualify for the `server_embedder` capability.
+
 ---
 
 ## 2. Backend contract
@@ -198,7 +224,7 @@ Defined capability tokens (v1):
 | `supports_embeddings_passthrough` | Persists provided `embeddings=` as-is without re-embedding (required for lossless migration target) |
 | `supports_embeddings_out` | Returns embeddings when `include=["embeddings"]` is requested |
 | `supports_estimated_count` | `estimated_count()` is meaningfully cheaper than `count()` |
-| `supports_update` | Distinguishes `upsert` from `add` with meaningful replace semantics |
+| `supports_update` | `update()` is atomic and single-round-trip (vs the ABC default of get+merge+upsert) |
 | `supports_metadata_filters` | Implements the required where-clause subset (§1.4) |
 | `supports_range_filters` | Implements `$gt` / `$gte` / `$lt` / `$lte` |
 | `supports_contains_fast` | `$contains` is indexed (vs scan-based) |
@@ -440,9 +466,20 @@ The existing MemPalace test suite is parametrized over all registered backends w
 
 Backend-to-backend comparisons are meaningless without accounting for per-backend maintenance state. Postgres with stale planner stats behaves very differently from Postgres post-`VACUUM ANALYZE`; HNSW-based stores behave differently before and after index compaction.
 
-Backends MAY implement `maintenance_state()` returning a structured dict describing the current state (e.g., `{"autovacuum_age_seconds": 42, "last_analyze": "...", "index_build_complete": true}`), and `run_maintenance(kind: str)` to trigger known maintenance kinds (`"analyze"`, `"compact"`, `"reindex"`). Both are optional.
+Backends MAY implement `maintenance_state()` returning a structured dict describing the current state (e.g., `{"autovacuum_age_seconds": 42, "last_analyze": "...", "index_build_complete": true}`), and `run_maintenance(kind: str)` to trigger supported kinds. Both are optional.
 
-The benchmark harness under [benchmarks/](../../benchmarks/) records `maintenance_state()` alongside every latency/recall measurement it publishes. Published numbers MUST include three phases: immediately after bulk load, after the backend's native background maintenance has caught up, and after explicit `run_maintenance` if the backend advertises maintenance kinds. This prevents comparing an un-`ANALYZE`d Postgres to a settled Chroma and calling the former slow.
+Supported maintenance kinds MUST be advertised via a class-level frozenset:
+
+```python
+class BaseBackend(ABC):
+    maintenance_kinds: ClassVar[frozenset[str]] = frozenset()
+```
+
+The spec reserves the kind names `"analyze"` (update planner/query statistics), `"compact"` (reclaim space, rewrite storage), and `"reindex"` (rebuild secondary indexes). Backends MAY add their own kinds; the reserved names MUST mean what the spec says if advertised.
+
+`run_maintenance(kind)` MUST raise `UnsupportedMaintenanceKindError` when called with a kind not in `maintenance_kinds`. Advertising a kind without implementing it is a conformance failure.
+
+The benchmark harness under [benchmarks/](../../benchmarks/) records `maintenance_state()` alongside every latency/recall measurement it publishes. Published numbers MUST include three phases: immediately after bulk load, after the backend's native background maintenance has caught up, and after `run_maintenance(kind)` has been called for each kind in `maintenance_kinds`. Harnesses rely on this advertisement to decide what to call — they MUST NOT assume kind names. This prevents comparing an un-`ANALYZE`d Postgres to a settled Chroma and calling the former slow.
 
 ### 7.4 ID stability for non-string-ID backends
 
