@@ -367,8 +367,13 @@ def _try_chatgpt_json(data) -> Optional[str]:
 def _try_slack_json(data) -> Optional[str]:
     """
     Slack channel export: [{"type": "message", "user": "...", "text": "..."}]
-    Optimized for 2-person DMs. In channels with 3+ people, alternating
-    speakers are labeled user/assistant to preserve the exchange structure.
+
+    Slack exports are multi-party chats where no speaker is inherently the
+    "user" or "assistant".  To preserve exchange-pair chunking (which relies
+    on ``>`` markers from the ``user`` role), we still alternate roles, but
+    prefix each message with the speaker ID so downstream consumers can
+    distinguish the original author.  A provenance header marks the
+    transcript as a Slack import.
     """
     if not isinstance(data, list):
         return None
@@ -391,9 +396,11 @@ def _try_slack_json(data) -> Optional[str]:
             else:
                 seen_users[user_id] = "user"
         last_role = seen_users[user_id]
-        messages.append((seen_users[user_id], text))
+        # Prefix with speaker ID so the original author is preserved
+        messages.append((seen_users[user_id], f"[{user_id}] {text}"))
     if len(messages) >= 2:
-        return _messages_to_transcript(messages)
+        header = "[source: slack-export | multi-party chat — speaker roles are positional, not verified]\n\n"
+        return header + _messages_to_transcript(messages)
     return None
 
 
