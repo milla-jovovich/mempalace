@@ -72,9 +72,15 @@ Only words 3+ characters that aren't stop words count as keywords.
 
 ---
 
-## How Hybrid V2 Works (`--mode hybrid_v2`)
+## How Raw V2 Works (`--mode raw_v2`, legacy `--mode hybrid_v2`)
 
-Three targeted fixes on top of hybrid, each addressing a specific failure category found by analyzing the exact 11 questions that hybrid v1 missed.
+`raw_v2` is the public CLI name for the old `hybrid_v2` mode. Some helper
+functions and historical result filenames still use `hybrid_v2` for continuity,
+but user-facing docs and commands should prefer `raw_v2`.
+
+Three targeted fixes on top of raw_v2's predecessor, each addressing a specific
+failure category found by analyzing the exact 11 questions that hybrid v1
+missed.
 
 ### Fix 1: Temporal date boost
 
@@ -135,8 +141,8 @@ All the v1 keyword re-ranking applied on top of fixes 1 and 2.
 |------|-----|------|---------|--------|
 | **Raw (baseline)** | 96.6% | 98.2% | 0.889 | — |
 | **Hybrid v1 w=0.30** | 97.8% | 98.8% | 0.930 | +1.2pp / +0.6pp / +0.041 |
-| **Hybrid v2 w=0.30** | 98.4% | 99.0% | 0.934 | +1.8pp / +0.8pp / +0.045 |
-| **Hybrid v2 + LLM rerank** | 98.8% | 99.0% | 0.966 | +2.2pp / +0.8pp / +0.077 |
+| **Raw v2 w=0.30** | 98.4% | 99.0% | 0.934 | +1.8pp / +0.8pp / +0.045 |
+| **Raw v2 + LLM rerank** | 98.8% | 99.0% | 0.966 | +2.2pp / +0.8pp / +0.077 |
 | **Hybrid v3 + LLM rerank** | 99.4% | 99.6% | 0.975 | +2.8pp / +1.4pp / +0.086 |
 | **Palace + LLM rerank** | **99.4%** | **99.4%** | **0.973** | **+2.8pp / +1.2pp / +0.084** |
 | **Diary + LLM rerank (65% cache)** | 98.2% | 98.4% | 0.956 | +1.6pp / +0.2pp / +0.067 |
@@ -187,7 +193,7 @@ Ran experiments across 5 weights. 100-question samples showed 99% R@5 at w=0.40,
 
 ```bash
 # Simple single run — no split needed
-python benchmarks/longmemeval_bench.py data/longmemeval_s_cleaned.json --mode hybrid_v2
+python benchmarks/longmemeval_bench.py data/longmemeval_s_cleaned.json --mode raw_v2
 ```
 
 ---
@@ -217,16 +223,16 @@ python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_clean
 # Expected output:
 # R@5: 99.4%  R@10: 99.6%  NDCG@10: 0.975
 
-# Run hybrid v2 + LLM rerank (local-friendly, no preference extraction)
+# Run raw_v2 + LLM rerank (local-friendly, no preference extraction)
 python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json \
-  --mode hybrid_v2 --llm-rerank
+  --mode raw_v2 --llm-rerank
 
 # Expected output:
 # R@5: 98.8%  R@10: 99.0%  NDCG@10: 0.966
 
-# Run hybrid v2 without LLM (local-only, no API key needed)
+# Run raw_v2 without LLM (local-only, no API key needed)
 python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json \
-  --mode hybrid_v2
+  --mode raw_v2
 
 # Expected output:
 # R@5: 98.4%  R@10: 99.0%  NDCG@10: 0.934
@@ -244,8 +250,8 @@ python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_clean
 ```
 
 **Run time:**
-- hybrid_v2 (local): ~200s for full 500 on Apple Silicon
-- hybrid_v2 + LLM rerank: ~620s (~10 min) — adds ~0.8s per question for Haiku API call
+- raw_v2 (local): ~200s for full 500 on Apple Silicon
+- raw_v2 + LLM rerank: ~620s (~10 min) — adds ~0.8s per question for Haiku API call
 - palace (local): ~280s — slightly slower due to two-pass hall navigation
 - palace + LLM rerank: ~700s (~12 min)
 
@@ -403,10 +409,10 @@ Some assistant-reference failures had the correct session at rank 11-12 — just
 An optional fourth pass that works with any retrieval mode. Add `--llm-rerank` to any run.
 
 ```python
-# After hybrid_v2 retrieval, take top-10 sessions
+# After raw_v2 retrieval, take top-10 sessions
 # Send question + numbered session snippets (500 chars each) to Haiku
 # Haiku picks the single most relevant session number
-# That session is promoted to rank 1; rest stay in hybrid_v2 order
+# That session is promoted to rank 1; rest stay in raw_v2 order
 ```
 
 **The prompt (minimal by design):**
@@ -427,10 +433,10 @@ Most relevant session number:
 Embeddings can't bridge "battery life on my phone" → phone hardware research session because the vocabulary doesn't overlap. Haiku reasons about intent: "someone asking about battery problems likely had a session about phone hardware." This is the semantic gap that LLMs exist to close.
 
 **Why only 1 pick (not a full ranking):**
-Asking for a full ranking increases prompt complexity and error rate. Picking the single best is decisive and reliable. The rest of the ranking stays in hybrid_v2 order, which is already excellent.
+Asking for a full ranking increases prompt complexity and error rate. Picking the single best is decisive and reliable. The rest of the ranking stays in raw_v2 order, which is already excellent.
 
 **Graceful degradation:**
-If the API call fails (timeout, rate limit, no key), the function catches the exception and returns the original hybrid_v2 ranking unchanged. The benchmark never crashes due to the LLM pass.
+If the API call fails (timeout, rate limit, no key), the function catches the exception and returns the original raw_v2 ranking unchanged. The benchmark never crashes due to the LLM pass.
 
 **Key loading priority:**
 1. `--llm-key` CLI flag
@@ -465,7 +471,7 @@ parser.add_argument("--hybrid-weight", type=float, default=0.30,
                     help="Keyword boost weight for hybrid mode (default: 0.30)")
 ```
 
-### 3. `--mode hybrid_v2` added to choices
+### 3. `--mode raw_v2` added to choices (`hybrid_v2` kept as a legacy alias)
 
 Full function `build_palace_and_retrieve_hybrid_v2()` with temporal boost and two-pass assistant retrieval. See `longmemeval_bench.py` lines ~406–560.
 
@@ -493,7 +499,7 @@ Expected: catch 1–2 of the 2 remaining preference failures. New R@5: **~98.8%*
 
 For jargon-dense questions ("Hardware-Aware Modular Training") and context-gap questions ("business milestone"), a lightweight LLM re-ranker as a third pass could close the remaining gap:
 
-- Retrieve top-10 sessions via hybrid_v2
+- Retrieve top-10 sessions via raw_v2
 - Ask a small LLM: "Given this question, which session is most relevant? Rank these 10."
 - Re-order based on LLM output
 
@@ -538,7 +544,7 @@ Larger candidate pool gives keyword re-ranking more to work with. If the answer 
 Global assistant indexing dilutes the semantic signal — every session's assistant text competes with every other. Two-pass is surgical: use user turns to find the right session first, then use full text only within that session. Tested both approaches; two-pass wins.
 
 **Why no LLM calls?**
-The whole MemPal pitch is "no API key, no cloud." Hybrid and hybrid_v2 maintain this. Everything is local string matching and date arithmetic.
+The whole MemPal pitch is "no API key, no cloud." Hybrid and raw_v2 maintain this. Everything is local string matching and date arithmetic.
 
 **Why only 40% temporal boost (not 100%)?**
 Temporal proximity is a strong signal but not definitive. A 40% maximum reduction means semantically excellent matches can't be completely overridden by date proximity alone. It's a hint, not a rule.

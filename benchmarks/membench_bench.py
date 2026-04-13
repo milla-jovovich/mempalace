@@ -37,15 +37,21 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from mempalace.chroma_runtime import make_ephemeral_client
+
 # ── Shared ephemeral ChromaDB client ──────────────────────────────────────────
-_bench_client = chromadb.EphemeralClient()
+# MemBench also rebuilds many small collections, so the same benchmark note
+# applies here: keep one in-memory client for the process and disable the noisy
+# local telemetry path up front.
+_bench_client = None
 
 
 def _fresh_collection(name="membench_drawers"):
+    global _bench_client
+    if _bench_client is None:
+        _bench_client = make_ephemeral_client()
     try:
         _bench_client.delete_collection(name)
     except Exception:

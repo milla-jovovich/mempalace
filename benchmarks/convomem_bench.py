@@ -32,9 +32,9 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
-import chromadb
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from mempalace.chroma_runtime import make_persistent_client
 
 HF_BASE = "https://huggingface.co/datasets/Salesforce/ConvoMem/resolve/main/core_benchmark/evidence_questions"
 
@@ -174,7 +174,9 @@ def retrieve_for_item(item, top_k=10, mode="raw"):
     palace_path = os.path.join(tmpdir, "palace")
 
     try:
-        client = chromadb.PersistentClient(path=palace_path)
+        # ConvoMem is another local benchmark harness, so use the same
+        # telemetry-disabled client wrapper as the other benchmark runners.
+        client = make_persistent_client(palace_path)
         collection = client.create_collection("mempal_drawers")
 
         # Optionally compress

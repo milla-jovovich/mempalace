@@ -29,20 +29,28 @@ Usage:
     python benchmarks/longmemeval_bench.py data/longmemeval_s_cleaned.json --limit 20
 """
 
+import atexit
 import os
 import sys
 import re
 import json
 import argparse
 import math
+import shutil
+import tempfile
+import time
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
-import chromadb
-
 # Add mempal to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from mempalace.chroma_runtime import make_ephemeral_client
+from mempalace.miner import build_retrieval_artifacts
+from mempalace.palace import get_collection as get_palace_collection
+from mempalace.palace import get_support_collection
+from mempalace.searcher import search_memories
 
 
 # =============================================================================
@@ -90,15 +98,33 @@ def session_id_from_corpus_id(corpus_id):
 
 # =============================================================================
 # SHARED EPHEMERAL CLIENT
-# EphemeralClient instances share state in this ChromaDB version — use one
-# shared client and delete+recreate the collection between queries.
+# EphemeralClient instances share state in this ChromaDB version, so we keep one
+# client per benchmark process and delete+recreate the collection between
+# queries. LongMemEval haystacks top out well below Chroma's default
+# hnsw:batch_size=100, so this benchmark never meaningfully exercises HNSW
+# thread tuning; the practical local fix is disabling the broken telemetry path
+# that otherwise logs on every collection operation.
 # =============================================================================
 
-_bench_client = chromadb.EphemeralClient()
+_bench_client = None
 
 # Global embedding function — set by --embed-model arg before benchmark runs.
 # None = use ChromaDB default (all-MiniLM-L6-v2).
 _bench_embed_fn = None
+_MODE_ALIASES = {
+    # "hybrid_v2" is kept for backwards compatibility, but "raw_v2" is the
+    # clearer public name: it is still raw storage with a stronger reranker.
+    "hybrid_v2": "raw_v2",
+}
+_QUERY_ONLY_PRODUCT_MODES = {"raw", "raw_v2", "hybrid_v3", "palace"}
+_QUERY_ONLY_SUPPORT_MODES = {"hybrid_v3", "palace"}
+_product_palace_template_dir = None
+
+
+def _normalize_mode_name(mode: str | None) -> str:
+    """Return the canonical benchmark mode name used for reporting/dispatch."""
+    normalized = (mode or "raw").lower()
+    return _MODE_ALIASES.get(normalized, normalized)
 
 
 def _make_embed_fn(model_name: str):
@@ -145,7 +171,9 @@ def _make_embed_fn(model_name: str):
 
 def _fresh_collection(name="mempal_drawers"):
     """Delete and recreate collection for a clean slate between queries."""
-    global _bench_embed_fn
+    global _bench_client, _bench_embed_fn
+    if _bench_client is None:
+        _bench_client = make_ephemeral_client()
     try:
         _bench_client.delete_collection(name)
     except Exception:
@@ -153,6 +181,243 @@ def _fresh_collection(name="mempal_drawers"):
     if _bench_embed_fn is not None:
         return _bench_client.create_collection(name, embedding_function=_bench_embed_fn)
     return _bench_client.create_collection(name)
+
+
+def _render_session_transcript(session):
+    """Render one benchmark session into the transcript shape MemPalace mines.
+
+    Query-only timing should exercise the real product search path, which
+    expects conversation drawers to look like ``> user`` lines followed by the
+    assistant text. Keeping that formatting here makes the benchmark measure the
+    same representation the app actually searches.
+    """
+    lines = []
+    for turn in session:
+        content = str(turn.get("content", "")).strip()
+        if not content:
+            continue
+        if turn.get("role") == "user":
+            lines.append(f"> {content}")
+        else:
+            lines.append(content)
+    return "\n".join(lines).strip()
+
+
+def _render_turn_exchange(session, turn_index):
+    """Render one user turn plus its immediate assistant reply block."""
+    turn = session[turn_index]
+    user_text = str(turn.get("content", "")).strip()
+    if not user_text:
+        return ""
+
+    assistant_lines = []
+    for later_turn in session[turn_index + 1 :]:
+        later_text = str(later_turn.get("content", "")).strip()
+        if not later_text:
+            continue
+        if later_turn.get("role") == "assistant":
+            assistant_lines.append(later_text)
+            continue
+        break
+
+    parts = [f"> {user_text}"] + assistant_lines
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _build_product_documents(entry, granularity="session"):
+    """Convert one LongMemEval entry into product-style mined documents."""
+    documents = []
+
+    sessions = entry["haystack_sessions"]
+    session_ids = entry["haystack_session_ids"]
+    dates = entry["haystack_dates"]
+
+    for session, sess_id, date in zip(sessions, session_ids, dates):
+        safe_date = str(date).replace("/", "-").replace(":", "-")
+        if granularity == "session":
+            text = _render_session_transcript(session)
+            if not text:
+                continue
+            documents.append(
+                {
+                    "corpus_id": sess_id,
+                    "text": text,
+                    "timestamp": date,
+                    "source_file": f"{safe_date}_{sess_id}.txt",
+                }
+            )
+            continue
+
+        turn_number = 0
+        for turn_index, turn in enumerate(session):
+            if turn.get("role") != "user":
+                continue
+            text = _render_turn_exchange(session, turn_index)
+            if not text:
+                continue
+            documents.append(
+                {
+                    "corpus_id": f"{sess_id}_turn_{turn_number}",
+                    "text": text,
+                    "timestamp": date,
+                    "source_file": f"{safe_date}_{sess_id}_turn_{turn_number}.txt",
+                }
+            )
+            turn_number += 1
+
+    return documents
+
+
+def _rankings_from_product_hits(results, documents):
+    """Map product search hits back onto the benchmark's corpus-index ranking."""
+    source_file_to_corpus_id = {
+        Path(document["source_file"]).name: document["corpus_id"] for document in documents
+    }
+    corpus_ids = [document["corpus_id"] for document in documents]
+    corpus_id_to_index = {corpus_id: index for index, corpus_id in enumerate(corpus_ids)}
+
+    ranked_indices = []
+    for hit in results.get("results", []):
+        corpus_id = source_file_to_corpus_id.get(hit["source_file"])
+        if corpus_id is None:
+            continue
+        ranked_indices.append(corpus_id_to_index[corpus_id])
+
+    # Search strategies can consolidate or trim candidates. Metrics still want a
+    # total ordering, so append any unseen indices in their original order.
+    seen = set(ranked_indices)
+    for index in range(len(documents)):
+        if index not in seen:
+            ranked_indices.append(index)
+
+    return ranked_indices
+
+
+def _build_product_rows(documents, include_support=True):
+    """Convert benchmark documents into batched raw/support collection rows.
+
+    The query-only benchmark should still exercise the same mined retrieval
+    signals as the real product, but it does not need to pay per-document
+    upsert overhead. Building the artifact rows first lets the benchmark issue
+    one raw upsert and, when needed, one support upsert while preserving the
+    exact same drawer metadata/support-doc logic as normal mining. Modes that
+    never query the support collection can disable support-row derivation so
+    the benchmark does not charge them for work they never use.
+    """
+    raw_rows = []
+    support_rows = []
+
+    for index, document in enumerate(documents):
+        artifacts = build_retrieval_artifacts(
+            wing="longmemeval",
+            room="benchmark",
+            content=document["text"],
+            source_file=document["source_file"],
+            chunk_index=index,
+            agent="benchmark",
+            ingest_mode="convos",
+            include_support=include_support,
+            extra_metadata={
+                "date": document["timestamp"],
+                "session_timestamp": document["timestamp"],
+                "corpus_id": document["corpus_id"],
+            },
+        )
+        raw_rows.append(
+            {
+                "id": artifacts["drawer_id"],
+                "document": document["text"],
+                "metadata": artifacts["metadata"],
+            }
+        )
+        if artifacts["support_row"] is not None:
+            support_rows.append(artifacts["support_row"])
+
+    return raw_rows, support_rows
+
+
+def _get_product_palace_template_dir():
+    """Return one lazily initialized empty palace template for query-only runs.
+
+    Query-only timing should exclude one-time signal mining, but it should not
+    keep paying Chroma's schema/bootstrap cost for every benchmark question.
+    Reusing one empty initialized palace as a copy source keeps the per-question
+    logic identical while avoiding repeated database setup overhead.
+    """
+    global _product_palace_template_dir
+    if _product_palace_template_dir is not None:
+        return _product_palace_template_dir
+
+    template_dir = tempfile.mkdtemp(prefix="mempalace-bench-template-")
+    get_palace_collection(template_dir, create=True)
+    atexit.register(shutil.rmtree, template_dir, ignore_errors=True)
+    _product_palace_template_dir = template_dir
+    return _product_palace_template_dir
+
+
+def _clone_product_palace_template():
+    """Clone the empty query-only palace template into a fresh temp directory."""
+    template_dir = _get_product_palace_template_dir()
+    temp_dir = tempfile.TemporaryDirectory(prefix="mempalace-bench-")
+    palace_path = os.path.join(temp_dir.name, "palace")
+    shutil.copytree(template_dir, palace_path)
+    return temp_dir, palace_path
+
+
+def build_product_palace_and_retrieve(entry, granularity="session", mode="hybrid_v3", n_results=50):
+    """Benchmark the real product search path against one temporary palace.
+
+    This helper exists for query-only timing. It builds one product-style
+    palace from the haystack, measures that one-time ingest separately, then
+    runs the actual ``search_memories()`` path so the benchmark reflects how
+    MemPalace behaves once signals have already been mined.
+    """
+    documents = _build_product_documents(entry, granularity=granularity)
+    corpus = [document["text"] for document in documents]
+    corpus_ids = [document["corpus_id"] for document in documents]
+    corpus_timestamps = [document["timestamp"] for document in documents]
+
+    if not documents:
+        return [], corpus, corpus_ids, corpus_timestamps, 0.0, 0.0
+
+    normalized_mode = _normalize_mode_name(mode)
+    include_support = normalized_mode in _QUERY_ONLY_SUPPORT_MODES
+
+    temp_dir, palace_path = _clone_product_palace_template()
+    with temp_dir:
+        build_start = time.perf_counter()
+        # The cloned template already contains the initialized raw collection,
+        # so query-only timing measures ingest/query work rather than DB setup.
+        raw_collection = get_palace_collection(palace_path, create=False)
+        raw_rows, support_rows = _build_product_rows(documents, include_support=include_support)
+        raw_collection.upsert(
+            ids=[row["id"] for row in raw_rows],
+            documents=[row["document"] for row in raw_rows],
+            metadatas=[row["metadata"] for row in raw_rows],
+        )
+        if support_rows:
+            support_collection = get_support_collection(palace_path, create=True)
+            support_collection.upsert(
+                ids=[row["id"] for row in support_rows],
+                documents=[row["document"] for row in support_rows],
+                metadatas=[row["metadata"] for row in support_rows],
+            )
+        build_seconds = time.perf_counter() - build_start
+
+        query_start = time.perf_counter()
+        results = search_memories(
+            entry["question"],
+            palace_path,
+            n_results=min(max(n_results, 50), len(documents)),
+            strategy=normalized_mode,
+        )
+        query_seconds = time.perf_counter() - query_start
+
+    if "error" in results:
+        raise RuntimeError(results["error"])
+
+    rankings = _rankings_from_product_hits(results, documents)
+    return rankings, corpus, corpus_ids, corpus_timestamps, build_seconds, query_seconds
 
 
 # =============================================================================
@@ -2919,6 +3184,7 @@ def run_benchmark(
     skip_precompute=False,
     split_file=None,
     split_subset=None,
+    timing_scope="full",
 ):
     """Run the full benchmark.
 
@@ -2926,6 +3192,8 @@ def run_benchmark(
     split_subset: "dev" (50 questions for tuning) or "held_out" (450 for final evaluation).
                   None = run all questions.
     """
+    normalized_mode = _normalize_mode_name(mode)
+
     with open(data_file) as f:
         data = json.load(f)
 
@@ -2944,8 +3212,19 @@ def run_benchmark(
         print(f"  Skipping first {skip} questions (resume mode)")
         data = data[skip:]
 
+    if timing_scope == "query_only":
+        if normalized_mode not in _QUERY_ONLY_PRODUCT_MODES:
+            print(
+                "ERROR: --timing-scope query-only only supports "
+                "raw, raw_v2, hybrid_v3, and palace."
+            )
+            sys.exit(1)
+        if llm_rerank_enabled:
+            print("ERROR: --timing-scope query-only does not support --llm-rerank.")
+            sys.exit(1)
+
     api_key = ""
-    if llm_rerank_enabled or mode == "diary":
+    if llm_rerank_enabled or normalized_mode == "diary":
         api_key = _load_api_key(llm_key)
         if not api_key:
             print(
@@ -2957,7 +3236,7 @@ def run_benchmark(
     # Diary mode: pre-compute LLM topic extraction for ALL unique sessions upfront
     # This means the main benchmark loop reads from cache only — no API calls mid-loop
     diary_cache = {}
-    if mode == "diary":
+    if normalized_mode == "diary":
         # Load existing cache first
         if diary_cache_file:
             cache_path = Path(diary_cache_file)
@@ -3016,10 +3295,11 @@ def run_benchmark(
     print(f"  Data:        {Path(data_file).name}")
     print(f"  Questions:   {len(data)}")
     print(f"  Granularity: {granularity}")
+    print(f"  Timing:      {timing_scope.replace('_', '-')}")
     model_short = llm_model.split("-")[1] if "-" in llm_model else llm_model
     rerank_label = f" + LLM re-rank ({model_short})" if llm_rerank_enabled else ""
-    diary_label = f" [diary ingest: {model_short}]" if mode == "diary" else ""
-    print(f"  Mode:        {mode}{diary_label}{rerank_label}")
+    diary_label = f" [diary ingest: {model_short}]" if normalized_mode == "diary" else ""
+    print(f"  Mode:        {normalized_mode}{diary_label}{rerank_label}")
     print(f"{'─' * 60}\n")
 
     # Collect metrics
@@ -3036,6 +3316,8 @@ def run_benchmark(
 
     results_log = []
     start_time = datetime.now()
+    query_seconds_total = 0.0
+    build_seconds_total = 0.0
 
     for i, entry in enumerate(data):
         qid = entry["question_id"]
@@ -3044,35 +3326,50 @@ def run_benchmark(
         answer_sids = set(entry["answer_session_ids"])
 
         # Run retrieval with selected mode
-        if mode == "aaak":
+        if timing_scope == "query_only":
+            (
+                rankings,
+                corpus,
+                corpus_ids,
+                corpus_timestamps,
+                build_seconds,
+                query_seconds,
+            ) = build_product_palace_and_retrieve(
+                entry,
+                granularity=granularity,
+                mode=normalized_mode,
+            )
+            build_seconds_total += build_seconds
+            query_seconds_total += query_seconds
+        elif normalized_mode == "aaak":
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_aaak(
                 entry, granularity=granularity
             )
-        elif mode == "rooms":
+        elif normalized_mode == "rooms":
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_rooms(
                 entry, granularity=granularity
             )
-        elif mode == "hybrid":
+        elif normalized_mode == "hybrid":
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_hybrid(
                 entry, granularity=granularity, hybrid_weight=hybrid_weight
             )
-        elif mode == "hybrid_v2":
+        elif normalized_mode == "raw_v2":
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_hybrid_v2(
                 entry, granularity=granularity, hybrid_weight=hybrid_weight
             )
-        elif mode == "hybrid_v3":
+        elif normalized_mode == "hybrid_v3":
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_hybrid_v3(
                 entry, granularity=granularity, hybrid_weight=hybrid_weight
             )
-        elif mode == "hybrid_v4":
+        elif normalized_mode == "hybrid_v4":
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_hybrid_v4(
                 entry, granularity=granularity, hybrid_weight=hybrid_weight
             )
-        elif mode == "palace":
+        elif normalized_mode == "palace":
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_palace(
                 entry, granularity=granularity, hybrid_weight=hybrid_weight
             )
-        elif mode == "diary":
+        elif normalized_mode == "diary":
             # If skip_precompute, pass empty api_key to prevent inline Haiku calls
             _diary_api_key = "" if skip_precompute else api_key
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_diary(
@@ -3083,7 +3380,7 @@ def run_benchmark(
                 api_key=_diary_api_key,
                 diary_model=llm_model,
             )
-        elif mode == "full":
+        elif normalized_mode == "full":
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_full(
                 entry, granularity=granularity
             )
@@ -3098,7 +3395,7 @@ def run_benchmark(
 
         # Optional LLM re-ranking pass (larger pool for v3/palace to catch rank-11-12 misses)
         if llm_rerank_enabled:
-            rerank_pool = 20 if mode in ("hybrid_v3", "hybrid_v4", "palace") else 10
+            rerank_pool = 20 if normalized_mode in ("hybrid_v3", "hybrid_v4", "palace") else 10
             rankings = llm_rerank(
                 question, rankings, corpus, corpus_ids, api_key, top_k=rerank_pool, model=llm_model
             )
@@ -3173,9 +3470,20 @@ def run_benchmark(
 
     # Print results
     print(f"\n{'=' * 60}")
-    print(f"  RESULTS — MemPal ({mode} mode, {granularity} granularity)")
+    print(f"  RESULTS — MemPal ({normalized_mode} mode, {granularity} granularity)")
     print(f"{'=' * 60}")
-    print(f"  Time: {elapsed:.1f}s ({elapsed / len(data):.2f}s per question)\n")
+    if timing_scope == "query_only":
+        print(
+            "  Query time: "
+            f"{query_seconds_total:.1f}s ({query_seconds_total / len(data):.2f}s per question)"
+        )
+        print(
+            "  Build time excluded: "
+            f"{build_seconds_total:.1f}s ({build_seconds_total / len(data):.2f}s per question)"
+        )
+        print(f"  Wall time: {elapsed:.1f}s\n")
+    else:
+        print(f"  Time: {elapsed:.1f}s ({elapsed / len(data):.2f}s per question)\n")
 
     print("  SESSION-LEVEL METRICS:")
     for k in ks:
@@ -3199,7 +3507,7 @@ def run_benchmark(
 
     # Save diary cache for reuse (Sonnet run tomorrow can skip re-ingesting)
     # Only save sessions with real data (None = skipped inline call, not worth persisting)
-    if mode == "diary" and diary_cache and diary_cache_file:
+    if normalized_mode == "diary" and diary_cache and diary_cache_file:
         try:
             real_cache = {k: v for k, v in diary_cache.items() if v is not None}
             with open(diary_cache_file, "w") as f:
@@ -3231,12 +3539,20 @@ if __name__ == "__main__":
     )
     parser.add_argument("--limit", type=int, default=0, help="Limit to N questions (0 = all)")
     parser.add_argument(
+        "--timing-scope",
+        choices=["full", "query-only"],
+        default="full",
+        help="Timing mode: 'full' measures build+query (historical benchmark behavior). "
+        "'query-only' excludes one-time ingest and measures only the real product search path.",
+    )
+    parser.add_argument(
         "--mode",
         choices=[
             "raw",
             "aaak",
             "rooms",
             "hybrid",
+            "raw_v2",
             "hybrid_v2",
             "hybrid_v3",
             "hybrid_v4",
@@ -3245,7 +3561,7 @@ if __name__ == "__main__":
             "full",
         ],
         default="raw",
-        help="Retrieval mode: raw, hybrid, hybrid_v2, hybrid_v3, palace, diary (palace + LLM topic layer)",
+        help="Retrieval mode: raw, hybrid, raw_v2 (preferred; legacy alias: hybrid_v2), hybrid_v3, palace, diary (palace + LLM topic layer)",
     )
     parser.add_argument("--out", default=None, help="Output JSONL file path")
     parser.add_argument(
@@ -3356,7 +3672,8 @@ if __name__ == "__main__":
         embed_tag = f"_{args.embed_model}" if args.embed_model != "default" else ""
         suffix = "_llmrerank" if args.llm_rerank else ""
         subset_tag = f"_{split_subset}" if split_subset else ""
-        args.out = f"benchmarks/results_mempal_{args.mode}{embed_tag}{suffix}{subset_tag}_{args.granularity}_{datetime.now().strftime('%Y%m%d_%H%M')}.jsonl"
+        canonical_mode = _normalize_mode_name(args.mode)
+        args.out = f"benchmarks/results_mempal_{canonical_mode}{embed_tag}{suffix}{subset_tag}_{args.granularity}_{datetime.now().strftime('%Y%m%d_%H%M')}.jsonl"
 
     # Set global embedding function before running
     if args.embed_model != "default":
@@ -3380,4 +3697,5 @@ if __name__ == "__main__":
         args.skip_precompute,
         split_file=args.split_file,
         split_subset=split_subset,
+        timing_scope=args.timing_scope.replace("-", "_"),
     )

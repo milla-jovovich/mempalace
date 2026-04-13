@@ -33,9 +33,9 @@ from pathlib import Path
 from collections import Counter, defaultdict
 from datetime import datetime
 
-import chromadb
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from mempalace.chroma_runtime import make_persistent_client
 
 # ── Optional bge-large embeddings ────────────────────────────────────────────
 _fastembed_model = None
@@ -693,7 +693,9 @@ def run_benchmark(
         palace_path = os.path.join(tmpdir, "palace")
 
         try:
-            client = chromadb.PersistentClient(path=palace_path)
+            # Benchmarks should not spend time or stderr budget on local product
+            # telemetry, so reuse the shared MemPalace client wrapper here too.
+            client = make_persistent_client(palace_path)
             collection = client.create_collection("mempal_drawers")
 
             if mode == "aaak":

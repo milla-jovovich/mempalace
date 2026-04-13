@@ -34,6 +34,11 @@ python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_clean
 
 # Turn-level granularity
 python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json --granularity turn
+
+# Query-only timing on a prebuilt product-style palace
+# Supported modes here are: raw, raw_v2, hybrid_v3, palace
+python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json \
+  --mode hybrid_v3 --timing-scope query-only
 ```
 
 **Expected output (raw mode, full 500):**
@@ -43,6 +48,10 @@ Recall@10: 0.982
 NDCG@10:   0.889
 Time:      ~5 minutes on Apple Silicon
 ```
+
+`--timing-scope query-only` reports the real search cost separately from the
+one-time ingest/build cost. Use the default `full` timing when reproducing the
+historical README headline numbers.
 
 ## Benchmark 2: LoCoMo (1,986 QA pairs)
 
