@@ -393,8 +393,16 @@ PALACE_ROOMS = [
 _PALACE_ROOM_LIST = "\n".join(f"  - {r}" for r in PALACE_ROOMS)
 
 
+def _llm_base_url(model):
+    """Return the Anthropic-compatible API base URL for the given model."""
+    if model.startswith("MiniMax"):
+        return os.environ.get("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic")
+    return "https://api.anthropic.com"
+
+
 def _llm_call(prompt, api_key, model="claude-haiku-4-5-20251001", max_tokens=32):
     """Minimal LLM call. Returns text response or empty string on failure."""
+    base_url = _llm_base_url(model)
     payload = json.dumps(
         {
             "model": model,
@@ -403,7 +411,7 @@ def _llm_call(prompt, api_key, model="claude-haiku-4-5-20251001", max_tokens=32)
         }
     ).encode("utf-8")
     req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
+        f"{base_url}/v1/messages",
         data=payload,
         headers={
             "x-api-key": api_key,
@@ -534,6 +542,7 @@ def llm_rerank_locomo(
         f"Reply with just the number (1-{len(candidates)}).\n\n" + "\n".join(lines)
     )
 
+    base_url = _llm_base_url(model)
     payload = json.dumps(
         {
             "model": model,
@@ -543,7 +552,7 @@ def llm_rerank_locomo(
     ).encode("utf-8")
 
     req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
+        f"{base_url}/v1/messages",
         data=payload,
         headers={
             "x-api-key": api_key,
@@ -579,10 +588,18 @@ def llm_rerank_locomo(
     return retrieved_ids
 
 
-def _load_api_key(key_arg):
-    """Load API key from --llm-key arg or ANTHROPIC_API_KEY env var."""
+def _load_api_key(key_arg, model=""):
+    """Load API key from --llm-key arg or environment variables.
+
+    For MiniMax models (starting with 'MiniMax'), checks MINIMAX_API_KEY first.
+    Falls back to ANTHROPIC_API_KEY for Anthropic/Claude models.
+    """
     if key_arg:
         return key_arg
+    if model.startswith("MiniMax"):
+        env_key = os.environ.get("MINIMAX_API_KEY", "")
+        if env_key:
+            return env_key
     env_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if env_key:
         return env_key
@@ -618,9 +635,13 @@ def run_benchmark(
 
     api_key = ""
     if llm_rerank_enabled or mode == "palace":
-        api_key = _load_api_key(llm_key)
+        api_key = _load_api_key(llm_key, model=llm_model)
         if not api_key:
-            print(f"ERROR: --mode {mode} requires an API key (--llm-key or ANTHROPIC_API_KEY).")
+            env_hint = "MINIMAX_API_KEY" if llm_model.startswith("MiniMax") else "ANTHROPIC_API_KEY"
+            print(
+                f"ERROR: --mode {mode} requires an API key "
+                f"(--llm-key or {env_hint} env var)."
+            )
             sys.exit(1)
 
     # Palace mode: load or create room assignment cache
@@ -1010,9 +1031,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--llm-model",
         default="claude-sonnet-4-6",
-        help="Model for LLM rerank (default: claude-sonnet-4-6)",
+        help="Model for LLM rerank (default: claude-sonnet-4-6). "
+        "MiniMax models also supported: MiniMax-M2.7, MiniMax-M2.7-highspeed "
+        "(set MINIMAX_API_KEY env var or pass via --llm-key).",
     )
-    parser.add_argument("--llm-key", default="", help="API key (or set ANTHROPIC_API_KEY env var)")
+    parser.add_argument(
+        "--llm-key",
+        default="",
+        help="API key. For Anthropic models, falls back to ANTHROPIC_API_KEY env var. "
+        "For MiniMax models, falls back to MINIMAX_API_KEY env var.",
+    )
     parser.add_argument(
         "--hybrid-weight",
         type=float,

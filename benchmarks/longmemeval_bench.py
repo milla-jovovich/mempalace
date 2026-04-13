@@ -2367,6 +2367,13 @@ def build_palace_and_retrieve_palace(
 # =============================================================================
 
 
+def _llm_base_url(model):
+    """Return the Anthropic-compatible API base URL for the given model."""
+    if model.startswith("MiniMax"):
+        return os.environ.get("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic")
+    return "https://api.anthropic.com"
+
+
 def diary_ingest_session(session, sess_id, api_key, model="claude-haiku-4-5-20251001"):
     """
     Call an LLM to extract topics and a summary from one session.
@@ -2417,7 +2424,7 @@ def diary_ingest_session(session, sess_id, api_key, model="claude-haiku-4-5-2025
     ).encode("utf-8")
 
     req = _urllib_request.Request(
-        "https://api.anthropic.com/v1/messages",
+        f"{_llm_base_url(model)}/v1/messages",
         data=payload,
         headers={
             "x-api-key": api_key,
@@ -2822,7 +2829,7 @@ def llm_rerank(
     ).encode("utf-8")
 
     req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
+        f"{_llm_base_url(model)}/v1/messages",
         data=payload,
         headers={
             "x-api-key": api_key,
@@ -2860,10 +2867,18 @@ def llm_rerank(
     return rankings
 
 
-def _load_api_key(key_arg):
-    """Load API key from --llm-key arg or ANTHROPIC_API_KEY env var."""
+def _load_api_key(key_arg, model=""):
+    """Load API key from --llm-key arg or environment variables.
+
+    For MiniMax models (starting with 'MiniMax'), checks MINIMAX_API_KEY first.
+    Falls back to ANTHROPIC_API_KEY for Anthropic/Claude models.
+    """
     if key_arg:
         return key_arg
+    if model.startswith("MiniMax"):
+        env_key = os.environ.get("MINIMAX_API_KEY", "")
+        if env_key:
+            return env_key
     env_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if env_key:
         return env_key
@@ -2946,11 +2961,12 @@ def run_benchmark(
 
     api_key = ""
     if llm_rerank_enabled or mode == "diary":
-        api_key = _load_api_key(llm_key)
+        api_key = _load_api_key(llm_key, model=llm_model)
         if not api_key:
+            env_hint = "MINIMAX_API_KEY" if llm_model.startswith("MiniMax") else "ANTHROPIC_API_KEY"
             print(
-                "ERROR: --llm-rerank / --mode diary requires an API key. "
-                "Set ANTHROPIC_API_KEY or use --llm-key."
+                f"ERROR: --llm-rerank / --mode diary requires an API key. "
+                f"Set {env_hint} or use --llm-key."
             )
             sys.exit(1)
 
@@ -3269,14 +3285,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--llm-key",
         default="",
-        help="Anthropic API key for LLM re-ranking. Falls back to ANTHROPIC_API_KEY env var.",
+        help="API key for LLM re-ranking/diary. For Anthropic models, falls back to "
+        "ANTHROPIC_API_KEY env var. For MiniMax models, falls back to MINIMAX_API_KEY env var.",
     )
     parser.add_argument(
         "--llm-model",
         default="claude-haiku-4-5-20251001",
         help="Model for LLM re-ranking and diary ingest "
         "(default: claude-haiku-4-5-20251001). "
-        "Use 'claude-sonnet-4-6' for Sonnet comparison.",
+        "MiniMax models also supported: MiniMax-M2.7, MiniMax-M2.7-highspeed "
+        "(set MINIMAX_API_KEY env var or pass via --llm-key).",
     )
     parser.add_argument(
         "--diary-cache",
