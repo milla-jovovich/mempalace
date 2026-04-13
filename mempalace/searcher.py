@@ -183,138 +183,156 @@ def search_memories(
 
     where = build_where_filter(wing, room)
 
-    # Try closet-first search: search the compact index, then hydrate drawers
-    closet_hits = []
+    # Hybrid retrieval: always query drawers directly (the floor), then use
+    # closet hits to boost rankings. Closets are a ranking SIGNAL, never a
+    # GATE — direct drawer search is always the baseline.
+    #
+    # This avoids the "weak-closets regression" where narrative content
+    # produces low-signal closets (regex extraction matches few topics)
+    # and closet-first routing hides drawers that direct search would find.
+    try:
+        dkwargs = {
+            "query_texts": [query],
+            "n_results": n_results * 3,  # over-fetch for re-ranking
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if where:
+            dkwargs["where"] = where
+        drawer_results = drawers_col.query(**dkwargs)
+    except Exception as e:
+        return {"error": f"Search error: {e}"}
+
+    # Gather closet hits (best-per-source) to build a boost lookup.
+    closet_boost_by_source = {}  # source_file -> (rank, closet_dist, preview)
     try:
         closets_col = get_closets_collection(palace_path, create=False)
         ckwargs = {
             "query_texts": [query],
-            "n_results": n_results * 2,  # over-fetch closets to find best drawers
+            "n_results": n_results * 2,
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
             ckwargs["where"] = where
         closet_results = closets_col.query(**ckwargs)
-        if closet_results["documents"][0]:
-            closet_hits = list(zip(
+        for rank, (doc, meta, dist) in enumerate(
+            zip(
                 closet_results["documents"][0],
                 closet_results["metadatas"][0],
                 closet_results["distances"][0],
-            ))
+            )
+        ):
+            source = meta.get("source_file", "")
+            if source and source not in closet_boost_by_source:
+                closet_boost_by_source[source] = (rank, dist, doc[:200])
     except Exception:
-        pass  # no closets yet — fall through to direct drawer search
+        pass  # no closets yet — hybrid degrades to pure drawer search
 
-    # If closets found results, hydrate the referenced drawers
-    MAX_HYDRATION_CHARS = 10000  # cap to prevent blowup on large source files
+    # Rank-based boost. Ordinal signal (which closet matched best) is more
+    # reliable than absolute distance on narrative content.
+    CLOSET_RANK_BOOSTS = [0.40, 0.25, 0.15, 0.08, 0.04]
+    CLOSET_DISTANCE_CAP = 1.5  # cosine dist > 1.5 = too weak to use as signal
 
-    if closet_hits:
-        import re
-        seen_sources = set()
-        hits = []
-        for closet_doc, closet_meta, closet_dist in closet_hits:
-            source = closet_meta.get("source_file", "")
-            if source in seen_sources:
-                continue
-            seen_sources.add(source)
-
-            # Find drawers for this source file, grep for most relevant chunk
-            try:
-                drawer_results = drawers_col.get(
-                    where={"source_file": source},
-                    include=["documents", "metadatas"],
-                )
-                if drawer_results.get("ids"):
-                    # Drawer-grep: score each chunk against the query,
-                    # return the best-matching chunk first + surrounding context
-                    query_terms = set(re.findall(r'\w{2,}', query.lower()))
-                    best_idx = 0
-                    best_score = -1
-                    for idx, doc in enumerate(drawer_results["documents"]):
-                        doc_lower = doc.lower()
-                        score = sum(1 for t in query_terms if t in doc_lower)
-                        if score > best_score:
-                            best_score = score
-                            best_idx = idx
-
-                    # Build result: best chunk first, then neighbors
-                    docs = drawer_results["documents"]
-                    n_docs = len(docs)
-                    # Include best chunk + 1 before + 1 after for context
-                    start = max(0, best_idx - 1)
-                    end = min(n_docs, best_idx + 2)
-                    relevant_text = "\n\n".join(docs[start:end])
-
-                    if len(relevant_text) > MAX_HYDRATION_CHARS:
-                        relevant_text = relevant_text[:MAX_HYDRATION_CHARS] + f"\n\n[...truncated. {n_docs} total drawers. Use mempalace_get_drawer for full content.]"
-
-                    meta = drawer_results["metadatas"][best_idx]
-                    hits.append({
-                        "text": relevant_text,
-                        "wing": meta.get("wing", "unknown"),
-                        "room": meta.get("room", "unknown"),
-                        "source_file": Path(source).name,
-                        "similarity": round(max(0.0, 1 - closet_dist), 3),
-                        "distance": round(closet_dist, 4),
-                        "matched_via": "closet",
-                        "closet_preview": closet_doc[:200],
-                        "drawer_index": best_idx,
-                        "total_drawers": n_docs,
-                    })
-            except Exception:
-                pass
-
-            if len(hits) >= n_results:
-                break
-
-        if hits:
-            # Re-rank with BM25 hybrid scoring
-            hits = _hybrid_rank(hits, query)
-            return {
-                "query": query,
-                "filters": {"wing": wing, "room": room},
-                "total_before_filter": len(closet_hits),
-                "results": hits,
-            }
-
-    # Fallback: direct drawer search (no closets yet, or closets empty)
-    try:
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            kwargs["where"] = where
-
-        results = drawers_col.query(**kwargs)
-    except Exception as e:
-        return {"error": f"Search error: {e}"}
-
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    dists = results["distances"][0]
-
-    hits = []
-    for doc, meta, dist in zip(docs, metas, dists):
-        # Filter on raw distance before rounding to avoid precision loss
+    scored = []
+    for doc, meta, dist in zip(
+        drawer_results["documents"][0],
+        drawer_results["metadatas"][0],
+        drawer_results["distances"][0],
+    ):
         if max_distance > 0.0 and dist > max_distance:
             continue
-        hits.append(
-            {
-                "text": doc,
-                "wing": meta.get("wing", "unknown"),
-                "room": meta.get("room", "unknown"),
-                "source_file": Path(meta.get("source_file", "?")).name,
-                "similarity": round(max(0.0, 1 - dist), 3),
-                "distance": round(dist, 4),
-            }
-        )
 
-    # Re-rank with BM25 hybrid scoring
+        source = meta.get("source_file", "")
+        boost = 0.0
+        matched_via = "drawer"
+        closet_preview = None
+        if source in closet_boost_by_source:
+            c_rank, c_dist, c_preview = closet_boost_by_source[source]
+            if c_dist <= CLOSET_DISTANCE_CAP and c_rank < len(CLOSET_RANK_BOOSTS):
+                boost = CLOSET_RANK_BOOSTS[c_rank]
+                matched_via = "drawer+closet"
+                closet_preview = c_preview
+
+        effective_dist = dist - boost
+        entry = {
+            "text": doc,
+            "wing": meta.get("wing", "unknown"),
+            "room": meta.get("room", "unknown"),
+            "source_file": Path(source).name if source else "?",
+            "similarity": round(max(0.0, 1 - effective_dist), 3),
+            "distance": round(dist, 4),
+            "effective_distance": round(effective_dist, 4),
+            "closet_boost": round(boost, 3),
+            "matched_via": matched_via,
+            "_sort_key": effective_dist,
+        }
+        if closet_preview:
+            entry["closet_preview"] = closet_preview
+        scored.append(entry)
+
+    scored.sort(key=lambda h: h["_sort_key"])
+    hits = scored[:n_results]
+
+    # Drawer-grep enrichment: for top hits whose source file has multiple
+    # drawers, return the best-matching chunk + its immediate neighbors
+    # instead of just the single drawer. Preserves the chunk-expansion
+    # behavior users relied on in the closet-first path.
+    MAX_HYDRATION_CHARS = 10000
+    import re as _re
+
+    for h in hits:
+        if h["matched_via"] == "drawer":
+            continue
+        # Only enrich closet-matched hits (cheap: we already know source matters)
+        source_name = h["source_file"]
+        # Look up full source_file by matching suffix in candidate pool
+        full_source = next(
+            (
+                m.get("source_file", "")
+                for m in drawer_results["metadatas"][0]
+                if m.get("source_file", "").endswith(source_name)
+            ),
+            "",
+        )
+        if not full_source:
+            continue
+        try:
+            source_drawers = drawers_col.get(
+                where={"source_file": full_source}, include=["documents"]
+            )
+        except Exception:
+            continue
+        docs = source_drawers.get("documents") or []
+        if len(docs) <= 1:
+            continue
+
+        query_terms = set(_re.findall(r"\w{2,}", query.lower()))
+        best_idx, best_score = 0, -1
+        for idx, d in enumerate(docs):
+            d_lower = d.lower()
+            s = sum(1 for t in query_terms if t in d_lower)
+            if s > best_score:
+                best_score, best_idx = s, idx
+
+        start = max(0, best_idx - 1)
+        end = min(len(docs), best_idx + 2)
+        expanded = "\n\n".join(docs[start:end])
+        if len(expanded) > MAX_HYDRATION_CHARS:
+            expanded = (
+                expanded[:MAX_HYDRATION_CHARS]
+                + f"\n\n[...truncated. {len(docs)} total drawers. Use mempalace_get_drawer for full content.]"
+            )
+        h["text"] = expanded
+        h["drawer_index"] = best_idx
+        h["total_drawers"] = len(docs)
+
+    # BM25 hybrid re-rank within the final candidate set
     hits = _hybrid_rank(hits, query)
+    for h in hits:
+        h.pop("_sort_key", None)
+
     return {
         "query": query,
         "filters": {"wing": wing, "room": room},
-        "total_before_filter": len(docs),
+        "total_before_filter": len(drawer_results["documents"][0]),
         "results": hits,
     }
