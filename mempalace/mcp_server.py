@@ -32,7 +32,6 @@ from pathlib import Path
 
 from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
-import chromadb
 from .query_sanitizer import sanitize_query
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats

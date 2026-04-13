@@ -17,7 +17,7 @@ from collections import defaultdict
 
 from .vector_store import get_collection as _get_vector_store_collection
 
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS, file_already_mined
 
 READABLE_EXTENSIONS = {
     ".txt",
