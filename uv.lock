@@ -1239,7 +1239,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "autocorrect", marker = "extra == 'spellcheck'", specifier = ">=2.0" },
-    { name = "chromadb", specifier = ">=0.5.0,<0.7" },
+    { name = "chromadb", specifier = ">=0.5.0" },
     { name = "psutil", marker = "extra == 'dev'", specifier = ">=5.9" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },

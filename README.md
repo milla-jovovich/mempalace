@@ -99,6 +99,10 @@ Stay safe out there.
 ## Quick Start
 
 ```bash
+# With uv (recommended)
+uv tool install mempalace
+
+# Or with pip
 pip install mempalace
 
 # Set up your world — who you work with, what your projects are
@@ -728,6 +732,10 @@ mempalace/
 No API key. No internet after install. Everything local.
 
 ```bash
+# With uv (recommended)
+uv tool install mempalace
+
+# Or with pip
 pip install mempalace
 ```
 

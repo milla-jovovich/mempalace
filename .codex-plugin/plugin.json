@@ -21,11 +21,8 @@
   "hooks": "./hooks.json",
   "mcpServers": {
     "mempalace": {
-      "command": "python3",
-      "args": [
-        "-m",
-        "mempalace.mcp_server"
-      ]
+      "command": "mempalace-mcp",
+      "args": []
     }
   },
   "interface": {

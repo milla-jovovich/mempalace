@@ -36,3 +36,6 @@ venv/
 
 # ChromaDB local data
 *.sqlite3-journal
+/.serena
+/.testmondata
+/site
