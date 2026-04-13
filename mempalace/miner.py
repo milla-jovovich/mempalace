@@ -447,6 +447,29 @@ def _load_known_entities_raw() -> dict:
     return dict(_ENTITY_REGISTRY_CACHE["raw"])
 
 
+def detect_hall(content: str) -> str:
+    """Route content to a hall based on keyword scoring.
+
+    Halls connect rooms within a wing — they categorize the TYPE of content
+    (emotional, technical, family, etc.) while rooms categorize the TOPIC.
+    """
+    from .config import MempalaceConfig
+
+    config = MempalaceConfig()
+    hall_keywords = config.hall_keywords
+    content_lower = content[:3000].lower()
+
+    scores = {}
+    for hall, keywords in hall_keywords.items():
+        score = sum(1 for kw in keywords if kw in content_lower)
+        if score > 0:
+            scores[hall] = score
+
+    if scores:
+        return max(scores, key=scores.get)
+    return "general"
+
+
 def _extract_entities_for_metadata(content: str) -> str:
     """Extract entity names from content for metadata tagging.
 
@@ -508,6 +531,8 @@ def add_drawer(
             metadata["source_mtime"] = os.path.getmtime(source_file)
         except OSError:
             pass
+        # Tag with hall for graph connectivity within wings
+        metadata["hall"] = detect_hall(content)
         # Tag with entity names for filterable search
         entities = _extract_entities_for_metadata(content)
         if entities:
