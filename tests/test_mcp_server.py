@@ -409,7 +409,10 @@ class TestWriteTools:
         from mempalace.mcp_server import tool_add_drawer
 
         header = "# ACME Corp Knowledge Base\n**Project:** Alpha | **Team:** Backend | **Status:** Active\n\n"
-        doc1 = header + "Decision: Use PostgreSQL for primary storage. Rationale: ACID compliance required."
+        doc1 = (
+            header
+            + "Decision: Use PostgreSQL for primary storage. Rationale: ACID compliance required."
+        )
         doc2 = header + "Decision: Use Redis for session caching. Rationale: sub-ms latency needed."
 
         result1 = tool_add_drawer(wing="work", room="decisions", content=doc1)

@@ -481,7 +481,9 @@ def tool_add_drawer(
     if not col:
         return _no_palace()
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content).encode()).hexdigest()[:24]}"
+    drawer_id = (
+        f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content).encode()).hexdigest()[:24]}"
+    )
 
     _wal_log(
         "add_drawer",
