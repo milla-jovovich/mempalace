@@ -773,7 +773,7 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
             all_text.append(content)
             all_lines.extend(content.splitlines())
             files_read += 1
-        except Exception:
+        except OSError:
             continue
 
     combined_text = "\n".join(all_text)
@@ -878,7 +878,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
         if detected["uncertain"]:
             print("\n  Uncertain entities — classify each:")
             for e in detected["uncertain"]:
-                ans = input(f"    {e['name']} — (p)erson, (r)roject, or (s)kip? ").strip().lower()
+                ans = input(f"    {e['name']} — (p)erson, (r)project, or (s)kip? ").strip().lower()
                 if ans == "p":
                     confirmed_people.append(e["name"])
                 elif ans == "r":
@@ -907,7 +907,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
             name = input("  Name (or enter to stop): ").strip()
             if not name:
                 break
-            kind = input(f"  Is '{name}' a (p)erson or (r)roject? ").strip().lower()
+            kind = input(f"  Is '{name}' a (p)erson or p(r)oject? ").strip().lower()
             if kind == "p":
                 confirmed_people.append(name)
             elif kind == "r":

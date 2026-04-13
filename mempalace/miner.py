@@ -10,11 +10,12 @@ Stores verbatim chunks as drawers. No summaries. Ever.
 import os
 import sys
 import hashlib
+import fnmatch
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
+from .palace import SKIP_DIRS, get_collection, file_already_mined
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -39,23 +40,209 @@ READABLE_EXTENSIONS = {
     ".toml",
 }
 
-SKIP_DIRS = {
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "venv",
-    "env",
-    "dist",
-    "build",
-    ".next",
-    "coverage",
-    ".mempalace",
+SKIP_FILENAMES = {
+    "mempalace.yaml",
+    "mempalace.yml",
+    "mempal.yaml",
+    "mempal.yml",
+    ".gitignore",
+    "package-lock.json",
 }
 
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+
+
+# =============================================================================
+# IGNORE MATCHING
+# =============================================================================
+
+
+class GitignoreMatcher:
+    """Lightweight matcher for one directory's .gitignore patterns."""
+
+    def __init__(self, base_dir: Path, rules: list):
+        self.base_dir = base_dir
+        self.rules = rules
+
+    @classmethod
+    def from_dir(cls, dir_path: Path):
+        gitignore_path = dir_path / ".gitignore"
+        if not gitignore_path.is_file():
+            return None
+
+        try:
+            lines = gitignore_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            return None
+
+        rules = []
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            if line.startswith("\\#") or line.startswith("\\!"):
+                line = line[1:]
+            elif line.startswith("#"):
+                continue
+
+            negated = line.startswith("!")
+            if negated:
+                line = line[1:]
+
+            anchored = line.startswith("/")
+            if anchored:
+                line = line.lstrip("/")
+
+            dir_only = line.endswith("/")
+            if dir_only:
+                line = line.rstrip("/")
+
+            if not line:
+                continue
+
+            rules.append(
+                {
+                    "pattern": line,
+                    "anchored": anchored,
+                    "dir_only": dir_only,
+                    "negated": negated,
+                }
+            )
+
+        if not rules:
+            return None
+
+        return cls(dir_path, rules)
+
+    def matches(self, path: Path, is_dir: bool = None):
+        try:
+            relative = path.relative_to(self.base_dir).as_posix().strip("/")
+        except ValueError:
+            return None
+
+        if not relative:
+            return None
+
+        if is_dir is None:
+            is_dir = path.is_dir()
+
+        ignored = None
+        for rule in self.rules:
+            if self._rule_matches(rule, relative, is_dir):
+                ignored = not rule["negated"]
+        return ignored
+
+    def _rule_matches(self, rule: dict, relative: str, is_dir: bool) -> bool:
+        pattern = rule["pattern"]
+        parts = relative.split("/")
+        pattern_parts = pattern.split("/")
+
+        if rule["dir_only"]:
+            target_parts = parts if is_dir else parts[:-1]
+            if not target_parts:
+                return False
+            if rule["anchored"] or len(pattern_parts) > 1:
+                return self._match_from_root(target_parts, pattern_parts)
+            return any(fnmatch.fnmatch(part, pattern) for part in target_parts)
+
+        if rule["anchored"] or len(pattern_parts) > 1:
+            return self._match_from_root(parts, pattern_parts)
+
+        return any(fnmatch.fnmatch(part, pattern) for part in parts)
+
+    def _match_from_root(self, target_parts: list, pattern_parts: list) -> bool:
+        def matches(path_index: int, pattern_index: int) -> bool:
+            if pattern_index == len(pattern_parts):
+                return True
+
+            if path_index == len(target_parts):
+                return all(part == "**" for part in pattern_parts[pattern_index:])
+
+            pattern_part = pattern_parts[pattern_index]
+            if pattern_part == "**":
+                return matches(path_index, pattern_index + 1) or matches(
+                    path_index + 1, pattern_index
+                )
+
+            if not fnmatch.fnmatch(target_parts[path_index], pattern_part):
+                return False
+
+            return matches(path_index + 1, pattern_index + 1)
+
+        return matches(0, 0)
+
+
+def load_gitignore_matcher(dir_path: Path, cache: dict):
+    """Load and cache one directory's .gitignore matcher."""
+    if dir_path not in cache:
+        cache[dir_path] = GitignoreMatcher.from_dir(dir_path)
+    return cache[dir_path]
+
+
+def is_gitignored(path: Path, matchers: list, is_dir: bool = False) -> bool:
+    """Apply active .gitignore matchers in ancestor order; last match wins."""
+    ignored = False
+    for matcher in matchers:
+        decision = matcher.matches(path, is_dir=is_dir)
+        if decision is not None:
+            ignored = decision
+    return ignored
+
+
+def should_skip_dir(dirname: str) -> bool:
+    """Skip known generated/cache directories before gitignore matching."""
+    return dirname in SKIP_DIRS or dirname.endswith(".egg-info")
+
+
+def normalize_include_paths(include_ignored: list) -> set:
+    """Normalize comma-parsed include paths into project-relative POSIX strings."""
+    normalized = set()
+    for raw_path in include_ignored or []:
+        candidate = str(raw_path).strip().strip("/")
+        if candidate:
+            normalized.add(Path(candidate).as_posix())
+    return normalized
+
+
+def is_exact_force_include(path: Path, project_path: Path, include_paths: set) -> bool:
+    """Return True when a path exactly matches an explicit include override."""
+    if not include_paths:
+        return False
+
+    try:
+        relative = path.relative_to(project_path).as_posix().strip("/")
+    except ValueError:
+        return False
+
+    return relative in include_paths
+
+
+def is_force_included(path: Path, project_path: Path, include_paths: set) -> bool:
+    """Return True when a path or one of its ancestors/descendants was explicitly included."""
+    if not include_paths:
+        return False
+
+    try:
+        relative = path.relative_to(project_path).as_posix().strip("/")
+    except ValueError:
+        return False
+
+    if not relative:
+        return False
+
+    for include_path in include_paths:
+        if relative == include_path:
+            return True
+        if relative.startswith(f"{include_path}/"):
+            return True
+        if include_path.startswith(f"{relative}/"):
+            return True
+
+    return False
 
 
 # =============================================================================
@@ -99,11 +286,12 @@ def detect_room(filepath: Path, content: str, rooms: list, project_path: Path) -
     filename = filepath.stem.lower()
     content_lower = content[:2000].lower()
 
-    # Priority 1: folder path contains room name
+    # Priority 1: folder path matches room name or keywords
     path_parts = relative.replace("\\", "/").split("/")
     for part in path_parts[:-1]:  # skip filename itself
         for room in rooms:
-            if room["name"].lower() in part or part in room["name"].lower():
+            candidates = [room["name"].lower()] + [k.lower() for k in room.get("keywords", [])]
+            if any(part == c or c in part or part in c for c in candidates):
                 return room["name"]
 
     # Priority 2: filename matches room name
@@ -180,48 +368,32 @@ def chunk_text(content: str, source_file: str) -> list:
 # =============================================================================
 
 
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
-
-
-def file_already_mined(collection, source_file: str) -> bool:
-    """Fast check: has this file been filed before?"""
-    try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
-        return len(results.get("ids", [])) > 0
-    except Exception:
-        return False
-
-
 def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
 ):
     """Add one drawer to the palace."""
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((source_file + str(chunk_index)).encode()).hexdigest()[:16]}"
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
     try:
-        collection.add(
+        metadata = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file,
+            "chunk_index": chunk_index,
+            "added_by": agent,
+            "filed_at": datetime.now().isoformat(),
+        }
+        # Store file mtime so we can detect modifications later.
+        try:
+            metadata["source_mtime"] = os.path.getmtime(source_file)
+        except OSError:
+            pass
+        collection.upsert(
             documents=[content],
             ids=[drawer_id],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file,
-                    "chunk_index": chunk_index,
-                    "added_by": agent,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
+            metadatas=[metadata],
         )
         return True
-    except Exception as e:
-        if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
-            return False
+    except Exception:
         raise
 
 
@@ -238,29 +410,39 @@ def process_file(
     rooms: list,
     agent: str,
     dry_run: bool,
-) -> int:
-    """Read, chunk, route, and file one file. Returns drawer count."""
+) -> tuple:
+    """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
 
     # Skip if already filed
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file):
-        return 0
+    if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
+        return 0, "general"
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return 0
+    except OSError:
+        return 0, "general"
 
     content = content.strip()
     if len(content) < MIN_CHUNK_SIZE:
-        return 0
+        return 0, "general"
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
-        return len(chunks)
+        return len(chunks), room
+
+    # Purge stale drawers for this file before re-inserting the fresh chunks.
+    # Converts modified-file re-mines from upsert-over-existing-IDs (which hits
+    # hnswlib's thread-unsafe updatePoint path and can segfault on macOS ARM
+    # with chromadb 0.6.3) into a clean delete+insert, bypassing the update
+    # path entirely.
+    try:
+        collection.delete(where={"source_file": source_file})
+    except Exception:
+        pass
 
     drawers_added = 0
     for chunk in chunks:
@@ -276,7 +458,7 @@ def process_file(
         if added:
             drawers_added += 1
 
-    return drawers_added
+    return drawers_added, room
 
 
 # =============================================================================
@@ -284,26 +466,67 @@ def process_file(
 # =============================================================================
 
 
-def scan_project(project_dir: str) -> list:
+def scan_project(
+    project_dir: str,
+    respect_gitignore: bool = True,
+    include_ignored: list = None,
+) -> list:
     """Return list of all readable file paths."""
     project_path = Path(project_dir).expanduser().resolve()
     files = []
+    active_matchers = []
+    matcher_cache = {}
+    include_paths = normalize_include_paths(include_ignored)
+
     for root, dirs, filenames in os.walk(project_path):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        root_path = Path(root)
+
+        if respect_gitignore:
+            active_matchers = [
+                matcher
+                for matcher in active_matchers
+                if root_path == matcher.base_dir or matcher.base_dir in root_path.parents
+            ]
+            current_matcher = load_gitignore_matcher(root_path, matcher_cache)
+            if current_matcher is not None:
+                active_matchers.append(current_matcher)
+
+        dirs[:] = [
+            d
+            for d in dirs
+            if is_force_included(root_path / d, project_path, include_paths)
+            or not should_skip_dir(d)
+        ]
+        if respect_gitignore and active_matchers:
+            dirs[:] = [
+                d
+                for d in dirs
+                if is_force_included(root_path / d, project_path, include_paths)
+                or not is_gitignored(root_path / d, active_matchers, is_dir=True)
+            ]
+
         for filename in filenames:
-            filepath = Path(root) / filename
-            if filepath.suffix.lower() in READABLE_EXTENSIONS:
-                # Skip config files
-                if filename in (
-                    "mempalace.yaml",
-                    "mempalace.yml",
-                    "mempal.yaml",
-                    "mempal.yml",
-                    ".gitignore",
-                    "package-lock.json",
-                ):
+            filepath = root_path / filename
+            force_include = is_force_included(filepath, project_path, include_paths)
+            exact_force_include = is_exact_force_include(filepath, project_path, include_paths)
+
+            if not force_include and filename in SKIP_FILENAMES:
+                continue
+            if filepath.suffix.lower() not in READABLE_EXTENSIONS and not exact_force_include:
+                continue
+            if respect_gitignore and active_matchers and not force_include:
+                if is_gitignored(filepath, active_matchers, is_dir=False):
                     continue
-                files.append(filepath)
+            # Skip symlinks — prevents following links to /dev/urandom, etc.
+            if filepath.is_symlink():
+                continue
+            # Skip files exceeding size limit
+            try:
+                if filepath.stat().st_size > MAX_FILE_SIZE:
+                    continue
+            except OSError:
+                continue
+            files.append(filepath)
     return files
 
 
@@ -319,6 +542,8 @@ def mine(
     agent: str = "mempalace",
     limit: int = 0,
     dry_run: bool = False,
+    respect_gitignore: bool = True,
+    include_ignored: list = None,
 ):
     """Mine a project directory into the palace."""
 
@@ -328,7 +553,11 @@ def mine(
     wing = wing_override or config["wing"]
     rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
 
-    files = scan_project(project_dir)
+    files = scan_project(
+        project_dir,
+        respect_gitignore=respect_gitignore,
+        include_ignored=include_ignored,
+    )
     if limit > 0:
         files = files[:limit]
 
@@ -341,6 +570,10 @@ def mine(
     print(f"  Palace:  {palace_path}")
     if dry_run:
         print("  DRY RUN — nothing will be filed")
+    if not respect_gitignore:
+        print("  .gitignore: DISABLED")
+    if include_ignored:
+        print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
     print(f"{'─' * 55}\n")
 
     if not dry_run:
@@ -353,7 +586,7 @@ def mine(
     room_counts = defaultdict(int)
 
     for i, filepath in enumerate(files, 1):
-        drawers = process_file(
+        drawers, room = process_file(
             filepath=filepath,
             project_path=project_path,
             collection=collection,
@@ -366,7 +599,6 @@ def mine(
             files_skipped += 1
         else:
             total_drawers += drawers
-            room = detect_room(filepath, "", rooms, project_path)
             room_counts[room] += 1
             if not dry_run:
                 print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
@@ -391,15 +623,15 @@ def mine(
 def status(palace_path: str):
     """Show what's been filed in the palace."""
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_collection(palace_path, create=False)
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
     # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
+    total = col.count()
+    r = col.get(limit=total, include=["metadatas"]) if total else {"metadatas": []}
     metas = r["metadatas"]
 
     wing_rooms = defaultdict(lambda: defaultdict(int))

@@ -14,6 +14,7 @@ Commands:
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
     mempalace search "query"              Find anything, exact words
+    mempalace mcp                         Show MCP setup command
     mempalace wake-up                     Show L0 + L1 wake-up context
     mempalace wake-up --wing my_app       Wake-up for a specific project
     mempalace status                      Show what's been filed
@@ -28,6 +29,7 @@ Examples:
 
 import os
 import sys
+import shlex
 import argparse
 from pathlib import Path
 
@@ -59,12 +61,15 @@ def cmd_init(args):
             print("  No entities detected — proceeding with directory-based rooms.")
 
     # Pass 2: detect rooms from folder structure
-    detect_rooms_local(project_dir=args.dir)
+    detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
     MempalaceConfig().init()
 
 
 def cmd_mine(args):
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    include_ignored = []
+    for raw in args.include_ignored or []:
+        include_ignored.extend(part.strip() for part in raw.split(",") if part.strip())
 
     if args.mode == "convos":
         from .convo_miner import mine_convos
@@ -88,20 +93,25 @@ def cmd_mine(args):
             agent=args.agent,
             limit=args.limit,
             dry_run=args.dry_run,
+            respect_gitignore=not args.no_gitignore,
+            include_ignored=include_ignored,
         )
 
 
 def cmd_search(args):
-    from .searcher import search
+    from .searcher import search, SearchError
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-    search(
-        query=args.query,
-        palace_path=palace_path,
-        wing=args.wing,
-        room=args.room,
-        n_results=args.results,
-    )
+    try:
+        search(
+            query=args.query,
+            palace_path=palace_path,
+            wing=args.wing,
+            room=args.room,
+            n_results=args.results,
+        )
+    except SearchError:
+        sys.exit(1)
 
 
 def cmd_wakeup(args):
@@ -124,7 +134,8 @@ def cmd_split(args):
     import sys
 
     # Rebuild argv for split_mega_files argparse
-    argv = [args.dir]
+    # Expand ~ and resolve to absolute path so split_mega_files sees a real path
+    argv = ["--source", str(Path(args.dir).expanduser().resolve())]
     if args.output_dir:
         argv += ["--output-dir", args.output_dir]
     if args.dry_run:
@@ -140,11 +151,144 @@ def cmd_split(args):
         sys.argv = old_argv
 
 
+def cmd_migrate(args):
+    """Migrate palace from a different ChromaDB version."""
+    from .migrate import migrate
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    migrate(palace_path=palace_path, dry_run=args.dry_run, confirm=getattr(args, "yes", False))
+
+
 def cmd_status(args):
     from .miner import status
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     status(palace_path=palace_path)
+
+
+def cmd_repair(args):
+    """Rebuild palace vector index from SQLite metadata."""
+    import chromadb
+    import shutil
+    from .migrate import confirm_destructive_action, contains_palace_database
+
+    palace_path = os.path.abspath(
+        os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    )
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
+
+    if not os.path.isdir(palace_path):
+        print(f"\n  No palace found at {palace_path}")
+        return
+    if not contains_palace_database(palace_path):
+        print(f"\n  No palace database found at {db_path}")
+        return
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Repair")
+    print(f"{'=' * 55}\n")
+    print(f"  Palace: {palace_path}")
+
+    # Try to read existing drawers
+    try:
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection("mempalace_drawers")
+        total = col.count()
+        print(f"  Drawers found: {total}")
+    except Exception as e:
+        print(f"  Error reading palace: {e}")
+        print("  Cannot recover — palace may need to be re-mined from source files.")
+        return
+
+    if total == 0:
+        print("  Nothing to repair.")
+        return
+
+    if not confirm_destructive_action(
+        "Repair", palace_path, assume_yes=getattr(args, "yes", False)
+    ):
+        return
+
+    # Extract all drawers in batches
+    print("\n  Extracting drawers...")
+    batch_size = 5000
+    all_ids = []
+    all_docs = []
+    all_metas = []
+    offset = 0
+    while offset < total:
+        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        all_ids.extend(batch["ids"])
+        all_docs.extend(batch["documents"])
+        all_metas.extend(batch["metadatas"])
+        offset += batch_size
+    print(f"  Extracted {len(all_ids)} drawers")
+
+    # Backup and rebuild
+    palace_path = os.path.normpath(palace_path)
+    backup_path = palace_path + ".backup"
+    if os.path.exists(backup_path):
+        if not contains_palace_database(backup_path):
+            print(
+                "  Backup validation failed: backup path exists but does not contain chroma.sqlite3. "
+                f"Please remove or rename: {backup_path}"
+            )
+            return
+        shutil.rmtree(backup_path)
+    print(f"  Backing up to {backup_path}...")
+    shutil.copytree(palace_path, backup_path)
+
+    print("  Rebuilding collection...")
+    client.delete_collection("mempalace_drawers")
+    new_col = client.create_collection("mempalace_drawers")
+
+    filed = 0
+    for i in range(0, len(all_ids), batch_size):
+        batch_ids = all_ids[i : i + batch_size]
+        batch_docs = all_docs[i : i + batch_size]
+        batch_metas = all_metas[i : i + batch_size]
+        new_col.add(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
+        filed += len(batch_ids)
+        print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
+
+    print(f"\n  Repair complete. {filed} drawers rebuilt.")
+    print(f"  Backup saved at {backup_path}")
+    print(f"\n{'=' * 55}\n")
+
+
+def cmd_hook(args):
+    """Run hook logic: reads JSON from stdin, outputs JSON to stdout."""
+    from .hooks_cli import run_hook
+
+    run_hook(hook_name=args.hook, harness=args.harness)
+
+
+def cmd_instructions(args):
+    """Output skill instructions to stdout."""
+    from .instructions_cli import run_instructions
+
+    run_instructions(name=args.name)
+
+
+def cmd_mcp(args):
+    """Show how to wire MemPalace into MCP-capable hosts."""
+    base_server_cmd = "python -m mempalace.mcp_server"
+
+    if args.palace:
+        resolved_palace = str(Path(args.palace).expanduser())
+        server_cmd = f"{base_server_cmd} --palace {shlex.quote(resolved_palace)}"
+    else:
+        server_cmd = base_server_cmd
+
+    print("MemPalace MCP quick setup:")
+    print(f"  claude mcp add mempalace -- {server_cmd}")
+    print("\nRun the server directly:")
+    print(f"  {server_cmd}")
+
+    if not args.palace:
+        print("\nOptional custom palace:")
+        print(f"  claude mcp add mempalace -- {base_server_cmd} --palace /path/to/palace")
+        print(f"  {base_server_cmd} --palace /path/to/palace")
 
 
 def cmd_compress(args):
@@ -177,20 +321,31 @@ def cmd_compress(args):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         sys.exit(1)
 
-    # Query drawers in the wing
+    # Query drawers in batches to avoid SQLite variable limit (~999)
     where = {"wing": args.wing} if args.wing else None
-    try:
-        kwargs = {"include": ["documents", "metadatas"]}
-        if where:
-            kwargs["where"] = where
-        results = col.get(**kwargs)
-    except Exception as e:
-        print(f"\n  Error reading drawers: {e}")
-        sys.exit(1)
-
-    docs = results["documents"]
-    metas = results["metadatas"]
-    ids = results["ids"]
+    _BATCH = 500
+    docs, metas, ids = [], [], []
+    offset = 0
+    while True:
+        try:
+            kwargs = {"include": ["documents", "metadatas"], "limit": _BATCH, "offset": offset}
+            if where:
+                kwargs["where"] = where
+            batch = col.get(**kwargs)
+        except Exception as e:
+            if not docs:
+                print(f"\n  Error reading drawers: {e}")
+                sys.exit(1)
+            break
+        batch_docs = batch.get("documents", [])
+        if not batch_docs:
+            break
+        docs.extend(batch_docs)
+        metas.extend(batch.get("metadatas", []))
+        ids.extend(batch.get("ids", []))
+        offset += len(batch_docs)
+        if len(batch_docs) < _BATCH:
+            break
 
     if not docs:
         wing_label = f" in wing '{args.wing}'" if args.wing else ""
@@ -213,7 +368,7 @@ def cmd_compress(args):
         stats = dialect.compression_stats(doc, compressed)
 
         total_original += stats["original_chars"]
-        total_compressed += stats["compressed_chars"]
+        total_compressed += stats["summary_chars"]
 
         compressed_entries.append((doc_id, compressed, meta, stats))
 
@@ -223,7 +378,7 @@ def cmd_compress(args):
             source = Path(meta.get("source_file", "?")).name
             print(f"  [{wing_name}/{room_name}] {source}")
             print(
-                f"    {stats['original_tokens']}t -> {stats['compressed_tokens']}t ({stats['ratio']:.1f}x)"
+                f"    {stats['original_tokens_est']}t -> {stats['summary_tokens_est']}t ({stats['size_ratio']:.1f}x)"
             )
             print(f"    {compressed}")
             print()
@@ -234,8 +389,8 @@ def cmd_compress(args):
             comp_col = client.get_or_create_collection("mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
-                comp_meta["compression_ratio"] = round(stats["ratio"], 1)
-                comp_meta["original_tokens"] = stats["original_tokens"]
+                comp_meta["compression_ratio"] = round(stats["size_ratio"], 1)
+                comp_meta["original_tokens"] = stats["original_tokens_est"]
                 comp_col.upsert(
                     ids=[doc_id],
                     documents=[compressed],
@@ -250,8 +405,9 @@ def cmd_compress(args):
 
     # Summary
     ratio = total_original / max(total_compressed, 1)
-    orig_tokens = Dialect.count_tokens("x" * total_original)
-    comp_tokens = Dialect.count_tokens("x" * total_compressed)
+    # Estimate tokens from char count (~3.8 chars/token for English text)
+    orig_tokens = max(1, int(total_original / 3.8))
+    comp_tokens = max(1, int(total_compressed / 3.8))
     print(f"  Total: {orig_tokens:,}t -> {comp_tokens:,}t ({ratio:.1f}x compression)")
     if args.dry_run:
         print("  (dry run -- nothing stored)")
@@ -288,6 +444,17 @@ def main():
         help="Ingest mode: 'projects' for code/docs (default), 'convos' for chat exports",
     )
     p_mine.add_argument("--wing", default=None, help="Wing name (default: directory name)")
+    p_mine.add_argument(
+        "--no-gitignore",
+        action="store_true",
+        help="Don't respect .gitignore files when scanning project files",
+    )
+    p_mine.add_argument(
+        "--include-ignored",
+        action="append",
+        default=[],
+        help="Always scan these project-relative paths even if ignored; repeat or pass comma-separated paths",
+    )
     p_mine.add_argument(
         "--agent",
         default="mempalace",
@@ -350,7 +517,62 @@ def main():
         help="Only split files containing at least N sessions (default: 2)",
     )
 
+    # hook
+    p_hook = sub.add_parser(
+        "hook",
+        help="Run hook logic (reads JSON from stdin, outputs JSON to stdout)",
+    )
+    hook_sub = p_hook.add_subparsers(dest="hook_action")
+    p_hook_run = hook_sub.add_parser("run", help="Execute a hook")
+    p_hook_run.add_argument(
+        "--hook",
+        required=True,
+        choices=["session-start", "stop", "precompact"],
+        help="Hook name to run",
+    )
+    p_hook_run.add_argument(
+        "--harness",
+        required=True,
+        choices=["claude-code", "codex"],
+        help="Harness type (determines stdin JSON format)",
+    )
+
+    # instructions
+    p_instructions = sub.add_parser(
+        "instructions",
+        help="Output skill instructions to stdout",
+    )
+    instructions_sub = p_instructions.add_subparsers(dest="instructions_name")
+    for instr_name in ["init", "search", "mine", "help", "status"]:
+        instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
+
+    # repair
+    sub.add_parser(
+        "repair",
+        help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
+    ).add_argument("--yes", action="store_true", help="Skip confirmation for destructive changes")
+
+    # mcp
+    sub.add_parser(
+        "mcp",
+        help="Show MCP setup command for connecting MemPalace to your AI client",
+    )
+
     # status
+    # migrate
+    p_migrate = sub.add_parser(
+        "migrate",
+        help="Migrate palace from a different ChromaDB version (fixes 3.0.0 → 3.1.0 upgrade)",
+    )
+    p_migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be migrated without changing anything",
+    )
+    p_migrate.add_argument(
+        "--yes", action="store_true", help="Skip confirmation for destructive changes"
+    )
+
     sub.add_parser("status", help="Show what's been filed")
 
     args = parser.parse_args()
@@ -359,13 +581,33 @@ def main():
         parser.print_help()
         return
 
+    # Handle two-level subcommands
+    if args.command == "hook":
+        if not getattr(args, "hook_action", None):
+            p_hook.print_help()
+            return
+        cmd_hook(args)
+        return
+
+    if args.command == "instructions":
+        name = getattr(args, "instructions_name", None)
+        if not name:
+            p_instructions.print_help()
+            return
+        args.name = name
+        cmd_instructions(args)
+        return
+
     dispatch = {
         "init": cmd_init,
         "mine": cmd_mine,
         "split": cmd_split,
         "search": cmd_search,
+        "mcp": cmd_mcp,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
+        "repair": cmd_repair,
+        "migrate": cmd_migrate,
         "status": cmd_status,
     }
     dispatch[args.command](args)

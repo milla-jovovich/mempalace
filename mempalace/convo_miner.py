@@ -15,9 +15,8 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
-
 from .normalize import normalize
+from .palace import SKIP_DIRS, get_collection, file_already_mined
 
 
 # File types that might contain conversations
@@ -28,20 +27,33 @@ CONVO_EXTENSIONS = {
     ".jsonl",
 }
 
-SKIP_DIRS = {
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "venv",
-    "env",
-    "dist",
-    "build",
-    ".next",
-    ".mempalace",
-}
-
 MIN_CHUNK_SIZE = 30
+CHUNK_SIZE = 800  # chars per drawer — align with miner.py
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+
+
+def _register_file(collection, source_file: str, wing: str, agent: str):
+    """Write a sentinel so file_already_mined() returns True for 0-chunk files.
+
+    Without this, files that normalize to nothing or produce zero chunks are
+    re-read and re-processed on every mine run because nothing was written to
+    ChromaDB on the first pass.
+    """
+    sentinel_id = f"_reg_{hashlib.sha256(source_file.encode()).hexdigest()[:24]}"
+    collection.upsert(
+        documents=[f"[registry] {source_file}"],
+        ids=[sentinel_id],
+        metadatas=[
+            {
+                "wing": wing,
+                "room": "_registry",
+                "source_file": source_file,
+                "added_by": agent,
+                "filed_at": datetime.now().isoformat(),
+                "ingest_mode": "registry",
+            }
+        ],
+    )
 
 
 # =============================================================================
@@ -64,7 +76,12 @@ def chunk_exchanges(content: str) -> list:
 
 
 def _chunk_by_exchange(lines: list) -> list:
-    """One user turn (>) + the AI response that follows = one chunk."""
+    """One user turn (>) + the AI response that follows = one or more chunks.
+
+    The full AI response is preserved verbatim.  When the combined
+    user-turn + response exceeds CHUNK_SIZE the response is split across
+    consecutive drawers so nothing is silently discarded.
+    """
     chunks = []
     i = 0
 
@@ -83,10 +100,23 @@ def _chunk_by_exchange(lines: list) -> list:
                     ai_lines.append(next_line.strip())
                 i += 1
 
-            ai_response = " ".join(ai_lines[:8])
+            ai_response = " ".join(ai_lines)
             content = f"{user_turn}\n{ai_response}" if ai_response else user_turn
 
-            if len(content.strip()) > MIN_CHUNK_SIZE:
+            # Split into multiple drawers when the exchange exceeds CHUNK_SIZE
+            if len(content) > CHUNK_SIZE:
+                # First chunk: user turn + as much response as fits
+                first_part = content[:CHUNK_SIZE]
+                if len(first_part.strip()) > MIN_CHUNK_SIZE:
+                    chunks.append({"content": first_part, "chunk_index": len(chunks)})
+                # Remaining response in CHUNK_SIZE-sized continuation drawers
+                remainder = content[CHUNK_SIZE:]
+                while remainder:
+                    part = remainder[:CHUNK_SIZE]
+                    remainder = remainder[CHUNK_SIZE:]
+                    if len(part.strip()) > MIN_CHUNK_SIZE:
+                        chunks.append({"content": part, "chunk_index": len(chunks)})
+            elif len(content.strip()) > MIN_CHUNK_SIZE:
                 chunks.append(
                     {
                         "content": content,
@@ -243,23 +273,6 @@ def detect_convo_room(content: str) -> str:
 # =============================================================================
 
 
-def get_collection(palace_path: str):
-    os.makedirs(palace_path, exist_ok=True)
-    client = chromadb.PersistentClient(path=palace_path)
-    try:
-        return client.get_collection("mempalace_drawers")
-    except Exception:
-        return client.create_collection("mempalace_drawers")
-
-
-def file_already_mined(collection, source_file: str) -> bool:
-    try:
-        results = collection.get(where={"source_file": source_file}, limit=1)
-        return len(results.get("ids", [])) > 0
-    except Exception:
-        return False
-
-
 # =============================================================================
 # SCAN FOR CONVERSATION FILES
 # =============================================================================
@@ -272,8 +285,18 @@ def scan_convos(convo_dir: str) -> list:
     for root, dirs, filenames in os.walk(convo_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for filename in filenames:
+            if filename.endswith(".meta.json"):
+                continue
             filepath = Path(root) / filename
             if filepath.suffix.lower() in CONVO_EXTENSIONS:
+                # Skip symlinks and oversized files
+                if filepath.is_symlink():
+                    continue
+                try:
+                    if filepath.stat().st_size > MAX_FILE_SIZE:
+                        continue
+                except OSError:
+                    continue
                 files.append(filepath)
     return files
 
@@ -316,7 +339,7 @@ def mine_convos(
     print(f"  Palace:  {palace_path}")
     if dry_run:
         print("  DRY RUN — nothing will be filed")
-    print(f"{'─' * 55}\n")
+    print(f"{'-' * 55}\n")
 
     collection = get_collection(palace_path) if not dry_run else None
 
@@ -335,10 +358,14 @@ def mine_convos(
         # Normalize format
         try:
             content = normalize(str(filepath))
-        except Exception:
+        except (OSError, ValueError):
+            if not dry_run:
+                _register_file(collection, source_file, wing, agent)
             continue
 
         if not content or len(content.strip()) < MIN_CHUNK_SIZE:
+            if not dry_run:
+                _register_file(collection, source_file, wing, agent)
             continue
 
         # Chunk — either exchange pairs or general extraction
@@ -351,6 +378,8 @@ def mine_convos(
             chunks = chunk_exchanges(content)
 
         if not chunks:
+            if not dry_run:
+                _register_file(collection, source_file, wing, agent)
             continue
 
         # Detect room from content (general mode uses memory_type instead)
@@ -386,9 +415,9 @@ def mine_convos(
             chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
             if extract_mode == "general":
                 room_counts[chunk_room] += 1
-            drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.md5((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:16]}"
+            drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
             try:
-                collection.add(
+                collection.upsert(
                     documents=[chunk["content"]],
                     ids=[drawer_id],
                     metadatas=[
