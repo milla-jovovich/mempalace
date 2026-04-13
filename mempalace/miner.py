@@ -629,10 +629,19 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
+    # Count by wing and room (batch to avoid SQLite variable limit)
     total = col.count()
-    r = col.get(limit=total, include=["metadatas"]) if total else {"metadatas": []}
-    metas = r["metadatas"]
+    metas = []
+    if total:
+        batch_size = 5000
+        offset = 0
+        while offset < total:
+            r = col.get(limit=batch_size, offset=offset, include=["metadatas"])
+            batch = r["metadatas"]
+            if not batch:
+                break
+            metas.extend(batch)
+            offset += len(batch)
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:
