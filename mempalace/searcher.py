@@ -2,9 +2,11 @@
 """
 searcher.py — Find anything. Exact words.
 
-Hybrid search: BM25 keyword matching + vector semantic similarity.
-Searches closets first (fast index), then hydrates full drawer content.
-Falls back to direct drawer search for palaces without closets.
+Hybrid search: BM25 keyword matching + vector semantic similarity. The
+drawer query is the floor — always runs — and closet hits add a rank-based
+boost when they agree. Closets are a ranking *signal*, never a gate, so
+weak closets (regex extraction on narrative content) can only help, never
+hide drawers the direct path would have found.
 """
 
 import logging
@@ -220,108 +222,6 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
     }
 
 
-def _closet_first_hits(
-    palace_path: str,
-    query: str,
-    where: dict,
-    drawers_col,
-    n_results: int,
-    max_distance: float,
-):
-    """Run a closet-first search and return chunk-level drawer hits.
-
-    Returns:
-        non-empty list of hits when the closet path produced usable matches.
-        ``None`` when the closet collection is empty/missing OR when every
-        candidate drawer was filtered out (e.g. by max_distance); the
-        caller should fall back to direct drawer search.
-    """
-    try:
-        closets_col = get_closets_collection(palace_path, create=False)
-    except Exception:
-        return None
-
-    try:
-        ckwargs = {
-            "query_texts": [query],
-            "n_results": max(n_results * 2, 5),
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            ckwargs["where"] = where
-        closet_results = closets_col.query(**ckwargs)
-    except Exception:
-        return None
-
-    closet_docs = closet_results["documents"][0] if closet_results["documents"] else []
-    if not closet_docs:
-        return None
-
-    closet_metas = closet_results["metadatas"][0]
-    closet_dists = closet_results["distances"][0]
-
-    # Collect candidate drawer IDs in closet-rank order, dedupe, remember
-    # which closet (and its distance/preview) introduced each one.
-    drawer_id_order: list = []
-    drawer_provenance: dict = {}
-    for cdoc, cmeta, cdist in zip(closet_docs, closet_metas, closet_dists):
-        for did in _extract_drawer_ids_from_closet(cdoc):
-            if did in drawer_provenance:
-                continue
-            drawer_provenance[did] = (cdist, cdoc, cmeta)
-            drawer_id_order.append(did)
-
-    if not drawer_id_order:
-        return None
-
-    # Hydrate exactly those drawers — chunk-level, not whole-file.
-    try:
-        fetched = drawers_col.get(
-            ids=drawer_id_order,
-            include=["documents", "metadatas"],
-        )
-    except Exception:
-        return None
-
-    fetched_ids = fetched.get("ids") or []
-    fetched_docs = fetched.get("documents") or []
-    fetched_metas = fetched.get("metadatas") or []
-    fetched_map = {
-        did: (doc, meta) for did, doc, meta in zip(fetched_ids, fetched_docs, fetched_metas)
-    }
-
-    hits: list = []
-    for did in drawer_id_order:
-        if did not in fetched_map:
-            continue  # closet pointed to a drawer that no longer exists
-        doc, meta = fetched_map[did]
-        cdist, cdoc, _ = drawer_provenance[did]
-        if max_distance > 0.0 and cdist > max_distance:
-            continue
-        # Expand with ±1 neighbor chunks from the same source file so a
-        # closet hit that lands mid-thought still returns enough context to
-        # be useful without a follow-up get_drawer call.
-        expansion = _expand_with_neighbors(drawers_col, doc, meta, radius=1)
-        hits.append(
-            {
-                "text": expansion["text"],
-                "wing": meta.get("wing", "unknown"),
-                "room": meta.get("room", "unknown"),
-                "source_file": Path(meta.get("source_file", "?")).name,
-                "similarity": round(max(0.0, 1 - cdist), 3),
-                "distance": round(cdist, 4),
-                "matched_via": "closet",
-                "closet_preview": cdoc[:200],
-                "drawer_index": expansion["drawer_index"],
-                "total_drawers": expansion["total_drawers"],
-            }
-        )
-        if len(hits) >= n_results:
-            break
-
-    return hits if hits else None
-
-
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
     """
     Search the palace. Returns verbatim drawer content.
@@ -420,72 +320,168 @@ def search_memories(
 
     where = build_where_filter(wing, room)
 
-    # Closet-first search: scan the compact index, parse drawer pointers
-    # from each matching line, then hydrate exactly those drawers. This
-    # keeps the result shape chunk-level (consistent with direct search)
-    # and applies the same max_distance filter.
-    closet_hits = _closet_first_hits(
-        palace_path=palace_path,
-        query=query,
-        where=where,
-        drawers_col=drawers_col,
-        n_results=n_results,
-        max_distance=max_distance,
-    )
-    if closet_hits is not None:
-        # Re-rank chunk-level closet hits with the same hybrid scoring as
-        # the direct path. The vector half here uses the closet's distance
-        # (query↔topic-line) — that's intentional: closets are *meant* to
-        # be the semantic-narrowing signal, and BM25 then enforces actual
-        # keyword presence in the hydrated drawer text.
-        closet_hits = _hybrid_rank(closet_hits, query)
-        return {
-            "query": query,
-            "filters": {"wing": wing, "room": room},
-            "total_before_filter": len(closet_hits),
-            "results": closet_hits,
-        }
-
-    # Fallback: direct drawer search (no closets yet, or closets empty)
+    # Hybrid retrieval: always query drawers directly (the floor), then use
+    # closet hits to boost rankings. Closets are a ranking SIGNAL, never a
+    # GATE — direct drawer search is always the baseline.
+    #
+    # This avoids the "weak-closets regression" where narrative content
+    # produces low-signal closets (regex extraction matches few topics)
+    # and closet-first routing hides drawers that direct search would find.
     try:
-        kwargs = {
+        dkwargs = {
             "query_texts": [query],
-            "n_results": n_results,
+            "n_results": n_results * 3,  # over-fetch for re-ranking
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
-            kwargs["where"] = where
-
-        results = drawers_col.query(**kwargs)
+            dkwargs["where"] = where
+        drawer_results = drawers_col.query(**dkwargs)
     except Exception as e:
         return {"error": f"Search error: {e}"}
 
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    dists = results["distances"][0]
+    # Gather closet hits (best-per-source) to build a boost lookup.
+    closet_boost_by_source: dict = {}  # source_file -> (rank, closet_dist, preview)
+    try:
+        closets_col = get_closets_collection(palace_path, create=False)
+        ckwargs = {
+            "query_texts": [query],
+            "n_results": n_results * 2,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if where:
+            ckwargs["where"] = where
+        closet_results = closets_col.query(**ckwargs)
+        for rank, (cdoc, cmeta, cdist) in enumerate(
+            zip(
+                closet_results["documents"][0],
+                closet_results["metadatas"][0],
+                closet_results["distances"][0],
+            )
+        ):
+            source = cmeta.get("source_file", "")
+            if source and source not in closet_boost_by_source:
+                closet_boost_by_source[source] = (rank, cdist, cdoc[:200])
+    except Exception:
+        pass  # no closets yet — hybrid degrades to pure drawer search
 
-    hits = []
-    for doc, meta, dist in zip(docs, metas, dists):
-        # Filter on raw distance before rounding to avoid precision loss
+    # Rank-based boost. The ordinal signal ("which closet matched best") is
+    # more reliable than absolute distance on narrative content, where
+    # closet distances cluster in 1.2-1.5 range regardless of match quality.
+    CLOSET_RANK_BOOSTS = [0.40, 0.25, 0.15, 0.08, 0.04]
+    CLOSET_DISTANCE_CAP = 1.5  # cosine dist > 1.5 = too weak to use as signal
+
+    scored: list = []
+    for doc, meta, dist in zip(
+        drawer_results["documents"][0],
+        drawer_results["metadatas"][0],
+        drawer_results["distances"][0],
+    ):
+        # Filter on raw distance before rounding to avoid precision loss.
         if max_distance > 0.0 and dist > max_distance:
             continue
-        hits.append(
-            {
-                "text": doc,
-                "wing": meta.get("wing", "unknown"),
-                "room": meta.get("room", "unknown"),
-                "source_file": Path(meta.get("source_file", "?")).name,
-                "similarity": round(max(0.0, 1 - dist), 3),
-                "distance": round(dist, 4),
-                "matched_via": "drawer",
-            }
-        )
 
-    # Re-rank with BM25 hybrid scoring
+        source = meta.get("source_file", "") or ""
+        boost = 0.0
+        matched_via = "drawer"
+        closet_preview = None
+        if source in closet_boost_by_source:
+            c_rank, c_dist, c_preview = closet_boost_by_source[source]
+            if c_dist <= CLOSET_DISTANCE_CAP and c_rank < len(CLOSET_RANK_BOOSTS):
+                boost = CLOSET_RANK_BOOSTS[c_rank]
+                matched_via = "drawer+closet"
+                closet_preview = c_preview
+
+        effective_dist = dist - boost
+        entry = {
+            "text": doc,
+            "wing": meta.get("wing", "unknown"),
+            "room": meta.get("room", "unknown"),
+            "source_file": Path(source).name if source else "?",
+            "similarity": round(max(0.0, 1 - effective_dist), 3),
+            "distance": round(dist, 4),
+            "effective_distance": round(effective_dist, 4),
+            "closet_boost": round(boost, 3),
+            "matched_via": matched_via,
+            # Internal: retain the full source_file path + chunk_index so the
+            # enrichment step below doesn't have to reverse-lookup via
+            # basename-suffix matching (which silently collides when two
+            # files share a basename across different directories).
+            "_sort_key": effective_dist,
+            "_source_file_full": source,
+            "_chunk_index": meta.get("chunk_index"),
+        }
+        if closet_preview:
+            entry["closet_preview"] = closet_preview
+        scored.append(entry)
+
+    scored.sort(key=lambda h: h["_sort_key"])
+    hits = scored[:n_results]
+
+    # Drawer-grep enrichment: for closet-boosted hits whose source has
+    # multiple drawers, return the keyword-best chunk + its immediate
+    # neighbors instead of just the drawer vector search landed on. The
+    # closet said "this source is relevant"; vector may have picked the
+    # wrong chunk within it; grep picks the right one.
+    MAX_HYDRATION_CHARS = 10000
+    for h in hits:
+        if h["matched_via"] == "drawer":
+            continue
+        full_source = h.get("_source_file_full") or ""
+        if not full_source:
+            continue
+        try:
+            source_drawers = drawers_col.get(
+                where={"source_file": full_source},
+                include=["documents", "metadatas"],
+            )
+        except Exception:
+            continue
+        docs = source_drawers.get("documents") or []
+        metas_ = source_drawers.get("metadatas") or []
+        if len(docs) <= 1:
+            continue
+
+        # Sort by chunk_index so best_idx + neighbors are positional.
+        indexed = []
+        for idx, (d, m) in enumerate(zip(docs, metas_)):
+            ci = m.get("chunk_index", idx) if isinstance(m, dict) else idx
+            if not isinstance(ci, int):
+                ci = idx
+            indexed.append((ci, d))
+        indexed.sort(key=lambda p: p[0])
+        ordered_docs = [d for _, d in indexed]
+
+        query_terms = set(_tokenize(query))
+        best_idx, best_score = 0, -1
+        for idx, d in enumerate(ordered_docs):
+            d_lower = d.lower()
+            s = sum(1 for t in query_terms if t in d_lower)
+            if s > best_score:
+                best_score, best_idx = s, idx
+
+        start = max(0, best_idx - 1)
+        end = min(len(ordered_docs), best_idx + 2)
+        expanded = "\n\n".join(ordered_docs[start:end])
+        if len(expanded) > MAX_HYDRATION_CHARS:
+            expanded = (
+                expanded[:MAX_HYDRATION_CHARS]
+                + f"\n\n[...truncated. {len(ordered_docs)} total drawers. "
+                "Use mempalace_get_drawer for full content.]"
+            )
+        h["text"] = expanded
+        h["drawer_index"] = best_idx
+        h["total_drawers"] = len(ordered_docs)
+
+    # BM25 hybrid re-rank within the final candidate set.
     hits = _hybrid_rank(hits, query)
+    for h in hits:
+        h.pop("_sort_key", None)
+        h.pop("_source_file_full", None)
+        h.pop("_chunk_index", None)
+
     return {
         "query": query,
         "filters": {"wing": wing, "room": room},
-        "total_before_filter": len(docs),
+        "total_before_filter": len(drawer_results["documents"][0]),
         "results": hits,
     }
