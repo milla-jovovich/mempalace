@@ -18,7 +18,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 
 **AAAK (experimental)** — A lossy abbreviation dialect for packing repeated entities into fewer tokens at scale. Readable by any LLM that reads text — Claude, GPT, Gemini, Llama, Mistral — no decoder needed. **AAAK is a separate compression layer, not the storage default**, and on the LongMemEval benchmark it currently regresses vs raw mode (84.2% vs 96.6%). We're iterating. See the [note above](#a-note-from-milla--ben--april-7-2026) for the honest status.
 
-**Local, open, adaptable** — MemPalace runs entirely on your machine, on any data you have locally, without using any external API or services. It has been tested on conversations — but it can be adapted for different types of datastores. This is why we're open-sourcing it.
+**Local, open, adaptable** — Core mining, search, wake-up, and storage run on your machine against local data. Optional entity research can call Wikipedia when you explicitly use that workflow. It has been tested on conversations — but it can be adapted for different types of datastores. This is why we're open-sourcing it.
 
 <br>
 
@@ -39,7 +39,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 <tr>
 <td align="center"><strong>96.6%</strong><br><sub>LongMemEval R@5<br><b>raw mode</b>, zero API calls</sub></td>
 <td align="center"><strong>500/500</strong><br><sub>questions tested<br>independently reproduced</sub></td>
-<td align="center"><strong>$0</strong><br><sub>No subscription<br>No cloud. Local only.</sub></td>
+<td align="center"><strong>$0</strong><br><sub>No subscription<br>Core workflows local.</sub></td>
 </tr>
 </table>
 
@@ -68,7 +68,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 > **What's still true and reproducible:**
 >
 > - **96.6% R@5 on LongMemEval in raw mode**, on 500 questions, zero API calls — independently reproduced on M2 Ultra in under 5 minutes by [@gizmax](https://github.com/milla-jovovich/mempalace/issues/39).
-> - Local, free, no subscription, no cloud, no data leaving your machine.
+> - Local and free for core workflows, with no subscription required. Optional external research only runs when you explicitly invoke it.
 > - The architecture (wings, rooms, closets, drawers) is real and useful, even if it's not a magical retrieval boost.
 >
 > **What we're doing:**
@@ -116,7 +116,7 @@ mempalace search "why did we switch to GraphQL"
 mempalace status
 ```
 
-Three mining modes: **projects** (code and docs), **convos** (conversation exports), and **general** (auto-classifies into decisions, preferences, milestones, problems, and emotional context). Everything stays on your machine.
+Three mining modes: **projects** (code and docs), **convos** (conversation exports), and **general** (auto-classifies into decisions, preferences, milestones, problems, and emotional context). Core mining stays on your machine.
 
 ---
 
@@ -161,7 +161,7 @@ mempalace wake-up > context.txt
 # Paste context.txt into your local model's system prompt
 ```
 
-This gives your local model ~170 tokens of critical facts (in AAAK if you prefer) before you ask a single question.
+This gives your local model a compact wake-up context before you ask a single question. In the current implementation, token counts are estimates and typically depend on your identity file plus the top drawers selected for Layer 1.
 
 **2. CLI search** — query on demand, feed results into your prompt:
 
@@ -178,7 +178,7 @@ results = search_memories("auth decisions", palace_path="~/.mempalace/palace")
 # Inject into your local model's context
 ```
 
-Either way — your entire memory stack runs offline. ChromaDB on your machine, Llama on your machine, AAAK for compression, zero cloud calls.
+Either way — the core memory stack runs locally. ChromaDB stays on your machine, local models stay local, and optional Wikipedia-backed entity research only runs if you invoke it.
 
 ---
 
@@ -192,10 +192,10 @@ Decisions happen in conversations now. Not in docs. Not in Jira. In conversation
 |----------|--------------|-------------|
 | Paste everything | 19.5M — doesn't fit any context window | Impossible |
 | LLM summaries | ~650K | ~$507/yr |
-| **MemPalace wake-up** | **~170 tokens** | **~$0.70/yr** |
-| **MemPalace + 5 searches** | **~13,500 tokens** | **~$10/yr** |
+| **MemPalace wake-up** | **~600-900 estimated tokens** | **depends on your model** |
+| **MemPalace + 5 searches** | **query + result dependent** | **depends on your model** |
 
-MemPalace loads 170 tokens of critical facts on wake-up — your team, your projects, your preferences. Then searches only when needed. $10/year to remember everything vs $507/year for summaries that lose context.
+MemPalace loads a compact wake-up layer first — your identity plus the most important recent drawers — then searches only when needed. Exact token cost depends on your stored context and model pricing.
 
 ---
 
@@ -209,9 +209,9 @@ It starts with a **wing**. Every project, person, or topic you're filing gets it
 
 Each wing has **rooms** connected to it, where information is divided into subjects that relate to that wing — so every room is a different element of what your project contains. Project ideas could be one room, employees could be another, financial statements another. There can be an endless number of rooms that split the wing into sections. The MemPalace install detects these for you automatically, and of course you can personalize it any way you feel is right.
 
-Every room has a **closet** connected to it, and here's where things get interesting. We've developed an AI language called **AAAK**. Don't ask — it's a whole story of its own. Your agent learns the AAAK shorthand every time it wakes up. Because AAAK is essentially English, but a very truncated version, your agent understands how to use it in seconds. It comes as part of the install, built into the MemPalace code. In our next update, we'll add AAAK directly to the closets, which will be a real game changer — the amount of info in the closets will be much bigger, but it will take up far less space and far less reading time for your agent.
+Every room has a **closet** connected to it, and here's where things get interesting. AAAK is the shorthand dialect MemPalace can expose to agents as a compact representation. In the current codebase, AAAK is still an optional layer and the primary stored memory remains the verbatim drawers.
 
-Inside those closets are **drawers**, and those drawers are where your original files live. In this first version, we haven't used AAAK as a closet tool, but even so, the summaries have shown **96.6% recall** in all the benchmarks we've done across multiple benchmarking platforms. Once the closets use AAAK, searches will be even faster while keeping every word exact. But even now, the closet approach has been a huge boon to how much info is stored in a small space — it's used to easily point your AI agent to the drawer where your original file lives. You never lose anything, and all this happens in seconds.
+Inside those closets are **drawers**, and those drawers are where your original files live. In this first version, drawers are still the main retrieval substrate. AAAK remains useful as a compact notation and roadmap direction, but verbatim drawer content is what the current search path relies on.
 
 There are also **halls**, which connect rooms within a wing, and **tunnels**, which connect rooms from different wings to one another. So finding things becomes truly effortless — we've given the AI a clean and organized way to know where to start searching, without having to look through every keyword in huge folders.
 
@@ -289,11 +289,11 @@ Wings and rooms aren't cosmetic. They're a **34% retrieval improvement**. The pa
 | Layer | What | Size | When |
 |-------|------|------|------|
 | **L0** | Identity — who is this AI? | ~50 tokens | Always loaded |
-| **L1** | Critical facts — team, projects, preferences | ~120 tokens (AAAK) | Always loaded |
+| **L1** | Critical facts — top palace drawers | ~500-800 estimated tokens | Always loaded |
 | **L2** | Room recall — recent sessions, current project | On demand | When topic comes up |
 | **L3** | Deep search — semantic query across all closets | On demand | When explicitly asked |
 
-Your AI wakes up with L0 + L1 (~170 tokens) and knows your world. Searches only fire when needed.
+Your AI wakes up with L0 + L1. The current implementation usually lands in the ~600-900 token range, but treat that as an estimate rather than a fixed budget.
 
 ### AAAK Dialect (experimental)
 
@@ -650,7 +650,7 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |
 | `searcher.py` | Semantic search via ChromaDB |
 | `layers.py` | 4-layer memory stack |
-| `dialect.py` | AAAK compression — 30x lossless |
+| `dialect.py` | AAAK compression helpers |
 | `knowledge_graph.py` | Temporal entity-relationship graph (SQLite) |
 | `palace_graph.py` | Room-based navigation graph |
 | `onboarding.py` | Guided setup — generates AAAK bootstrap + wing config |
