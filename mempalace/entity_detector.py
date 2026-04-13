@@ -395,6 +395,37 @@ STOPWORDS = {
     "inference",
 }
 
+# Technical/architecture terms that appear capitalized in docs but are never
+# real entity names on their own (issue #476)
+_TECH_STOPWORDS: frozenset = frozenset({
+    # Architecture / design patterns
+    "handler", "service", "manager", "controller", "middleware",
+    "provider", "factory", "builder", "registry", "resolver",
+    "listener", "dispatcher", "adapter", "wrapper", "plugin",
+    # Runtime / infrastructure
+    "node", "client", "server", "worker", "thread", "process",
+    "queue", "cache", "buffer", "socket", "router", "proxy",
+    # Code constructs
+    "module", "package", "instance", "event", "callback",
+    "promise", "object", "function", "method", "boolean",
+    "integer", "string", "array", "default",
+    # Common doc/config terms
+    "config", "context", "session", "token", "schema",
+    "index", "record", "message", "action", "state",
+    "task", "job", "hook", "flag", "stage", "batch",
+    "chunk", "block", "stream", "channel", "driver",
+    "backend", "frontend", "endpoint", "payload",
+    "header", "body", "query", "filter", "timeout",
+    "retry", "log", "build", "deploy", "release",
+    "pipeline", "migration", "seed", "reset", "repair",
+    # Extremely common sentence-opening words
+    "one", "two", "three", "four", "five", "six",
+    "seven", "eight", "nine", "ten",
+})
+
+# Merge tech stopwords into the main set
+STOPWORDS = STOPWORDS | _TECH_STOPWORDS
+
 # For entity detection — prose only, no code files
 # Code files have too many capitalized names (classes, functions) that aren't entities
 PROSE_EXTENSIONS = {
@@ -439,19 +470,35 @@ SKIP_DIRS = {
 
 # ==================== CANDIDATE EXTRACTION ====================
 
+# Matches text that ends with a sentence-terminating character (., !, ?, or newline)
+# Used to skip words that appear at the very start of a sentence (issue #476)
+_SENTENCE_END_RE = re.compile(r"[.!?\n]\s*$")
+
 
 def extract_candidates(text: str) -> dict:
     """
     Extract all capitalized proper noun candidates from text.
     Returns {name: frequency} for names appearing 3+ times.
-    """
-    # Find all capitalized words (not at sentence start — harder, so we use frequency as filter)
-    raw = re.findall(r"\b([A-Z][a-z]{1,19})\b", text)
 
-    counts = defaultdict(int)
-    for word in raw:
-        if word.lower() not in STOPWORDS and len(word) > 1:
-            counts[word] += 1
+    Skips words that are:
+      - in STOPWORDS (includes _TECH_STOPWORDS merged in)
+      - at position 0 (absolute document start)
+      - immediately following a sentence-ending character (sentence-start position)
+    """
+    counts: dict[str, int] = defaultdict(int)
+    for match in re.finditer(r"\b([A-Z][a-z]{1,19})\b", text):
+        word = match.group(1)
+        if word.lower() in STOPWORDS or len(word) <= 1:
+            continue
+        start = match.start()
+        # Skip words at the absolute start of the document
+        if start == 0:
+            continue
+        # Skip words that follow a sentence-ending punctuation or newline
+        preceding = text[max(0, start - 50):start].rstrip()
+        if not preceding or _SENTENCE_END_RE.search(preceding):
+            continue
+        counts[word] += 1
 
     # Also find multi-word proper nouns (e.g. "Memory Palace", "Claude Code")
     multi = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", text)

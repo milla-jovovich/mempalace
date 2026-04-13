@@ -20,7 +20,13 @@ from mempalace.entity_detector import (
 
 
 def test_extract_candidates_finds_frequent_names():
-    text = "Riley said hello. Riley laughed. Riley smiled. Riley waved."
+    # Names must appear mid-sentence (not at sentence start) to be captured.
+    # The sentence-start filter (issue #476) skips words immediately following
+    # punctuation or at position 0, so we embed the name after an opener.
+    text = (
+        "Today Riley said hello. Yesterday Riley laughed loudly. "
+        "Then Riley smiled again. Finally Riley waved goodbye."
+    )
     result = extract_candidates(text)
     assert "Riley" in result
     assert result["Riley"] >= 3
@@ -162,16 +168,18 @@ def test_classify_entity_mixed_signals():
 
 def test_detect_entities_with_person_file(tmp_path):
     f = tmp_path / "notes.txt"
+    # Names are placed mid-sentence so the sentence-start filter (issue #476)
+    # does not discard them. Each line has an adverb/connector before the name.
     content = "\n".join(
         [
-            "Riley said hello today.",
-            "Riley asked about the project.",
-            "Riley told me she was happy.",
-            "Riley: I think we should go.",
-            "Hey Riley, thanks for the help.",
-            "Riley laughed and smiled.",
-            "Riley decided to join.",
-            "Riley pushed the change.",
+            "Today Riley said hello.",
+            "Later Riley asked about the project.",
+            "Then Riley told me she was happy.",
+            "Afterwards Riley laughed and smiled.",
+            "Next Riley decided to join.",
+            "Finally Riley pushed the change.",
+            "Also, hey Riley, thanks for the help.",
+            "Meanwhile Riley waved goodbye.",
         ]
     )
     f.write_text(content)
