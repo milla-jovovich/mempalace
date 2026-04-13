@@ -550,6 +550,8 @@ The #413 seam is incomplete. Seven files in `mempalace/` still import `chromadb`
 
 These must be routed through `BaseCollection` before the spec can be enforced. Combined with the dict-to-typed-result migration from §1.3, this is substantial enough to be its own PR, landing before any new backend implementation merges.
 
+One implementation detail worth flagging for the cleanup PR: `mcp_server._get_client()` caches a `PersistentClient` at module scope and invalidates it on `chroma.sqlite3` inode or mtime changes (merged via [#757](https://github.com/MemPalace/mempalace/pull/757)). Both the cache and the stat-based freshness check are Chroma-specific. They should migrate into `ChromaBackend.get_collection()` (§2.5, handle caching) and `ChromaBackend.close_palace()` (§2.6, explicit flush) during cleanup — other backends do not have a single on-disk SQLite file to stat. The `mempalace_reconnect` MCP tool then becomes a thin wrapper around `backend.close_palace(palace_ref)`.
+
 ---
 
 ## 11. Impact on in-flight PRs
