@@ -9,6 +9,8 @@ import os
 import re
 from pathlib import Path
 
+import chromadb
+
 
 # ── Input validation ──────────────────────────────────────────────────────────
 # Shared sanitizers for wing/room/entity names. Prevents path traversal,
@@ -57,9 +59,37 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
         raise ValueError("content contains null bytes")
     return value
 
-
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
+
+# --- Multi-tenant Chroma HttpClient support (mpc-multi-tenant patch) --------
+
+_chroma_client_cache = None
+
+
+def get_chroma_client(config=None):
+    """Return a cached chromadb.HttpClient for the shared Chroma Server."""
+    global _chroma_client_cache
+    if _chroma_client_cache is not None:
+        return _chroma_client_cache
+    if config is None:
+        config = MempalaceConfig()
+    _chroma_client_cache = chromadb.HttpClient(
+        host=config.chroma_http_host,
+        port=config.chroma_http_port,
+    )
+    return _chroma_client_cache
+
+
+def get_collection_name(config=None, suffix=None):
+    """Return the tenant-scoped collection name (e.g., 'tenant_<uuid>_mempalace_drawers')."""
+    if config is None:
+        config = MempalaceConfig()
+    base = suffix or config.collection_name
+    prefix = config.collection_prefix
+    if prefix:
+        return f"{prefix}_{base}"
+    return base
 
 DEFAULT_TOPIC_WINGS = [
     "emotions",
@@ -151,6 +181,32 @@ class MempalaceConfig:
     def collection_name(self):
         """ChromaDB collection name."""
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
+
+    @property
+    def chroma_http_host(self):
+        """Chroma Server hostname (default: localhost)."""
+        return os.environ.get("MEMPALACE_CHROMA_HOST") or self._file_config.get(
+            "chroma_http_host", "localhost"
+        )
+
+    @property
+    def chroma_http_port(self):
+        """Chroma Server port (default: 8000)."""
+        v = os.environ.get("MEMPALACE_CHROMA_PORT") or self._file_config.get(
+            "chroma_http_port", 8000
+        )
+        return int(v)
+
+    @property
+    def collection_prefix(self):
+        """Per-tenant collection name prefix (e.g., 'tenant_<uuid>').
+
+        Set by the sidecar per-request via MEMPALACE_COLLECTION_PREFIX.
+        When empty, collection names are unprefixed (single-user mode).
+        """
+        return os.environ.get("MEMPALACE_COLLECTION_PREFIX") or self._file_config.get(
+            "collection_prefix", ""
+        )
 
     @property
     def people_map(self):

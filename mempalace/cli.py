@@ -34,6 +34,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from mempalace.config import get_chroma_client, get_collection_name
 
 
 def cmd_init(args):
@@ -183,8 +184,8 @@ def cmd_repair(args):
 
     # Try to read existing drawers
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        client = get_chroma_client()
+        col = client.get_collection(get_collection_name())
         total = col.count()
         print(f"  Drawers found: {total}")
     except Exception as e:
@@ -295,8 +296,8 @@ def cmd_compress(args):
 
     # Connect to palace
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        client = get_chroma_client()
+        col = client.get_collection(get_collection_name())
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")

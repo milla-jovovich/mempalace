@@ -19,13 +19,14 @@ from collections import defaultdict, Counter
 from .config import MempalaceConfig
 
 import chromadb
+from mempalace.config import get_chroma_client, get_collection_name
 
 
 def _get_collection(config=None):
     config = config or MempalaceConfig()
     try:
-        client = chromadb.PersistentClient(path=config.palace_path)
-        return client.get_collection(config.collection_name)
+        client = get_chroma_client()
+        return client.get_collection(get_collection_name(config))
     except Exception:
         return None
 

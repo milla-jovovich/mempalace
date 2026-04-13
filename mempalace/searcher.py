@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 import chromadb
+from mempalace.config import get_chroma_client, get_collection_name
 
 logger = logging.getLogger("mempalace_mcp")
 
@@ -24,8 +25,8 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     Optionally filter by wing (project) or room (aspect).
     """
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        client = get_chroma_client()
+        col = client.get_collection(get_collection_name())
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
@@ -98,8 +99,8 @@ def search_memories(
     Used by the MCP server and other callers that need data.
     """
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        client = get_chroma_client()
+        col = client.get_collection(get_collection_name())
     except Exception as e:
         logger.error("No palace found at %s: %s", palace_path, e)
         return {

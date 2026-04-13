@@ -26,12 +26,11 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
-from .config import MempalaceConfig, sanitize_name, sanitize_content
+from .config import MempalaceConfig, sanitize_name, sanitize_content, get_chroma_client, get_collection_name
 from .version import __version__
 from .query_sanitizer import sanitize_query
 from .searcher import search_memories
 from .palace_graph import traverse, find_tunnels, graph_stats
-import chromadb
 
 from .knowledge_graph import KnowledgeGraph
 
@@ -101,15 +100,11 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
-_client_cache = None
-_collection_cache = None
-
-
 def _get_client():
-    """Return a singleton ChromaDB PersistentClient."""
+    """Return a singleton ChromaDB HttpClient via multi-tenant config."""
     global _client_cache
     if _client_cache is None:
-        _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+        _client_cache = get_chroma_client()
     return _client_cache
 
 
@@ -118,10 +113,11 @@ def _get_collection(create=False):
     global _collection_cache
     try:
         client = _get_client()
+        col_name = get_collection_name(_config)
         if create:
-            _collection_cache = client.get_or_create_collection(_config.collection_name)
+            _collection_cache = client.get_or_create_collection(col_name)
         elif _collection_cache is None:
-            _collection_cache = client.get_collection(_config.collection_name)
+            _collection_cache = client.get_collection(col_name)
         return _collection_cache
     except Exception:
         return None
