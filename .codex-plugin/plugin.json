@@ -1,7 +1,7 @@
 {
   "name": "mempalace",
-  "version": "3.0.14",
-  "description": "Give your AI a memory — mine projects and conversations into a searchable palace. 19 MCP tools, auto-save hooks, and guided setup.",
+  "version": "3.1.0",
+  "description": "Give your AI a memory — mine projects and conversations into a searchable palace. 26 MCP tools, auto-save hooks, guided setup, and specialist agents.",
   "author": {
     "name": "milla-jovovich"
   },
@@ -31,7 +31,7 @@
   "interface": {
     "displayName": "MemPalace",
     "shortDescription": "AI memory system for Codex",
-    "longDescription": "Give your AI a persistent memory — mine projects and conversations into a searchable palace backed by ChromaDB, with 19 MCP tools, auto-save hooks, and guided skills.",
+    "longDescription": "Give your AI a persistent memory — mine projects and conversations into a searchable palace backed by ChromaDB, with 26 MCP tools, auto-save hooks, specialist agents, and guided skills.",
     "developerName": "milla-jovovich",
     "category": "Coding",
     "capabilities": [

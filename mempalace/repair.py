@@ -12,6 +12,7 @@ This module provides three operations:
   prune   — delete only the corrupt IDs (surgical)
   rebuild — extract all drawers, delete the collection, recreate with
             correct HNSW settings, and upsert everything back
+  signals — backfill hall/support retrieval signals for older palaces
 
 The rebuild backs up ONLY chroma.sqlite3 (the source of truth), not the
 full palace directory — so it works even when link_lists.bin is bloated.
@@ -20,6 +21,7 @@ Usage (standalone):
     python -m mempalace.repair scan [--wing X]
     python -m mempalace.repair prune --confirm
     python -m mempalace.repair rebuild
+    python -m mempalace.repair signals [--dry-run]
 
 Usage (from CLI):
     mempalace repair
@@ -34,8 +36,10 @@ import time
 
 import chromadb
 
+from .miner import build_retrieval_artifacts
+from .palace import DRAWERS_COLLECTION_NAME, SUPPORT_COLLECTION_NAME
 
-COLLECTION_NAME = "mempalace_drawers"
+COLLECTION_NAME = DRAWERS_COLLECTION_NAME
 
 
 def _get_palace_path():
@@ -76,6 +80,176 @@ def _paginate_ids(col, where=None):
         if n < page:
             break
     return ids
+
+
+def _paginate_drawers(col, batch_size: int = 1000):
+    """Yield raw drawer rows in stable batches.
+
+    Repair-style operations need to scan the full collection without loading an
+    arbitrarily large palace into memory at once. Keeping pagination here makes
+    rebuild/backfill share one traversal path instead of each reinventing it.
+    """
+    offset = 0
+    while True:
+        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        ids = batch.get("ids") or []
+        if not ids:
+            break
+
+        documents = batch.get("documents") or []
+        metadatas = batch.get("metadatas") or []
+        for drawer_id, document, metadata in zip(ids, documents, metadatas):
+            yield drawer_id, document, metadata or {}
+
+        offset += len(ids)
+        if len(ids) < batch_size:
+            break
+
+
+def _coerce_chunk_index(value) -> int:
+    """Convert stored chunk_index values to integers with a safe fallback."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _signals_need_refresh(existing_meta: dict, derived_meta: dict) -> bool:
+    """Return True when stored raw metadata is missing current retrieval hints."""
+    return (
+        existing_meta.get("hall") != derived_meta.get("hall")
+        or existing_meta.get("ingest_mode") != derived_meta.get("ingest_mode")
+    )
+
+
+def _batch_upsert(collection, rows: list[tuple[str, str, dict]], batch_size: int = 1000):
+    """Upsert ``(id, document, metadata)`` rows in batches.
+
+    Both rebuild and signal backfill may touch large palaces, so batching keeps
+    memory growth and SQLite parameter pressure predictable.
+    """
+    for i in range(0, len(rows), batch_size):
+        chunk = rows[i : i + batch_size]
+        collection.upsert(
+            ids=[row_id for row_id, _document, _metadata in chunk],
+            documents=[document for _row_id, document, _metadata in chunk],
+            metadatas=[metadata for _row_id, _document, metadata in chunk],
+        )
+
+
+def backfill_retrieval_signals(palace_path=None, dry_run: bool = False):
+    """Backfill mined hall/support signals for palaces created before v3 mining.
+
+    The raw drawers are the source of truth. This pass re-derives the current
+    hall and ingest-mode metadata from those drawers, updates any stale raw
+    metadata in place, and rebuilds the support collection from scratch so the
+    derived helper docs match the same heuristics as fresh mining runs.
+    """
+    palace_path = palace_path or _get_palace_path()
+
+    if not os.path.isdir(palace_path):
+        print(f"\n  No palace found at {palace_path}")
+        return {"success": False, "reason": "missing_palace"}
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Repair — Signal Backfill")
+    print(f"{'=' * 55}\n")
+    print(f"  Palace: {palace_path}")
+
+    client = chromadb.PersistentClient(path=palace_path)
+    try:
+        col = client.get_collection(COLLECTION_NAME)
+        total = col.count()
+    except Exception as e:
+        print(f"  Error reading palace: {e}")
+        return {"success": False, "reason": "read_error", "error": str(e)}
+
+    print(f"  Drawers found: {total}")
+    if total == 0:
+        print("  Nothing to backfill.")
+        return {
+            "success": True,
+            "dry_run": dry_run,
+            "raw_scanned": 0,
+            "raw_updated": 0,
+            "support_docs": 0,
+        }
+
+    raw_updates: list[tuple[str, str, dict]] = []
+    support_rows: list[tuple[str, str, dict]] = []
+    scanned = 0
+
+    print("\n  Deriving retrieval signals from raw drawers...")
+    for drawer_id, document, metadata in _paginate_drawers(col):
+        scanned += 1
+        derived = build_retrieval_artifacts(
+            wing=metadata.get("wing", "unknown"),
+            room=metadata.get("room", "general"),
+            content=document,
+            source_file=metadata.get("source_file", f"recovered_{drawer_id}.txt"),
+            chunk_index=_coerce_chunk_index(metadata.get("chunk_index", 0)),
+            agent=metadata.get("added_by", "mempalace"),
+            ingest_mode=metadata.get("ingest_mode", "project"),
+            extra_metadata=metadata,
+            drawer_id_override=drawer_id,
+        )
+
+        if _signals_need_refresh(metadata, derived["metadata"]):
+            raw_updates.append((drawer_id, document, derived["metadata"]))
+
+        # Rebuilding support docs from the raw corpus is simpler and safer than
+        # trying to diff or patch any older support collection in place.
+        if derived["support_row"] is not None:
+            support_rows.append(
+                (
+                    derived["support_row"]["id"],
+                    derived["support_row"]["document"],
+                    derived["support_row"]["metadata"],
+                )
+            )
+
+        if scanned % 5000 == 0:
+            print(f"    scanned {scanned}/{total} drawers...")
+
+    print(f"  Raw drawers scanned: {scanned}")
+    print(f"  Raw metadata updates: {len(raw_updates)}")
+    print(f"  Support docs to rebuild: {len(support_rows)}")
+
+    stats = {
+        "success": True,
+        "dry_run": dry_run,
+        "raw_scanned": scanned,
+        "raw_updated": len(raw_updates),
+        "support_docs": len(support_rows),
+    }
+
+    if dry_run:
+        print("\n  DRY RUN — no writes performed.")
+        print(f"\n{'=' * 55}\n")
+        return stats
+
+    if raw_updates:
+        print("\n  Updating raw drawer metadata...")
+        _batch_upsert(col, raw_updates)
+
+    print("  Rebuilding support collection...")
+    try:
+        client.delete_collection(SUPPORT_COLLECTION_NAME)
+    except Exception:
+        pass
+
+    if support_rows:
+        support_col = client.create_collection(
+            SUPPORT_COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine"},
+        )
+        _batch_upsert(support_col, support_rows)
+
+    print("\n  Signal backfill complete.")
+    print(f"  Raw metadata updated: {len(raw_updates)}")
+    print(f"  Support docs rebuilt: {len(support_rows)}")
+    print(f"\n{'=' * 55}\n")
+    return stats
 
 
 def scan_palace(palace_path=None, only_wing=None):
@@ -283,10 +457,15 @@ def rebuild_index(palace_path=None):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="MemPalace repair tools")
-    p.add_argument("command", choices=["scan", "prune", "rebuild"])
+    p.add_argument("command", choices=["scan", "prune", "rebuild", "signals"])
     p.add_argument("--palace", default=None, help="Palace directory path")
     p.add_argument("--wing", default=None, help="Scan only this wing")
     p.add_argument("--confirm", action="store_true", help="Actually delete corrupt IDs")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview signal backfill work without writing (used with signals)",
+    )
     args = p.parse_args()
 
     path = os.path.expanduser(args.palace) if args.palace else None
@@ -297,3 +476,5 @@ if __name__ == "__main__":
         prune_corrupt(palace_path=path, confirm=args.confirm)
     elif args.command == "rebuild":
         rebuild_index(palace_path=path)
+    elif args.command == "signals":
+        backfill_retrieval_signals(palace_path=path, dry_run=args.dry_run)

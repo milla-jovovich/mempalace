@@ -1,6 +1,6 @@
 # MemPalace - Codex CLI Plugin
 
-Give your AI a persistent memory -- mine projects and conversations into a searchable palace backed by ChromaDB, with 19 MCP tools, auto-save hooks, and guided skills.
+Give your AI a persistent memory -- mine projects and conversations into a searchable palace backed by ChromaDB, with 26 MCP tools, auto-save hooks, specialist agents, and guided skills.
 
 ## Prerequisites
 
@@ -18,16 +18,16 @@ Give your AI a persistent memory -- mine projects and conversations into a searc
 cp -r .codex-plugin /path/to/your/project/.codex-plugin
 ```
 
-2. Verify the plugin is detected:
+2. Start Codex from that repo root:
 
 ```bash
-codex --plugins
+codex
 ```
 
 3. Initialize your palace:
 
 ```bash
-codex /init
+mempalace init .
 ```
 
 ### Git Install
@@ -50,7 +50,7 @@ pip install -e .
 4. Initialize your palace:
 
 ```bash
-codex /init
+mempalace init .
 ```
 
 ## Available Skills
@@ -58,7 +58,7 @@ codex /init
 | Skill | Description |
 |-------|-------------|
 | `/help` | Show available commands and usage tips |
-| `/init` | Initialize a new memory palace |
+| `/init` | Guided onboarding + bootstrap + room detection |
 | `/search` | Semantic search across all mined memories |
 | `/mine` | Mine a project or conversation into your palace |
 | `/status` | Show palace status, room counts, and health |
@@ -68,6 +68,16 @@ codex /init
 The plugin includes auto-save hooks that run on session stop (every 15 messages) and before context compaction, automatically preserving conversation context into your palace.
 
 Set the `MEMPAL_DIR` environment variable to a directory path to automatically run `mempalace mine` on that directory during each save trigger.
+
+## What Init Creates
+
+`mempalace init <dir>` now scaffolds the full first-run bootstrap:
+
+- `~/.mempalace/aaak_entities.md`
+- `~/.mempalace/critical_facts.md`
+- `~/.mempalace/wing_config.json`
+- `~/.mempalace/identity.txt`
+- `~/.mempalace/agents/*.json` for the default specialist agents
 
 ## Support
 

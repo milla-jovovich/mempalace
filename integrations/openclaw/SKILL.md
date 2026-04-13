@@ -39,10 +39,11 @@ You have access to a local memory palace via MCP tools. The palace stores verbat
 ## Protocol — FOLLOW THIS EVERY SESSION
 
 1. **ON WAKE-UP**: Call `mempalace_status` to load palace overview and AAAK dialect spec.
-2. **BEFORE RESPONDING** about any person, project, or past event: call `mempalace_search` or `mempalace_kg_query` FIRST. Never guess from memory — verify from the palace.
-3. **IF UNSURE** about a fact (name, age, relationship, preference): say "let me check" and query. Wrong is worse than slow.
-4. **AFTER EACH SESSION**: Call `mempalace_diary_write` to record what happened, what you learned, what matters.
-5. **WHEN FACTS CHANGE**: Call `mempalace_kg_invalidate` on the old fact, then `mempalace_kg_add` for the new one.
+2. **IF SPECIALIST AGENTS ARE CONFIGURED**: Call `mempalace_list_agents` and pick the best lens for the task.
+3. **BEFORE RESPONDING** about any person, project, or past event: call `mempalace_search` or `mempalace_kg_query` FIRST. Never guess from memory — verify from the palace.
+4. **BEFORE ADDING OR CHANGING A FACT**: Call `mempalace_kg_check` first. If it reports a conflict, invalidate the old fact before writing the new one.
+5. **IF UNSURE** about a fact (name, age, relationship, preference): say "let me check" and query. Wrong is worse than slow.
+6. **AFTER EACH SESSION**: Call `mempalace_diary_write` to record what happened, what you learned, what matters.
 
 ## Available Tools
 
@@ -60,12 +61,15 @@ You have access to a local memory palace via MCP tools. The palace stores verbat
 - `mempalace_list_rooms` — Rooms within a wing (optional wing filter)
 - `mempalace_get_taxonomy` — Full wing/room/count tree
 - `mempalace_get_aaak_spec` — Get AAAK compression dialect specification
+- `mempalace_get_drawer` — Fetch a drawer with full content and metadata
+- `mempalace_list_drawers` — Paginated drawer listing with previews
 
 ### Knowledge Graph (Temporal Facts)
 - `mempalace_kg_query` — Query entity relationships. Supports time filtering.
   - `entity` (required): e.g. "Max", "MyProject"
   - `as_of`: date filter (YYYY-MM-DD) — what was true at that time
   - `direction`: "outgoing", "incoming", or "both" (default "both")
+- `mempalace_kg_check` — Check a proposed fact for duplicates or conflicts before writing it
 - `mempalace_kg_add` — Add a fact: subject -> predicate -> object
   - `subject`, `predicate`, `object` (required)
   - `valid_from`: when this became true
@@ -90,8 +94,10 @@ You have access to a local memory palace via MCP tools. The palace stores verbat
   - `wing`, `room`, `content` (required)
   - `source_file`: optional source reference
   - Checks for duplicates automatically
+- `mempalace_update_drawer` — Update an existing drawer's content or taxonomy
 - `mempalace_delete_drawer` — Remove a drawer by ID
   - `drawer_id` (required)
+- `mempalace_list_agents` — Discover specialist agents from `~/.mempalace/agents/*.json`
 - `mempalace_diary_write` — Write a session diary entry
   - `agent_name` (required): your name/identifier
   - `entry` (required): what happened, what you learned, what matters
@@ -99,6 +105,8 @@ You have access to a local memory palace via MCP tools. The palace stores verbat
 - `mempalace_diary_read` — Read recent diary entries
   - `agent_name` (required)
   - `last_n`: number of entries (default 10)
+- `mempalace_hook_settings` — Configure silent-save hook behaviour
+- `mempalace_memories_filed_away` — Acknowledge the latest silent checkpoint
 
 ## Setup
 
@@ -138,7 +146,7 @@ openclaw mcp set mempalace '{"command":"python3","args":["-m","mempalace.mcp_ser
 claude mcp add mempalace -- python -m mempalace.mcp_server
 
 # Cursor — add to .cursor/mcp.json
-# Codex — add to .codex/mcp.json
+# Codex — start Codex from a repo containing `.codex-plugin/`, or add the same MCP command manually
 ```
 
 ## Tips

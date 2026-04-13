@@ -15,7 +15,13 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS, file_already_mined, get_collection, get_support_collection
+from .retrieval_signals import (
+    HALL_PREFERENCES,
+    build_preference_support_document,
+    classify_document_hall,
+    infer_ingest_mode,
+)
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -124,7 +130,9 @@ class GitignoreMatcher:
         except ValueError:
             return None
 
-        if not relative:
+        # pathlib returns "." when path == base_dir, so treat that the same as
+        # an empty relative path: there is no file/dir-specific match to make.
+        if relative in {"", "."}:
             return None
 
         if is_dir is None:
@@ -231,7 +239,9 @@ def is_force_included(path: Path, project_path: Path, include_paths: set) -> boo
     except ValueError:
         return False
 
-    if not relative:
+    # pathlib returns "." when path == project_path, which should behave like
+    # "no relative path" for include-override checks.
+    if relative in {"", "."}:
         return False
 
     for include_path in include_paths:
@@ -369,32 +379,151 @@ def chunk_text(content: str, source_file: str) -> list:
 
 
 def add_drawer(
-    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
+    collection,
+    wing: str,
+    room: str,
+    content: str,
+    source_file: str,
+    chunk_index: int,
+    agent: str,
+    support_collection=None,
+    ingest_mode: str = "project",
+    extra_metadata: dict | None = None,
+    drawer_id_override: str | None = None,
 ):
-    """Add one drawer to the palace."""
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
+    """Add one raw drawer and any retrieval-support docs derived from it.
+
+    The raw drawer remains the canonical memory. Hall metadata and preference
+    support docs are auxiliary retrieval hints: they should improve later search
+    quality without changing what the user ultimately reads back.
+    """
+    artifacts = build_retrieval_artifacts(
+        wing=wing,
+        room=room,
+        content=content,
+        source_file=source_file,
+        chunk_index=chunk_index,
+        agent=agent,
+        ingest_mode=ingest_mode,
+        extra_metadata=extra_metadata,
+        drawer_id_override=drawer_id_override,
+    )
     try:
-        metadata = {
-            "wing": wing,
-            "room": room,
-            "source_file": source_file,
-            "chunk_index": chunk_index,
-            "added_by": agent,
-            "filed_at": datetime.now().isoformat(),
-        }
-        # Store file mtime so we can detect modifications later.
+        collection.upsert(
+            documents=[content],
+            ids=[artifacts["drawer_id"]],
+            metadatas=[artifacts["metadata"]],
+        )
+
+        # Preference-support docs live in a sibling collection so they can be
+        # queried for ranking without inflating user-facing drawer counts.
+        if support_collection is not None and artifacts["support_row"] is not None:
+            support_collection.upsert(
+                documents=[artifacts["support_row"]["document"]],
+                ids=[artifacts["support_row"]["id"]],
+                metadatas=[artifacts["support_row"]["metadata"]],
+            )
+        return True
+    except Exception:
+        raise
+
+
+def _build_drawer_id(wing: str, room: str, source_file: str, chunk_index: int) -> str:
+    """Return the stable raw-drawer ID used by file and conversation mining.
+
+    The ID is derived from stable source coordinates rather than content so
+    re-mining the same file chunk replaces the same logical drawer. Manual MCP
+    writes can still override it with a content-based ID for idempotency.
+    """
+    digest = hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]
+    return f"drawer_{wing}_{room}_{digest}"
+
+
+def _build_preference_support_id(wing: str, room: str, source_file: str, chunk_index: int) -> str:
+    """Return the stable ID for one derived preference-support document."""
+    digest = hashlib.sha256((source_file + str(chunk_index) + "preference").encode()).hexdigest()[
+        :24
+    ]
+    return f"support_preference_{wing}_{room}_{digest}"
+
+
+def build_retrieval_artifacts(
+    wing: str,
+    room: str,
+    content: str,
+    source_file: str,
+    chunk_index: int,
+    agent: str,
+    ingest_mode: str = "project",
+    extra_metadata: dict | None = None,
+    drawer_id_override: str | None = None,
+    include_support: bool = True,
+) -> dict:
+    """Build normalized raw metadata plus any derived retrieval-support row.
+
+    Mining, MCP manual writes, and repair backfills all need the same derived
+    signals. Keeping that logic in one helper prevents subtle drift where one
+    path uses different hall routing or support-doc wording than another.
+    """
+    drawer_id = drawer_id_override or _build_drawer_id(wing, room, source_file, chunk_index)
+    normalized_ingest_mode = infer_ingest_mode(
+        content,
+        metadata=extra_metadata,
+        default=ingest_mode,
+    )
+    hall = classify_document_hall(content, ingest_mode=normalized_ingest_mode)
+
+    metadata = {
+        "wing": wing,
+        "room": room,
+        "source_file": source_file,
+        "chunk_index": chunk_index,
+        "added_by": agent,
+        "filed_at": datetime.now().isoformat(),
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
+
+    # Derived retrieval signals are canonical and intentionally override any
+    # stale values carried in extra metadata so backfills converge on one state.
+    metadata["hall"] = hall
+    metadata["ingest_mode"] = normalized_ingest_mode
+
+    # Store file mtime when available so project re-mining can detect edits.
+    # Repair passes existing metadata through here too, so we only stat when the
+    # value is missing instead of overwriting history on every rebuild/backfill.
+    if "source_mtime" not in metadata:
         try:
             metadata["source_mtime"] = os.path.getmtime(source_file)
         except OSError:
             pass
-        collection.upsert(
-            documents=[content],
-            ids=[drawer_id],
-            metadatas=[metadata],
+
+    support_row = None
+    support_doc = None
+    if include_support:
+        support_doc = build_preference_support_document(content, ingest_mode=normalized_ingest_mode)
+    if support_doc is not None:
+        support_metadata = dict(metadata)
+        support_metadata.update(
+            {
+                "hall": HALL_PREFERENCES,
+                "support_kind": "preference",
+                "parent_drawer_id": drawer_id,
+                "preference_signal_count": len(support_doc["signals"]),
+                "preference_signals": "; ".join(support_doc["signals"]),
+            }
         )
-        return True
-    except Exception:
-        raise
+        support_row = {
+            "id": _build_preference_support_id(wing, room, source_file, chunk_index),
+            "document": support_doc["text"],
+            "metadata": support_metadata,
+        }
+
+    return {
+        "drawer_id": drawer_id,
+        "metadata": metadata,
+        "support_row": support_row,
+    }
 
 
 # =============================================================================
@@ -410,6 +539,7 @@ def process_file(
     rooms: list,
     agent: str,
     dry_run: bool,
+    support_collection=None,
 ) -> tuple:
     """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
 
@@ -443,6 +573,11 @@ def process_file(
         collection.delete(where={"source_file": source_file})
     except Exception:
         pass
+    try:
+        if support_collection is not None:
+            support_collection.delete(where={"source_file": source_file})
+    except Exception:
+        pass
 
     drawers_added = 0
     for chunk in chunks:
@@ -454,6 +589,8 @@ def process_file(
             source_file=source_file,
             chunk_index=chunk["chunk_index"],
             agent=agent,
+            support_collection=support_collection,
+            ingest_mode="project",
         )
         if added:
             drawers_added += 1
@@ -578,8 +715,10 @@ def mine(
 
     if not dry_run:
         collection = get_collection(palace_path)
+        support_collection = get_support_collection(palace_path)
     else:
         collection = None
+        support_collection = None
 
     total_drawers = 0
     files_skipped = 0
@@ -590,6 +729,7 @@ def mine(
             filepath=filepath,
             project_path=project_path,
             collection=collection,
+            support_collection=support_collection,
             wing=wing,
             rooms=rooms,
             agent=agent,

@@ -10,13 +10,12 @@ Same palace as project mining. Different ingest strategy.
 
 import os
 import sys
-import hashlib
 from pathlib import Path
-from datetime import datetime
 from collections import defaultdict
 
+from .miner import add_drawer
 from .normalize import normalize
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import SKIP_DIRS, file_already_mined, get_collection, get_support_collection
 
 
 # File types that might contain conversations
@@ -265,6 +264,7 @@ def mine_convos(
     print(f"{'-' * 55}\n")
 
     collection = get_collection(palace_path) if not dry_run else None
+    support_collection = get_support_collection(palace_path) if not dry_run else None
 
     total_drawers = 0
     files_skipped = 0
@@ -332,23 +332,18 @@ def mine_convos(
             chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
             if extract_mode == "general":
                 room_counts[chunk_room] += 1
-            drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
             try:
-                collection.upsert(
-                    documents=[chunk["content"]],
-                    ids=[drawer_id],
-                    metadatas=[
-                        {
-                            "wing": wing,
-                            "room": chunk_room,
-                            "source_file": source_file,
-                            "chunk_index": chunk["chunk_index"],
-                            "added_by": agent,
-                            "filed_at": datetime.now().isoformat(),
-                            "ingest_mode": "convos",
-                            "extract_mode": extract_mode,
-                        }
-                    ],
+                add_drawer(
+                    collection=collection,
+                    wing=wing,
+                    room=chunk_room,
+                    content=chunk["content"],
+                    source_file=source_file,
+                    chunk_index=chunk["chunk_index"],
+                    agent=agent,
+                    support_collection=support_collection,
+                    ingest_mode="convos",
+                    extra_metadata={"extract_mode": extract_mode},
                 )
                 drawers_added += 1
             except Exception as e:

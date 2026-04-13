@@ -8,6 +8,9 @@ import os
 
 from .backends.chroma import ChromaBackend
 
+DRAWERS_COLLECTION_NAME = "mempalace_drawers"
+SUPPORT_COLLECTION_NAME = "mempalace_support"
+
 SKIP_DIRS = {
     ".git",
     "node_modules",
@@ -39,13 +42,28 @@ _DEFAULT_BACKEND = ChromaBackend()
 
 def get_collection(
     palace_path: str,
-    collection_name: str = "mempalace_drawers",
+    collection_name: str = DRAWERS_COLLECTION_NAME,
     create: bool = True,
 ):
     """Get the palace collection through the backend layer."""
     return _DEFAULT_BACKEND.get_collection(
         palace_path,
         collection_name=collection_name,
+        create=create,
+    )
+
+
+def get_support_collection(palace_path: str, create: bool = True):
+    """Get the retrieval-support collection used for synthetic helper docs.
+
+    Raw drawers stay in the primary collection so status screens, graph tools,
+    and exports continue to reflect the user's verbatim material. Helper docs
+    such as preference-support embeddings live in a sibling collection that only
+    retrieval strategies consult explicitly.
+    """
+    return get_collection(
+        palace_path,
+        collection_name=SUPPORT_COLLECTION_NAME,
         create=create,
     )
 

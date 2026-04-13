@@ -9,7 +9,7 @@ Two ways to ingest:
 Same palace. Same search. Different ingest strategies.
 
 Commands:
-    mempalace init <dir>                  Detect rooms from folder structure
+    mempalace init <dir>                  Guided onboarding + bootstrap + room detection
     mempalace split <dir>                 Split concatenated mega-files into per-session files
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
@@ -27,41 +27,77 @@ Examples:
     mempalace search "pricing discussion" --wing my_app --room costs
 """
 
-import os
-import sys
-import shlex
 import argparse
+import json
+import os
+import shlex
+import sys
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .searcher import DEFAULT_SEARCH_STRATEGY
+
+
+def _write_project_entities(project_dir: Path, entities: dict):
+    """
+    Save the simple per-project entities.json file the miner already understands.
+
+    The richer onboarding registry lives in ~/.mempalace, but project mining
+    still benefits from a local file containing the confirmed names for that
+    specific codebase or conversation export.
+    """
+    if not entities.get("people") and not entities.get("projects"):
+        return None
+    entities_path = project_dir / "entities.json"
+    with open(entities_path, "w", encoding="utf-8") as f:
+        json.dump(entities, f, indent=2, ensure_ascii=False)
+    return entities_path
 
 
 def cmd_init(args):
-    import json
-    from pathlib import Path
     from .entity_detector import scan_for_detection, detect_entities, confirm_entities
+    from .onboarding import bootstrap_from_entities, registry_project_entities, run_onboarding
     from .room_detector_local import detect_rooms_local
 
-    # Pass 1: auto-detect people and projects from file content
-    print(f"\n  Scanning for entities in: {args.dir}")
-    files = scan_for_detection(args.dir)
-    if files:
-        print(f"  Reading {len(files)} files...")
-        detected = detect_entities(files)
-        total = len(detected["people"]) + len(detected["projects"]) + len(detected["uncertain"])
-        if total > 0:
-            confirmed = confirm_entities(detected, yes=getattr(args, "yes", False))
-            # Save confirmed entities to <project>/entities.json for the miner
-            if confirmed["people"] or confirmed["projects"]:
-                entities_path = Path(args.dir).expanduser().resolve() / "entities.json"
-                with open(entities_path, "w") as f:
-                    json.dump(confirmed, f, indent=2)
-                print(f"  Entities saved: {entities_path}")
-        else:
-            print("  No entities detected — proceeding with directory-based rooms.")
+    project_dir = Path(args.dir).expanduser().resolve()
+    interactive_setup = not getattr(args, "yes", False) and sys.stdin.isatty()
+
+    # Guided mode now runs the full onboarding flow so init actually creates the
+    # bootstrap files described in the README. Non-interactive mode still uses
+    # detection-first setup so scripts and CI can keep calling `--yes`.
+    if interactive_setup:
+        print(f"\n  Running guided setup for: {project_dir}")
+        registry = run_onboarding(directory=str(project_dir))
+        entities_path = _write_project_entities(project_dir, registry_project_entities(registry))
+        if entities_path:
+            print(f"  Entities saved: {entities_path}")
+    else:
+        print(f"\n  Scanning for entities in: {project_dir}")
+        files = scan_for_detection(str(project_dir))
+        confirmed = {"people": [], "projects": []}
+        if files:
+            print(f"  Reading {len(files)} files...")
+            detected = detect_entities(files)
+            total = len(detected["people"]) + len(detected["projects"]) + len(detected["uncertain"])
+            if total > 0:
+                confirmed = confirm_entities(detected, yes=getattr(args, "yes", False))
+                entities_path = _write_project_entities(project_dir, confirmed)
+                if entities_path:
+                    print(f"  Entities saved: {entities_path}")
+            else:
+                print("  No entities detected — proceeding with directory-based rooms.")
+
+        # Non-interactive init now produces the same bootstrap artifacts as the
+        # guided flow, using inferred defaults instead of prompting the user.
+        people = [{"name": name, "context": "work"} for name in confirmed["people"]]
+        bootstrap = bootstrap_from_entities(people, confirmed["projects"])
+        print(f"  Wing config saved: {bootstrap['wing_config_path']}")
+        print(f"  Identity scaffold: {bootstrap['identity_path']}")
+        if bootstrap["created_agents"]:
+            print(f"  Specialist agents scaffolded: {len(bootstrap['created_agents'])}")
 
     # Pass 2: detect rooms from folder structure
-    detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
+    detect_rooms_local(project_dir=str(project_dir), yes=getattr(args, "yes", False))
     MempalaceConfig().init()
 
 
@@ -99,7 +135,7 @@ def cmd_mine(args):
 
 
 def cmd_search(args):
-    from .searcher import search, SearchError
+    from .searcher import DEFAULT_SEARCH_STRATEGY, SearchError, search
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     try:
@@ -109,6 +145,7 @@ def cmd_search(args):
             wing=args.wing,
             room=args.room,
             n_results=args.results,
+            strategy=getattr(args, "strategy", DEFAULT_SEARCH_STRATEGY),
         )
     except SearchError:
         sys.exit(1)
@@ -167,75 +204,18 @@ def cmd_status(args):
 
 
 def cmd_repair(args):
-    """Rebuild palace vector index from SQLite metadata."""
-    import chromadb
-    import shutil
+    """Run one of the supported repair flows against an existing palace."""
+    from .repair import backfill_retrieval_signals, rebuild_index
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-
-    if not os.path.isdir(palace_path):
-        print(f"\n  No palace found at {palace_path}")
+    if getattr(args, "signals", False):
+        backfill_retrieval_signals(
+            palace_path=palace_path,
+            dry_run=getattr(args, "dry_run", False),
+        )
         return
 
-    print(f"\n{'=' * 55}")
-    print("  MemPalace Repair")
-    print(f"{'=' * 55}\n")
-    print(f"  Palace: {palace_path}")
-
-    # Try to read existing drawers
-    try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
-        total = col.count()
-        print(f"  Drawers found: {total}")
-    except Exception as e:
-        print(f"  Error reading palace: {e}")
-        print("  Cannot recover — palace may need to be re-mined from source files.")
-        return
-
-    if total == 0:
-        print("  Nothing to repair.")
-        return
-
-    # Extract all drawers in batches
-    print("\n  Extracting drawers...")
-    batch_size = 5000
-    all_ids = []
-    all_docs = []
-    all_metas = []
-    offset = 0
-    while offset < total:
-        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
-        all_ids.extend(batch["ids"])
-        all_docs.extend(batch["documents"])
-        all_metas.extend(batch["metadatas"])
-        offset += batch_size
-    print(f"  Extracted {len(all_ids)} drawers")
-
-    # Backup and rebuild
-    palace_path = palace_path.rstrip(os.sep)
-    backup_path = palace_path + ".backup"
-    if os.path.exists(backup_path):
-        shutil.rmtree(backup_path)
-    print(f"  Backing up to {backup_path}...")
-    shutil.copytree(palace_path, backup_path)
-
-    print("  Rebuilding collection...")
-    client.delete_collection("mempalace_drawers")
-    new_col = client.create_collection("mempalace_drawers")
-
-    filed = 0
-    for i in range(0, len(all_ids), batch_size):
-        batch_ids = all_ids[i : i + batch_size]
-        batch_docs = all_docs[i : i + batch_size]
-        batch_metas = all_metas[i : i + batch_size]
-        new_col.add(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
-        filed += len(batch_ids)
-        print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
-
-    print(f"\n  Repair complete. {filed} drawers rebuilt.")
-    print(f"  Backup saved at {backup_path}")
-    print(f"\n{'=' * 55}\n")
+    rebuild_index(palace_path=palace_path)
 
 
 def cmd_hook(args):
@@ -264,6 +244,8 @@ def cmd_mcp(args):
 
     print("MemPalace MCP quick setup:")
     print(f"  claude mcp add mempalace -- {server_cmd}")
+    print("  Codex plugin: copy .codex-plugin/ into your repo root or run Codex inside this repo")
+    print(f"  Codex server command: {server_cmd}")
     print("\nRun the server directly:")
     print(f"  {server_cmd}")
 
@@ -410,7 +392,7 @@ def main():
     sub = parser.add_subparsers(dest="command")
 
     # init
-    p_init = sub.add_parser("init", help="Detect rooms from your folder structure")
+    p_init = sub.add_parser("init", help="Guided onboarding + bootstrap + room detection")
     p_init.add_argument("dir", help="Project directory to set up")
     p_init.add_argument(
         "--yes", action="store_true", help="Auto-accept all detected entities (non-interactive)"
@@ -459,6 +441,15 @@ def main():
     p_search.add_argument("--wing", default=None, help="Limit to one project")
     p_search.add_argument("--room", default=None, help="Limit to one room")
     p_search.add_argument("--results", type=int, default=5, help="Number of results")
+    p_search.add_argument(
+        "--strategy",
+        choices=["raw", "raw_v2", "hybrid_v2", "hybrid_v3", "palace"],
+        default=DEFAULT_SEARCH_STRATEGY,
+        help="Retrieval strategy. 'hybrid_v3' is the default mined-signal search: "
+        "semantic retrieval plus reranking and persisted preference helpers. "
+        "Use 'palace' for hall-aware routing, 'raw_v2' for improved raw search "
+        "(legacy alias: 'hybrid_v2'), or 'raw' for baseline vector search.",
+    )
 
     # compress
     p_compress = sub.add_parser(
@@ -529,9 +520,19 @@ def main():
         instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
 
     # repair
-    sub.add_parser(
+    p_repair = sub.add_parser(
         "repair",
         help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
+    )
+    p_repair.add_argument(
+        "--signals",
+        action="store_true",
+        help="Backfill hall/support retrieval signals for an existing palace instead of rebuilding the index",
+    )
+    p_repair.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the signal backfill counts without writing anything (only used with --signals)",
     )
 
     # mcp

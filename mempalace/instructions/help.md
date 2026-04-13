@@ -16,7 +16,7 @@ AI memory system. Store everything, find anything. Local, free, no API key.
 
 ---
 
-## MCP Tools (19)
+## MCP Tools (26)
 
 ### Palace (read)
 - mempalace_status -- Palace status and stats
@@ -26,13 +26,17 @@ AI memory system. Store everything, find anything. Local, free, no API key.
 - mempalace_search -- Search memories by query
 - mempalace_check_duplicate -- Check if a memory already exists
 - mempalace_get_aaak_spec -- Get the AAAK specification
+- mempalace_get_drawer -- Fetch one drawer with full content and metadata
+- mempalace_list_drawers -- List drawers with pagination and previews
 
 ### Palace (write)
 - mempalace_add_drawer -- Add a new memory (drawer)
+- mempalace_update_drawer -- Update an existing drawer's content or taxonomy
 - mempalace_delete_drawer -- Delete a memory (drawer)
 
 ### Knowledge Graph
 - mempalace_kg_query -- Query the knowledge graph
+- mempalace_kg_check -- Check a proposed fact for duplicates or conflicts
 - mempalace_kg_add -- Add a knowledge graph entry
 - mempalace_kg_invalidate -- Invalidate a knowledge graph entry
 - mempalace_kg_timeline -- View knowledge graph timeline
@@ -44,14 +48,17 @@ AI memory system. Store everything, find anything. Local, free, no API key.
 - mempalace_graph_stats -- Graph connectivity statistics
 
 ### Agent Diary
+- mempalace_list_agents -- Discover specialist agents from ~/.mempalace/agents
 - mempalace_diary_write -- Write a diary entry
 - mempalace_diary_read -- Read diary entries
+- mempalace_hook_settings -- Configure silent-save hook behavior
+- mempalace_memories_filed_away -- Acknowledge the latest silent checkpoint
 
 ---
 
 ## CLI Commands
 
-    mempalace init <dir>                  Initialize a new palace
+    mempalace init <dir>                  Guided onboarding + bootstrap + room detection
     mempalace mine <dir>                  Mine a project (default mode)
     mempalace mine <dir> --mode convos    Mine conversation exports
     mempalace search "query"              Search your memories

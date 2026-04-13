@@ -16,7 +16,11 @@ Usage:
     or: mempalace init
 """
 
+import json
 from pathlib import Path
+
+from mempalace.agents import ensure_default_agents
+from mempalace.config import MempalaceConfig
 from mempalace.entity_registry import EntityRegistry
 from mempalace.entity_detector import detect_entities, scan_for_detection
 
@@ -362,6 +366,201 @@ def _generate_aaak_bootstrap(
     (mempalace_dir / "critical_facts.md").write_text("\n".join(facts_lines), encoding="utf-8")
 
 
+def _wing_slug(name: str) -> str:
+    """
+    Turn a free-form label into the wing key format used across the palace.
+
+    We keep this helper local to onboarding because the same slug rules are used
+    for wing_config.json, default agent wings, and the identity scaffold text.
+    """
+    return f"wing_{name.strip().lower().replace(' ', '_')}"
+
+
+def _infer_mode(people: list, projects: list) -> str:
+    """
+    Infer a reasonable onboarding mode when setup is running non-interactively.
+
+    `mempalace init --yes` needs to generate the same bootstrap files as the
+    guided flow, so we synthesize the mode from the entity contexts we have.
+    """
+    contexts = {entry.get("context") for entry in people if entry.get("context")}
+    if {"personal", "work"} <= contexts:
+        return "combo"
+    if "work" in contexts or projects:
+        return "work"
+    return "personal"
+
+
+def _generate_wing_config(
+    people: list, projects: list, wings: list, mode: str, config_dir: Path = None
+) -> Path:
+    """
+    Write ~/.mempalace/wing_config.json.
+
+    The public docs have long said init generates this file. We now do that for
+    both guided and non-interactive setup so the bootstrap output matches the
+    documented shape.
+    """
+    mempalace_dir = Path(config_dir) if config_dir else Path.home() / ".mempalace"
+    mempalace_dir.mkdir(parents=True, exist_ok=True)
+
+    # Seed the chosen taxonomy wings first so the user's high-level palace shape
+    # is visible even before any project or conversation has been mined.
+    wing_map = {
+        _wing_slug(wing): {
+            "type": "taxonomy",
+            "keywords": [wing.lower()],
+            "label": wing,
+        }
+        for wing in wings
+    }
+
+    # Add person and project wings so simple keyword routing can start working
+    # from day one. This is intentionally lightweight; mining still provides the
+    # real storage and retrieval behavior later.
+    for person in people:
+        name = person["name"].strip()
+        if not name:
+            continue
+        wing_map[_wing_slug(name)] = {
+            "type": "person",
+            "entity": name,
+            "relationship": person.get("relationship", ""),
+            "keywords": [name.lower(), f"{name.lower()}'s"],
+        }
+
+    for project in projects:
+        clean = project.strip()
+        if not clean:
+            continue
+        wing_map[_wing_slug(clean)] = {
+            "type": "project",
+            "entity": clean,
+            "keywords": [clean.lower()],
+        }
+
+    payload = {
+        "default_wing": "wing_general",
+        "mode": mode,
+        "wings": wing_map,
+    }
+    out_path = mempalace_dir / "wing_config.json"
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return out_path
+
+
+def _generate_identity_scaffold(
+    people: list, projects: list, wings: list, mode: str, config_dir: Path = None
+) -> Path:
+    """
+    Create identity.txt if it does not exist yet.
+
+    Layer 0 reads this file directly, so generating a scaffold during init turns
+    a documented manual follow-up into a working default for new users.
+    """
+    mempalace_dir = Path(config_dir) if config_dir else Path.home() / ".mempalace"
+    mempalace_dir.mkdir(parents=True, exist_ok=True)
+    out_path = mempalace_dir / "identity.txt"
+    if out_path.exists():
+        return out_path
+
+    lines = [
+        "## L0 — IDENTITY",
+        "I am a memory-aware AI assistant working with the same human across sessions.",
+        f"Mode: {mode}",
+        f"Primary wings: {', '.join(wings)}",
+    ]
+
+    if people:
+        lines.append("Known people:")
+        for person in people:
+            relationship = person.get("relationship", "").strip()
+            detail = f" — {relationship}" if relationship else ""
+            lines.append(f"- {person['name']}{detail}")
+
+    if projects:
+        lines.append("Known projects:")
+        for project in projects:
+            lines.append(f"- {project}")
+
+    lines.extend(
+        [
+            "",
+            "Update this file with your preferred tone, standing instructions, and durable facts.",
+        ]
+    )
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out_path
+
+
+def _persist_topic_wings(wings: list, config_dir: Path = None) -> Path:
+    """
+    Save the chosen wing taxonomy into config.json.
+
+    Without this, onboarding would ask for wings but later commands would still
+    report the package defaults, which makes the guided flow feel fake.
+    """
+    config = MempalaceConfig(config_dir=config_dir)
+    config.init()
+    return config.set_topic_wings(wings)
+
+
+def bootstrap_from_entities(
+    people: list,
+    projects: list,
+    *,
+    wings: list = None,
+    mode: str = None,
+    config_dir: Path = None,
+    install_default_agents: bool = True,
+) -> dict:
+    """
+    Generate the full first-run bootstrap without interactive prompts.
+
+    This is the bridge between the old `mempalace init --yes` behavior and the
+    richer guided onboarding promised in the README.
+    """
+    inferred_mode = mode or _infer_mode(people, projects)
+    resolved_wings = wings or DEFAULT_WINGS[inferred_mode]
+
+    _generate_aaak_bootstrap(people, projects, resolved_wings, inferred_mode, config_dir)
+    wing_config_path = _generate_wing_config(
+        people, projects, resolved_wings, inferred_mode, config_dir
+    )
+    identity_path = _generate_identity_scaffold(
+        people, projects, resolved_wings, inferred_mode, config_dir
+    )
+    config_path = _persist_topic_wings(resolved_wings, config_dir)
+    created_agents = ensure_default_agents(config_dir) if install_default_agents else []
+
+    return {
+        "mode": inferred_mode,
+        "wings": resolved_wings,
+        "config_path": config_path,
+        "wing_config_path": wing_config_path,
+        "identity_path": identity_path,
+        "created_agents": created_agents,
+    }
+
+
+def registry_project_entities(registry: EntityRegistry) -> dict:
+    """
+    Convert the global entity registry into the simple project-level entities.json.
+
+    The miner expects plain name lists, while the registry stores richer metadata
+    and aliases. We filter out alias records here to avoid duplicating people.
+    """
+    canonical_people = []
+    for name, info in registry.people.items():
+        if info.get("canonical"):
+            continue
+        canonical_people.append(name)
+    return {
+        "people": sorted(canonical_people),
+        "projects": sorted(registry.projects),
+    }
+
+
 def run_onboarding(
     directory: str = ".",
     config_dir: Path = None,
@@ -433,8 +632,16 @@ def run_onboarding(
     registry = EntityRegistry.load(config_dir)
     registry.seed(mode=mode, people=people, projects=projects, aliases=aliases)
 
-    # Generate AAAK entity registry + critical facts bootstrap
-    _generate_aaak_bootstrap(people, projects, wings, mode, config_dir)
+    # Guided onboarding should leave the whole bootstrap in place, not just the
+    # entity registry. We call the same helper that non-interactive init uses so
+    # both flows stay aligned over time.
+    bootstrap = bootstrap_from_entities(
+        people,
+        projects,
+        wings=wings,
+        mode=mode,
+        config_dir=config_dir,
+    )
 
     # Summary
     _header("Setup Complete")
@@ -444,6 +651,10 @@ def run_onboarding(
     print(f"\n  Registry saved to: {registry._path}")
     print("\n  AAAK entity registry: ~/.mempalace/aaak_entities.md")
     print("  Critical facts bootstrap: ~/.mempalace/critical_facts.md")
+    print("  Wing config: ~/.mempalace/wing_config.json")
+    print("  Identity scaffold: ~/.mempalace/identity.txt")
+    if bootstrap["created_agents"]:
+        print("  Specialist agents: ~/.mempalace/agents/*.json")
     print("\n  Your AI will know your world from the first session.")
     print()
 
