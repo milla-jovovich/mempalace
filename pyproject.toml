@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "chromadb>=0.5.0,<0.7",
+    "chromadb>=0.5.0",
     "pyyaml>=6.0,<7",
 ]
 
