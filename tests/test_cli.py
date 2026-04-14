@@ -1,6 +1,7 @@
 """Tests for mempalace.cli — the main CLI dispatcher."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,6 +13,7 @@ from mempalace.cli import (
     cmd_hook,
     cmd_init,
     cmd_instructions,
+    cmd_mcp_serve,
     cmd_mine,
     cmd_repair,
     cmd_search,
@@ -334,9 +336,9 @@ def test_mcp_command_prints_setup_guidance(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert "MemPalace MCP quick setup:" in captured.out
-    assert "claude mcp add mempalace -- python -m mempalace.mcp_server" in captured.out
+    assert "claude mcp add mempalace -- mempalace mcp-serve" in captured.out
     assert "\nOptional custom palace:\n" in captured.out
-    assert "python -m mempalace.mcp_server --palace /path/to/palace" in captured.out
+    assert "mempalace mcp-serve --palace /path/to/palace" in captured.out
     assert "[--palace /path/to/palace]" not in captured.out
     assert captured.err == ""
 
@@ -349,7 +351,7 @@ def test_mcp_command_uses_custom_palace_path_when_provided(monkeypatch, capsys):
     captured = capsys.readouterr()
     expanded = str(Path("~/tmp/my palace").expanduser())
 
-    assert "python -m mempalace.mcp_server --palace" in captured.out
+    assert "mempalace mcp-serve --palace" in captured.out
     assert expanded in captured.out
     assert "Optional custom palace:" not in captured.out
     assert "[--palace /path/to/palace]" not in captured.out
@@ -407,6 +409,58 @@ def test_main_compress_dispatches():
     ):
         main()
         mock_cmd.assert_called_once()
+
+
+def test_main_mcp_serve_dispatches():
+    with (
+        patch("sys.argv", ["mempalace", "mcp-serve"]),
+        patch("mempalace.cli.cmd_mcp_serve") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+
+
+def test_main_mcp_serve_palace_after_subcommand():
+    """mempalace mcp-serve --palace /path must work (not just mempalace --palace /path mcp-serve)."""
+    with (
+        patch("sys.argv", ["mempalace", "mcp-serve", "--palace", "/custom/palace"]),
+        patch("mempalace.cli.cmd_mcp_serve") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+        args = mock_cmd.call_args[0][0]
+        assert args.palace == "/custom/palace"
+
+
+def test_main_mcp_serve_palace_before_subcommand():
+    """mempalace --palace /path mcp-serve must also forward --palace."""
+    with (
+        patch("sys.argv", ["mempalace", "--palace", "/global/palace", "mcp-serve"]),
+        patch("mempalace.cli.cmd_mcp_serve") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+        args = mock_cmd.call_args[0][0]
+        assert args.palace == "/global/palace"
+
+
+def test_cmd_mcp_serve_expands_tilde():
+    """cmd_mcp_serve must expand ~ in --palace for non-shell launchers (MCP JSON configs)."""
+    args = argparse.Namespace(palace="~/custom/palace")
+    captured_argv = None
+
+    def capture_main():
+        nonlocal captured_argv
+        captured_argv = sys.argv[:]
+
+    mock_mcp = MagicMock()
+    mock_mcp.main = capture_main
+    with patch.dict("sys.modules", {"mempalace.mcp_server": mock_mcp}):
+        cmd_mcp_serve(args)
+
+    expected = os.path.expanduser("~/custom/palace")
+    assert captured_argv == ["mempalace-mcp-server", "--palace", expected]
+    assert "~" not in expected
 
 
 # ── cmd_repair ─────────────────────────────────────────────────────────

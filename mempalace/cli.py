@@ -263,6 +263,15 @@ def cmd_hook(args):
     run_hook(hook_name=args.hook, harness=args.harness)
 
 
+def cmd_mcp_serve(args):
+    """Start the MCP server (JSON-RPC over stdin/stdout)."""
+    palace = os.path.expanduser(args.palace) if args.palace else None
+    sys.argv = ["mempalace-mcp-server"] + (["--palace", palace] if palace else [])
+    from .mcp_server import main as mcp_main
+
+    mcp_main()
+
+
 def cmd_instructions(args):
     """Output skill instructions to stdout."""
     from .instructions_cli import run_instructions
@@ -272,7 +281,7 @@ def cmd_instructions(args):
 
 def cmd_mcp(args):
     """Show how to wire MemPalace into MCP-capable hosts."""
-    base_server_cmd = "python -m mempalace.mcp_server"
+    base_server_cmd = "mempalace mcp-serve"
 
     if args.palace:
         resolved_palace = str(Path(args.palace).expanduser())
@@ -546,6 +555,18 @@ def main():
     for instr_name in ["init", "search", "mine", "help", "status"]:
         instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
 
+    # mcp-serve
+    p_mcp_serve = sub.add_parser(
+        "mcp-serve",
+        help="Start the MCP server (JSON-RPC over stdin/stdout)",
+    )
+    p_mcp_serve.add_argument(
+        "--palace",
+        default=argparse.SUPPRESS,
+        dest="palace",
+        help="Where the palace lives (overrides config file and env var)",
+    )
+
     # repair
     sub.add_parser(
         "repair",
@@ -609,6 +630,7 @@ def main():
         "repair": cmd_repair,
         "migrate": cmd_migrate,
         "status": cmd_status,
+        "mcp-serve": cmd_mcp_serve,
     }
     dispatch[args.command](args)
 
