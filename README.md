@@ -142,7 +142,7 @@ Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-Now your AI has 29 tools available through MCP. Ask it anything:
+Now your AI has 32 tools available through MCP. Ask it anything:
 
 > *"What did we decide about auth last month?"*
 
@@ -470,7 +470,7 @@ claude plugin install --scope user mempalace
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-### 29 Tools
+### 32 Tools
 
 **Palace (read)**
 
@@ -483,6 +483,14 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 | `mempalace_search` | Semantic search with wing/room filters |
 | `mempalace_check_duplicate` | Check before filing |
 | `mempalace_get_aaak_spec` | AAAK dialect reference |
+
+**Synapse (optional retrieval layer)**
+
+| Tool | What |
+|------|------|
+| `mempalace_session_context` | Pinned memories and maintenance hints for session startup |
+| `mempalace_supersede_check` | Scan for drawer pairs where newer content likely supersedes older |
+| `mempalace_consolidate` | Merge drawers into one summary drawer (caller supplies summary text) |
 
 **Palace (write)**
 
@@ -665,7 +673,7 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `cli.py` | CLI entry point |
 | `config.py` | Configuration loading and defaults |
 | `normalize.py` | Converts 5 chat formats to standard transcript |
-| `mcp_server.py` | MCP server — 29 tools, AAAK auto-teach, memory protocol |
+| `mcp_server.py` | MCP server — 32 tools, AAAK auto-teach, memory protocol |
 | `miner.py` | Project file ingest |
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |
 | `searcher.py` | Semantic search via ChromaDB |
@@ -689,7 +697,7 @@ mempalace/
 ├── README.md                  ← you are here
 ├── mempalace/                 ← core package (README)
 │   ├── cli.py                 ← CLI entry point
-│   ├── mcp_server.py          ← MCP server (29 tools)
+│   ├── mcp_server.py          ← MCP server (32 tools)
 │   ├── knowledge_graph.py     ← temporal entity graph
 │   ├── palace_graph.py        ← room navigation graph
 │   ├── dialect.py             ← AAAK compression
