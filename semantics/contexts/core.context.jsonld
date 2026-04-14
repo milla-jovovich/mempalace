@@ -1,0 +1,28 @@
+{
+  "@context": {
+    "id": "@id",
+    "type": "@type",
+    "RepoProfile": "https://schema.fleet-to-force.dev/repo#RepoProfile",
+    "RuntimeConfig": "https://schema.fleet-to-force.dev/repo#RuntimeConfig",
+    "Capability": "https://schema.fleet-to-force.dev/repo#Capability",
+    "DomainManager": "https://schema.fleet-to-force.dev/repo#DomainManager",
+    "Toggle": "https://schema.fleet-to-force.dev/repo#Toggle",
+    "CollectionProfile": "https://schema.fleet-to-force.dev/repo#CollectionProfile",
+    "HookProfile": "https://schema.fleet-to-force.dev/repo#HookProfile",
+    "repoName": "https://schema.fleet-to-force.dev/repo#repoName",
+    "displayName": "https://schema.fleet-to-force.dev/repo#displayName",
+    "repoUrl": {"@id": "https://schema.fleet-to-force.dev/repo#repoUrl", "@type": "@id"},
+    "packageName": "https://schema.fleet-to-force.dev/repo#packageName",
+    "commandName": "https://schema.fleet-to-force.dev/repo#commandName",
+    "hiddenDir": "https://schema.fleet-to-force.dev/repo#hiddenDir",
+    "moduleEntry": "https://schema.fleet-to-force.dev/repo#moduleEntry",
+    "enabled": "https://schema.fleet-to-force.dev/repo#enabled",
+    "category": "https://schema.fleet-to-force.dev/repo#category",
+    "path": "https://schema.fleet-to-force.dev/repo#path",
+    "collectionName": "https://schema.fleet-to-force.dev/repo#collectionName",
+    "defaultValue": "https://schema.fleet-to-force.dev/repo#defaultValue",
+    "description": "https://schema.fleet-to-force.dev/repo#description",
+    "manages": {"@id": "https://schema.fleet-to-force.dev/repo#manages", "@type": "@id"},
+    "dependsOn": {"@id": "https://schema.fleet-to-force.dev/repo#dependsOn", "@type": "@id"}
+  }
+}
