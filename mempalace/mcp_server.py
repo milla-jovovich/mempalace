@@ -219,10 +219,22 @@ def _no_palace():
 # ==================== AUTO-DISCOVER WINGS ====================
 
 IGNORE_DIRS = {
-    "node_modules", ".git", ".cursor", "__pycache__",
-    ".venv", "venv", ".env", "dist", "build",
-    "target", ".next", ".nuxt", ".mempalace",
-    ".idea", ".vs", ".vscode",
+    "node_modules",
+    ".git",
+    ".cursor",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".env",
+    "dist",
+    "build",
+    "target",
+    ".next",
+    ".nuxt",
+    ".mempalace",
+    ".idea",
+    ".vs",
+    ".vscode",
 }
 
 # Cache for discovered wings — avoids repeated filesystem scans
@@ -240,9 +252,9 @@ def _folder_to_wing(folder_name: str) -> str:
     """
     slug = folder_name.lower()
     # Keep word characters (Unicode-aware), hyphens, digits
-    slug = re.sub(r'[^\w\-]+', '_', slug)
+    slug = re.sub(r"[^\w\-]+", "_", slug)
     # Trim leading/trailing separators so '--project--' -> 'project', not '--project--'
-    slug = slug.strip('_-')
+    slug = slug.strip("_-")
     if not slug:
         slug = "unnamed"
     return f"wing_{slug}"
@@ -289,11 +301,13 @@ def _sync_wings_from_root(force=False):
 
         wing_name = _folder_to_wing(child.name)
         if wing_name not in known_wings:
-            new_wings.append({
-                "name": wing_name,
-                "path": str(child),
-                "folder": child.name,
-            })
+            new_wings.append(
+                {
+                    "name": wing_name,
+                    "path": str(child),
+                    "folder": child.name,
+                }
+            )
 
     # Register new wings in wing_config.json
     if new_wings:
@@ -369,6 +383,7 @@ def _sanitize_optional_name(value: str = None, field_name: str = "name") -> str:
 
 
 # ==================== READ TOOLS ====================
+
 
 def tool_status():
     # Return cached auto-discovered wings (no rescan, no I/O)

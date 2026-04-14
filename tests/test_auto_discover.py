@@ -1,11 +1,9 @@
 """Tests for auto-discover wings from root_dir."""
 
-import json
 import os
 import tempfile
 import shutil
 import uuid
-from pathlib import Path
 
 from mempalace.config import MempalaceConfig
 from mempalace.mcp_server import _folder_to_wing, _sync_wings_from_root, _config

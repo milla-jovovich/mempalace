@@ -39,6 +39,7 @@ from .config import MempalaceConfig
 def cmd_init(args):
     import json
     from pathlib import Path
+
     directory = str(Path(args.dir).expanduser().resolve())
     from .entity_detector import scan_for_detection, detect_entities, confirm_entities
     from .room_detector_local import detect_rooms_local
@@ -71,7 +72,6 @@ def cmd_init(args):
     config.init(root_dir=directory)
     print(f"\n  Root directory set: {directory}")
     print("  Subdirectories will be auto-detected as wings on each startup.")
-
 
 
 def cmd_mine(args):
