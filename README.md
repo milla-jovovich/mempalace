@@ -142,7 +142,7 @@ Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-Now your AI has 19 tools available through MCP. Ask it anything:
+Now your AI has 29 tools available through MCP. Ask it anything:
 
 > *"What did we decide about auth last month?"*
 
@@ -161,7 +161,7 @@ mempalace wake-up > context.txt
 # Paste context.txt into your local model's system prompt
 ```
 
-This gives your local model ~170 tokens of critical facts (in AAAK if you prefer) before you ask a single question.
+This gives your local model ~600-900 tokens of critical facts (in AAAK if you prefer) before you ask a single question.
 
 **2. CLI search** — query on demand, feed results into your prompt:
 
@@ -192,10 +192,10 @@ Decisions happen in conversations now. Not in docs. Not in Jira. In conversation
 |----------|--------------|-------------|
 | Paste everything | 19.5M — doesn't fit any context window | Impossible |
 | LLM summaries | ~650K | ~$507/yr |
-| **MemPalace wake-up** | **~170 tokens** | **~$0.70/yr** |
+| **MemPalace wake-up** | **~600-900 tokens** | **~$0.70/yr** |
 | **MemPalace + 5 searches** | **~13,500 tokens** | **~$10/yr** |
 
-MemPalace loads 170 tokens of critical facts on wake-up — your team, your projects, your preferences. Then searches only when needed. $10/year to remember everything vs $507/year for summaries that lose context.
+MemPalace loads ~600-900 tokens of critical facts on wake-up — your team, your projects, your preferences. Then searches only when needed. $10/year to remember everything vs $507/year for summaries that lose context.
 
 ---
 
@@ -218,33 +218,33 @@ There are also **halls**, which connect rooms within a wing, and **tunnels**, wh
 You say what you're looking for and boom, it already knows which wing to go to. Just *that* in itself would have made a big difference. But this is beautiful, elegant, organic, and most importantly, efficient.
 
 ```
-  ┌─────────────────────────────────────────────────────────────┐
-  │  WING: Person                                              │
-  │                                                            │
-  │    ┌──────────┐  ──hall──  ┌──────────┐                    │
-  │    │  Room A  │            │  Room B  │                    │
-  │    └────┬─────┘            └──────────┘                    │
-  │         │                                                  │
-  │         ▼                                                  │
-  │    ┌──────────┐      ┌──────────┐                          │
-  │    │  Closet  │ ───▶ │  Drawer  │                          │
-  │    └──────────┘      └──────────┘                          │
-  └─────────┼──────────────────────────────────────────────────┘
-            │
+  +------------------------------------------------------------+
+  ¦  WING: Person                                              ¦
+  ¦                                                            ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦    ¦  Room A  ¦  --hall--  ¦  Room B  ¦                    ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦         ¦                                                  ¦
+  ¦         v                                                  ¦
+  ¦    +----------+      +----------+                          ¦
+  ¦    ¦  Closet  ¦ ---> ¦  Drawer  ¦                          ¦
+  ¦    +----------+      +----------+                          ¦
+  +---------+--------------------------------------------------+
+            ¦
           tunnel
-            │
-  ┌─────────┼──────────────────────────────────────────────────┐
-  │  WING: Project                                             │
-  │         │                                                  │
-  │    ┌────┴─────┐  ──hall──  ┌──────────┐                    │
-  │    │  Room A  │            │  Room C  │                    │
-  │    └────┬─────┘            └──────────┘                    │
-  │         │                                                  │
-  │         ▼                                                  │
-  │    ┌──────────┐      ┌──────────┐                          │
-  │    │  Closet  │ ───▶ │  Drawer  │                          │
-  │    └──────────┘      └──────────┘                          │
-  └─────────────────────────────────────────────────────────────┘
+            ¦
+  +---------+--------------------------------------------------+
+  ¦  WING: Project                                             ¦
+  ¦         ¦                                                  ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦    ¦  Room A  ¦  --hall--  ¦  Room C  ¦                    ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦         ¦                                                  ¦
+  ¦         v                                                  ¦
+  ¦    +----------+      +----------+                          ¦
+  ¦    ¦  Closet  ¦ ---> ¦  Drawer  ¦                          ¦
+  ¦    +----------+      +----------+                          ¦
+  +------------------------------------------------------------+
 ```
 
 **Wings** — a person or project. As many as you need.
@@ -293,7 +293,7 @@ Wings and rooms aren't cosmetic. They're a **34% retrieval improvement**. The pa
 | **L2** | Room recall — recent sessions, current project | On demand | When topic comes up |
 | **L3** | Deep search — semantic query across all closets | On demand | When explicitly asked |
 
-Your AI wakes up with L0 + L1 (~170 tokens) and knows your world. Searches only fire when needed.
+Your AI wakes up with L0 + L1 (~600-900 tokens) and knows your world. Searches only fire when needed.
 
 ### AAAK Dialect (experimental)
 
@@ -470,7 +470,7 @@ claude plugin install --scope user mempalace
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-### 19 Tools
+### 29 Tools
 
 **Palace (read)**
 
@@ -508,6 +508,18 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 | `mempalace_traverse` | Walk the graph from a room across wings |
 | `mempalace_find_tunnels` | Find rooms bridging two wings |
 | `mempalace_graph_stats` | Graph connectivity overview |
+| `mempalace_create_tunnel` | Create explicit cross-wing link between two rooms |
+| `mempalace_list_tunnels` | List all explicit tunnels, filter by wing |
+| `mempalace_delete_tunnel` | Remove a tunnel by ID |
+| `mempalace_follow_tunnels` | Follow tunnels from a room to connected rooms in other wings |
+
+**Drawer Management**
+
+| Tool | What |
+|------|------|
+| `mempalace_get_drawer` | Fetch a single drawer by ID |
+| `mempalace_list_drawers` | Paginated drawer listing |
+| `mempalace_update_drawer` | Update drawer content or metadata |
 
 **Agent Diary**
 
@@ -515,6 +527,14 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 |------|------|
 | `mempalace_diary_write` | Write AAAK diary entry |
 | `mempalace_diary_read` | Read recent diary entries |
+
+**System**
+
+| Tool | What |
+|------|------|
+| `mempalace_hook_settings` | Get/set hook behavior (silent save, toast) |
+| `mempalace_memories_filed_away` | Check if recent checkpoint was saved |
+| `mempalace_reconnect` | Force DB reconnect after external writes |
 
 The AI learns AAAK and the memory protocol automatically from the `mempalace_status` response. No manual configuration.
 
@@ -645,12 +665,12 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `cli.py` | CLI entry point |
 | `config.py` | Configuration loading and defaults |
 | `normalize.py` | Converts 5 chat formats to standard transcript |
-| `mcp_server.py` | MCP server — 19 tools, AAAK auto-teach, memory protocol |
+| `mcp_server.py` | MCP server — 29 tools, AAAK auto-teach, memory protocol |
 | `miner.py` | Project file ingest |
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |
 | `searcher.py` | Semantic search via ChromaDB |
 | `layers.py` | 4-layer memory stack |
-| `dialect.py` | AAAK compression — 30x lossless |
+| `dialect.py` | AAAK index format for closet pointers |
 | `knowledge_graph.py` | Temporal entity-relationship graph (SQLite) |
 | `palace_graph.py` | Room-based navigation graph |
 | `onboarding.py` | Guided setup — generates AAAK bootstrap + wing config |
@@ -669,7 +689,7 @@ mempalace/
 ├── README.md                  ← you are here
 ├── mempalace/                 ← core package (README)
 │   ├── cli.py                 ← CLI entry point
-│   ├── mcp_server.py          ← MCP server (19 tools)
+│   ├── mcp_server.py          ← MCP server (29 tools)
 │   ├── knowledge_graph.py     ← temporal entity graph
 │   ├── palace_graph.py        ← room navigation graph
 │   ├── dialect.py             ← AAAK compression
@@ -694,7 +714,7 @@ mempalace/
 │   └── mcp_setup.md
 ├── tests/                     ← test suite (README)
 ├── assets/                    ← logo + brand assets
-└── pyproject.toml             ← package config (v3.0.0)
+└── pyproject.toml             ← package config (v3.3.0)
 ```
 
 ---
@@ -722,7 +742,7 @@ PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
 MIT — see [LICENSE](LICENSE).
 
 <!-- Link Definitions -->
-[version-shield]: https://img.shields.io/badge/version-3.1.0-4dc9f6?style=flat-square&labelColor=0a0e14
+[version-shield]: https://img.shields.io/badge/version-3.3.0-4dc9f6?style=flat-square&labelColor=0a0e14
 [release-link]: https://github.com/milla-jovovich/mempalace/releases
 [python-shield]: https://img.shields.io/badge/python-3.9+-7dd8f8?style=flat-square&labelColor=0a0e14&logo=python&logoColor=7dd8f8
 [python-link]: https://www.python.org/

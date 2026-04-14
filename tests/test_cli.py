@@ -424,9 +424,23 @@ def test_cmd_repair_no_palace(mock_config_cls, tmp_path, capsys):
 
 
 @patch("mempalace.cli.MempalaceConfig")
+def test_cmd_repair_requires_palace_database(mock_config_cls, tmp_path, capsys):
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+    mock_config_cls.return_value.palace_path = str(palace_dir)
+    args = argparse.Namespace(palace=None)
+    mock_chromadb = MagicMock()
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        cmd_repair(args)
+    out = capsys.readouterr().out
+    assert "No palace database found" in out
+
+
+@patch("mempalace.cli.MempalaceConfig")
 def test_cmd_repair_error_reading(mock_config_cls, tmp_path, capsys):
     palace_dir = tmp_path / "palace"
     palace_dir.mkdir()
+    (palace_dir / "chroma.sqlite3").write_text("db")
     mock_config_cls.return_value.palace_path = str(palace_dir)
     args = argparse.Namespace(palace=None)
     mock_chromadb = MagicMock()
@@ -443,6 +457,7 @@ def test_cmd_repair_error_reading(mock_config_cls, tmp_path, capsys):
 def test_cmd_repair_zero_drawers(mock_config_cls, tmp_path, capsys):
     palace_dir = tmp_path / "palace"
     palace_dir.mkdir()
+    (palace_dir / "chroma.sqlite3").write_text("db")
     mock_config_cls.return_value.palace_path = str(palace_dir)
     args = argparse.Namespace(palace=None)
     mock_chromadb = MagicMock()
@@ -461,8 +476,9 @@ def test_cmd_repair_zero_drawers(mock_config_cls, tmp_path, capsys):
 def test_cmd_repair_success(mock_config_cls, tmp_path, capsys):
     palace_dir = tmp_path / "palace"
     palace_dir.mkdir()
+    (palace_dir / "chroma.sqlite3").write_text("db")
     mock_config_cls.return_value.palace_path = str(palace_dir)
-    args = argparse.Namespace(palace=None)
+    args = argparse.Namespace(palace=None, yes=True)
     mock_chromadb = MagicMock()
     mock_col = MagicMock()
     mock_col.count.return_value = 2
@@ -481,6 +497,29 @@ def test_cmd_repair_success(mock_config_cls, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Repair complete" in out
     assert "2 drawers rebuilt" in out
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_repair_aborts_without_confirmation(mock_config_cls, tmp_path, capsys):
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+    (palace_dir / "chroma.sqlite3").write_text("db")
+    mock_config_cls.return_value.palace_path = str(palace_dir)
+    args = argparse.Namespace(palace=None)
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.count.return_value = 1
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with (
+        patch.dict("sys.modules", {"chromadb": mock_chromadb}),
+        patch("builtins.input", return_value="n"),
+    ):
+        cmd_repair(args)
+    out = capsys.readouterr().out
+    assert "Aborted." in out
+    mock_client.create_collection.assert_not_called()
 
 
 # ── cmd_compress ───────────────────────────────────────────────────────
@@ -546,10 +585,11 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
+        "note": "Estimates only.",
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -564,6 +604,7 @@ def test_cmd_compress_dry_run(mock_config_cls, capsys):
     out = capsys.readouterr().out
     assert "dry run" in out.lower()
     assert "Compressing" in out
+    assert "Total:" in out
 
 
 @patch("mempalace.cli.MempalaceConfig")
@@ -619,10 +660,11 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
     mock_dialect.compress.return_value = "compressed"
     mock_dialect.compression_stats.return_value = {
         "original_chars": 100,
-        "compressed_chars": 30,
-        "original_tokens": 25,
-        "compressed_tokens": 8,
-        "ratio": 3.3,
+        "summary_chars": 30,
+        "original_tokens_est": 25,
+        "summary_tokens_est": 8,
+        "size_ratio": 3.3,
+        "note": "Estimates only.",
     }
     mock_dialect_mod = _make_mock_dialect_module(mock_dialect)
 
@@ -636,6 +678,7 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
         cmd_compress(args)
     out = capsys.readouterr().out
     assert "Stored" in out
+    assert "Total:" in out
     mock_comp_col.upsert.assert_called_once()
 
 
