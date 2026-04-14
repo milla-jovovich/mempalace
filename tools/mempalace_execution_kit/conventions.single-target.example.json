@@ -1,0 +1,35 @@
+{
+  "source": {
+    "package": "mempalace",
+    "command": "mempalace",
+    "hidden_dir": ".mempalace",
+    "module_entry": "mempalace.mcp_server",
+    "repo_url": "https://github.com/MemPalace/mempalace",
+    "collections": {
+      "drawers": "mempalace_drawers",
+      "compressed": "mempalace_compressed",
+      "closets": "mempalace_closets"
+    }
+  },
+  "target": {
+    "id": "memorymesh",
+    "display_name": "MemoryMesh",
+    "repo_url": "https://github.com/your-org/memorymesh"
+  },
+  "overrides": {
+    "command": null,
+    "hidden_dir": null,
+    "module_entry": null,
+    "plugin_name": null,
+    "plugin_display_name": null,
+    "interpreter_env_var": null,
+    "collections": {
+      "drawers": null,
+      "compressed": null,
+      "closets": null
+    }
+  },
+  "interpreter_policy": {
+    "fallback_command": "python"
+  }
+}
