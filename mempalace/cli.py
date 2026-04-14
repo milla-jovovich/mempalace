@@ -37,8 +37,17 @@ from .config import MempalaceConfig
 
 
 def cmd_init(args):
+
+    # Ensure target directory exists (create if missing)
+    path = str(Path(args.dir).expanduser())
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+        print(f"  Created directory: {path}")
+
+    # Normalize args.dir to absolute path
+    args.dir = str(Path(path).resolve())
+
     import json
-    from pathlib import Path
     from .entity_detector import scan_for_detection, detect_entities, confirm_entities
     from .room_detector_local import detect_rooms_local
 
