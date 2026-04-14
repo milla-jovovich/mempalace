@@ -1,0 +1,70 @@
+{
+  "@context": [
+    "../contexts/core.context.jsonld"
+  ],
+  "@graph": [
+    {
+      "@id": "did:web:github.com:Fleet-to-Force:mempalace#repo",
+      "@type": "RepoProfile",
+      "repoName": "mempalace",
+      "displayName": "MemPalace",
+      "repoUrl": "https://github.com/Fleet-to-Force/mempalace",
+      "packageName": "mempalace",
+      "commandName": "mempalace",
+      "hiddenDir": ".mempalace",
+      "moduleEntry": "mempalace.mcp_server"
+    },
+    {
+      "@id": "did:web:github.com:Fleet-to-Force:mempalace#collection/drawers",
+      "@type": "CollectionProfile",
+      "category": "drawers",
+      "collectionName": "mempalace_drawers",
+      "description": "Primary verbatim memory collection"
+    },
+    {
+      "@id": "did:web:github.com:Fleet-to-Force:mempalace#collection/compressed",
+      "@type": "CollectionProfile",
+      "category": "compressed",
+      "collectionName": "mempalace_compressed",
+      "description": "Optional compressed memory collection"
+    },
+    {
+      "@id": "did:web:github.com:Fleet-to-Force:mempalace#collection/closets",
+      "@type": "CollectionProfile",
+      "category": "closets",
+      "collectionName": "mempalace_closets",
+      "description": "Closet pointer collection"
+    },
+    {
+      "@id": "did:web:github.com:Fleet-to-Force:mempalace#capability/search",
+      "@type": "Capability",
+      "category": "search",
+      "enabled": true,
+      "description": "Semantic memory search across drawers and closets"
+    },
+    {
+      "@id": "did:web:github.com:Fleet-to-Force:mempalace#capability/kg",
+      "@type": "Capability",
+      "category": "knowledge-graph",
+      "enabled": true,
+      "description": "Temporal entity graph operations"
+    },
+    {
+      "@id": "did:web:github.com:Fleet-to-Force:mempalace#domain-manager/runtime",
+      "@type": "DomainManager",
+      "category": "runtime",
+      "description": "Distills repo surfaces into runtime categories",
+      "manages": [
+        "did:web:github.com:Fleet-to-Force:mempalace#capability/search",
+        "did:web:github.com:Fleet-to-Force:mempalace#capability/kg"
+      ]
+    },
+    {
+      "@id": "did:web:github.com:Fleet-to-Force:mempalace#toggle/aaak",
+      "@type": "Toggle",
+      "category": "aaak",
+      "enabled": true,
+      "description": "Enables AAAK-related features where supported"
+    }
+  ]
+}
