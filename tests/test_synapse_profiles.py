@@ -275,9 +275,7 @@ def test_axes_enabled_empty_high_ltp_same_as_fresh(palace_dir):
 
 def test_annotated_dict_includes_axes_enabled(palace_dir):
     """to_annotated_dict() includes axes_enabled with source"""
-    config = {
-        "synapse_profiles": {"orient": {"axes_enabled": ["ltp", "association"]}}
-    }
+    config = {"synapse_profiles": {"orient": {"axes_enabled": ["ltp", "association"]}}}
     with open(os.path.join(palace_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump(config, f)
     pm = ProfileManager(palace_dir)

@@ -13,9 +13,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-VALID_AXES = frozenset(
-    {"ltp", "tagging", "association", "similarity", "decay", "recency", "mmr"}
-)
+VALID_AXES = frozenset({"ltp", "tagging", "association", "similarity", "decay", "recency", "mmr"})
 
 HARDCODED_DEFAULTS: Dict[str, Any] = {
     "description": "",
@@ -230,9 +228,7 @@ class ProfileManager:
             errors.append(f"mmr_lambda must be between 0.0 and 1.0, got {mlam}")
 
         mmfk = merged.get("mmr_final_k")
-        if mmfk is not None and (
-            not isinstance(mmfk, int) or isinstance(mmfk, bool) or mmfk < 1
-        ):
+        if mmfk is not None and (not isinstance(mmfk, int) or isinstance(mmfk, bool) or mmfk < 1):
             errors.append(f"mmr_final_k must be an integer >= 1, got {mmfk}")
 
         pmt = merged.get("pinned_max_tokens")
@@ -253,9 +249,7 @@ class ProfileManager:
 
         qemt = merged.get("query_expansion_max_terms")
         if qemt is not None and (not isinstance(qemt, int) or qemt < 1):
-            errors.append(
-                f"query_expansion_max_terms must be an integer >= 1, got {qemt}"
-            )
+            errors.append(f"query_expansion_max_terms must be an integer >= 1, got {qemt}")
 
         qest = merged.get("query_expansion_similarity_threshold")
         if qest is not None and (qest < 0.0 or qest > 1.0):
@@ -265,44 +259,30 @@ class ProfileManager:
 
         qeb = merged.get("query_expansion_boost")
         if qeb is not None and (qeb < 0.0 or qeb > 1.0):
-            errors.append(
-                f"query_expansion_boost must be between 0.0 and 1.0, got {qeb}"
-            )
+            errors.append(f"query_expansion_boost must be between 0.0 and 1.0, got {qeb}")
 
         qel = merged.get("query_expansion_lookback_days")
         if qel is not None and qel < 1:
-            errors.append(
-                f"query_expansion_lookback_days must be >= 1, got {qel}"
-            )
+            errors.append(f"query_expansion_lookback_days must be >= 1, got {qel}")
 
         sst = merged.get("supersede_similarity_threshold")
         if sst is not None and (sst < 0.0 or sst > 1.0):
-            errors.append(
-                f"supersede_similarity_threshold must be between 0.0 and 1.0, got {sst}"
-            )
+            errors.append(f"supersede_similarity_threshold must be between 0.0 and 1.0, got {sst}")
 
         smag = merged.get("supersede_min_age_gap_days")
         if smag is not None and (not isinstance(smag, int) or smag < 0):
-            errors.append(
-                f"supersede_min_age_gap_days must be an integer >= 0, got {smag}"
-            )
+            errors.append(f"supersede_min_age_gap_days must be an integer >= 0, got {smag}")
 
         sa = merged.get("supersede_action")
         if sa is not None and sa not in ("filter", "annotate"):
-            errors.append(
-                f'supersede_action must be "filter" or "annotate", got {sa!r}'
-            )
+            errors.append(f'supersede_action must be "filter" or "annotate", got {sa!r}')
 
         smc = merged.get("supersede_max_candidates")
         if smc is not None and (not isinstance(smc, int) or smc < 1):
-            errors.append(
-                f"supersede_max_candidates must be an integer >= 1, got {smc}"
-            )
+            errors.append(f"supersede_max_candidates must be an integer >= 1, got {smc}")
 
         if errors:
-            raise ValueError(
-                f"Invalid profile '{profile_name}': " + "; ".join(errors)
-            )
+            raise ValueError(f"Invalid profile '{profile_name}': " + "; ".join(errors))
 
     def resolve(
         self,
@@ -342,9 +322,7 @@ class ProfileManager:
                 merged[k] = v
                 sources[k] = "default (config.json)"
 
-        if "default" in self._file_profiles and isinstance(
-            self._file_profiles["default"], dict
-        ):
+        if "default" in self._file_profiles and isinstance(self._file_profiles["default"], dict):
             for k, v in self._file_profiles["default"].items():
                 merged[k] = v
                 sources[k] = "default (synapse_profiles.json)"

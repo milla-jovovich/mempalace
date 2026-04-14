@@ -593,9 +593,7 @@ class SynapseDB:
         now_iso = _utc_now_iso()
         conn = sqlite3.connect(self.db_path)
         try:
-            cur = conn.execute(
-                "SELECT drawer_id, COUNT(*) FROM retrieval_log GROUP BY drawer_id"
-            )
+            cur = conn.execute("SELECT drawer_id, COUNT(*) FROM retrieval_log GROUP BY drawer_id")
             totals = {row[0]: int(row[1]) for row in cur.fetchall()}
             cur = conn.execute(
                 "SELECT drawer_id, COUNT(*) FROM retrieval_log WHERE retrieved_at >= ? "
@@ -697,9 +695,7 @@ class SynapseDB:
         if lambda_param >= 0.999:
             sel = sorted(
                 candidates,
-                key=lambda h: float(
-                    h.get("synapse_score", h.get("similarity", 0.0))
-                ),
+                key=lambda h: float(h.get("synapse_score", h.get("similarity", 0.0))),
                 reverse=True,
             )[:final_k]
             after_n = len(sel)
@@ -759,7 +755,9 @@ class SynapseDB:
                     mmr_s = lambda_param * sim_q
                 else:
                     max_sim_sel = max(
-                        self._cosine_similarity(emb_c, _get_emb(s)) if emb_c and _get_emb(s) else 0.0
+                        self._cosine_similarity(emb_c, _get_emb(s))
+                        if emb_c and _get_emb(s)
+                        else 0.0
                         for s in selected
                     )
                     mmr_s = lambda_param * sim_q - (1.0 - lambda_param) * max_sim_sel
@@ -780,9 +778,7 @@ class SynapseDB:
             for i in range(len(selected)):
                 for j in range(i + 1, len(selected)):
                     if embs[i] and embs[j]:
-                        max_internal = max(
-                            max_internal, self._cosine_similarity(embs[i], embs[j])
-                        )
+                        max_internal = max(max_internal, self._cosine_similarity(embs[i], embs[j]))
 
         return {
             "results": selected,
@@ -856,9 +852,7 @@ class SynapseDB:
                 if not isinstance(past_emb, list) or not past_emb:
                     continue
                 past_emb_f = [float(x) for x in past_emb]
-                sim = self._cosine_similarity(
-                    [float(x) for x in query_embedding], past_emb_f
-                )
+                sim = self._cosine_similarity([float(x) for x in query_embedding], past_emb_f)
                 if sim >= similarity_threshold and str(qtxt) != query_text:
                     similar_past.append(str(qtxt))
                     rids = json.loads(rids_blob)
@@ -875,9 +869,7 @@ class SynapseDB:
         expansion_terms: list[str] = []
         if source_ids and collection is not None:
             try:
-                got = collection.get(
-                    ids=list(source_ids), include=["metadatas", "documents"]
-                )
+                got = collection.get(ids=list(source_ids), include=["metadatas", "documents"])
                 metas = got.get("metadatas") or []
                 docs = got.get("documents") or []
                 counter: Counter[str] = Counter()
@@ -934,9 +926,7 @@ class SynapseDB:
         finally:
             conn.close()
 
-    def get_top_ltp_drawers(
-        self, ltp_threshold: float, limit: int = 10
-    ) -> list[tuple[str, float]]:
+    def get_top_ltp_drawers(self, ltp_threshold: float, limit: int = 10) -> list[tuple[str, float]]:
         """synapse_stats から LTP が閾値以上の drawer を上位 limit 件返す。"""
         conn = sqlite3.connect(self.db_path)
         try:
@@ -1025,9 +1015,7 @@ class SynapseDB:
         ltp_ranked = self.get_top_ltp_drawers(ltp_threshold, limit=10)
         tagged_ids: list[str] = []
         if include_tagged:
-            tagged_ids = self.get_recently_tagged_drawer_ids(
-                collection, tagged_window_hours
-            )
+            tagged_ids = self.get_recently_tagged_drawer_ids(collection, tagged_window_hours)
 
         merged: dict[str, dict[str, Any]] = {}
         for rank, (did, ltp) in enumerate(ltp_ranked, start=1):
@@ -1210,14 +1198,10 @@ class SynapseDB:
                 raw_cands.append(
                     {
                         "superseded_id": older_id,
-                        "superseded_title": str(
-                            (older_meta or {}).get("title", older_id)
-                        ),
+                        "superseded_title": str((older_meta or {}).get("title", older_id)),
                         "superseded_date": older_dt.isoformat(),
                         "superseding_id": newer_id,
-                        "superseding_title": str(
-                            (newer_meta or {}).get("title", newer_id)
-                        ),
+                        "superseding_title": str((newer_meta or {}).get("title", newer_id)),
                         "superseding_date": newer_dt.isoformat(),
                         "similarity": sim,
                         "age_gap_days": age_gap,
@@ -1226,9 +1210,7 @@ class SynapseDB:
                 )
 
         conf_rank = {"high": 0, "medium": 1, "low": 2}
-        raw_cands.sort(
-            key=lambda c: (conf_rank.get(c["confidence"], 3), -c["similarity"])
-        )
+        raw_cands.sort(key=lambda c: (conf_rank.get(c["confidence"], 3), -c["similarity"]))
         return {
             "candidates": raw_cands[:max_candidates],
             "checked": True,
@@ -1305,8 +1287,7 @@ class SynapseDB:
                 c = supers_map[hid]
                 new_h["synapse_superseded_by"] = c["superseding_id"]
                 new_h["synapse_supersede_note"] = (
-                    f"Likely superseded by {c['superseding_id']} "
-                    f"(similarity={c['similarity']:.3f})"
+                    f"Likely superseded by {c['superseding_id']} (similarity={c['similarity']:.3f})"
                 )
                 annotated += 1
             for c in cands:
@@ -1403,9 +1384,7 @@ class SynapseDB:
         self, collection: Any, consolidated_drawer_id: str
     ) -> list[dict[str, Any]]:
         """統合 drawer の元 drawer 一覧を返す。"""
-        got = collection.get(
-            ids=[consolidated_drawer_id], include=["metadatas", "documents"]
-        )
+        got = collection.get(ids=[consolidated_drawer_id], include=["metadatas", "documents"])
         if not got.get("ids"):
             return []
         meta = (got.get("metadatas") or [{}])[0] or {}

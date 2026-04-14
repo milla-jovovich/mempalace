@@ -35,4 +35,5 @@ coverage.xml
 venv/
 
 # ChromaDB local data
+*.sqlite3
 *.sqlite3-journal

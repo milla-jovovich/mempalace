@@ -64,9 +64,7 @@ def test_init_creates_tables(tmp_palace):
     db = SynapseDB(tmp_palace)
     conn = sqlite3.connect(db.db_path)
     try:
-        cur = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        )
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         names = {row[0] for row in cur.fetchall()}
     finally:
         conn.close()
@@ -121,7 +119,9 @@ def test_log_retrieval_empty_list(tmp_palace):
 
 def test_log_retrieval_exception_suppressed(tmp_palace):
     db = SynapseDB(tmp_palace)
-    with patch("mempalace.synapse.sqlite3.connect", side_effect=sqlite3.OperationalError("readonly")):
+    with patch(
+        "mempalace.synapse.sqlite3.connect", side_effect=sqlite3.OperationalError("readonly")
+    ):
         db.log_retrieval(["a"], "h", "s")
 
 
@@ -336,9 +336,7 @@ def test_per_query_ltp_override_true(palace_path, seeded_collection):
         synapse_log_retrievals=False,
     )
     with patch("mempalace.config.MempalaceConfig", return_value=cfg):
-        result = search_memories(
-            "JWT authentication", palace_path, synapse_ltp_enabled=True
-        )
+        result = search_memories("JWT authentication", palace_path, synapse_ltp_enabled=True)
     assert result.get("synapse_enabled") is True
     hit = next(h for h in result["hits"] if h.get("id") == drawer_id)
     assert hit["synapse_factors"]["ltp"] > 1.0
@@ -354,9 +352,7 @@ def test_per_query_ltp_override_false(palace_path, seeded_collection):
     )
     with patch("mempalace.config.MempalaceConfig", return_value=cfg):
         with patch.object(SynapseDB, "get_ltp_scores_batch", fake_batch):
-            result = search_memories(
-                "JWT authentication", palace_path, synapse_ltp_enabled=False
-            )
+            result = search_memories("JWT authentication", palace_path, synapse_ltp_enabled=False)
     assert result.get("synapse_enabled") is True
     for hit in result["hits"]:
         assert hit["synapse_factors"]["ltp"] == 1.0
@@ -384,9 +380,7 @@ def test_per_query_tagging_override(palace_path, seeded_collection):
         synapse_log_retrievals=False,
     )
     with patch("mempalace.config.MempalaceConfig", return_value=cfg_off):
-        r_off = search_memories(
-            "JWT authentication", palace_path, synapse_tagging_enabled=False
-        )
+        r_off = search_memories("JWT authentication", palace_path, synapse_tagging_enabled=False)
     hit_off = next(h for h in r_off["hits"] if h.get("id") == drawer_id)
     assert hit_off["synapse_factors"]["tagging"] == 1.0
 
@@ -427,9 +421,7 @@ def test_log_retrieval_failure_does_not_break_search(palace_path, seeded_collect
     """log_retrieval が例外を投げても検索は Synapse スコア付きで返る（接続は commit される）。"""
     cfg = _synapse_cfg(synapse_log_retrievals=True)
     with patch("mempalace.config.MempalaceConfig", return_value=cfg):
-        with patch.object(
-            SynapseDB, "log_retrieval", side_effect=RuntimeError("log failed")
-        ):
+        with patch.object(SynapseDB, "log_retrieval", side_effect=RuntimeError("log failed")):
             result = search_memories("JWT authentication", palace_path)
     assert result.get("synapse_enabled") is True
     assert len(result.get("hits", [])) >= 1
