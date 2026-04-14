@@ -59,6 +59,27 @@ class TestLLMConfig:
         c = LLMConfig(endpoint="http://local/v1", model="m")
         assert c.missing() == []
 
+    def test_rejects_non_http_scheme(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="http"):
+            LLMConfig(endpoint="file:///etc/passwd", model="m")
+
+    def test_rejects_ftp_scheme(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="http"):
+            LLMConfig(endpoint="ftp://evil.example.com/v1", model="m")
+
+    def test_accepts_https(self):
+        c = LLMConfig(endpoint="https://api.example.com/v1", model="m")
+        assert c.endpoint == "https://api.example.com/v1"
+
+    def test_empty_endpoint_is_allowed(self, monkeypatch):
+        monkeypatch.delenv("LLM_ENDPOINT", raising=False)
+        c = LLMConfig()
+        assert c.endpoint == ""
+
 
 # ── _parsed_to_closet_lines ──────────────────────────────────────────────
 

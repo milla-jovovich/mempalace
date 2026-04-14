@@ -40,6 +40,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime
@@ -98,9 +99,25 @@ class LLMConfig:
         key: Optional[str] = None,
         model: Optional[str] = None,
     ):
-        self.endpoint = (endpoint or os.environ.get("LLM_ENDPOINT", "")).rstrip("/")
+        raw_endpoint = (endpoint or os.environ.get("LLM_ENDPOINT", "")).rstrip("/")
+        self.endpoint = self._validate_endpoint(raw_endpoint)
         self.key = key or os.environ.get("LLM_KEY", "")
         self.model = model or os.environ.get("LLM_MODEL", "")
+
+    @staticmethod
+    def _validate_endpoint(url: str) -> str:
+        """Validate the LLM endpoint URL.  Only http:// and https:// schemes are
+        accepted to prevent SSRF via other URI schemes (file://, ftp://, etc.)."""
+        if not url:
+            return url
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"LLM endpoint must use http:// or https:// — got: {url!r}"
+            )
+        if not parsed.netloc:
+            raise ValueError(f"LLM endpoint URL has no host: {url!r}")
+        return url
 
     def missing(self) -> list:
         missing = []

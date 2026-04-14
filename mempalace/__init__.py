@@ -1,13 +1,15 @@
 """MemPalace — Give your AI a memory. No API key required."""
 
 import logging
+import os
 
 from .version import __version__  # noqa: E402
 
-# ChromaDB 0.6.x ships a Posthog telemetry client whose capture() signature is
-# incompatible with the bundled posthog library, producing noisy stderr warnings
-# on every client operation ("Failed to send telemetry event … capture() takes
-# 1 positional argument but 3 were given").  Silence just that logger.
+# Disable ChromaDB's built-in PostHog telemetry so no usage data is sent to
+# external servers.  The env var is the authoritative kill-switch recognised by
+# chromadb.config.Settings; we also silence the logger in case older bundled
+# versions ignore the env var.
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
 
 # NOTE: the previous block set ``ORT_DISABLE_COREML=1`` on macOS arm64 as a

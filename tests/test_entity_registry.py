@@ -228,7 +228,7 @@ def test_research_caches_result(tmp_path):
     }
 
     with patch("mempalace.entity_registry._wikipedia_lookup", return_value=mock_result):
-        result = registry.research("Saoirse", auto_confirm=True)
+        result = registry.research("Saoirse", auto_confirm=True, wiki_lookup=True)
     assert result["inferred_type"] == "person"
 
     # Second call should use cache, not call Wikipedia again
@@ -251,7 +251,7 @@ def test_confirm_research_adds_to_people(tmp_path):
         "wiki_title": "Saoirse",
     }
     with patch("mempalace.entity_registry._wikipedia_lookup", return_value=mock_result):
-        registry.research("Saoirse", auto_confirm=False)
+        registry.research("Saoirse", auto_confirm=False, wiki_lookup=True)
 
     registry.confirm_research("Saoirse", entity_type="person", relationship="friend")
     assert "Saoirse" in registry.people

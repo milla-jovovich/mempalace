@@ -16,6 +16,7 @@ Usage:
 """
 
 import json
+import os
 import re
 import urllib.request
 import urllib.parse
@@ -178,6 +179,10 @@ def _wikipedia_lookup(word: str) -> dict:
     Look up a word via Wikipedia REST API.
     Returns inferred type (person/place/concept/unknown) + confidence + summary.
     Free, no API key, handles disambiguation pages.
+
+    This function makes an external network request to Wikipedia.  It is only
+    called when the caller has confirmed that remote lookups are permitted
+    (``MEMPALACE_WIKI_LOOKUP=1`` env var or explicit ``wiki_lookup=True``).
     """
     try:
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(word)}"
@@ -502,18 +507,27 @@ class EntityRegistry:
 
     # ── Research unknown words ───────────────────────────────────────────────
 
-    def research(self, word: str, auto_confirm: bool = False) -> dict:
+    def research(self, word: str, auto_confirm: bool = False, wiki_lookup: bool = False) -> dict:
         """
-        Research an unknown word via Wikipedia.
-        Caches result. If auto_confirm=False, marks as unconfirmed (needs user review).
-        Returns the lookup result.
+        Research an unknown word.  Results are cached locally.
+
+        External Wikipedia lookups are **opt-in only** — they send the entity
+        name to Wikipedia's servers.  Pass ``wiki_lookup=True`` or set the
+        ``MEMPALACE_WIKI_LOOKUP=1`` environment variable to enable them.
+
+        If auto_confirm=False, the result is marked as unconfirmed (needs user
+        review).  Returns the lookup result.
         """
         # Already cached?
         cache = self._data.setdefault("wiki_cache", {})
         if word in cache:
             return cache[word]
 
-        result = _wikipedia_lookup(word)
+        allow_remote = wiki_lookup or os.environ.get("MEMPALACE_WIKI_LOOKUP", "0") == "1"
+        if not allow_remote:
+            result = {"inferred_type": "unknown", "confidence": 0.0, "wiki_summary": None}
+        else:
+            result = _wikipedia_lookup(word)
         result["word"] = word
         result["confirmed"] = auto_confirm
 
