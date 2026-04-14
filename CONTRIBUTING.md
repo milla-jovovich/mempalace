@@ -5,8 +5,11 @@ Thanks for wanting to help. MemPalace is open source and we welcome contribution
 ## Getting Started
 
 ```bash
-git clone https://github.com/MemPalace/mempalace.git
+# Fork the repo on GitHub first, then clone your fork
+git clone https://github.com/<your-username>/mempalace.git
 cd mempalace
+git remote add upstream https://github.com/MemPalace/mempalace.git
+
 pip install -e ".[dev]"    # installs with dev dependencies (pytest, build, twine)
 ```
 

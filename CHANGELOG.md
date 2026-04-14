@@ -54,6 +54,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [3.2.0] — 2026-04-12
 
+### Packaging
+- Remove `chromadb<0.7` upper bound — unblocks installs against chromadb 1.x palaces (#690)
+- Bump version to 3.2.0 across `pyproject.toml`, `mempalace/version.py`, README badge, and OpenClaw SKILL (#761)
+
 ### Security
 - Harden palace deletion, WAL redaction, and MCP search input handling (#739)
 - Consistent input validation, argument whitelisting, concurrency safety, and WAL fixes (#647)
@@ -61,6 +65,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Remove global SSL verification bypass in convomem_bench (#176)
 
 ### Bug Fixes
+- Parse Claude.ai privacy export with `messages` key and sender field (#685, #677)
+- Detect mtime changes in `_get_client` to prevent stale HNSW index (#757)
+- Hash full content in `tool_add_drawer` drawer ID — stable re-mines (#716)
+- Remove 10k drawer cap from status display (#707, #603)
+- Correct typo in entity_detector interactive classification prompt (#755)
 - Prevent convo_miner from re-processing 0-chunk files on every run (#732, #654)
 - Remove silent 8-line AI response truncation in convo_miner (#708, #692)
 - Store full AI response in convo_miner exchange chunking (#695)
@@ -103,6 +112,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add VitePress documentation site (#439)
 - Add warning about fake MemPalace websites (#598)
 - Fix stale org URLs and PR branch target in contributor docs (#679)
+- Fix misaligned architecture diagram (#734, #733)
 - Add ROADMAP.md — v3.1.1 stability patch and v4.0.0-alpha plan
 
 ### Internal
