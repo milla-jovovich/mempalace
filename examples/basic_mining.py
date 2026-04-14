@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Example: mine a project folder into the palace."""
+"""Example: mine a project folder into the palace.
+
+See examples/quickstart.md for a full walkthrough and bundled demo_project.
+"""
 
 import sys
 
@@ -10,3 +13,5 @@ print("\nStep 2: Mine everything")
 print(f"  mempalace mine {project_dir}")
 print("\nStep 3: Search")
 print("  mempalace search 'why did we choose this approach'")
+print("\nOr try the ready-made demo + script:")
+print("  python examples/quickstart_demo.py --isolated")
