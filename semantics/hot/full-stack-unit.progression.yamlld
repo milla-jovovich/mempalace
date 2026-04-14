@@ -1,0 +1,68 @@
+"@context":
+  - ../contexts/core.context.jsonld
+  - ../contexts/full-stack-unit.context.jsonld
+  - ../contexts/progression.context.jsonld
+
+"@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#projection-model
+"@type": LayerProjection
+
+declarations:
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#projection/L1-tools
+    "@type": ProjectionRule
+    sourceLayer: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L0-infra
+    targetLayer: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-tools
+    projectionOrder: 1
+    description: L1-tools may only be declared from L0-infra contracts
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#projection/L1-mcp-servers
+    "@type": ProjectionRule
+    sourceLayer: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L0-infra
+    targetLayer: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-mcp-servers
+    projectionOrder: 2
+    description: MCP server declarations are projected from L0 identity and runtime contracts
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#projection/L2-agents
+    "@type": ProjectionRule
+    dependsOnLayer:
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L0-infra
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-tools
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-mcp-servers
+    targetLayer: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-agents
+    projectionOrder: 3
+    description: Agents are projected only after tool and MCP substrate exists
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#projection/L2-workflows
+    "@type": ProjectionRule
+    dependsOnLayer:
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L0-infra
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-tools
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-mcp-servers
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-agents
+    targetLayer: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-workflows
+    projectionOrder: 4
+    description: Workflows are composed only after lower execution surfaces exist
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#projection/L3-observation
+    "@type": ProjectionRule
+    dependsOnLayer:
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L0-infra
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-tools
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-mcp-servers
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-agents
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-workflows
+    targetLayer: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L3-observation
+    projectionOrder: 5
+    description: Observation binds to all already-declared operational surfaces
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#projection/L3-assembly
+    "@type": ProjectionRule
+    dependsOnLayer:
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L0-infra
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-tools
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-mcp-servers
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-agents
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-workflows
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L3-observation
+    targetLayer: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L3-assembly
+    projectionOrder: 6
+    description: Assembly is last because it packages the total declared unit
