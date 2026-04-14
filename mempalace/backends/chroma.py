@@ -55,6 +55,9 @@ class ChromaCollection(BaseCollection):
     def upsert(self, *, documents, ids, metadatas=None):
         self._collection.upsert(documents=documents, ids=ids, metadatas=metadatas)
 
+    def update(self, **kwargs):
+        self._collection.update(**kwargs)
+
     def query(self, **kwargs):
         return self._collection.query(**kwargs)
 
@@ -71,6 +74,44 @@ class ChromaCollection(BaseCollection):
 class ChromaBackend:
     """Factory for MemPalace's default ChromaDB backend."""
 
+    def __init__(self):
+        # Per-instance client cache: palace_path -> chromadb.PersistentClient
+        self._clients: dict = {}
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _client(self, palace_path: str):
+        """Return a cached PersistentClient for *palace_path*, creating one if needed."""
+        if palace_path not in self._clients:
+            _fix_blob_seq_ids(palace_path)
+            self._clients[palace_path] = chromadb.PersistentClient(path=palace_path)
+        return self._clients[palace_path]
+
+    # ------------------------------------------------------------------
+    # Public static helpers (for callers that manage their own caching)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def make_client(palace_path: str):
+        """Create and return a fresh PersistentClient (fix BLOB seq_ids first).
+
+        Intended for long-lived callers (e.g. mcp_server) that keep their own
+        inode/mtime-based client cache.
+        """
+        _fix_blob_seq_ids(palace_path)
+        return chromadb.PersistentClient(path=palace_path)
+
+    @staticmethod
+    def backend_version() -> str:
+        """Return the installed chromadb package version string."""
+        return chromadb.__version__
+
+    # ------------------------------------------------------------------
+    # Collection lifecycle
+    # ------------------------------------------------------------------
+
     def get_collection(self, palace_path: str, collection_name: str, create: bool = False):
         if not create and not os.path.isdir(palace_path):
             raise FileNotFoundError(palace_path)
@@ -82,10 +123,30 @@ class ChromaBackend:
             except (OSError, NotImplementedError):
                 pass
 
-        _fix_blob_seq_ids(palace_path)
-        client = chromadb.PersistentClient(path=palace_path)
+        client = self._client(palace_path)
         if create:
-            collection = client.get_or_create_collection(collection_name)
+            collection = client.get_or_create_collection(
+                collection_name, metadata={"hnsw:space": "cosine"}
+            )
         else:
             collection = client.get_collection(collection_name)
+        return ChromaCollection(collection)
+
+    def get_or_create_collection(
+        self, palace_path: str, collection_name: str
+    ) -> "ChromaCollection":
+        """Shorthand for get_collection(..., create=True)."""
+        return self.get_collection(palace_path, collection_name, create=True)
+
+    def delete_collection(self, palace_path: str, collection_name: str) -> None:
+        """Delete *collection_name* from the palace at *palace_path*."""
+        self._client(palace_path).delete_collection(collection_name)
+
+    def create_collection(
+        self, palace_path: str, collection_name: str, hnsw_space: str = "cosine"
+    ) -> "ChromaCollection":
+        """Create (not get-or-create) *collection_name* with cosine HNSW space."""
+        collection = self._client(palace_path).create_collection(
+            collection_name, metadata={"hnsw:space": hnsw_space}
+        )
         return ChromaCollection(collection)

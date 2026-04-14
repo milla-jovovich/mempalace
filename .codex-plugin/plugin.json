@@ -5,8 +5,8 @@
   "author": {
     "name": "milla-jovovich"
   },
-  "homepage": "https://github.com/milla-jovovich/mempalace",
-  "repository": "https://github.com/milla-jovovich/mempalace",
+  "homepage": "https://github.com/MemPalace/mempalace",
+  "repository": "https://github.com/MemPalace/mempalace",
   "license": "MIT",
   "keywords": [
     "memory",
@@ -39,9 +39,9 @@
       "Read",
       "Write"
     ],
-    "websiteURL": "https://github.com/milla-jovovich/mempalace",
-    "privacyPolicyURL": "https://github.com/milla-jovovich/mempalace",
-    "termsOfServiceURL": "https://github.com/milla-jovovich/mempalace",
+    "websiteURL": "https://github.com/MemPalace/mempalace",
+    "privacyPolicyURL": "https://github.com/MemPalace/mempalace",
+    "termsOfServiceURL": "https://github.com/MemPalace/mempalace",
     "defaultPrompt": [
       "Search my memories for recent decisions",
       "Mine this project into my memory palace",

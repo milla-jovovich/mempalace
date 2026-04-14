@@ -1,6 +1,6 @@
 [project]
 name = "mempalace"
-version = "3.1.0"
+version = "3.3.0"
 description = "Give your AI a memory — mine projects and conversations into a searchable palace. No API key required."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "chromadb>=0.5.0,<0.7",
+    "chromadb>=0.5.0",
     "pyyaml>=6.0,<7",
 ]
 
@@ -35,7 +35,7 @@ Repository = "https://github.com/milla-jovovich/mempalace"
 "Bug Tracker" = "https://github.com/milla-jovovich/mempalace/issues"
 
 [project.scripts]
-mempalace = "mempalace:main"
+mempalace = "mempalace.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]

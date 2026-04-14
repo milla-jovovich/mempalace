@@ -1,0 +1,44 @@
+{
+  "lang": "es",
+  "label": "Español",
+  "terms": {
+    "palace": "palacio",
+    "wing": "ala",
+    "hall": "pasillo",
+    "closet": "armario",
+    "drawer": "cajón",
+    "mine": "extraer",
+    "search": "buscar",
+    "status": "estado",
+    "init": "inicializar",
+    "repair": "reparar",
+    "migrate": "migrar",
+    "entity": "entidad",
+    "topic": "tema"
+  },
+  "cli": {
+    "mine_start": "Extrayendo {path}...",
+    "mine_complete": "Listo. {closets} armarios, {drawers} cajones creados.",
+    "mine_skip": "Ya extraído. Use --force para repetir.",
+    "search_no_results": "Sin resultados para: {query}",
+    "search_results": "{count} resultados encontrados:",
+    "status_palace": "Palacio: {path}",
+    "status_wings": "{count} alas",
+    "status_closets": "{count} armarios",
+    "status_drawers": "{count} cajones",
+    "init_complete": "Palacio inicializado en {path}",
+    "init_exists": "Ya existe un palacio en {path}",
+    "repair_complete": "Reparación completa. {fixed} problemas corregidos.",
+    "migrate_complete": "Migración completa.",
+    "no_palace": "No se encontró palacio. Ejecute: mempalace init <carpeta>"
+  },
+  "aaak": {
+    "instruction": "Comprima en español. Guiones entre palabras, pipes entre conceptos. Elimine artículos y palabras de relleno. Mantenga nombres propios y números exactos."
+  },
+  "regex": {
+    "topic_pattern": "[A-ZÁ-Ú][a-zá-ú]{2,}|[A-Za-zÁ-ú]{3,}",
+    "stop_words": "el la los las un una unos unas de del al en con por para su sus mi mis tu tus es son está están fue ser estar haber sido como pero más muy también todo todos toda todas este esta estos estas ese esa esos esas que quien cual donde cuando porque aunque sin",
+    "quote_pattern": "\"([^\"]{10,200})\"|«([^»]{10,200})»",
+    "action_pattern": "(?:construido|corregido|escrito|añadido|enviado|medido|probado|revisado|creado|eliminado|actualizado|configurado|desplegado|migrado)\\s+[\\wá-ú\\s]{3,30}"
+  }
+}

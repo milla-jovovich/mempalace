@@ -15,6 +15,9 @@ Tools (read):
 Tools (write):
   mempalace_add_drawer      — file verbatim content into a wing/room
   mempalace_delete_drawer   — remove a drawer by ID
+
+Tools (maintenance):
+  mempalace_reconnect       — force cache invalidation and reconnect after external writes
 """
 
 import argparse
@@ -29,10 +32,18 @@ from pathlib import Path
 
 from .config import MempalaceConfig, sanitize_name, sanitize_content
 from .version import __version__
-import chromadb
+from .backends.chroma import ChromaBackend, ChromaCollection
 from .query_sanitizer import sanitize_query
 from .searcher import search_memories
-from .palace_graph import traverse, find_tunnels, graph_stats
+from .palace_graph import (
+    traverse,
+    find_tunnels,
+    graph_stats,
+    create_tunnel,
+    list_tunnels,
+    delete_tunnel,
+    follow_tunnels,
+)
 
 from .knowledge_graph import KnowledgeGraph
 
@@ -70,6 +81,7 @@ else:
 _client_cache = None
 _collection_cache = None
 _palace_db_inode = 0  # inode of chroma.sqlite3 at cache time
+_palace_db_mtime = 0.0  # mtime of chroma.sqlite3 at cache time
 
 
 # ==================== WRITE-AHEAD LOG ====================
@@ -94,7 +106,9 @@ else:
         pass
 
 # Keys whose values should be redacted in WAL entries to avoid logging sensitive content
-_WAL_REDACT_KEYS = frozenset({"content_preview", "entry_preview"})
+_WAL_REDACT_KEYS = frozenset(
+    {"content", "content_preview", "document", "entry", "entry_preview", "query", "text"}
+)
 
 
 def _wal_log(operation: str, params: dict, result: dict = None):
@@ -125,20 +139,50 @@ def _get_client():
 
     Detects palace rebuilds (repair/nuke/purge) by checking the inode of
     chroma.sqlite3.  A full rebuild replaces the file, changing the inode.
+    Also detects external writes (scripts, CLI) via mtime changes — the
+    inode check alone misses in-place modifications that invalidate the
+    in-memory HNSW index.
+
+    Note: FAT/exFAT may return 0 for st_ino — the ``current_inode != 0``
+    guard skips reconnect detection on those filesystems (safe fallback).
     """
-    global _client_cache, _collection_cache, _palace_db_inode, _metadata_cache, _metadata_cache_time
+    global \
+        _client_cache, \
+        _collection_cache, \
+        _palace_db_inode, \
+        _palace_db_mtime, \
+        _metadata_cache, \
+        _metadata_cache_time
     db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
     try:
-        current_inode = os.stat(db_path).st_ino
+        st = os.stat(db_path)
+        current_inode = st.st_ino
+        current_mtime = st.st_mtime
     except OSError:
         current_inode = 0
+        current_mtime = 0.0
 
-    if _client_cache is None or current_inode != _palace_db_inode:
-        _client_cache = chromadb.PersistentClient(path=_config.palace_path)
+    # If the DB file disappeared (e.g. during rebuild) but we have a cached
+    # collection, invalidate so we don't serve stale data.  Without this,
+    # both stored and current values are 0 on the first call after deletion,
+    # making inode_changed and mtime_changed both False.
+    if not os.path.isfile(db_path) and _collection_cache is not None:
+        _client_cache = None
+        _collection_cache = None
+        _palace_db_inode = 0
+        _palace_db_mtime = 0.0
+        # Fall through to normal reconnect which will handle missing DB
+
+    inode_changed = current_inode != 0 and current_inode != _palace_db_inode
+    mtime_changed = current_mtime != 0.0 and abs(current_mtime - _palace_db_mtime) > 0.01
+
+    if _client_cache is None or inode_changed or mtime_changed:
+        _client_cache = ChromaBackend.make_client(_config.palace_path)
         _collection_cache = None
         _metadata_cache = None
         _metadata_cache_time = 0
         _palace_db_inode = current_inode
+        _palace_db_mtime = current_mtime
     return _client_cache
 
 
@@ -148,13 +192,15 @@ def _get_collection(create=False):
     try:
         client = _get_client()
         if create:
-            _collection_cache = client.get_or_create_collection(
-                _config.collection_name, metadata={"hnsw:space": "cosine"}
+            _collection_cache = ChromaCollection(
+                client.get_or_create_collection(
+                    _config.collection_name, metadata={"hnsw:space": "cosine"}
+                )
             )
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
-            _collection_cache = client.get_collection(_config.collection_name)
+            _collection_cache = ChromaCollection(client.get_collection(_config.collection_name))
             _metadata_cache = None
             _metadata_cache_time = 0
         return _collection_cache
@@ -210,6 +256,13 @@ def _get_cached_metadata(col, where=None):
         _metadata_cache = result
         _metadata_cache_time = now
     return result
+
+
+def _sanitize_optional_name(value: str = None, field_name: str = "name") -> str:
+    """Validate optional wing/room-style filters."""
+    if value is None:
+        return None
+    return sanitize_name(value, field_name)
 
 
 # ==================== READ TOOLS ====================
@@ -296,6 +349,10 @@ def tool_list_wings():
 
 
 def tool_list_rooms(wing: str = None):
+    try:
+        wing = _sanitize_optional_name(wing, "wing")
+    except ValueError as e:
+        return {"error": str(e)}
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -347,6 +404,12 @@ def tool_search(
     sort_by: str = "relevance",
 ):
     limit = max(1, min(limit, _MAX_RESULTS))
+    try:
+        wing = _sanitize_optional_name(wing, "wing")
+        room = _sanitize_optional_name(room, "room")
+    except ValueError as e:
+        return {"error": str(e)}
+    # Backwards compat: accept old name
     # Backwards compat: convert old similarity scale (higher=stricter) to
     # distance scale (lower=stricter). Similarity 0.8 → distance 0.2.
     dist = (1.0 - min_similarity) if min_similarity is not None else max_distance
@@ -431,6 +494,11 @@ def tool_traverse_graph(start_room: str, max_hops: int = 2):
 
 def tool_find_tunnels(wing_a: str = None, wing_b: str = None):
     """Find rooms that bridge two wings — the hallways connecting domains."""
+    try:
+        wing_a = _sanitize_optional_name(wing_a, "wing_a")
+        wing_b = _sanitize_optional_name(wing_b, "wing_b")
+    except ValueError as e:
+        return {"error": str(e)}
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -443,6 +511,66 @@ def tool_graph_stats():
     if not col:
         return _no_palace()
     return graph_stats(col=col)
+
+
+def tool_create_tunnel(
+    source_wing: str,
+    source_room: str,
+    target_wing: str,
+    target_room: str,
+    label: str = "",
+    source_drawer_id: str = None,
+    target_drawer_id: str = None,
+):
+    """Create an explicit cross-wing tunnel between two palace locations.
+
+    Use when you notice content in one project relates to another project.
+    Example: an API design discussion in project_api connects to the
+    database schema in project_database.
+    """
+    try:
+        source_wing = sanitize_name(source_wing, "source_wing")
+        source_room = sanitize_name(source_room, "source_room")
+        target_wing = sanitize_name(target_wing, "target_wing")
+        target_room = sanitize_name(target_room, "target_room")
+    except ValueError as e:
+        return {"error": str(e)}
+    return create_tunnel(
+        source_wing,
+        source_room,
+        target_wing,
+        target_room,
+        label=label,
+        source_drawer_id=source_drawer_id,
+        target_drawer_id=target_drawer_id,
+    )
+
+
+def tool_list_tunnels(wing: str = None):
+    """List all explicit cross-wing tunnels, optionally filtered by wing."""
+    try:
+        wing = _sanitize_optional_name(wing, "wing")
+    except ValueError as e:
+        return {"error": str(e)}
+    return list_tunnels(wing)
+
+
+def tool_delete_tunnel(tunnel_id: str):
+    """Delete an explicit tunnel by its ID."""
+    if not tunnel_id or not isinstance(tunnel_id, str):
+        return {"error": "tunnel_id is required"}
+    return delete_tunnel(tunnel_id)
+
+
+def tool_follow_tunnels(wing: str, room: str):
+    """Follow explicit tunnels from a room to see connected drawers in other wings."""
+    try:
+        wing = sanitize_name(wing, "wing")
+        room = sanitize_name(room, "room")
+    except ValueError as e:
+        return {"error": str(e)}
+    col = _get_collection()
+    return follow_tunnels(wing, room, col=col)
 
 
 # ==================== WRITE TOOLS ====================
@@ -473,7 +601,9 @@ def tool_add_drawer(
     if not col:
         return _no_palace()
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content[:100]).encode()).hexdigest()[:24]}"
+    drawer_id = (
+        f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content).encode()).hexdigest()[:24]}"
+    )
 
     _wal_log(
         "add_drawer",
@@ -582,6 +712,11 @@ def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offse
     """List drawers with pagination. Optional wing/room filter."""
     limit = max(1, min(limit, _MAX_RESULTS))
     offset = max(0, offset)
+    try:
+        wing = _sanitize_optional_name(wing, "wing")
+        room = _sanitize_optional_name(room, "room")
+    except ValueError as e:
+        return {"error": str(e)}
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -795,7 +930,10 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return _no_palace()
 
     now = datetime.now()
-    entry_id = f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S')}_{hashlib.sha256(entry[:50].encode()).hexdigest()[:12]}"
+    entry_id = (
+        f"diary_{wing}_{now.strftime('%Y%m%d_%H%M%S%f')}_"
+        f"{hashlib.sha256(entry.encode()).hexdigest()[:12]}"
+    )
 
     _wal_log(
         "diary_write",
@@ -966,6 +1104,32 @@ def tool_memories_filed_away():
         }
 
 
+# ==================== SETTINGS TOOLS ====================
+
+
+def tool_reconnect():
+    """Force the MCP server to drop the cached ChromaDB collection and reconnect.
+
+    Use after external scripts or CLI commands modify the palace database
+    directly, which can leave the in-memory HNSW index stale.
+    """
+    global _collection_cache, _palace_db_inode, _palace_db_mtime
+    _collection_cache = None
+    _palace_db_inode = 0
+    _palace_db_mtime = 0.0
+    try:
+        col = _get_collection()
+        if col is None:
+            return {
+                "success": False,
+                "message": "No palace found after reconnect",
+                "drawers": 0,
+            }
+        return {"success": True, "message": "Reconnected to palace", "drawers": col.count()}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # ==================== MCP PROTOCOL ====================
 
 TOOLS = {
@@ -1114,6 +1278,65 @@ TOOLS = {
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_graph_stats,
     },
+    "mempalace_create_tunnel": {
+        "description": "Create a cross-wing tunnel linking two palace locations. Use when content in one project relates to another — e.g., an API design in project_api connects to a database schema in project_database.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source_wing": {"type": "string", "description": "Wing of the source"},
+                "source_room": {"type": "string", "description": "Room in the source wing"},
+                "target_wing": {"type": "string", "description": "Wing of the target"},
+                "target_room": {"type": "string", "description": "Room in the target wing"},
+                "label": {"type": "string", "description": "Description of the connection"},
+                "source_drawer_id": {
+                    "type": "string",
+                    "description": "Optional specific drawer ID",
+                },
+                "target_drawer_id": {
+                    "type": "string",
+                    "description": "Optional specific drawer ID",
+                },
+            },
+            "required": ["source_wing", "source_room", "target_wing", "target_room"],
+        },
+        "handler": tool_create_tunnel,
+    },
+    "mempalace_list_tunnels": {
+        "description": "List all explicit cross-wing tunnels. Optionally filter by wing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {
+                    "type": "string",
+                    "description": "Filter tunnels by wing (shows tunnels where wing is source or target)",
+                },
+            },
+        },
+        "handler": tool_list_tunnels,
+    },
+    "mempalace_delete_tunnel": {
+        "description": "Delete an explicit tunnel by its ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tunnel_id": {"type": "string", "description": "Tunnel ID to delete"},
+            },
+            "required": ["tunnel_id"],
+        },
+        "handler": tool_delete_tunnel,
+    },
+    "mempalace_follow_tunnels": {
+        "description": "Follow tunnels from a room to see what it connects to in other wings. Returns connected rooms with drawer previews.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string", "description": "Wing to start from"},
+                "room": {"type": "string", "description": "Room to follow tunnels from"},
+            },
+            "required": ["wing", "room"],
+        },
+        "handler": tool_follow_tunnels,
+    },
     "mempalace_search": {
         "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY search keywords. Use 'context' for background. Results with cosine distance > max_distance are filtered out. Use 'where' for metadata filtering and 'sort_by' for ordering.",
         "input_schema": {
@@ -1121,8 +1344,8 @@ TOOLS = {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Short search query ONLY — keywords or a question. Max 200 chars recommended.",
-                    "maxLength": 500,
+                    "description": "Short search query ONLY — keywords or a question. Max 250 chars.",
+                    "maxLength": 250,
                 },
                 "limit": {
                     "type": "integer",
@@ -1326,6 +1549,17 @@ TOOLS = {
         "description": "Check if a recent palace checkpoint was saved. Returns message count and timestamp.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_memories_filed_away,
+    },
+    "mempalace_reconnect": {
+        "description": (
+            "Force reconnect to the palace database. Use after external scripts or CLI commands"
+            " modified the palace directly, which can leave the in-memory HNSW index stale."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+        "handler": tool_reconnect,
     },
 }
 

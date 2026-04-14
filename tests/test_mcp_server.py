@@ -6,7 +6,11 @@ dispatch layer (integration-level). Uses isolated palace + KG fixtures
 via monkeypatch to avoid touching real data.
 """
 
+from datetime import datetime
 import json
+import sys
+
+import pytest
 
 
 def _patch_mcp_server(monkeypatch, config, kg):
@@ -27,7 +31,10 @@ def _get_collection(palace_path, create=False):
 
     client = chromadb.PersistentClient(path=palace_path)
     if create:
-        return client, client.get_or_create_collection("mempalace_drawers")
+        return (
+            client,
+            client.get_or_create_collection("mempalace_drawers", metadata={"hnsw:space": "cosine"}),
+        )
     return client, client.get_collection("mempalace_drawers")
 
 
@@ -311,6 +318,59 @@ class TestSearchTool:
         result_loose = tool_search(query="JWT", max_distance=0.01, min_similarity=999.0)
         assert len(result_strict["results"]) <= len(result_loose["results"])
 
+    def test_list_rooms_rejects_invalid_wing(self, monkeypatch, config, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(mcp_server, "_get_collection", lambda: pytest.fail())
+
+        result = mcp_server.tool_list_rooms(wing="../etc/passwd")
+        assert "error" in result
+
+    def test_search_rejects_invalid_room(self, monkeypatch, config, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(mcp_server, "search_memories", lambda: pytest.fail())
+
+        result = mcp_server.tool_search(query="JWT", room="../backend")
+        assert "error" in result
+
+    def test_list_drawers_rejects_invalid_wing(self, monkeypatch, config, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(mcp_server, "_get_collection", lambda: pytest.fail())
+
+        result = mcp_server.tool_list_drawers(wing="../notes")
+        assert "error" in result
+
+    def test_find_tunnels_rejects_invalid_wing(self, monkeypatch, config, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(mcp_server, "_get_collection", lambda: pytest.fail())
+
+        result = mcp_server.tool_find_tunnels(wing_a="../project")
+        assert "error" in result
+
+    def test_wal_redacts_sensitive_fields(self, monkeypatch, config, kg, tmp_path):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        wal_file = tmp_path / "write_log.jsonl"
+        monkeypatch.setattr(mcp_server, "_WAL_FILE", wal_file)
+
+        mcp_server._wal_log(
+            "test",
+            {"content": "secret note", "query": "private search", "safe": "ok"},
+        )
+
+        entry = json.loads(wal_file.read_text().strip())
+        assert entry["params"]["content"].startswith("[REDACTED")
+        assert entry["params"]["query"].startswith("[REDACTED")
+        assert entry["params"]["safe"] == "ok"
+
 
 # ── Write Tools ─────────────────────────────────────────────────────────
 
@@ -345,6 +405,29 @@ class TestWriteTools:
         result2 = tool_add_drawer(wing="w", room="r", content=content)
         assert result2["success"] is True
         assert result2["reason"] == "already_exists"
+
+    def test_add_drawer_shared_header_no_collision(self, monkeypatch, config, palace_path, kg):
+        """Documents sharing a >100-char header must get distinct IDs (full-content hash)."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer
+
+        header = "# ACME Corp Knowledge Base\n**Project:** Alpha | **Team:** Backend | **Status:** Active\n\n"
+        doc1 = (
+            header
+            + "Decision: Use PostgreSQL for primary storage. Rationale: ACID compliance required."
+        )
+        doc2 = header + "Decision: Use Redis for session caching. Rationale: sub-ms latency needed."
+
+        result1 = tool_add_drawer(wing="work", room="decisions", content=doc1)
+        result2 = tool_add_drawer(wing="work", room="decisions", content=doc2)
+
+        assert result1["success"] is True
+        assert result2["success"] is True
+        assert (
+            result1["drawer_id"] != result2["drawer_id"]
+        ), "Documents with shared header but different content must have distinct drawer IDs"
 
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
@@ -563,3 +646,146 @@ class TestDiaryTools:
 
         r = tool_diary_read(agent_name="Nobody")
         assert r["entries"] == []
+
+    def test_diary_write_same_second_shared_prefix_no_collision(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+
+        from mempalace import mcp_server
+
+        class FrozenDateTime:
+            calls = [
+                datetime(2026, 4, 13, 22, 15, 30, 123456),
+                datetime(2026, 4, 13, 22, 15, 30, 123457),
+            ]
+            fallback = datetime(2026, 4, 13, 22, 15, 30, 123457)
+
+            @classmethod
+            def now(cls):
+                if cls.calls:
+                    return cls.calls.pop(0)
+                return cls.fallback
+
+        monkeypatch.setattr(mcp_server, "datetime", FrozenDateTime)
+
+        from mempalace.mcp_server import tool_diary_read, tool_diary_write
+
+        entry1 = "A" * 50 + " entry one"
+        entry2 = "A" * 50 + " entry two"
+
+        result1 = tool_diary_write(agent_name="TestAgent", entry=entry1, topic="status")
+        result2 = tool_diary_write(agent_name="TestAgent", entry=entry2, topic="status")
+
+        assert result1["success"] is True
+        assert result2["success"] is True
+        assert result1["entry_id"] != result2["entry_id"]
+
+        read_result = tool_diary_read(agent_name="TestAgent")
+        contents = [entry["content"] for entry in read_result["entries"]]
+        assert read_result["total"] == 2
+        assert entry1 in contents
+        assert entry2 in contents
+
+
+# ── Cache Invalidation (inode/mtime) ──────────────────────────────────
+
+
+class TestCacheInvalidation:
+    """Tests for _get_collection inode/mtime cache invalidation logic."""
+
+    def test_mtime_change_invalidates_cache(self, monkeypatch, config, palace_path, kg):
+        """When mtime changes, the cached collection should be replaced."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        # Create a real collection so _get_collection succeeds
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+
+        # Prime the cache
+        col1 = mcp_server._get_collection()
+        assert col1 is not None
+
+        # Simulate an external write changing the mtime
+        old_mtime = mcp_server._palace_db_mtime
+        monkeypatch.setattr(mcp_server, "_palace_db_mtime", old_mtime - 10.0)
+
+        # _get_collection should detect the mtime drift and reconnect
+        col2 = mcp_server._get_collection()
+        assert col2 is not None
+
+    def test_inode_change_invalidates_cache(self, monkeypatch, config, palace_path, kg):
+        """When inode changes (file replaced), the cached collection should be replaced."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+
+        # Prime the cache
+        col1 = mcp_server._get_collection()
+        assert col1 is not None
+
+        # Simulate a rebuild that changes the inode
+        monkeypatch.setattr(mcp_server, "_palace_db_inode", 99999)
+
+        col2 = mcp_server._get_collection()
+        assert col2 is not None
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows holds chroma.sqlite3 open while the client is cached, blocking os.remove",
+    )
+    def test_missing_db_invalidates_cache(self, monkeypatch, config, palace_path, kg):
+        """When chroma.sqlite3 disappears, a cached collection should be invalidated."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        import os
+        from mempalace import mcp_server
+
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+
+        # Prime the cache
+        col1 = mcp_server._get_collection()
+        assert col1 is not None
+        assert mcp_server._collection_cache is not None
+
+        # Delete the DB file to simulate a rebuild in progress
+        db_file = os.path.join(palace_path, "chroma.sqlite3")
+        if os.path.isfile(db_file):
+            os.remove(db_file)
+
+        # Cache should be invalidated; _get_collection returns None
+        # because the backend can't open a missing DB without create=True
+        mcp_server._get_collection()
+        # The key assertion: the old cached collection was dropped
+        assert mcp_server._palace_db_inode == 0
+        assert mcp_server._palace_db_mtime == 0.0
+
+    def test_reconnect_reports_failure_when_no_palace(self, monkeypatch, config, kg):
+        """tool_reconnect should report failure when no collection is available."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        # Make _get_collection always return None
+        monkeypatch.setattr(mcp_server, "_get_collection", lambda create=False: None)
+
+        result = mcp_server.tool_reconnect()
+        assert result["success"] is False
+        assert "No palace found" in result["message"]
+        assert result["drawers"] == 0
+
+    def test_reconnect_reports_success(self, monkeypatch, config, palace_path, kg):
+        """tool_reconnect should report success with drawer count."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace import mcp_server
+
+        result = mcp_server.tool_reconnect()
+        assert result["success"] is True
+        assert "Reconnected" in result["message"]
+        assert isinstance(result["drawers"], int)
