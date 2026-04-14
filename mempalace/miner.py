@@ -59,8 +59,8 @@ SKIP_FILENAMES = {
     "package-lock.json",
 }
 
-CHUNK_SIZE = 800  # chars per drawer
-CHUNK_OVERLAP = 100  # overlap between chunks
+CHUNK_SIZE = 400  # chars — fits within all-MiniLM-L6-v2 256-token limit
+CHUNK_OVERLAP = 50  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
 

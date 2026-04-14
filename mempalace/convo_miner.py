@@ -54,7 +54,7 @@ CONVO_EXTENSIONS = {
 }
 
 MIN_CHUNK_SIZE = 30
-CHUNK_SIZE = 800  # chars per drawer — align with miner.py
+CHUNK_SIZE = 400  # chars — fits within all-MiniLM-L6-v2 256-token limit
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
 
 

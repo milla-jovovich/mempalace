@@ -77,6 +77,28 @@ def test_mine_convos_does_not_reprocess_empty_chunk_files(capsys):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+# ── chunk size / token limit constants ────────────────────────────────────
+
+
+def test_convo_chunk_size_constant():
+    """CHUNK_SIZE must stay within the embedding model's token window."""
+    from mempalace.convo_miner import CHUNK_SIZE
+
+    assert CHUNK_SIZE == 400
+
+
+def test_chunk_by_exchange_respects_chunk_size():
+    """Every chunk produced by _chunk_by_exchange must fit within CHUNK_SIZE chars."""
+    from mempalace.convo_miner import CHUNK_SIZE, _chunk_by_exchange
+
+    # Build a long exchange that exceeds CHUNK_SIZE
+    lines = ["> Tell me everything about memory"] + ["Memory is a complex topic. " * 30]
+    chunks = _chunk_by_exchange(lines)
+    assert len(chunks) >= 1
+    for chunk in chunks:
+        assert len(chunk["content"]) <= CHUNK_SIZE
+
+
 def test_mine_convos_rebuilds_stale_drawers_after_schema_bump(capsys):
     """When stored drawers have an older normalize_version, the next mine
     silently purges them and refiles — no manual erase required.
@@ -140,9 +162,9 @@ def test_mine_convos_rebuilds_stale_drawers_after_schema_bump(capsys):
         # Second mine — version gate should trigger rebuild
         mine_convos(tmpdir, palace_path, wing="test")
         out = capsys.readouterr().out
-        assert (
-            "Files skipped (already filed): 0" in out
-        ), "stale drawers should force a rebuild, not a skip"
+        assert "Files skipped (already filed): 0" in out, (
+            "stale drawers should force a rebuild, not a skip"
+        )
 
         client = chromadb.PersistentClient(path=palace_path)
         col = client.get_collection("mempalace_drawers")

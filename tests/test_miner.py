@@ -416,3 +416,31 @@ def test_add_drawer_stamps_normalize_version(tmp_path):
         assert meta["normalize_version"] == NORMALIZE_VERSION
     finally:
         del col, client
+
+
+# ── chunk size / token limit constants ────────────────────────────────────
+
+
+def test_chunk_size_constant():
+    """CHUNK_SIZE must stay within the embedding model's token window."""
+    from mempalace.miner import CHUNK_SIZE
+
+    assert CHUNK_SIZE == 400
+
+
+def test_chunk_overlap_constant():
+    """CHUNK_OVERLAP must match the reduced overlap for smaller chunks."""
+    from mempalace.miner import CHUNK_OVERLAP
+
+    assert CHUNK_OVERLAP == 50
+
+
+def test_chunk_text_respects_chunk_size():
+    """Every chunk produced by chunk_text must fit within CHUNK_SIZE chars."""
+    from mempalace.miner import CHUNK_SIZE, chunk_text
+
+    long_content = "word " * 500  # ~2500 chars — well over one chunk
+    chunks = chunk_text(long_content, "/fake/file.py")
+    assert len(chunks) > 1, "content should split into multiple chunks"
+    for chunk in chunks:
+        assert len(chunk["content"]) <= CHUNK_SIZE
