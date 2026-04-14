@@ -1,0 +1,12 @@
+[
+  {
+    "id": "longtail_001",
+    "name": "Tizaro 替泽帕肽",
+    "description": "新药品牌名和机制",
+    "query": "Tizaro 替泽帕肽是什么药物，其作用机制和获批适应症是什么",
+    "wing": "wing_qa",
+    "keywords": ["Tirzepatide", "GIP", "GLP-1", "2型糖尿病", "礼来"],
+    "difficulty": 3,
+    "expected_recall": 0.75
+  }
+]

@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "description": "MemPalace 中文 Benchmark 基准线数据",
+  "last_updated": "2025-01",
+  "baselines": {
+    "hash_embedding": {
+      "model": "CJK character bigram hash (dim=1024)",
+      "avg_keywords_recall": 0.55,
+      "avg_ndcg": 0.58,
+      "p50_latency_ms": 105,
+      "p95_latency_ms": 120,
+      "by_scenario": {
+        "factual": {"recall": 0.68, "ndcg": 0.70},
+        "technical": {"recall": 0.57, "ndcg": 0.59},
+        "longtail": {"recall": 0.42, "ndcg": 0.48},
+        "multi_hop": {"recall": 0.35, "ndcg": 0.45}
+      },
+      "notes": "轻量级嵌入，仅支持关键词匹配，语义泛化能力较弱"
+    },
+    "semantic_bge_small": {
+      "model": "BAAI/bge-small-zh-v1.5 (512dim)",
+      "avg_keywords_recall": 0.82,
+      "avg_ndcg": 0.78,
+      "p50_latency_ms": 350,
+      "p95_latency_ms": 520,
+      "by_scenario": {
+        "factual": {"recall": 0.90, "ndcg": 0.85},
+        "technical": {"recall": 0.84, "ndcg": 0.80},
+        "longtail": {"recall": 0.76, "ndcg": 0.73},
+        "multi_hop": {"recall": 0.58, "ndcg": 0.65}
+      },
+      "notes": "中文专用语义模型，MTEB 中文榜顶级，90MB 模型"
+    },
+    "semantic_paraphrase_multilingual": {
+      "model": "paraphrase-multilingual-MiniLM-L12-v2 (384dim)",
+      "avg_keywords_recall": 0.74,
+      "avg_ndcg": 0.69,
+      "p50_latency_ms": 280,
+      "p95_latency_ms": 380,
+      "by_scenario": {
+        "factual": {"recall": 0.82, "ndcg": 0.76},
+        "technical": {"recall": 0.75, "ndcg": 0.70},
+        "longtail": {"recall": 0.65, "ndcg": 0.62},
+        "multi_hop": {"recall": 0.50, "ndcg": 0.55}
+      },
+      "notes": "多语言模型，中英混合场景，但对纯中文的语义理解略逊于 bge-small"
+    },
+    "target": {
+      "model": "理想目标 (95% recall + sub-300ms latency)",
+      "avg_keywords_recall": 0.95,
+      "avg_ndcg": 0.85,
+      "p50_latency_ms": 250,
+      "p95_latency_ms": 350,
+      "by_scenario": {
+        "factual": {"recall": 0.98, "ndcg": 0.92},
+        "technical": {"recall": 0.94, "ndcg": 0.88},
+        "longtail": {"recall": 0.90, "ndcg": 0.80},
+        "multi_hop": {"recall": 0.82, "ndcg": 0.78}
+      },
+      "notes": "生产环境推荐指标"
+    }
+  },
+  "test_cases_count": {
+    "factual": 5,
+    "technical": 6,
+    "longtail": 5,
+    "multi_hop": 4,
+    "total": 20
+  },
+  "evaluation_guidelines": {
+    "pass_threshold": {
+      "easy": {"difficulty": 1, "min_recall": 0.8},
+      "medium": {"difficulty": 2, "min_recall": 0.75},
+      "hard": {"difficulty": 3, "min_recall": 0.65},
+      "expert": {"difficulty": 4, "min_recall": 0.55}
+    },
+    "latency_targets": {
+      "hash_embedding": {"p50": 100, "p95": 150},
+      "semantic_small": {"p50": 300, "p95": 500},
+      "semantic_large": {"p50": 500, "p95": 800}
+    }
+  }
+}

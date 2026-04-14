@@ -1,0 +1,22 @@
+[
+  {
+    "id": "technical_001",
+    "name": "安睿驰 i-Sealing 自修复轮胎",
+    "description": "技术参数检索",
+    "query": "安睿驰轮胎的 i-Sealing 自修复技术参数和修复孔径上限",
+    "wing": "wing_qa",
+    "keywords": ["i-Sealing", "6mm", "纳米", "安睿驰", "自修复"],
+    "difficulty": 2,
+    "expected_recall": 0.8
+  },
+  {
+    "id": "technical_002",
+    "name": "大疆随心换服务权益",
+    "description": "服务条款细节",
+    "query": "大疆随心换服务包含哪些权益，飞丢如何处理",
+    "wing": "wing_qa",
+    "keywords": ["随心换", "飞丢失联", "损坏保障", "提供全新", "置换"],
+    "difficulty": 2,
+    "expected_recall": 0.75
+  }
+]

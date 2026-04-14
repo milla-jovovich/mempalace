@@ -1,0 +1,52 @@
+[
+  {
+    "id": "factual_001",
+    "name": "蔚来 EP9 赠送投资人",
+    "description": "检索产品相关的历史事实",
+    "query": "蔚来 EP9 超跑首批车型赠给了哪些投资人",
+    "wing": "wing_qa",
+    "keywords": ["李想", "刘强东", "雷军", "马化腾", "6台"],
+    "difficulty": 1,
+    "expected_recall": 0.8
+  },
+  {
+    "id": "factual_002",
+    "name": "马歇尔计划援助金额",
+    "description": "历史事件的具体数字",
+    "query": "二战后马歇尔计划总共向西欧提供了多少援助资金",
+    "wing": "wing_qa",
+    "keywords": ["131.5亿", "马歇尔", "西欧", "赠予", "16"],
+    "difficulty": 2,
+    "expected_recall": 0.75
+  },
+  {
+    "id": "factual_003",
+    "name": "日本平成泡沫高点",
+    "description": "经济历史数据",
+    "query": "日本平成时代经济泡沫崩溃的日经指数高点是多少",
+    "wing": "wing_qa",
+    "keywords": ["38915", "日经", "1989", "泡沫", "平成"],
+    "difficulty": 2,
+    "expected_recall": 0.75
+  },
+  {
+    "id": "factual_004",
+    "name": "香港稳定币发牌要求",
+    "description": "金融监管法规",
+    "query": "香港稳定币条例对发行人的储备和资本要求是什么",
+    "wing": "wing_qa",
+    "keywords": ["2500万", "储备资产", "100%", "HKMA", "发牌"],
+    "difficulty": 2,
+    "expected_recall": 0.8
+  },
+  {
+    "id": "factual_005",
+    "name": "保险公司增值税税率",
+    "description": "税务规定",
+    "query": "保险公司提供保险服务适用的增值税税率是多少",
+    "wing": "wing_qa",
+    "keywords": ["6%", "保险", "增值税", "一般纳税人", "金融"],
+    "difficulty": 1,
+    "expected_recall": 0.8
+  }
+]

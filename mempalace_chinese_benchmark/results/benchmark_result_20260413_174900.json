@@ -1,0 +1,267 @@
+{
+  "timestamp": "20260413_174900",
+  "config": {
+    "top_k": 8
+  },
+  "summary": {
+    "total": 20,
+    "success": 0,
+    "success_rate": 0.0,
+    "avg_recall": 0.0,
+    "avg_ndcg": 0.0,
+    "p50_latency": 1.2810230255126953,
+    "p95_latency": 10.554790496826172
+  },
+  "by_scenario": {
+    "factual": {
+      "count": 5,
+      "success": 0,
+      "success_rate": 0.0,
+      "avg_recall": 0.0,
+      "avg_ndcg": 0.0
+    },
+    "technical": {
+      "count": 6,
+      "success": 0,
+      "success_rate": 0.0,
+      "avg_recall": 0.0,
+      "avg_ndcg": 0.0
+    },
+    "longtail": {
+      "count": 5,
+      "success": 0,
+      "success_rate": 0.0,
+      "avg_recall": 0.0,
+      "avg_ndcg": 0.0
+    },
+    "multi_hop": {
+      "count": 4,
+      "success": 0,
+      "success_rate": 0.0,
+      "avg_recall": 0.0,
+      "avg_ndcg": 0.0
+    }
+  },
+  "cases": [
+    {
+      "case_id": "factual_001",
+      "scenario": "factual",
+      "query": "蔚来 EP9 超跑首批车型赠给了哪些投资人",
+      "expected_recall": 0.8,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 10.554790496826172,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "factual_002",
+      "scenario": "factual",
+      "query": "二战后马歇尔计划总共向西欧提供了多少援助资金",
+      "expected_recall": 0.75,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 4.179954528808594,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "factual_003",
+      "scenario": "factual",
+      "query": "日本平成时代经济泡沫崩溃的日经指数高点是多少",
+      "expected_recall": 0.75,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.3496875762939453,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "factual_004",
+      "scenario": "factual",
+      "query": "香港稳定币条例对发行人的储备和资本要求是什么",
+      "expected_recall": 0.8,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2710094451904297,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "factual_005",
+      "scenario": "factual",
+      "query": "保险公司提供保险服务适用的增值税税率是多少",
+      "expected_recall": 0.8,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2679100036621094,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "technical_001",
+      "scenario": "technical",
+      "query": "安睿驰轮胎的 i-Sealing 自修复技术参数和修复孔径上限",
+      "expected_recall": 0.8,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2810230255126953,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "technical_002",
+      "scenario": "technical",
+      "query": "大疆随心换服务包含哪些权益，飞丢如何处理",
+      "expected_recall": 0.75,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2578964233398438,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "technical_003",
+      "scenario": "technical",
+      "query": "Python 中常见的异常类型有哪些，各自的使用场景",
+      "expected_recall": 0.8,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.3499259948730469,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "technical_004",
+      "scenario": "technical",
+      "query": "HTTP 中的 4xx 错误状态码含义是什么，区别在哪里",
+      "expected_recall": 0.75,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2722015380859375,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "technical_005",
+      "scenario": "technical",
+      "query": "Docker 容器的网络模式有哪几种，各有什么特点",
+      "expected_recall": 0.75,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2097358703613281,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "technical_006",
+      "scenario": "technical",
+      "query": "Git 的 rebase 和 merge 有什么区别，什么时候用哪个",
+      "expected_recall": 0.7,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2111663818359375,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "longtail_001",
+      "scenario": "longtail",
+      "query": "Tizaro 替泽帕肽是什么药物，其作用机制和获批适应症是什么",
+      "expected_recall": 0.75,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2998580932617188,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "longtail_002",
+      "scenario": "longtail",
+      "query": "南丁格尔奖章的设立背景和首批获奖者是谁",
+      "expected_recall": 0.7,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2650489807128906,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "longtail_003",
+      "scenario": "longtail",
+      "query": "Erlang 语言的并发模型和优势是什么",
+      "expected_recall": 0.7,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2900829315185547,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "longtail_004",
+      "scenario": "longtail",
+      "query": "穿山甲的学名是什么，主要分布在哪些地区",
+      "expected_recall": 0.7,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.3670921325683594,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "longtail_005",
+      "scenario": "longtail",
+      "query": "中国古典建筑中的斗拱，其结构和作用是什么",
+      "expected_recall": 0.65,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.3010501861572266,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "multi_hop_001",
+      "scenario": "multi_hop",
+      "query": "对比 iPhone 13 和 iPhone 14 在摄像头和电池方面的差异",
+      "expected_recall": 0.65,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2700557708740234,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "multi_hop_002",
+      "scenario": "multi_hop",
+      "query": "在选择后端框架时，性能、生态和学习曲线如何权衡",
+      "expected_recall": 0.6,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2688636779785156,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "multi_hop_003",
+      "scenario": "multi_hop",
+      "query": "服务器 CPU 使用率 100% 时应该如何排查，从进程到代码层面",
+      "expected_recall": 0.6,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.2960433959960938,
+      "success": false,
+      "top_hits": []
+    },
+    {
+      "case_id": "multi_hop_004",
+      "scenario": "multi_hop",
+      "query": "React Native 如何在 iOS 和 Android 平台上实现跨平台渲染",
+      "expected_recall": 0.6,
+      "actual_recall": 0.0,
+      "ndcg": 0.0,
+      "latency_ms": 1.264810562133789,
+      "success": false,
+      "top_hits": []
+    }
+  ]
+}
