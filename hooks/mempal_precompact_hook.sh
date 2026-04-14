@@ -37,8 +37,8 @@
 # Claude Code sends JSON on stdin with:
 #   session_id — unique session identifier
 #
-# We always return decision: "block" with a reason telling the AI
-# to save everything. After the AI saves, compaction proceeds normally.
+# Filing now happens in the background via the pipeline, so we return
+# empty JSON (do not block) and let compaction proceed normally.
 #
 # === MEMPALACE CLI ===
 # This repo uses: mempalace mine <dir>
@@ -68,6 +68,7 @@ if [ -n "$MEMPAL_DIR" ] && [ -d "$MEMPAL_DIR" ]; then
     python3 -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1
 fi
 
-# Silent: return empty JSON to not block. "decision": "allow" is invalid —
-# only "block" or {} are recognized.
+# Silent: return empty JSON to not block. The top-level "decision"
+# field only recognizes "block"; returning empty JSON means "do not
+# block". See #872.
 echo '{}'
