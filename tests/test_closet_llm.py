@@ -71,6 +71,12 @@ class TestLLMConfig:
         with pytest.raises(ValueError, match="http"):
             LLMConfig(endpoint="ftp://evil.example.com/v1", model="m")
 
+    def test_rejects_userinfo_in_url(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="userinfo"):
+            LLMConfig(endpoint="http://trusted@evil.com/v1", model="m")
+
     def test_accepts_https(self):
         c = LLMConfig(endpoint="https://api.example.com/v1", model="m")
         assert c.endpoint == "https://api.example.com/v1"

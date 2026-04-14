@@ -107,7 +107,9 @@ class LLMConfig:
     @staticmethod
     def _validate_endpoint(url: str) -> str:
         """Validate the LLM endpoint URL.  Only http:// and https:// schemes are
-        accepted to prevent SSRF via other URI schemes (file://, ftp://, etc.)."""
+        accepted to prevent SSRF via other URI schemes (file://, ftp://, etc.).
+        URLs with userinfo (``@``) are also rejected to prevent credential-hiding
+        attacks such as ``http://trusted@evil.com``."""
         if not url:
             return url
         parsed = urllib.parse.urlparse(url)
@@ -117,6 +119,12 @@ class LLMConfig:
             )
         if not parsed.netloc:
             raise ValueError(f"LLM endpoint URL has no host: {url!r}")
+        # Reject URLs that embed userinfo (e.g. http://user@host) — these can
+        # be used to confuse parsers downstream and hide the real destination.
+        if "@" in parsed.netloc:
+            raise ValueError(
+                f"LLM endpoint URL must not contain userinfo (@): {url!r}"
+            )
         return url
 
     def missing(self) -> list:
