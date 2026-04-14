@@ -116,7 +116,9 @@ class TestMMR:
             sdb = SynapseDB(d)
             q = [1.0] * 6
             out = sdb.apply_mmr(scored, q, lambda_param=1.0, final_k=10)
-            expected = [h["id"] for h in sorted(scored, key=lambda h: h["synapse_score"], reverse=True)]
+            expected = [
+                h["id"] for h in sorted(scored, key=lambda h: h["synapse_score"], reverse=True)
+            ]
             got = [h["id"] for h in out["results"]]
             assert got == expected
         finally:
@@ -303,7 +305,9 @@ class TestPinnedMemory:
         adv_col.add(
             ids=["p1"],
             documents=["c"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         db = SynapseDB(adv_palace)
         for _ in range(10):
@@ -376,7 +380,9 @@ class TestPinnedMemory:
         adv_col.add(
             ids=["pf1"],
             documents=["c"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         db = SynapseDB(adv_palace)
         for _ in range(5):
@@ -392,7 +398,9 @@ class TestPinnedMemory:
         adv_col.add(
             ids=["lonely"],
             documents=["z"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         db = SynapseDB(adv_palace)
         now = datetime.now(timezone.utc).isoformat()
@@ -485,7 +493,9 @@ class TestQueryExpansion:
         col.add(
             ids=["same"],
             documents=["hello world"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         with patch("mempalace.config.MempalaceConfig", return_value=cfg):
             r = search_memories("hello", palace_path=adv_palace, n_results=5)
@@ -627,11 +637,12 @@ class TestSupersedeDetection:
             embeddings=[e1, e2],
         )
         db = SynapseDB(adv_palace)
-        r = db.detect_superseded(adv_col, ["u1", "u2"], similarity_threshold=0.99, min_age_gap_days=7)
+        r = db.detect_superseded(
+            adv_col, ["u1", "u2"], similarity_threshold=0.99, min_age_gap_days=7
+        )
         assert len(r["candidates"]) == 0
 
     def test_supersede_confidence_ranking(self, adv_palace, adv_col):
-        db = SynapseDB(adv_palace)
         # synthetic candidates order
         cands = [
             {"confidence": "low", "similarity": 0.9},
@@ -757,7 +768,9 @@ class TestConsolidationEngine:
         adv_col.add(
             ids=["z1"],
             documents=["z"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         db = SynapseDB(adv_palace)
         with pytest.raises(ValueError):
@@ -782,7 +795,9 @@ class TestConsolidationEngine:
         adv_col.add(
             ids=["r1"],
             documents=["x"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         db = SynapseDB(adv_palace)
         db.consolidate(adv_col, ["r1"], "sum")
@@ -857,7 +872,9 @@ class TestConsolidationEngine:
         with patch("mempalace.config.MempalaceConfig", return_value=cfg):
             r = search_memories("p", palace_path=palace, n_results=10)
         assert r["synapse_consolidation"].get("include_sources_as_metadata") is True
-        top = [h for h in r.get("hits", []) if h.get("metadata", {}).get("status") == "consolidated"]
+        top = [
+            h for h in r.get("hits", []) if h.get("metadata", {}).get("status") == "consolidated"
+        ]
         assert top == []
         summ = next(
             (
@@ -935,7 +952,9 @@ class TestConsolidationEngine:
         adv_col.add(
             ids=["e1"],
             documents=["z"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         r = SynapseDB(adv_palace).consolidate(adv_col, ["e1"], "s")
         for k in ("consolidated_drawer_id", "source_drawers_archived", "reversible"):
@@ -955,7 +974,9 @@ class TestPipelineTrace:
         col.add(
             ids=["pt1"],
             documents=["hello pipeline"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         with patch("mempalace.config.MempalaceConfig", return_value=cfg):
             r = search_memories("hello", palace_path=adv_palace, n_results=5)
@@ -990,7 +1011,9 @@ class TestPipelineTrace:
         col.add(
             ids=["pv1"],
             documents=["unique pipeline test string"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         with patch("mempalace.config.MempalaceConfig", return_value=cfg):
             r = search_memories("unique pipeline", palace_path=palace, n_results=5)
@@ -1006,7 +1029,9 @@ class TestPipelineTrace:
         col.add(
             ids=["off1"],
             documents=["x"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         with patch("mempalace.config.MempalaceConfig", return_value=cfg):
             r = search_memories("x", palace_path=adv_palace, n_results=3)
@@ -1021,7 +1046,9 @@ class TestPipelineTrace:
         col.add(
             ids=["e1"],
             documents=["elapsed test"],
-            metadatas=[{"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}],
+            metadatas=[
+                {"wing": "w", "room": "r", "filed_at": datetime.now(timezone.utc).isoformat()}
+            ],
         )
         with patch("mempalace.config.MempalaceConfig", return_value=cfg):
             r = search_memories("elapsed", palace_path=adv_palace, n_results=3)

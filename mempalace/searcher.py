@@ -339,7 +339,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     print()
 
 
-def search_memories(
+def search_memories(  # noqa: C901
     query: str,
     palace_path: Optional[str] = None,
     wing: Optional[str] = None,
@@ -678,11 +678,7 @@ def search_memories(
                         emetas = exr["metadatas"][0]
                         edists = exr["distances"][0]
                         eids = exr.get("ids", [[]])[0]
-                        eer = (
-                            exr.get("embeddings", [[]])[0]
-                            if cfg.synapse_enabled
-                            else None
-                        )
+                        eer = exr.get("embeddings", [[]])[0] if cfg.synapse_enabled else None
                         exhits = _chroma_rows_to_hits(
                             edocs,
                             emetas,
@@ -735,14 +731,10 @@ def search_memories(
                 for hit in result["hits"]:
                     drawer_id = hit.get("metadata", {}).get("drawer_id", hit.get("id", ""))
                     filed_at = hit.get("metadata", {}).get("filed_at", None)
-                    similarity = float(
-                        hit.get("original_similarity", hit.get("similarity", 0.0))
-                    )
+                    similarity = float(hit.get("original_similarity", hit.get("similarity", 0.0)))
                     age_days = hit_filed_age_days(filed_at)
                     decay = (
-                        compute_decay(age_days, int(profile.half_life_days))
-                        if time_decay
-                        else 1.0
+                        compute_decay(age_days, int(profile.half_life_days)) if time_decay else 1.0
                     )
 
                     ltp = ltp_scores.get(drawer_id, 1.0) if profile.ltp_enabled else 1.0
@@ -756,9 +748,7 @@ def search_memories(
                         else 1.0
                     )
                     association = (
-                        assoc_scores.get(drawer_id, 1.0)
-                        if profile.association_enabled
-                        else 1.0
+                        assoc_scores.get(drawer_id, 1.0) if profile.association_enabled else 1.0
                     )
 
                     final_score = similarity * decay * ltp * association * tagging
@@ -793,9 +783,7 @@ def search_memories(
                     sres = synapse_db.detect_superseded(
                         drawers_col,
                         [h.get("id") for h in hits_after_score if h.get("id")],
-                        similarity_threshold=float(
-                            pd.get("supersede_similarity_threshold", 0.86)
-                        ),
+                        similarity_threshold=float(pd.get("supersede_similarity_threshold", 0.86)),
                         min_age_gap_days=int(pd.get("supersede_min_age_gap_days", 7)),
                         max_candidates=int(pd.get("supersede_max_candidates", 10)),
                     )
@@ -980,9 +968,7 @@ def search_memories(
 
                 ss = result.get("synapse_supersede") or {}
                 if ss.get("checked"):
-                    phases_applied.append(
-                        "supersede_" + str(ss.get("action", "filter"))
-                    )
+                    phases_applied.append("supersede_" + str(ss.get("action", "filter")))
                 else:
                     phases_skipped.append("supersede")
 
@@ -1004,9 +990,7 @@ def search_memories(
                     "total_candidates_in": total_candidates_in,
                     "total_results_out": len(hits_after_score),
                     "profile_used": result.get("synapse_profile_used", "default"),
-                    "elapsed_ms": round(
-                        (time.monotonic() - _pipeline_start) * 1000, 1
-                    ),
+                    "elapsed_ms": round((time.monotonic() - _pipeline_start) * 1000, 1),
                 }
 
                 if cfg.synapse_log_retrievals:
@@ -1017,13 +1001,9 @@ def search_memories(
                     log_ids = [x for x in log_ids if x]
                     if log_ids:
                         try:
-                            synapse_db.log_retrieval(
-                                log_ids, query_hash, session_id, conn=conn
-                            )
+                            synapse_db.log_retrieval(log_ids, query_hash, session_id, conn=conn)
                         except Exception as e:
-                            logger.warning(
-                                "Synapse log_retrieval failed (non-fatal): %s", e
-                            )
+                            logger.warning("Synapse log_retrieval failed (non-fatal): %s", e)
 
             try:
                 synapse_db.log_query(

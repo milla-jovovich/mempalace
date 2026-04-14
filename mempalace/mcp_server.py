@@ -27,7 +27,7 @@ import json
 import logging
 import hashlib
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -589,6 +589,7 @@ def tool_search(
         }
         result = {**result, "response_meta": response_meta}
     return result
+
 
 def tool_session_context():
     """
