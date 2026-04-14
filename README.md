@@ -106,7 +106,7 @@ mempalace init ~/projects/myapp
 
 # Mine your data
 mempalace mine ~/projects/myapp                    # projects — code, docs, notes
-mempalace mine ~/chats/ --mode convos              # convos — Claude, ChatGPT, Slack exports
+mempalace mine ~/chats/ --mode convos              # convos — Claude, ChatGPT, Grok, Slack exports
 mempalace mine ~/chats/ --mode convos --extract general  # general — classifies into decisions, milestones, problems
 
 # Search anything you've ever discussed
@@ -117,7 +117,6 @@ mempalace status
 ```
 
 Three mining modes: **projects** (code and docs), **convos** (conversation exports), and **general** (auto-classifies into decisions, preferences, milestones, problems, and emotional context). Everything stays on your machine.
-
 ---
 
 ## How You Actually Use It

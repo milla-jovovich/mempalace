@@ -5,6 +5,7 @@ normalize.py — Convert any chat export format to MemPalace transcript format.
 Supported:
     - Plain text with > markers (pass through)
     - Claude.ai JSON export
+    - Grok JSON export
     - ChatGPT conversations.json
     - Claude Code JSONL (with tool_use/tool_result block capture)
     - OpenAI Codex CLI JSONL
@@ -156,7 +157,7 @@ def _try_normalize_json(content: str) -> Optional[str]:
     except json.JSONDecodeError:
         return None
 
-    for parser in (_try_claude_ai_json, _try_chatgpt_json, _try_slack_json):
+    for parser in (_try_grok_json, _try_claude_ai_json, _try_chatgpt_json, _try_slack_json):
         normalized = parser(data)
         if normalized:
             return normalized
@@ -321,6 +322,44 @@ def _collect_claude_messages(items) -> list:
         elif role in ("assistant", "ai") and text:
             messages.append(("assistant", text))
     return messages
+
+
+def _try_grok_json(data) -> Optional[str]:
+    """Grok / xAI JSON export with nested conversations and responses."""
+    conversations = data.get("conversations") if isinstance(data, dict) else None
+    if not isinstance(conversations, list):
+        return None
+
+    messages = []
+    for convo in conversations:
+        if not isinstance(convo, dict):
+            continue
+
+        responses = convo.get("responses", [])
+        if not isinstance(responses, list):
+            continue
+
+        for item in responses:
+            if not isinstance(item, dict):
+                continue
+            response = item.get("response", {})
+            if not isinstance(response, dict):
+                continue
+
+            sender = str(response.get("sender", "")).lower()
+            message = _extract_content(response.get("message", ""))
+            if sender == "human" and message:
+                role = "user"
+            elif sender == "assistant" and message:
+                role = "assistant"
+            else:
+                continue
+
+            messages.append((role, message))
+
+    if len(messages) >= 2:
+        return _messages_to_transcript(messages)
+    return None
 
 
 def _try_chatgpt_json(data) -> Optional[str]:
