@@ -1,0 +1,62 @@
+"@context":
+  - ../contexts/core.context.jsonld
+  - ../contexts/full-stack-unit.context.jsonld
+
+"@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#integration-profile
+"@type": RuntimeConfig
+
+repoRoot: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+packageName: mempalace
+commandName: mempalace
+moduleEntry: mempalace.mcp_server
+hiddenDir: .mempalace
+repoUrl: https://github.com/Fleet-to-Force/mempalace
+
+runtime:
+  pythonCommand: python
+  mcpCommand: mempalace-mcp
+  hookStateDir: ~/.mempalace/hook_state
+
+pluginProfiles:
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#plugin/claude
+    "@type": HookProfile
+    category: claude-plugin
+    path: .claude-plugin/
+    enabled: true
+    manifest:
+      mcpCommand: mempalace-mcp
+      args: []
+    hooks:
+      stop: bash ${CLAUDE_PLUGIN_ROOT}/hooks/mempal-stop-hook.sh
+      precompact: bash ${CLAUDE_PLUGIN_ROOT}/hooks/mempal-precompact-hook.sh
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#plugin/codex
+    "@type": HookProfile
+    category: codex-plugin
+    path: .codex-plugin/
+    enabled: true
+    manifest:
+      mcpCommand: mempalace-mcp
+      args: []
+    hooks:
+      stop: ${CODEX_PLUGIN_ROOT}/hooks/mempal-hook.sh stop
+      precompact: ${CODEX_PLUGIN_ROOT}/hooks/mempal-hook.sh precompact
+
+collections:
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#collection/drawers
+    "@type": CollectionProfile
+    category: drawers
+    collectionName: mempalace_drawers
+    description: Primary verbatim memory collection.
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#collection/compressed
+    "@type": CollectionProfile
+    category: compressed
+    collectionName: mempalace_compressed
+    description: Compressed memory collection.
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#collection/closets
+    "@type": CollectionProfile
+    category: closets
+    collectionName: mempalace_closets
+    description: Closet pointer collection.
