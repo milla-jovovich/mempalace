@@ -1,0 +1,41 @@
+{
+  "source": {
+    "package": "mempalace",
+    "command": "mempalace",
+    "hidden_dir": ".mempalace",
+    "module_entry": "mempalace.mcp_server",
+    "repo_url": "https://github.com/MemPalace/mempalace",
+    "collections": {
+      "drawers": "mempalace_drawers",
+      "compressed": "mempalace_compressed",
+      "closets": "mempalace_closets"
+    }
+  },
+  "targets": [
+    {
+      "repo_path": "/repos/memorymesh",
+      "target": {
+        "id": "memorymesh",
+        "display_name": "MemoryMesh",
+        "repo_url": "https://github.com/your-org/memorymesh"
+      },
+      "interpreter_policy": {
+        "fallback_command": "python"
+      }
+    },
+    {
+      "repo_path": "/repos/nexusmemory",
+      "target": {
+        "id": "nexusmemory",
+        "display_name": "NexusMemory",
+        "repo_url": "https://github.com/your-org/nexusmemory"
+      },
+      "overrides": {
+        "plugin_display_name": "Nexus Memory"
+      },
+      "interpreter_policy": {
+        "fallback_command": "python"
+      }
+    }
+  ]
+}
