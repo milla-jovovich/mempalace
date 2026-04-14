@@ -140,17 +140,25 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
         python3 -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
     fi
 
-    # Notify the AI that a checkpoint happened — but do NOT ask it to write
-    # anything in chat. All filing happens in the background via the pipeline.
-    # The old version asked the agent to write diary entries, add drawers, and
-    # add KG triples in the chat window — that cost ~$1/session in retransmitted
-    # tokens and cluttered the conversation.
-    cat << 'HOOKJSON'
+    # MEMPAL_VERBOSE toggle:
+    #   true  = developer mode — block and show diaries/code in chat
+    #   false = silent mode (default) — save in background, no chat clutter
+    # Set via: export MEMPAL_VERBOSE=true
+    if [ "$MEMPAL_VERBOSE" = "true" ] || [ "$MEMPAL_VERBOSE" = "1" ]; then
+        cat << 'HOOKJSON'
+{
+  "decision": "block",
+  "reason": "MemPalace save checkpoint. Write a brief session diary entry covering key topics, decisions, and code changes since the last save. Use verbatim quotes where possible. Continue after saving."
+}
+HOOKJSON
+    else
+        cat << 'HOOKJSON'
 {
   "decision": "allow",
   "reason": "MemPalace auto-save checkpoint. Your conversation is being saved verbatim in the background — no action needed from you. Continue working."
 }
 HOOKJSON
+    fi
 else
     # Not time yet — let the AI stop normally
     echo "{}"
