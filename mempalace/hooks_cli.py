@@ -191,11 +191,66 @@ def hook_session_start(data: dict, harness: str):
 
 
 def hook_precompact(data: dict, harness: str):
-    """Precompact hook: always block with comprehensive save instruction."""
+    """Precompact hook: block once per new human message to request a save,
+    then allow compaction through.
+
+    Without a guard, Claude Code enters an infinite loop:
+      1. Context fills -> Claude Code fires PreCompact
+      2. Hook returns decision=block, which cancels compaction and feeds
+         the reason back to the model as an instruction
+      3. Model saves memories, response ends
+      4. Context is still over limit -> Claude Code fires PreCompact again
+      5. goto 2
+
+    Two guards prevent the loop:
+      - trigger == "manual" (user ran /compact): never block, the user
+        explicitly asked for compaction.
+      - deadlock guard: remember the human-message count at which we last
+        blocked for this session. If PreCompact fires again with the same
+        count (no new user turn happened), the save already ran -- allow
+        compaction to proceed. A fresh user message advances the count and
+        re-arms the one-shot block.
+    """
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
+    transcript_path = parsed["transcript_path"]
+    trigger = str(data.get("trigger", "auto")).lower()
 
-    _log(f"PRE-COMPACT triggered for session {session_id}")
+    _log(f"PRE-COMPACT triggered for session {session_id} (trigger={trigger})")
+
+    # Manual /compact: user explicitly asked -- never block.
+    if trigger == "manual":
+        _log("PRE-COMPACT manual trigger -- allowing compaction")
+        _output({})
+        return
+
+    # Deadlock guard.
+    exchange_count = _count_human_messages(transcript_path)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    state_file = STATE_DIR / f"{session_id}_precompact_blocked_at"
+    last_blocked_at = -1
+    if state_file.is_file():
+        try:
+            last_blocked_at = int(state_file.read_text().strip())
+        except (ValueError, OSError):
+            last_blocked_at = -1
+
+    if last_blocked_at >= 0 and exchange_count <= last_blocked_at:
+        _log(
+            f"PRE-COMPACT already blocked at exchange {last_blocked_at} "
+            f"(now {exchange_count}) -- allowing compaction to prevent deadlock"
+        )
+        try:
+            state_file.unlink()
+        except OSError:
+            pass
+        _output({})
+        return
+
+    try:
+        state_file.write_text(str(exchange_count), encoding="utf-8")
+    except OSError:
+        pass
 
     # Optional: auto-ingest synchronously before compaction (so memories land first)
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
@@ -212,7 +267,6 @@ def hook_precompact(data: dict, harness: str):
         except OSError:
             pass
 
-    # Always block -- compaction = save everything
     _output({"decision": "block", "reason": PRECOMPACT_BLOCK_REASON})
 
 

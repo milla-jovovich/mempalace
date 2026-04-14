@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Hall detection — routes drawer content to `emotions` / `technical` / `family` / `memory` / `identity` / `consciousness` / `creative` halls, enabling hall-based graph connectivity within wings (#835)
 
 ### Bug Fixes
+- **PreCompact deadlock** — `hook_precompact` unconditionally returned `decision=block`, causing Claude Code to loop indefinitely (block → save → context still full → PreCompact re-fires → block again). Manual `/compact` was also blocked because the `trigger` field was ignored. Now: manual triggers always pass through, and a per-session exchange-count guard lets auto triggers block exactly once per new user turn. See [`docs/bugfixes/precompact-deadlock.md`](docs/bugfixes/precompact-deadlock.md).
 - Set `hnsw:space=cosine` metadata on all collection creation sites — fixes broken similarity scoring under ChromaDB's default L2 distance (#807, #218)
 - File-level locking prevents duplicate drawers when agents mine the same file concurrently (#784, #826)
 - Hybrid closet+drawer retrieval — closets boost ranking, never gate results (#795)

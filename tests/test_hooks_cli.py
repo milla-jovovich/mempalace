@@ -204,14 +204,81 @@ def test_session_start_passes_through(tmp_path):
 # --- hook_precompact ---
 
 
-def test_precompact_always_blocks(tmp_path):
+def test_precompact_first_fire_blocks(tmp_path):
+    """First auto-triggered PreCompact for a session blocks for save."""
     result = _capture_hook_output(
         hook_precompact,
-        {"session_id": "test"},
+        {"session_id": "test", "transcript_path": "", "trigger": "auto"},
         state_dir=tmp_path,
     )
     assert result["decision"] == "block"
     assert result["reason"] == PRECOMPACT_BLOCK_REASON
+
+
+def test_precompact_manual_trigger_passes_through(tmp_path):
+    """Manual /compact must never be blocked, regardless of prior state."""
+    result = _capture_hook_output(
+        hook_precompact,
+        {"session_id": "test", "transcript_path": "", "trigger": "manual"},
+        state_dir=tmp_path,
+    )
+    assert result == {}
+
+
+def test_precompact_deadlock_guard_allows_refire(tmp_path):
+    """Second auto PreCompact with no new human message must pass through,
+    otherwise Claude Code would loop: block -> save -> context still full ->
+    fire again -> block again (the original deadlock)."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [
+            {"message": {"role": "user", "content": "hello"}},
+            {"message": {"role": "assistant", "content": "hi"}},
+        ],
+    )
+    payload = {
+        "session_id": "test",
+        "transcript_path": str(transcript),
+        "trigger": "auto",
+    }
+    first = _capture_hook_output(hook_precompact, payload, state_dir=tmp_path)
+    assert first["decision"] == "block"
+
+    second = _capture_hook_output(hook_precompact, payload, state_dir=tmp_path)
+    assert second == {}
+
+
+def test_precompact_new_human_message_rearms_block(tmp_path):
+    """After a fresh user turn, PreCompact should block once more -- the
+    deadlock guard is per exchange-count, not per session lifetime."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": "first"}}],
+    )
+    payload = {
+        "session_id": "test",
+        "transcript_path": str(transcript),
+        "trigger": "auto",
+    }
+    first = _capture_hook_output(hook_precompact, payload, state_dir=tmp_path)
+    assert first["decision"] == "block"
+
+    second = _capture_hook_output(hook_precompact, payload, state_dir=tmp_path)
+    assert second == {}
+
+    # New user message arrives.
+    _write_transcript(
+        transcript,
+        [
+            {"message": {"role": "user", "content": "first"}},
+            {"message": {"role": "assistant", "content": "ok"}},
+            {"message": {"role": "user", "content": "second"}},
+        ],
+    )
+    third = _capture_hook_output(hook_precompact, payload, state_dir=tmp_path)
+    assert third["decision"] == "block"
 
 
 # --- _log ---
