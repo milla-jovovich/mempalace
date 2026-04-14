@@ -40,6 +40,7 @@ mempalace = "mempalace.cli:main"
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
 spellcheck = ["autocorrect>=2.0"]
+qdrant = ["qdrant-client>=1.7.0", "sentence-transformers>=2.2.0"]
 
 [dependency-groups]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
