@@ -1,6 +1,6 @@
 # Benchmarks
 
-Curated summary of MemPalace benchmark results. For the full 725-line progression with every experiment, see [`benchmarks/BENCHMARKS.md`](https://github.com/milla-jovovich/mempalace/blob/main/benchmarks/BENCHMARKS.md) in the repository.
+Curated summary of MemPalace benchmark results. For the full 725-line progression with every experiment, see [`benchmarks/BENCHMARKS.md`](https://github.com/MemPalace/mempalace/blob/main/benchmarks/BENCHMARKS.md) in the repository.
 
 ## The Core Finding
 
@@ -76,7 +76,7 @@ On this benchmark, MemPalace materially outperforms the Mem0 result cited in the
 All benchmarks are reproducible with public datasets:
 
 ```bash
-git clone https://github.com/milla-jovovich/mempalace.git
+git clone https://github.com/MemPalace/mempalace.git
 cd mempalace
 pip install chromadb pyyaml
 
@@ -92,4 +92,4 @@ python benchmarks/longmemeval_bench.py /tmp/longmemeval_s_cleaned.json
 Results are deterministic. Same data + same script = same result every time. Every result JSONL file contains every question, every retrieved document, every score.
 :::
 
-For complete reproduction instructions, benchmark integrity notes, and the full score progression, see the [full benchmark documentation](https://github.com/milla-jovovich/mempalace/blob/main/benchmarks/BENCHMARKS.md).
+For complete reproduction instructions, benchmark integrity notes, and the full score progression, see the [full benchmark documentation](https://github.com/MemPalace/mempalace/blob/main/benchmarks/BENCHMARKS.md).

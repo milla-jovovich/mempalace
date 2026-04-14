@@ -17,6 +17,7 @@ Usage:
 
 import re
 import os
+import functools
 from pathlib import Path
 from collections import defaultdict
 
@@ -59,6 +60,8 @@ PRONOUN_PATTERNS = [
     r"\bthem\b",
     r"\btheir\b",
 ]
+
+PRONOUN_RE = re.compile("|".join(PRONOUN_PATTERNS), re.IGNORECASE)
 
 # Person signals — dialogue markers
 DIALOGUE_PATTERNS = [
@@ -466,6 +469,7 @@ def extract_candidates(text: str) -> dict:
 # ==================== SIGNAL SCORING ====================
 
 
+@functools.lru_cache(maxsize=128)
 def _build_patterns(name: str) -> dict:
     """Pre-compile all regex patterns for a single entity name."""
     n = re.escape(name)
@@ -515,11 +519,9 @@ def score_entity(name: str, text: str, lines: list) -> dict:
     name_line_indices = [i for i, line in enumerate(lines) if name_lower in line.lower()]
     pronoun_hits = 0
     for idx in name_line_indices:
-        window_text = " ".join(lines[max(0, idx - 2) : idx + 3]).lower()
-        for pronoun_pattern in PRONOUN_PATTERNS:
-            if re.search(pronoun_pattern, window_text):
-                pronoun_hits += 1
-                break
+        window_text = " ".join(lines[max(0, idx - 2) : idx + 3])
+        if PRONOUN_RE.search(window_text):
+            pronoun_hits += 1
     if pronoun_hits > 0:
         person_score += pronoun_hits * 2
         person_signals.append(f"pronoun nearby ({pronoun_hits}x)")
@@ -760,7 +762,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
         if detected["uncertain"]:
             print("\n  Uncertain entities — classify each:")
             for e in detected["uncertain"]:
-                ans = input(f"    {e['name']} — (p)erson, (r)roject, or (s)kip? ").strip().lower()
+                ans = input(f"    {e['name']} — (p)erson, (r)project, or (s)kip? ").strip().lower()
                 if ans == "p":
                     confirmed_people.append(e["name"])
                 elif ans == "r":

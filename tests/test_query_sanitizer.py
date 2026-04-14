@@ -102,6 +102,21 @@ class TestTailSentence:
         assert result["was_sanitized"] is True
         assert "MemPalace" in result["clean_query"] or "ChromaDB" in result["clean_query"]
 
+    def test_long_candidate_uses_last_sentence_fragment(self):
+        query = ("Prompt sentence. " * 30) + "Final search intent for architecture migration"
+        result = sanitize_query(query)
+        assert result["method"] == "tail_sentence"
+        assert result["clean_query"] == "Final search intent for architecture migration"
+
+    def test_long_candidate_strips_wrapping_quotes(self):
+        query = ("Prefix text " * 30) + '\n"' + ("x" * 260) + '"'
+        result = sanitize_query(query)
+        assert result["method"] == "tail_sentence"
+        assert result["clean_query"] == "x" * MAX_QUERY_LENGTH
+        assert not result["clean_query"].startswith('"')
+        assert not result["clean_query"].endswith('"')
+        assert len(result["clean_query"]) <= MAX_QUERY_LENGTH
+
 
 class TestTailTruncation:
     """Step 4: Fallback — take the last MAX_QUERY_LENGTH characters."""
@@ -119,9 +134,18 @@ class TestTailTruncation:
         result = sanitize_query(filler)
         assert "IMPORTANT_QUERY_CONTENT" in result["clean_query"]
 
+    def test_tail_sentence_fallback_preserves_tail_without_delimiters(self):
+        filler = ("x" * 260) + "IMPORTANT_QUERY_CONTENT"
+        result = sanitize_query(filler)
+        assert result["method"] == "tail_sentence"
+        assert "IMPORTANT_QUERY_CONTENT" in result["clean_query"]
+
 
 class TestLengthGuards:
     """Verify output length constraints."""
+
+    def test_max_query_length_reduced(self):
+        assert MAX_QUERY_LENGTH == 250
 
     def test_output_never_exceeds_max(self):
         # Very long question sentence

@@ -317,13 +317,17 @@ class Dialect:
         dialect.generate_layer1("zettels/", output="LAYER1.aaak")
     """
 
-    def __init__(self, entities: Dict[str, str] = None, skip_names: List[str] = None):
+    def __init__(
+        self, entities: Dict[str, str] = None, skip_names: List[str] = None, lang: str = None
+    ):
         """
         Args:
             entities: Mapping of full names -> short codes.
                       e.g. {"Alice": "ALC", "Bob": "BOB"}
                       If None, entities are auto-coded from first 3 chars.
             skip_names: Names to skip (fictional characters, etc.)
+            lang: Language code (e.g. "fr", "ko"). Loads AAAK instruction
+                  and regex patterns from i18n dictionary.
         """
         self.entity_codes = {}
         if entities:
@@ -331,6 +335,15 @@ class Dialect:
                 self.entity_codes[name] = code
                 self.entity_codes[name.lower()] = code
         self.skip_names = [n.lower() for n in (skip_names or [])]
+
+        # Load language-specific AAAK instruction and regex patterns
+        from mempalace.i18n import load_lang, t, current_lang, get_regex
+
+        if lang:
+            load_lang(lang)
+        self.lang = lang or current_lang()
+        self.aaak_instruction = t("aaak.instruction")
+        self.lang_regex = get_regex()
 
     @classmethod
     def from_config(cls, config_path: str) -> "Dialect":
@@ -347,6 +360,7 @@ class Dialect:
         return cls(
             entities=config.get("entities", {}),
             skip_names=config.get("skip_names", []),
+            lang=config.get("lang"),
         )
 
     def save_config(self, config_path: str):
