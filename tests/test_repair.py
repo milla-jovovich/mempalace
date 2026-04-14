@@ -66,22 +66,28 @@ def test_paginate_ids_offset_exception_fallback():
 # ── scan_palace ───────────────────────────────────────────────────────
 
 
-@patch("mempalace.repair.chromadb")
-def test_scan_palace_no_ids(mock_chromadb, tmp_path):
+def _install_mock_backend(mock_backend_cls, collection):
+    """Wire mock_backend_cls so ChromaBackend().get_collection(...) returns *collection*."""
+    mock_backend = MagicMock()
+    mock_backend.get_collection.return_value = collection
+    mock_backend_cls.return_value = mock_backend
+    return mock_backend
+
+
+@patch("mempalace.repair.ChromaBackend")
+def test_scan_palace_no_ids(mock_backend_cls, tmp_path):
     mock_col = MagicMock()
     mock_col.count.return_value = 0
     mock_col.get.return_value = {"ids": []}
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    _install_mock_backend(mock_backend_cls, mock_col)
 
     good, bad = repair.scan_palace(palace_path=str(tmp_path))
     assert good == set()
     assert bad == set()
 
 
-@patch("mempalace.repair.chromadb")
-def test_scan_palace_all_good(mock_chromadb, tmp_path):
+@patch("mempalace.repair.ChromaBackend")
+def test_scan_palace_all_good(mock_backend_cls, tmp_path):
     mock_col = MagicMock()
     mock_col.count.return_value = 2
     # _paginate_ids call
@@ -89,9 +95,7 @@ def test_scan_palace_all_good(mock_chromadb, tmp_path):
         {"ids": ["id1", "id2"]},  # paginate
         {"ids": ["id1", "id2"]},  # probe batch — both returned
     ]
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    _install_mock_backend(mock_backend_cls, mock_col)
 
     good, bad = repair.scan_palace(palace_path=str(tmp_path))
     assert "id1" in good
@@ -99,8 +103,8 @@ def test_scan_palace_all_good(mock_chromadb, tmp_path):
     assert len(bad) == 0
 
 
-@patch("mempalace.repair.chromadb")
-def test_scan_palace_with_bad_ids(mock_chromadb, tmp_path):
+@patch("mempalace.repair.ChromaBackend")
+def test_scan_palace_with_bad_ids(mock_backend_cls, tmp_path):
     mock_col = MagicMock()
     mock_col.count.return_value = 2
 
@@ -117,26 +121,22 @@ def test_scan_palace_with_bad_ids(mock_chromadb, tmp_path):
         raise Exception("batch fail")
 
     mock_col.get.side_effect = get_side_effect
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    _install_mock_backend(mock_backend_cls, mock_col)
 
     good, bad = repair.scan_palace(palace_path=str(tmp_path))
     assert "good1" in good
     assert "bad1" in bad
 
 
-@patch("mempalace.repair.chromadb")
-def test_scan_palace_with_wing_filter(mock_chromadb, tmp_path):
+@patch("mempalace.repair.ChromaBackend")
+def test_scan_palace_with_wing_filter(mock_backend_cls, tmp_path):
     mock_col = MagicMock()
     mock_col.count.return_value = 1
     mock_col.get.side_effect = [
         {"ids": ["id1"]},  # paginate
         {"ids": ["id1"]},  # probe
     ]
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    _install_mock_backend(mock_backend_cls, mock_col)
 
     repair.scan_palace(palace_path=str(tmp_path), only_wing="test_wing")
     # Verify where filter was passed
@@ -147,38 +147,36 @@ def test_scan_palace_with_wing_filter(mock_chromadb, tmp_path):
 # ── prune_corrupt ─────────────────────────────────────────────────────
 
 
-@patch("mempalace.repair.chromadb")
-def test_prune_corrupt_no_file(mock_chromadb, tmp_path):
+@patch("mempalace.repair.ChromaBackend")
+def test_prune_corrupt_no_file(mock_backend_cls, tmp_path):
     # Should print message and return without error
     repair.prune_corrupt(palace_path=str(tmp_path))
 
 
-@patch("mempalace.repair.chromadb")
-def test_prune_corrupt_dry_run(mock_chromadb, tmp_path):
+@patch("mempalace.repair.ChromaBackend")
+def test_prune_corrupt_dry_run(mock_backend_cls, tmp_path):
     bad_file = tmp_path / "corrupt_ids.txt"
     bad_file.write_text("bad1\nbad2\n")
     repair.prune_corrupt(palace_path=str(tmp_path), confirm=False)
-    # No chromadb calls in dry run
-    mock_chromadb.PersistentClient.assert_not_called()
+    # No backend calls in dry run
+    mock_backend_cls.assert_not_called()
 
 
-@patch("mempalace.repair.chromadb")
-def test_prune_corrupt_confirmed(mock_chromadb, tmp_path):
+@patch("mempalace.repair.ChromaBackend")
+def test_prune_corrupt_confirmed(mock_backend_cls, tmp_path):
     bad_file = tmp_path / "corrupt_ids.txt"
     bad_file.write_text("bad1\nbad2\n")
 
     mock_col = MagicMock()
     mock_col.count.side_effect = [10, 8]
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    _install_mock_backend(mock_backend_cls, mock_col)
 
     repair.prune_corrupt(palace_path=str(tmp_path), confirm=True)
     mock_col.delete.assert_called_once()
 
 
-@patch("mempalace.repair.chromadb")
-def test_prune_corrupt_delete_failure_fallback(mock_chromadb, tmp_path):
+@patch("mempalace.repair.ChromaBackend")
+def test_prune_corrupt_delete_failure_fallback(mock_backend_cls, tmp_path):
     bad_file = tmp_path / "corrupt_ids.txt"
     bad_file.write_text("bad1\nbad2\n")
 
@@ -186,9 +184,7 @@ def test_prune_corrupt_delete_failure_fallback(mock_chromadb, tmp_path):
     mock_col.count.side_effect = [10, 8]
     # Batch delete fails, per-id succeeds
     mock_col.delete.side_effect = [Exception("batch fail"), None, None]
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    _install_mock_backend(mock_backend_cls, mock_col)
 
     repair.prune_corrupt(palace_path=str(tmp_path), confirm=True)
     assert mock_col.delete.call_count == 3  # 1 batch + 2 individual
@@ -197,29 +193,27 @@ def test_prune_corrupt_delete_failure_fallback(mock_chromadb, tmp_path):
 # ── rebuild_index ─────────────────────────────────────────────────────
 
 
-@patch("mempalace.repair.chromadb")
-def test_rebuild_index_no_palace(mock_chromadb, tmp_path):
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_no_palace(mock_backend_cls, tmp_path):
     nonexistent = str(tmp_path / "nope")
     repair.rebuild_index(palace_path=nonexistent)
-    mock_chromadb.PersistentClient.assert_not_called()
+    mock_backend_cls.assert_not_called()
 
 
 @patch("mempalace.repair.shutil")
-@patch("mempalace.repair.chromadb")
-def test_rebuild_index_empty_palace(mock_chromadb, mock_shutil, tmp_path):
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_empty_palace(mock_backend_cls, mock_shutil, tmp_path):
     mock_col = MagicMock()
     mock_col.count.return_value = 0
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
 
     repair.rebuild_index(palace_path=str(tmp_path))
-    mock_client.delete_collection.assert_not_called()
+    mock_backend.delete_collection.assert_not_called()
 
 
 @patch("mempalace.repair.shutil")
-@patch("mempalace.repair.chromadb")
-def test_rebuild_index_success(mock_chromadb, mock_shutil, tmp_path):
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_success(mock_backend_cls, mock_shutil, tmp_path):
     # Create a fake sqlite file
     sqlite_path = tmp_path / "chroma.sqlite3"
     sqlite_path.write_text("fake")
@@ -233,10 +227,8 @@ def test_rebuild_index_success(mock_chromadb, mock_shutil, tmp_path):
     }
 
     mock_new_col = MagicMock()
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_client.create_collection.return_value = mock_new_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
+    mock_backend.create_collection.return_value = mock_new_col
 
     repair.rebuild_index(palace_path=str(tmp_path))
 
@@ -244,11 +236,9 @@ def test_rebuild_index_success(mock_chromadb, mock_shutil, tmp_path):
     mock_shutil.copy2.assert_called_once()
     assert "chroma.sqlite3" in str(mock_shutil.copy2.call_args)
 
-    # Verify: deleted and recreated with cosine
-    mock_client.delete_collection.assert_called_once_with("mempalace_drawers")
-    mock_client.create_collection.assert_called_once_with(
-        "mempalace_drawers", metadata={"hnsw:space": "cosine"}
-    )
+    # Verify: deleted and recreated (cosine is the backend default)
+    mock_backend.delete_collection.assert_called_once_with(str(tmp_path), "mempalace_drawers")
+    mock_backend.create_collection.assert_called_once_with(str(tmp_path), "mempalace_drawers")
 
     # Verify: used upsert not add
     mock_new_col.upsert.assert_called_once()
@@ -256,11 +246,11 @@ def test_rebuild_index_success(mock_chromadb, mock_shutil, tmp_path):
 
 
 @patch("mempalace.repair.shutil")
-@patch("mempalace.repair.chromadb")
-def test_rebuild_index_error_reading(mock_chromadb, mock_shutil, tmp_path):
-    mock_client = MagicMock()
-    mock_client.get_collection.side_effect = Exception("corrupt")
-    mock_chromadb.PersistentClient.return_value = mock_client
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_error_reading(mock_backend_cls, mock_shutil, tmp_path):
+    mock_backend = MagicMock()
+    mock_backend.get_collection.side_effect = Exception("corrupt")
+    mock_backend_cls.return_value = mock_backend
 
     repair.rebuild_index(palace_path=str(tmp_path))
-    mock_client.delete_collection.assert_not_called()
+    mock_backend.delete_collection.assert_not_called()

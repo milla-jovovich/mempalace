@@ -28,6 +28,11 @@ class BaseCollection(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def update(self, **kwargs: Any) -> None:
+        """Update existing records. Must raise if any ID is missing."""
+        raise NotImplementedError
+
+    @abstractmethod
     def query(self, **kwargs: Any) -> Dict[str, Any]:
         raise NotImplementedError
 

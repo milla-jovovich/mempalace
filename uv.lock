@@ -1208,7 +1208,7 @@ wheels = [
 
 [[package]]
 name = "mempalace"
-version = "3.0.14"
+version = "3.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
@@ -1239,11 +1239,11 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "autocorrect", marker = "extra == 'spellcheck'", specifier = ">=2.0" },
-    { name = "chromadb", specifier = ">=0.5.0,<0.7" },
+    { name = "chromadb", specifier = ">=0.5.0" },
     { name = "psutil", marker = "extra == 'dev'", specifier = ">=5.9" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
 ]
 provides-extras = ["dev", "spellcheck"]

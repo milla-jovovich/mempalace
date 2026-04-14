@@ -16,8 +16,91 @@ No API key. No internet. Everything local.
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Optional
+
+
+# ─── Noise stripping ─────────────────────────────────────────────────────
+# Claude Code and other tools inject system tags, hook output, and UI chrome
+# into transcripts. These waste drawer space and pollute search results.
+#
+# Verbatim is sacred — every pattern here is anchored to line boundaries and
+# refuses to cross blank lines, so a stray unclosed tag in one message can
+# never eat content from neighboring messages. When in doubt, leave text
+# alone.
+
+_NOISE_TAGS = (
+    "system-reminder",
+    "command-message",
+    "command-name",
+    "task-notification",
+    "user-prompt-submit-hook",
+    "hook_output",
+)
+
+
+def _tag_pattern(name: str) -> "re.Pattern[str]":
+    # Opening tag must begin a line (optionally after a `> ` blockquote marker,
+    # since _messages_to_transcript prefixes lines with `> `). Body is lazy but
+    # forbidden from crossing a blank line, so a dangling open tag can't span
+    # multiple messages. Closing tag eats optional trailing whitespace + newline.
+    return re.compile(
+        rf"(?m)^(?:> )?<{name}(?:\s[^>]*)?>" rf"(?:(?!\n\s*\n)[\s\S])*?" rf"</{name}>[ \t]*\n?"
+    )
+
+
+_NOISE_TAG_PATTERNS = [_tag_pattern(t) for t in _NOISE_TAGS]
+
+# Strings that identify an entire noise line when found at its start.
+# Matched case-sensitively and anchored to line-start so user prose mentioning
+# e.g. "current time:" in a sentence is untouched.
+_NOISE_LINE_PREFIXES = (
+    "CURRENT TIME:",
+    "VERIFIED FACTS (do not contradict)",
+    "AGENT SPECIALIZATION:",
+    "Checking verified facts...",
+    "Injecting timestamp...",
+    "Starting background pipeline...",
+    "Checking emotional weights...",
+    "Auto-save reminder...",
+    "Checking pipeline...",
+    "MemPalace auto-save checkpoint.",
+)
+
+_NOISE_LINE_PATTERNS = [
+    re.compile(rf"(?m)^(?:> )?{re.escape(p)}.*\n?") for p in _NOISE_LINE_PREFIXES
+]
+
+# Claude Code TUI hook-run chrome, e.g. "Ran 2 Stop hook", "Ran 1 PreCompact hook".
+# Line-anchored, case-sensitive, explicit hook names — prose like
+# "our CI has a stop hook" stays intact.
+_HOOK_LINE_RE = re.compile(
+    r"(?m)^(?:> )?Ran \d+ (?:Stop|PreCompact|PreToolUse|PostToolUse|UserPromptSubmit|Notification|SessionStart|SessionEnd) hook[s]?.*\n?"
+)
+
+# "… +N lines" collapsed-output marker, line-anchored.
+_COLLAPSED_LINES_RE = re.compile(r"(?m)^(?:> )?…\s*\+\d+ lines.*\n?")
+
+
+def strip_noise(text: str) -> str:
+    """Remove system tags, hook output, and Claude Code UI chrome from text.
+
+    All patterns are line-anchored. User prose that happens to mention these
+    strings inline (e.g., documenting them) is preserved verbatim.
+    """
+    for pat in _NOISE_TAG_PATTERNS:
+        text = pat.sub("", text)
+    for pat in _NOISE_LINE_PATTERNS:
+        text = pat.sub("", text)
+    text = _HOOK_LINE_RE.sub("", text)
+    text = _COLLAPSED_LINES_RE.sub("", text)
+    # Strip the Claude Code collapsed-output chrome "[N tokens] (ctrl+o to expand)".
+    # Narrow shape — a bare "(ctrl+o to expand)" in user prose stays intact.
+    text = re.sub(r"\s*\[\d+\s+tokens?\]\s*\(ctrl\+o to expand\)", "", text)
+    # Collapse runs of blank lines created by the removals
+    text = re.sub(r"\n{4,}", "\n\n\n", text)
+    return text.strip()
 
 
 def normalize(filepath: str) -> str:
@@ -30,7 +113,7 @@ def normalize(filepath: str) -> str:
     except OSError as e:
         raise IOError(f"Could not read {filepath}: {e}")
     if file_size > 500 * 1024 * 1024:  # 500 MB safety limit
-        raise IOError(f"File too large ({file_size // (1024*1024)} MB): {filepath}")
+        raise IOError(f"File too large ({file_size // (1024 * 1024)} MB): {filepath}")
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
@@ -40,12 +123,14 @@ def normalize(filepath: str) -> str:
     if not content.strip():
         return content
 
-    # Already has > markers — pass through
+    # Already has > markers — pass through unchanged.
     lines = content.split("\n")
     if sum(1 for line in lines if line.strip().startswith(">")) >= 3:
         return content
 
-    # Try JSON normalization
+    # Try JSON normalization. strip_noise is applied inside the Claude Code
+    # JSONL parser (the only format that injects system tags/hook chrome);
+    # other formats pass through verbatim.
     ext = Path(filepath).suffix.lower()
     if ext in (".json", ".jsonl") or content.strip()[:1] in ("{", "["):
         normalized = _try_normalize_json(content)
@@ -112,6 +197,10 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
                 isinstance(b, dict) and b.get("type") == "tool_result" for b in msg_content
             )
             text = _extract_content(msg_content, tool_use_map=tool_use_map)
+            # Strip Claude Code system-injected noise per message, never across
+            # message boundaries — prevents span-eating.
+            if text:
+                text = strip_noise(text)
             if text:
                 if is_tool_only and messages and messages[-1][0] == "assistant":
                     # Append tool results to the previous assistant message
@@ -121,6 +210,8 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
                     messages.append(("user", text))
         elif msg_type == "assistant":
             text = _extract_content(msg_content, tool_use_map=tool_use_map)
+            if text:
+                text = strip_noise(text)
             if text:
                 # If previous message is also assistant (multi-turn tool loop),
                 # merge into the same assistant turn
@@ -190,40 +281,46 @@ def _try_claude_ai_json(data) -> Optional[str]:
     if not isinstance(data, list):
         return None
 
-    # Privacy export: array of conversation objects with chat_messages inside each
-    if data and isinstance(data[0], dict) and "chat_messages" in data[0]:
-        all_messages = []
+    # Privacy export: array of conversation objects, each containing its own
+    # message list under "chat_messages" or "messages" (both variants seen in the wild).
+    if data and isinstance(data[0], dict) and ("chat_messages" in data[0] or "messages" in data[0]):
+        transcripts = []
         for convo in data:
             if not isinstance(convo, dict):
                 continue
-            chat_msgs = convo.get("chat_messages", [])
-            for item in chat_msgs:
-                if not isinstance(item, dict):
-                    continue
-                role = item.get("role", "")
-                text = _extract_content(item.get("content", ""))
-                if role in ("user", "human") and text:
-                    all_messages.append(("user", text))
-                elif role in ("assistant", "ai") and text:
-                    all_messages.append(("assistant", text))
-        if len(all_messages) >= 2:
-            return _messages_to_transcript(all_messages)
+            chat_msgs = convo.get("chat_messages") or convo.get("messages", [])
+            messages = _collect_claude_messages(chat_msgs)
+            if len(messages) >= 2:
+                transcripts.append(_messages_to_transcript(messages))
+        if transcripts:
+            return "\n\n".join(transcripts)
         return None
 
     # Flat messages list
+    messages = _collect_claude_messages(data)
+    if len(messages) >= 2:
+        return _messages_to_transcript(messages)
+    return None
+
+
+def _collect_claude_messages(items) -> list:
+    """Extract (role, text) pairs from a Claude.ai message list.
+
+    Accepts both ``role`` (API format) and ``sender`` (privacy export) as the
+    author field, and falls back to a top-level ``text`` key when the
+    ``content`` blocks are empty or absent.
+    """
     messages = []
-    for item in data:
+    for item in items:
         if not isinstance(item, dict):
             continue
-        role = item.get("role", "")
-        text = _extract_content(item.get("content", ""))
+        role = item.get("role") or item.get("sender", "")
+        text = _extract_content(item.get("content", "")) or (item.get("text") or "").strip()
         if role in ("user", "human") and text:
             messages.append(("user", text))
         elif role in ("assistant", "ai") and text:
             messages.append(("assistant", text))
-    if len(messages) >= 2:
-        return _messages_to_transcript(messages)
-    return None
+    return messages
 
 
 def _try_chatgpt_json(data) -> Optional[str]:
