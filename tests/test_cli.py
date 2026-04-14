@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mempalace.cli import (
+    build_parser,
     cmd_compress,
     cmd_hook,
     cmd_init,
@@ -100,6 +101,26 @@ def test_cmd_hook_calls_run_hook():
 
 
 # ── cmd_init ───────────────────────────────────────────────────────────
+
+
+def test_init_defaults_to_current_directory():
+    parser = build_parser()
+
+    args = parser.parse_args(["init"])
+
+    assert args.command == "init"
+    assert args.dir == "."
+    assert args.yes is False
+
+
+def test_init_accepts_explicit_directory():
+    parser = build_parser()
+
+    args = parser.parse_args(["init", "~/projects/demo", "--yes"])
+
+    assert args.command == "init"
+    assert args.dir == "~/projects/demo"
+    assert args.yes is True
 
 
 @patch("mempalace.cli.MempalaceConfig")

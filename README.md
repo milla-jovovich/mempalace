@@ -595,7 +595,7 @@ The 96.6% raw score is the highest published LongMemEval result requiring no API
 
 ```bash
 # Setup
-mempalace init <dir>                              # guided onboarding + AAAK bootstrap
+mempalace init [dir]                              # guided onboarding + AAAK bootstrap (default: current dir)
 
 # Mining
 mempalace mine <dir>                              # mine project files

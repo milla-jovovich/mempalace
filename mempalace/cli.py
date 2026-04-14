@@ -9,7 +9,7 @@ Two ways to ingest:
 Same palace. Same search. Different ingest strategies.
 
 Commands:
-    mempalace init <dir>                  Detect rooms from folder structure
+    mempalace init [dir]                  Detect rooms from folder structure
     mempalace split <dir>                 Split concatenated mega-files into per-session files
     mempalace mine <dir>                  Mine project files (default)
     mempalace mine <dir> --mode convos    Mine conversation exports
@@ -20,6 +20,7 @@ Commands:
     mempalace status                      Show what's been filed
 
 Examples:
+    mempalace init                        # init current directory
     mempalace init ~/projects/my_app
     mempalace mine ~/projects/my_app
     mempalace mine ~/chats/claude-sessions --mode convos
@@ -43,8 +44,9 @@ def cmd_init(args):
     from .room_detector_local import detect_rooms_local
 
     # Pass 1: auto-detect people and projects from file content
-    print(f"\n  Scanning for entities in: {args.dir}")
-    files = scan_for_detection(args.dir)
+    project_dir = Path(args.dir).expanduser().resolve()
+    print(f"\n  Scanning for entities in: {project_dir}")
+    files = scan_for_detection(str(project_dir))
     if files:
         print(f"  Reading {len(files)} files...")
         detected = detect_entities(files)
@@ -53,7 +55,7 @@ def cmd_init(args):
             confirmed = confirm_entities(detected, yes=getattr(args, "yes", False))
             # Save confirmed entities to <project>/entities.json for the miner
             if confirmed["people"] or confirmed["projects"]:
-                entities_path = Path(args.dir).expanduser().resolve() / "entities.json"
+                entities_path = project_dir / "entities.json"
                 with open(entities_path, "w") as f:
                     json.dump(confirmed, f, indent=2)
                 print(f"  Entities saved: {entities_path}")
@@ -61,7 +63,7 @@ def cmd_init(args):
             print("  No entities detected — proceeding with directory-based rooms.")
 
     # Pass 2: detect rooms from folder structure
-    detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
+    detect_rooms_local(project_dir=str(project_dir), yes=getattr(args, "yes", False))
     MempalaceConfig().init()
 
 
@@ -422,7 +424,7 @@ def cmd_compress(args):
         print("  (dry run -- nothing stored)")
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -438,7 +440,12 @@ def main():
 
     # init
     p_init = sub.add_parser("init", help="Detect rooms from your folder structure")
-    p_init.add_argument("dir", help="Project directory to set up")
+    p_init.add_argument(
+        "dir",
+        nargs="?",
+        default=".",
+        help="Project directory to set up (default: current directory)",
+    )
     p_init.add_argument(
         "--yes",
         action="store_true",
@@ -586,7 +593,12 @@ def main():
 
     sub.add_parser("status", help="Show what's been filed")
 
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
     if not args.command:
         parser.print_help()
