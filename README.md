@@ -67,7 +67,7 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 >
 > **What's still true and reproducible:**
 >
-> - **96.6% R@5 on LongMemEval in raw mode**, on 500 questions, zero API calls — independently reproduced on M2 Ultra in under 5 minutes by [@gizmax](https://github.com/milla-jovovich/mempalace/issues/39).
+> - **96.6% R@5 on LongMemEval in raw mode**, on 500 questions, zero API calls — independently reproduced on M2 Ultra in under 5 minutes by [@gizmax](https://github.com/MemPalace/mempalace/issues/39).
 > - Local, free, no subscription, no cloud, no data leaving your machine.
 > - The architecture (wings, rooms, closets, drawers) is real and useful, even if it's not a magical retrieval boost.
 >
@@ -78,9 +78,21 @@ Other memory systems try to fix this by letting AI decide what's worth rememberi
 > 3. Wiring `fact_checker.py` into the KG ops so the contradiction detection claim becomes true
 > 4. Pinning ChromaDB to a tested range (Issue #100), fixing the shell injection in hooks (#110), and addressing the macOS ARM64 segfault (#74)
 >
-> **Thank you to everyone who poked holes in this.** Brutal honest criticism is exactly what makes open source work, and it's what we asked for. Special thanks to [@panuhorsmalahti](https://github.com/milla-jovovich/mempalace/issues/43), [@lhl](https://github.com/milla-jovovich/mempalace/issues/27), [@gizmax](https://github.com/milla-jovovich/mempalace/issues/39), and everyone who filed an issue or a PR in the first 48 hours. We're listening, we're fixing, and we'd rather be right than impressive.
+> **Thank you to everyone who poked holes in this.** Brutal honest criticism is exactly what makes open source work, and it's what we asked for. Special thanks to [@panuhorsmalahti](https://github.com/MemPalace/mempalace/issues/43), [@lhl](https://github.com/MemPalace/mempalace/issues/27), [@gizmax](https://github.com/MemPalace/mempalace/issues/39), and everyone who filed an issue or a PR in the first 48 hours. We're listening, we're fixing, and we'd rather be right than impressive.
 >
 > — *Milla Jovovich & Ben Sigman*
+
+---
+
+## An important follow up note regarding fake MemPalace websites - April 11, 2026
+
+Several Community Members (#267, #326, #506) have pointed out there are fake MemPalace websites popping up, including ones with Malware.
+
+To be super clear, MemPalace *has no website* (at least for now), so anything claiming to be one is false.
+
+Thanks to our Community Members for letting us know about the problem.
+
+Stay safe out there.
 
 ---
 
@@ -117,7 +129,7 @@ After the one-time setup (install → init → mine), you don't run MemPalace co
 Native marketplace install:
 
 ```bash
-claude plugin marketplace add milla-jovovich/mempalace
+claude plugin marketplace add MemPalace/mempalace
 claude plugin install --scope user mempalace
 ```
 
@@ -130,7 +142,7 @@ Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-Now your AI has 19 tools available through MCP. Ask it anything:
+Now your AI has 29 tools available through MCP. Ask it anything:
 
 > *"What did we decide about auth last month?"*
 
@@ -149,7 +161,7 @@ mempalace wake-up > context.txt
 # Paste context.txt into your local model's system prompt
 ```
 
-This gives your local model ~170 tokens of critical facts (in AAAK if you prefer) before you ask a single question.
+This gives your local model ~600-900 tokens of critical facts (in AAAK if you prefer) before you ask a single question.
 
 **2. CLI search** — query on demand, feed results into your prompt:
 
@@ -180,10 +192,10 @@ Decisions happen in conversations now. Not in docs. Not in Jira. In conversation
 |----------|--------------|-------------|
 | Paste everything | 19.5M — doesn't fit any context window | Impossible |
 | LLM summaries | ~650K | ~$507/yr |
-| **MemPalace wake-up** | **~170 tokens** | **~$0.70/yr** |
+| **MemPalace wake-up** | **~600-900 tokens** | **~$0.70/yr** |
 | **MemPalace + 5 searches** | **~13,500 tokens** | **~$10/yr** |
 
-MemPalace loads 170 tokens of critical facts on wake-up — your team, your projects, your preferences. Then searches only when needed. $10/year to remember everything vs $507/year for summaries that lose context.
+MemPalace loads ~600-900 tokens of critical facts on wake-up — your team, your projects, your preferences. Then searches only when needed. $10/year to remember everything vs $507/year for summaries that lose context.
 
 ---
 
@@ -206,40 +218,40 @@ There are also **halls**, which connect rooms within a wing, and **tunnels**, wh
 You say what you're looking for and boom, it already knows which wing to go to. Just *that* in itself would have made a big difference. But this is beautiful, elegant, organic, and most importantly, efficient.
 
 ```
-  ┌─────────────────────────────────────────────────────────────┐
-  │  WING: Person                                              │
-  │                                                            │
-  │    ┌──────────┐  ──hall──  ┌──────────┐                    │
-  │    │  Room A  │            │  Room B  │                    │
-  │    └────┬─────┘            └──────────┘                    │
-  │         │                                                  │
-  │         ▼                                                  │
-  │    ┌──────────┐      ┌──────────┐                          │
-  │    │  Closet  │ ───▶ │  Drawer  │                          │
-  │    └──────────┘      └──────────┘                          │
-  └─────────┼──────────────────────────────────────────────────┘
-            │
+  +------------------------------------------------------------+
+  ¦  WING: Person                                              ¦
+  ¦                                                            ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦    ¦  Room A  ¦  --hall--  ¦  Room B  ¦                    ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦         ¦                                                  ¦
+  ¦         v                                                  ¦
+  ¦    +----------+      +----------+                          ¦
+  ¦    ¦  Closet  ¦ ---> ¦  Drawer  ¦                          ¦
+  ¦    +----------+      +----------+                          ¦
+  +---------+--------------------------------------------------+
+            ¦
           tunnel
-            │
-  ┌─────────┼──────────────────────────────────────────────────┐
-  │  WING: Project                                             │
-  │         │                                                  │
-  │    ┌────┴─────┐  ──hall──  ┌──────────┐                    │
-  │    │  Room A  │            │  Room C  │                    │
-  │    └────┬─────┘            └──────────┘                    │
-  │         │                                                  │
-  │         ▼                                                  │
-  │    ┌──────────┐      ┌──────────┐                          │
-  │    │  Closet  │ ───▶ │  Drawer  │                          │
-  │    └──────────┘      └──────────┘                          │
-  └─────────────────────────────────────────────────────────────┘
+            ¦
+  +---------+--------------------------------------------------+
+  ¦  WING: Project                                             ¦
+  ¦         ¦                                                  ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦    ¦  Room A  ¦  --hall--  ¦  Room C  ¦                    ¦
+  ¦    +----------+            +----------+                    ¦
+  ¦         ¦                                                  ¦
+  ¦         v                                                  ¦
+  ¦    +----------+      +----------+                          ¦
+  ¦    ¦  Closet  ¦ ---> ¦  Drawer  ¦                          ¦
+  ¦    +----------+      +----------+                          ¦
+  +------------------------------------------------------------+
 ```
 
 **Wings** — a person or project. As many as you need.
 **Rooms** — specific topics within a wing. Auth, billing, deploy — endless rooms.
 **Halls** — connections between related rooms *within* the same wing. If Room A (auth) and Room B (security) are related, a hall links them.
 **Tunnels** — connections *between* wings. When Person A and a Project both have a room about "auth," a tunnel cross-references them automatically.
-**Closets** — summaries that point to the original content. (In v3.0.0 these are plain-text summaries; AAAK-encoded closets are coming in a future update — see [Task #30](https://github.com/milla-jovovich/mempalace/issues/30).)
+**Closets** — summaries that point to the original content. (In v3.0.0 these are plain-text summaries; AAAK-encoded closets are coming in a future update — see [Task #30](https://github.com/MemPalace/mempalace/issues/30).)
 **Drawers** — the original verbatim files. The exact words, never summarized.
 
 **Halls** are memory types — the same in every wing, acting as corridors:
@@ -281,7 +293,7 @@ Wings and rooms aren't cosmetic. They're a **34% retrieval improvement**. The pa
 | **L2** | Room recall — recent sessions, current project | On demand | When topic comes up |
 | **L3** | Deep search — semantic query across all closets | On demand | When explicitly asked |
 
-Your AI wakes up with L0 + L1 (~170 tokens) and knows your world. Searches only fire when needed.
+Your AI wakes up with L0 + L1 (~600-900 tokens) and knows your world. Searches only fire when needed.
 
 ### AAAK Dialect (experimental)
 
@@ -295,11 +307,11 @@ AAAK is a lossy abbreviation system — entity codes, structural markers, and se
 - **AAAK currently regresses LongMemEval** vs raw verbatim retrieval (84.2% R@5 vs 96.6%). The 96.6% headline number is from **raw mode**, not AAAK mode.
 - **The MemPalace storage default is raw verbatim text in ChromaDB** — that's where the benchmark wins come from. AAAK is a separate compression layer for context loading, not the storage format.
 
-We're iterating on the dialect spec, adding a real tokenizer for stats, and exploring better break points for when to use it. Track progress in [Issue #43](https://github.com/milla-jovovich/mempalace/issues/43) and [#27](https://github.com/milla-jovovich/mempalace/issues/27).
+We're iterating on the dialect spec, adding a real tokenizer for stats, and exploring better break points for when to use it. Track progress in [Issue #43](https://github.com/MemPalace/mempalace/issues/43) and [#27](https://github.com/MemPalace/mempalace/issues/27).
 
 ### Contradiction Detection (experimental, not yet wired into KG)
 
-A separate utility (`fact_checker.py`) can check assertions against entity facts. It's not currently called automatically by the knowledge graph operations — this is being fixed (track in [Issue #27](https://github.com/milla-jovovich/mempalace/issues/27)). When enabled it catches things like:
+A separate utility (`fact_checker.py`) can check assertions against entity facts. It's not currently called automatically by the knowledge graph operations — this is being fixed (track in [Issue #27](https://github.com/MemPalace/mempalace/issues/27)). When enabled it catches things like:
 
 ```
 Input:  "Soren finished the auth migration"
@@ -451,14 +463,14 @@ Letta charges $20–200/mo for agent-managed memory. MemPalace does it with a wi
 
 ```bash
 # Via plugin (recommended)
-claude plugin marketplace add milla-jovovich/mempalace
+claude plugin marketplace add MemPalace/mempalace
 claude plugin install --scope user mempalace
 
 # Or manually
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-### 19 Tools
+### 29 Tools
 
 **Palace (read)**
 
@@ -496,6 +508,18 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 | `mempalace_traverse` | Walk the graph from a room across wings |
 | `mempalace_find_tunnels` | Find rooms bridging two wings |
 | `mempalace_graph_stats` | Graph connectivity overview |
+| `mempalace_create_tunnel` | Create explicit cross-wing link between two rooms |
+| `mempalace_list_tunnels` | List all explicit tunnels, filter by wing |
+| `mempalace_delete_tunnel` | Remove a tunnel by ID |
+| `mempalace_follow_tunnels` | Follow tunnels from a room to connected rooms in other wings |
+
+**Drawer Management**
+
+| Tool | What |
+|------|------|
+| `mempalace_get_drawer` | Fetch a single drawer by ID |
+| `mempalace_list_drawers` | Paginated drawer listing |
+| `mempalace_update_drawer` | Update drawer content or metadata |
 
 **Agent Diary**
 
@@ -503,6 +527,14 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 |------|------|
 | `mempalace_diary_write` | Write AAAK diary entry |
 | `mempalace_diary_read` | Read recent diary entries |
+
+**System**
+
+| Tool | What |
+|------|------|
+| `mempalace_hook_settings` | Get/set hook behavior (silent save, toast) |
+| `mempalace_memories_filed_away` | Check if recent checkpoint was saved |
+| `mempalace_reconnect` | Force DB reconnect after external writes |
 
 The AI learns AAAK and the memory protocol automatically from the `mempalace_status` response. No manual configuration.
 
@@ -633,12 +665,12 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `cli.py` | CLI entry point |
 | `config.py` | Configuration loading and defaults |
 | `normalize.py` | Converts 5 chat formats to standard transcript |
-| `mcp_server.py` | MCP server — 19 tools, AAAK auto-teach, memory protocol |
+| `mcp_server.py` | MCP server — 29 tools, AAAK auto-teach, memory protocol |
 | `miner.py` | Project file ingest |
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |
 | `searcher.py` | Semantic search via ChromaDB |
 | `layers.py` | 4-layer memory stack |
-| `dialect.py` | AAAK compression — 30x lossless |
+| `dialect.py` | AAAK index format for closet pointers |
 | `knowledge_graph.py` | Temporal entity-relationship graph (SQLite) |
 | `palace_graph.py` | Room-based navigation graph |
 | `onboarding.py` | Guided setup — generates AAAK bootstrap + wing config |
@@ -657,7 +689,7 @@ mempalace/
 ├── README.md                  ← you are here
 ├── mempalace/                 ← core package (README)
 │   ├── cli.py                 ← CLI entry point
-│   ├── mcp_server.py          ← MCP server (19 tools)
+│   ├── mcp_server.py          ← MCP server (29 tools)
 │   ├── knowledge_graph.py     ← temporal entity graph
 │   ├── palace_graph.py        ← room navigation graph
 │   ├── dialect.py             ← AAAK compression
@@ -682,7 +714,7 @@ mempalace/
 │   └── mcp_setup.md
 ├── tests/                     ← test suite (README)
 ├── assets/                    ← logo + brand assets
-└── pyproject.toml             ← package config (v3.0.0)
+└── pyproject.toml             ← package config (v3.3.0)
 ```
 
 ---
@@ -710,11 +742,11 @@ PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
 MIT — see [LICENSE](LICENSE).
 
 <!-- Link Definitions -->
-[version-shield]: https://img.shields.io/badge/version-3.1.0-4dc9f6?style=flat-square&labelColor=0a0e14
-[release-link]: https://github.com/milla-jovovich/mempalace/releases
+[version-shield]: https://img.shields.io/badge/version-3.3.0-4dc9f6?style=flat-square&labelColor=0a0e14
+[release-link]: https://github.com/MemPalace/mempalace/releases
 [python-shield]: https://img.shields.io/badge/python-3.9+-7dd8f8?style=flat-square&labelColor=0a0e14&logo=python&logoColor=7dd8f8
 [python-link]: https://www.python.org/
 [license-shield]: https://img.shields.io/badge/license-MIT-b0e8ff?style=flat-square&labelColor=0a0e14
-[license-link]: https://github.com/milla-jovovich/mempalace/blob/main/LICENSE
+[license-link]: https://github.com/MemPalace/mempalace/blob/main/LICENSE
 [discord-shield]: https://img.shields.io/badge/discord-join-5865F2?style=flat-square&labelColor=0a0e14&logo=discord&logoColor=5865F2
 [discord-link]: https://discord.com/invite/ycTQQCu6kn
