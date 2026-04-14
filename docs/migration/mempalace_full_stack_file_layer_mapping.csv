@@ -1,0 +1,201 @@
+path,layer,role,authority,status,notes
+.gitignore,L0-infra,repo hygiene,hand-authored,canonical,Ignore rules for runtime/build noise.
+.pre-commit-config.yaml,L1-tools,dev-tooling contract,hand-authored,canonical,Tooling/lint automation on top of repo substrate.
+AGENTS.md,L2-agents,agent-facing repo policy,hand-authored,canonical,Instruction surface for agent behavior in repo.
+CHANGELOG.md,L3-assembly,release/change artifact,hand-authored,derived-facing,Assembly/release history for distributed unit.
+CLAUDE.md,L2-agents,assistant/operator instruction surface,hand-authored,canonical,Agent-facing operating contract.
+CONTRIBUTING.md,L2-workflows,contribution workflow doc,hand-authored,canonical,Workflow rules for changing the unit.
+LICENSE,L0-infra,legal/root contract,hand-authored,canonical,Base legal substrate.
+MISSION.md,L3-assembly,product intent artifact,hand-authored,canonical,Public framing of assembled unit.
+README.md,L3-assembly,public entrypoint artifact,hand-authored,canonical,Assembled public interface to the repo.
+ROADMAP.md,L3-assembly,forward assembly plan,hand-authored,canonical,Future output/release direction.
+pyproject.toml,L0-infra,package/build/runtime contract,hand-authored,canonical,"Root package identity, scripts, deps."
+uv.lock,L0-infra,dependency lock substrate,generated,derived,Deterministic dependency substrate.
+.agents/plugins/marketplace.json,L1-mcp-servers,plugin distribution manifest,hand-authored,canonical,Marketplace-facing server/plugin declaration.
+.claude-plugin/.mcp.json,L1-mcp-servers,MCP launch manifest,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/plugin.json,L1-mcp-servers,plugin manifest,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/marketplace.json,L1-mcp-servers,plugin marketplace listing,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/README.md,L2-workflows,plugin install workflow doc,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/commands/help.md,L2-workflows,command/help workflow doc,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/commands/init.md,L2-workflows,init workflow doc,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/commands/mine.md,L2-workflows,mine workflow doc,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/commands/search.md,L2-workflows,search workflow doc,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/commands/status.md,L2-workflows,status workflow doc,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/hooks/hooks.json,L1-mcp-servers,hook manifest,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/hooks/mempal-precompact-hook.sh,L1-mcp-servers,precompact hook adapter,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/hooks/mempal-stop-hook.sh,L1-mcp-servers,stop hook adapter,hand-authored,canonical,Claude-facing integration/projection surface.
+.claude-plugin/skills/mempalace/SKILL.md,L2-agents,agent skill surface,hand-authored,canonical,Claude-facing integration/projection surface.
+.codex-plugin/plugin.json,L1-mcp-servers,plugin manifest,hand-authored,canonical,Codex-facing integration/projection surface.
+.codex-plugin/hooks.json,L1-mcp-servers,hook registry manifest,hand-authored,canonical,Codex-facing integration/projection surface.
+.codex-plugin/README.md,L2-workflows,plugin install workflow doc,hand-authored,canonical,Codex-facing integration/projection surface.
+.codex-plugin/hooks/mempal-hook.sh,L1-mcp-servers,hook adapter,hand-authored,canonical,Codex-facing integration/projection surface.
+.codex-plugin/skills/help,L2-agents,agent skill directory,hand-authored,canonical,Codex-facing integration/projection surface.
+.codex-plugin/skills/init,L2-agents,agent skill directory,hand-authored,canonical,Codex-facing integration/projection surface.
+.codex-plugin/skills/mine,L2-agents,agent skill directory,hand-authored,canonical,Codex-facing integration/projection surface.
+.codex-plugin/skills/search,L2-agents,agent skill directory,hand-authored,canonical,Codex-facing integration/projection surface.
+.codex-plugin/skills/status,L2-agents,agent skill directory,hand-authored,canonical,Codex-facing integration/projection surface.
+.github/ISSUE_TEMPLATE/bug_report.md,L3-observation,issue intake form,hand-authored,canonical,GitHub control surface.
+.github/ISSUE_TEMPLATE/feature_request.md,L3-observation,issue intake form,hand-authored,canonical,GitHub control surface.
+.github/workflows/bump-plugin-version.yml.disabled,L3-assembly,release automation workflow,hand-authored,canonical,GitHub control surface.
+.github/workflows/ci.yml,L3-observation,CI verification workflow,hand-authored,canonical,GitHub control surface.
+.github/workflows/deploy-docs.yml,L3-assembly,docs deployment workflow,hand-authored,canonical,GitHub control surface.
+.github/CODEOWNERS,L0-infra,ownership contract,hand-authored,canonical,GitHub control surface.
+.github/PULL_REQUEST_TEMPLATE.md,L2-workflows,change workflow template,hand-authored,canonical,GitHub control surface.
+.github/dependabot.yml,L1-tools,dependency maintenance tool config,hand-authored,canonical,GitHub control surface.
+assets/(brand/logo assets),L3-assembly,brand/distribution assets,hand-authored,canonical,Visual assets for assembled product.
+benchmarks/README.md,L3-observation,benchmark methodology/results doc,hand-authored,canonical,Observation surface for retrieval quality.
+benchmarks/BENCHMARKS.md,L3-observation,benchmark methodology/results doc,hand-authored,canonical,Observation surface for retrieval quality.
+benchmarks/HYBRID_MODE.md,L3-observation,benchmark methodology/results doc,hand-authored,canonical,Observation surface for retrieval quality.
+benchmarks/convomem_bench.py,L3-observation,benchmark runner,hand-authored,canonical,Evaluation harness over live runtime.
+benchmarks/locomo_bench.py,L3-observation,benchmark runner,hand-authored,canonical,Evaluation harness over live runtime.
+benchmarks/longmemeval_bench.py,L3-observation,benchmark runner,hand-authored,canonical,Evaluation harness over live runtime.
+benchmarks/membench_bench.py,L3-observation,benchmark runner,hand-authored,canonical,Evaluation harness over live runtime.
+docs/CLOSETS.md,L2-workflows,storage/workflow doc,hand-authored,canonical,Operational/storage documentation.
+docs/schema.sql,L0-infra,storage schema contract,hand-authored,canonical,Base SQL schema / storage substrate.
+examples/HOOKS_TUTORIAL.md,L2-workflows,hooks workflow doc,hand-authored,canonical,Operator workflow example.
+examples/basic_mining.py,L2-workflows,workflow example,hand-authored,canonical,Usage workflow example.
+examples/convo_import.py,L2-workflows,workflow example,hand-authored,canonical,Usage workflow example.
+examples/gemini_cli_setup.md,L2-workflows,integration workflow doc,hand-authored,canonical,Operator workflow example.
+examples/mcp_setup.md,L2-workflows,integration workflow doc,hand-authored,canonical,Operator workflow example.
+hooks/README.md,L2-workflows,hook operation doc,hand-authored,canonical,Workflow/operator guidance for hooks.
+hooks/mempal_save_hook.sh,L1-mcp-servers,hook runtime adapter,hand-authored,canonical,Runtime save hook integration surface.
+hooks/mempal_precompact_hook.sh,L1-mcp-servers,hook runtime adapter,hand-authored,canonical,Runtime precompact hook integration surface.
+integrations/openclaw/SKILL.md,L2-agents,integration skill surface,hand-authored,canonical,Agent-facing integration surface.
+mempalace/__init__.py,L0-infra,package root,hand-authored,canonical,Python package substrate.
+mempalace/__main__.py,L1-tools,CLI entry shim,hand-authored,canonical,Tooling entrypoint over runtime substrate.
+mempalace/README.md,L3-assembly,package-facing docs artifact,hand-authored,canonical,Public/package assembly-facing documentation.
+mempalace/py.typed,L0-infra,typing contract marker,hand-authored,canonical,Package typing substrate.
+mempalace/version.py,L0-infra,version contract,hand-authored,canonical,Runtime/package identity contract.
+mempalace/config.py,L0-infra,runtime config substrate,hand-authored,canonical,Root config loading and defaults.
+mempalace/backends/__init__.py,L0-infra,backend package root,hand-authored,canonical,Storage substrate package.
+mempalace/backends/base.py,L0-infra,backend abstraction contract,hand-authored,canonical,Storage substrate abstraction.
+mempalace/backends/chroma.py,L0-infra,default storage backend,hand-authored,canonical,Chroma runtime storage substrate.
+mempalace/palace.py,L0-infra,storage orchestration substrate,hand-authored,canonical,Core persistence substrate.
+mempalace/migrate.py,L0-infra,storage migration tool/runtime bridge,hand-authored,canonical,Storage contract evolution.
+mempalace/repair.py,L0-infra,storage repair bridge,hand-authored,canonical,Storage integrity substrate.
+mempalace/knowledge_graph.py,L0-infra,KG substrate,hand-authored,canonical,Temporal fact storage substrate.
+mempalace/entity_registry.py,L0-infra,entity identity substrate,hand-authored,canonical,Canonical entity/index substrate.
+mempalace/dedup.py,L1-tools,duplication utility,hand-authored,canonical,Runtime utility/helper layer.
+mempalace/dialect.py,L1-tools,AAAK transform utility,hand-authored,canonical,Runtime utility/helper layer.
+mempalace/entity_detector.py,L1-tools,extraction utility,hand-authored,canonical,Runtime utility/helper layer.
+mempalace/exporter.py,L3-assembly,export/projection emitter,hand-authored,canonical,Emits assembled/exported artifacts.
+mempalace/fact_checker.py,L3-observation,contradiction/verification tool,hand-authored,canonical,Observes and checks runtime facts.
+mempalace/general_extractor.py,L1-tools,extraction utility,hand-authored,canonical,Runtime utility/helper layer.
+mempalace/normalize.py,L1-tools,normalization utility,hand-authored,canonical,Runtime utility/helper layer.
+mempalace/query_sanitizer.py,L1-tools,query hygiene utility,hand-authored,canonical,Runtime utility/helper layer.
+mempalace/room_detector_local.py,L1-tools,local classification utility,hand-authored,canonical,Runtime utility/helper layer.
+mempalace/spellcheck.py,L1-tools,language utility,hand-authored,canonical,Runtime utility/helper layer.
+mempalace/split_mega_files.py,L1-tools,transcript/file utility,hand-authored,canonical,Runtime utility/helper layer.
+mempalace/cli.py,L1-tools,operator CLI tool surface,hand-authored,canonical,Primary command/tool runtime.
+mempalace/hooks_cli.py,L1-tools,hook CLI utility,hand-authored,canonical,Tool/runtime bridge for hooks.
+mempalace/instructions_cli.py,L1-tools,instruction CLI utility,hand-authored,canonical,Tool/runtime bridge for instruction surfaces.
+mempalace/onboarding.py,L2-workflows,init/onboarding workflow,hand-authored,canonical,Guided initialization flow.
+mempalace/miner.py,L2-workflows,project mining workflow,hand-authored,canonical,Project ingest workflow.
+mempalace/convo_miner.py,L2-workflows,conversation mining workflow,hand-authored,canonical,Conversation ingest workflow.
+mempalace/diary_ingest.py,L2-workflows,diary ingestion workflow,hand-authored,canonical,Ingest workflow surface.
+mempalace/layers.py,L2-agents,memory-layer agent/runtime surface,hand-authored,canonical,Agent-facing wake-up/context layer logic.
+mempalace/searcher.py,L1-mcp-servers,search runtime/service surface,hand-authored,canonical,Search service behind CLI/MCP surfaces.
+mempalace/palace_graph.py,L1-mcp-servers,navigation graph service,hand-authored,canonical,Cross-room navigation service behind CLI/MCP.
+mempalace/closet_llm.py,L1-tools,optional LLM transform utility,hand-authored,canonical,Optional utility layer.
+mempalace/mcp_server.py,L1-mcp-servers,MCP server runtime,hand-authored,canonical,Primary MCP integration/runtime surface.
+mempalace/instructions/help.md,L2-agents,instruction surface,hand-authored,canonical,Agent-facing command/instruction surface.
+mempalace/instructions/init.md,L2-workflows,init workflow instruction,hand-authored,canonical,Workflow-facing instruction surface.
+mempalace/instructions/mine.md,L2-workflows,mining workflow instruction,hand-authored,canonical,Workflow-facing instruction surface.
+mempalace/instructions/search.md,L2-agents,search instruction surface,hand-authored,canonical,Agent-facing command/instruction surface.
+mempalace/instructions/status.md,L2-agents,status instruction surface,hand-authored,canonical,Agent-facing command/instruction surface.
+mempalace/i18n/__init__.py,L1-tools,localization loader utility,hand-authored,canonical,Tool/runtime support layer.
+mempalace/i18n/en.json,L2-agents,language surface,hand-authored,canonical,Agent/user-facing language projection.
+mempalace/i18n/es.json,L2-agents,language surface,hand-authored,canonical,Agent/user-facing language projection.
+mempalace/i18n/fr.json,L2-agents,language surface,hand-authored,canonical,Agent/user-facing language projection.
+mempalace/i18n/de.json,L2-agents,language surface,hand-authored,canonical,Agent/user-facing language projection.
+mempalace/i18n/ja.json,L2-agents,language surface,hand-authored,canonical,Agent/user-facing language projection.
+mempalace/i18n/ko.json,L2-agents,language surface,hand-authored,canonical,Agent/user-facing language projection.
+mempalace/i18n/zh-CN.json,L2-agents,language surface,hand-authored,canonical,Agent/user-facing language projection.
+mempalace/i18n/zh-TW.json,L2-agents,language surface,hand-authored,canonical,Agent/user-facing language projection.
+mempalace/i18n/ru.json,L2-agents,language surface,hand-authored,canonical,Agent/user-facing language projection.
+mempalace/i18n/id.json,L2-agents,language surface,hand-authored,canonical,Agent/user-facing language projection.
+tests/conftest.py,L3-observation,test substrate,hand-authored,canonical,Verification harness support.
+tests/test_backends.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_cli.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_closets.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_config.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_config_extra.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_convo_miner.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_convo_miner_unit.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_dedup.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_dialect.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_entity_detector.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_entity_registry.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_exporter.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_general_extractor.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_hooks_cli.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_instructions_cli.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_knowledge_graph.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_knowledge_graph_extra.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_layers.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_mcp_server.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_migrate.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_miner.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_normalize.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_onboarding.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_palace_graph.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_query_sanitizer.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_repair.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_room_detector_local.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_searcher.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_spellcheck.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_spellcheck_extra.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_split_mega_files.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/test_version_consistency.py,L3-observation,runtime verification test,hand-authored,canonical,Verification surface.
+tests/benchmarks/README.md,L3-observation,benchmark/test doc,hand-authored,canonical,Verification/observation surface.
+tests/benchmarks/__init__.py,L3-observation,benchmark test package root,hand-authored,canonical,Verification/observation surface.
+tests/benchmarks/conftest.py,L3-observation,benchmark harness substrate,hand-authored,canonical,Verification/observation surface.
+tests/benchmarks/data_generator.py,L3-observation,benchmark data generator,hand-authored,canonical,Verification/observation surface.
+tests/benchmarks/report.py,L3-observation,benchmark/report utility,hand-authored,canonical,Verification/observation surface.
+tests/benchmarks/test_chromadb_stress.py,L3-observation,benchmark stress verification,hand-authored,canonical,Verification/observation surface.
+tests/benchmarks/test_ingest_bench.py,L3-observation,benchmark ingest verification,hand-authored,canonical,Verification/observation surface.
+website/index.md,L3-assembly,docs-site entry artifact,hand-authored,canonical,Docs/distribution assembly surface.
+website/package.json,L3-assembly,docs-site build contract,hand-authored,canonical,Docs assembly/build surface.
+website/bun.lock,L3-assembly,docs-site lock artifact,generated,derived,Deterministic docs assembly substrate.
+website/.vitepress/*,L3-assembly,docs-site assembly config,hand-authored,canonical,Docs assembly/build surface.
+website/concepts/*,L3-assembly,docs-site concept artifact,hand-authored,canonical,Public/docs assembly surface.
+website/guide/*,L3-assembly,docs-site guide artifact,hand-authored,canonical,Public/docs assembly surface.
+website/reference/*,L3-assembly,docs-site reference artifact,hand-authored,canonical,Public/docs assembly surface.
+website/public/*,L3-assembly,static docs asset,hand-authored,canonical,Public/docs assembly surface.
+docs/migration/README.md,L2-workflows,migration workflow doc,hand-authored,canonical,Branch-added reorganization workflow surface.
+docs/migration/mempalace_migration_checklist.md,L2-workflows,migration workflow doc,hand-authored,canonical,Branch-added reorganization workflow surface.
+docs/migration/mempalace_rebrand_compile_plan.md,L2-workflows,rebrand/compile workflow doc,hand-authored,canonical,Branch-added reorganization workflow surface.
+docs/migration/APEX_CONVERSION_ARCHITECTURE.md,L3-assembly,architectural assembly artifact,hand-authored,canonical,Branch-added architecture surface.
+docs/migration/DID_LD_ARCHITECTURE.md,L0-infra,identity/schema architecture contract,hand-authored,canonical,Branch-added identity substrate doc.
+docs/migration/FULL_STACK_UNIT_DID_TAXONOMY.md,L0-infra,layer taxonomy contract,hand-authored,canonical,Branch-added architecture contract.
+docs/migration/GRAPH_NATIVE_FULL_STACK_UNIT_KERNEL.md,L3-assembly,architectural assembly artifact,hand-authored,canonical,Branch-added architecture surface.
+docs/migration/PROGRESSIVE_LAYER_DECLARATION_MODEL.md,L0-infra,progression contract,hand-authored,canonical,Branch-added architecture contract.
+semantics/README.md,L0-infra,semantic control-plane root,hand-authored,canonical,Branch-added semantic substrate surface.
+semantics/contexts/core.context.jsonld,L0-infra,semantic vocabulary contract,hand-authored,canonical,Branch-added semantic substrate surface.
+semantics/contexts/full-stack-unit.context.jsonld,L0-infra,full-stack unit vocabulary contract,hand-authored,canonical,Branch-added semantic substrate surface.
+semantics/contexts/progression.context.jsonld,L0-infra,progression vocabulary contract,hand-authored,canonical,Branch-added semantic substrate surface.
+semantics/hot/repo.identity.yaml,L0-infra,hot semantic declaration,hand-authored,canonical,Branch-added semantic substrate surface.
+semantics/hot/full-stack-unit.identity.yamlld,L0-infra,hot semantic declaration,hand-authored,canonical,Branch-added semantic substrate surface.
+semantics/hot/full-stack-unit.progression.yamlld,L0-infra,hot progression declaration,hand-authored,canonical,Branch-added semantic substrate surface.
+semantics/cold/repo.bundle.example.jsonld,L3-assembly,compiled semantic bundle artifact,hand-authored,derived-facing,Branch-added compiled/assembled semantic output example.
+semantics/cold/kernel.projections.example.json,L3-assembly,projection artifact example,hand-authored,derived-facing,Branch-added assembly/projection output example.
+semantics/shapes/full-stack-unit.shacl.ttl,L0-infra,semantic validation contract,hand-authored,canonical,Branch-added substrate validation shape.
+tools/mempalace_execution_kit/README.md,L1-tools,execution kit tool doc,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/START_HERE.md,L1-tools,execution kit entry doc,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/LEGACY_V1.md,L1-tools,legacy toolchain doc,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/conventions.example.json,L1-tools,tool input schema example,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/conventions.single-target.example.json,L1-tools,tool input schema example,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/batch_targets.example.json,L1-tools,tool input schema example,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/batch_apply_manifest.example.json,L1-tools,tool input schema example,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/identity.schema.json,L1-tools,tool schema contract,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/identity_model.md,L1-tools,tool architecture doc,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/rename_surface_manifest.csv,L1-tools,tool inventory artifact,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/compile_identity.py,L1-tools,compiler tool,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/compile_semantic_identity.py,L1-tools,semantic compiler tool,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/apply_conventions.py,L1-tools,rewrite tool,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/apply_conventions_v2.py,L1-tools,rewrite tool,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/apply_batch_v2.py,L1-tools,batch rewrite tool,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/verify_conventions.py,L1-tools,verification tool,hand-authored,canonical,Branch-added toolchain surface.
+tools/mempalace_execution_kit/run_all.sh,L2-workflows,tool workflow wrapper,hand-authored,canonical,Branch-added execution workflow surface.
+tools/mempalace_execution_kit/run_all_v2.sh,L2-workflows,tool workflow wrapper,hand-authored,canonical,Branch-added execution workflow surface.
+tools/mempalace_execution_kit/forge.py,L1-tools,orchestration tool,hand-authored,canonical,Branch-added toolchain surface.
