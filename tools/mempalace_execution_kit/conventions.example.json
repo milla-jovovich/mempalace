@@ -1,0 +1,33 @@
+{
+  "source_package_name": "mempalace",
+  "source_cli_command": "mempalace",
+  "source_hidden_dir": ".mempalace",
+  "source_module_entry": "mempalace.mcp_server",
+  "source_repo_url": "https://github.com/MemPalace/mempalace",
+
+  "target_package_name": "yourpkg",
+  "target_cli_command": "yourcmd",
+  "target_hidden_dir": ".yourapp",
+  "target_module_entry": "yourpkg.mcp_server",
+  "target_repo_url": "https://github.com/your-org/your-repo",
+
+  "source_collection_names": {
+    "drawers": "mempalace_drawers",
+    "compressed": "mempalace_compressed",
+    "closets": "mempalace_closets"
+  },
+  "target_collection_names": {
+    "drawers": "yourpkg_drawers",
+    "compressed": "yourpkg_compressed",
+    "closets": "yourpkg_closets"
+  },
+
+  "plugin_name": "yourpkg",
+  "plugin_display_name": "YourPkg",
+  "brand_color": "#2563EB",
+
+  "interpreter_policy": {
+    "env_var": "YOURPKG_PYTHON",
+    "fallback_command": "python"
+  }
+}
