@@ -1,0 +1,82 @@
+"@context":
+  - ../contexts/core.context.jsonld
+  - ../contexts/full-stack-unit.context.jsonld
+
+"@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#operations
+"@type":
+  - FullStackUnit
+
+repoRoot: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+
+operations:
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/status
+    "@type": Capability
+    category: runtime-status
+    description: Show palace health, room counts, collection state, and integration status.
+    enabled: true
+    cli:
+      command: status
+      exposure: public
+    mcp:
+      tool: mempalace_status
+      exposure: public
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search
+    "@type": Capability
+    category: retrieval
+    description: Search drawers and closets using MemPalace retrieval.
+    enabled: true
+    cli:
+      command: search
+      exposure: public
+    mcp:
+      tool: mempalace_search
+      exposure: public
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine
+    "@type": Capability
+    category: ingestion
+    description: Mine a project or working directory into palace memory.
+    enabled: true
+    cli:
+      command: mine
+      exposure: public
+    mcp:
+      tool: mempalace_mine
+      exposure: gated
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/init
+    "@type": Capability
+    category: bootstrap
+    description: Initialize a new MemPalace root and onboarding surface.
+    enabled: true
+    cli:
+      command: init
+      exposure: public
+    mcp:
+      tool: mempalace_init
+      exposure: hidden
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop
+    "@type": Capability
+    category: hooks
+    description: Execute the stop-hook runtime for background save behavior.
+    enabled: true
+    cli:
+      command: hook run --hook stop
+      exposure: internal
+    mcp:
+      tool: mempalace_hook_stop
+      exposure: hidden
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact
+    "@type": Capability
+    category: hooks
+    description: Execute the precompact hook runtime for emergency save behavior.
+    enabled: true
+    cli:
+      command: hook run --hook precompact
+      exposure: internal
+    mcp:
+      tool: mempalace_hook_precompact
+      exposure: hidden
