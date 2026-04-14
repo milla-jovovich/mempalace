@@ -168,8 +168,9 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
 }
 HOOKJSON
     else
-        # Silent mode: return empty JSON to not block. "decision": "allow" is
-        # not a valid value — only "block" or {} are recognized.
+        # Silent mode: return empty JSON to not block. The top-level
+        # "decision" field only recognizes "block"; returning empty JSON
+        # means "do not block". See #872.
         echo '{}'
     fi
 else
