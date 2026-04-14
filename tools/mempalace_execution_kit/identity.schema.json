@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/mempalace-identity.schema.json",
+  "title": "MemPalace Identity Compiler Schema",
+  "type": "object",
+  "required": ["source", "target"],
+  "properties": {
+    "source": {
+      "type": "object",
+      "required": ["package", "command", "hidden_dir", "module_entry", "collections"],
+      "properties": {
+        "package": {"type": "string", "minLength": 1},
+        "command": {"type": "string", "minLength": 1},
+        "hidden_dir": {"type": "string", "pattern": "^\\.[A-Za-z0-9._-]+$"},
+        "module_entry": {"type": "string", "minLength": 1},
+        "repo_url": {"type": ["string", "null"]},
+        "collections": {
+          "type": "object",
+          "required": ["drawers", "compressed", "closets"],
+          "properties": {
+            "drawers": {"type": "string", "minLength": 1},
+            "compressed": {"type": "string", "minLength": 1},
+            "closets": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "required": ["id", "display_name", "repo_url"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "display_name": {"type": "string", "minLength": 1},
+        "repo_url": {"type": "string", "minLength": 1},
+        "brand_color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}
+      },
+      "additionalProperties": false
+    },
+    "overrides": {
+      "type": "object",
+      "properties": {
+        "package": {"type": ["string", "null"]},
+        "command": {"type": ["string", "null"]},
+        "hidden_dir": {"type": ["string", "null"], "pattern": "^\\.[A-Za-z0-9._-]+$"},
+        "module_entry": {"type": ["string", "null"]},
+        "plugin_name": {"type": ["string", "null"]},
+        "plugin_display_name": {"type": ["string", "null"]},
+        "interpreter_env_var": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]*$"},
+        "collections": {
+          "type": "object",
+          "properties": {
+            "drawers": {"type": ["string", "null"]},
+            "compressed": {"type": ["string", "null"]},
+            "closets": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "interpreter_policy": {
+      "type": "object",
+      "properties": {
+        "fallback_command": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
