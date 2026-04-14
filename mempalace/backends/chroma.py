@@ -5,6 +5,7 @@ import os
 import sqlite3
 
 import chromadb
+from chromadb.config import Settings
 
 from .base import BaseCollection
 
@@ -83,7 +84,10 @@ class ChromaBackend:
                 pass
 
         _fix_blob_seq_ids(palace_path)
-        client = chromadb.PersistentClient(path=palace_path)
+        client = chromadb.PersistentClient(
+            path=palace_path,
+            settings=Settings(anonymized_telemetry=False),
+        )
         if create:
             collection = client.get_or_create_collection(
                 collection_name, metadata={"hnsw:space": "cosine"}

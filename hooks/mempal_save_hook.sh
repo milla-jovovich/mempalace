@@ -64,20 +64,30 @@ MEMPAL_DIR=""
 # Read JSON input from stdin
 INPUT=$(cat)
 
-# Parse all fields in a single Python call (3x faster than separate invocations)
-eval $(echo "$INPUT" | python3 -c "
-import sys, json
+# Parse all fields safely using Python — write to a temp file instead of eval
+# to avoid any risk of shell injection via crafted JSON values.
+_HOOK_TMP=$(mktemp)
+echo "$INPUT" | python3 - "$_HOOK_TMP" <<'PYEOF'
+import sys, json, re
 data = json.load(sys.stdin)
 sid = data.get('session_id', 'unknown')
 sha = data.get('stop_hook_active', False)
-tp = data.get('transcript_path', '')
-# Shell-safe output — only allow alphanumeric, underscore, hyphen, slash, dot, tilde
-import re
+tp  = data.get('transcript_path', '')
+# Restrict each value to safe characters before writing
 safe = lambda s: re.sub(r'[^a-zA-Z0-9_/.\-~]', '', str(s))
-print(f'SESSION_ID=\"{safe(sid)}\"')
-print(f'STOP_HOOK_ACTIVE=\"{sha}\"')
-print(f'TRANSCRIPT_PATH=\"{safe(tp)}\"')
-" 2>/dev/null)
+out = sys.argv[1]
+with open(out, 'w') as f:
+    f.write(f'SESSION_ID={safe(sid)}\n')
+    f.write(f'STOP_HOOK_ACTIVE={sha}\n')
+    f.write(f'TRANSCRIPT_PATH={safe(tp)}\n')
+PYEOF
+
+# Source the temp file (values are already sanitised and contain no special chars)
+# shellcheck disable=SC1090
+if [ -s "$_HOOK_TMP" ]; then
+    . "$_HOOK_TMP"
+fi
+rm -f "$_HOOK_TMP"
 
 # Expand ~ in path
 TRANSCRIPT_PATH="${TRANSCRIPT_PATH/#\~/$HOME}"
