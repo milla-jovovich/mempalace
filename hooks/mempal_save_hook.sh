@@ -143,11 +143,20 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
 
     echo "[$(date '+%H:%M:%S')] TRIGGERING SAVE at exchange $EXCHANGE_COUNT" >> "$STATE_DIR/hook.log"
 
-    # Optional: run mempalace ingest in background if MEMPAL_DIR is set
+    # Auto-mine the transcript. Two paths:
+    # 1. TRANSCRIPT_PATH (from Claude Code) — mine the directory it lives in
+    # 2. MEMPAL_DIR (user-configured) — mine that directory
+    # At least one should work. If neither is set, nothing mines.
+    PYTHON="$(command -v python3)"
+    MINE_DIR=""
+    if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+        MINE_DIR="$(dirname "$TRANSCRIPT_PATH")"
+    fi
     if [ -n "$MEMPAL_DIR" ] && [ -d "$MEMPAL_DIR" ]; then
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        REPO_DIR="$(dirname "$SCRIPT_DIR")"
-        python3 -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
+        MINE_DIR="$MEMPAL_DIR"
+    fi
+    if [ -n "$MINE_DIR" ]; then
+        "$PYTHON" -m mempalace mine "$MINE_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
     fi
 
     # Notify the AI that a checkpoint happened — but do NOT ask it to write
