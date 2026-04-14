@@ -95,6 +95,57 @@ class TestDrawerHasHallMetadata:
         assert meta["hall"] == "technical"
 
 
+class TestConvoMinerWritesHalls:
+    """Conversation miner must also tag drawers with hall metadata."""
+
+    def test_convo_miner_drawers_have_hall(self, tmp_dir):
+        from mempalace.palace import get_collection
+        from mempalace.convo_miner import mine_convos
+
+        palace_dir = os.path.join(tmp_dir, "palace")
+        os.makedirs(palace_dir)
+        convo_dir = os.path.join(tmp_dir, "convos")
+        os.makedirs(convo_dir)
+        # Create a conversation file with technical content
+        with open(os.path.join(convo_dir, "session.txt"), "w") as f:
+            f.write("> How do I fix the python script bug?\n")
+            f.write("You need to check the error handler code and fix the traceback.\n")
+            f.write("> What about the database migration?\n")
+            f.write("Run the migration script to update the schema.\n")
+
+        mine_convos(convo_dir, palace_dir, wing="test", agent="test")
+
+        col = get_collection(palace_dir, create=False)
+        results = col.get(limit=10, include=["metadatas"])
+        # At least some drawers should exist and have hall
+        assert len(results["ids"]) > 0, "No drawers created by convo_miner"
+        for meta in results["metadatas"]:
+            if meta.get("ingest_mode") == "convos":
+                assert "hall" in meta, f"Convo drawer missing hall metadata: {meta}"
+
+
+class TestDetectHallCaching:
+    """detect_hall should cache config to avoid disk reads per drawer."""
+
+    def test_detect_hall_does_not_reread_config(self):
+        """After first call, config should be cached — no new MempalaceConfig()."""
+        import mempalace.miner as miner_mod
+
+        # Reset cache
+        miner_mod._HALL_KEYWORDS_CACHE = None
+
+        # First call loads config
+        miner_mod.detect_hall("Fixed the python bug in the code")
+        assert miner_mod._HALL_KEYWORDS_CACHE is not None
+
+        # Save reference
+        cached_ref = miner_mod._HALL_KEYWORDS_CACHE
+
+        # Second call should use same cached object
+        miner_mod.detect_hall("I feel so happy today")
+        assert miner_mod._HALL_KEYWORDS_CACHE is cached_ref
+
+
 class TestMineProjectWritesHalls:
     """Full mine pipeline must produce drawers with hall metadata."""
 

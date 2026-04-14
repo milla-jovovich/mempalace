@@ -447,20 +447,24 @@ def _load_known_entities_raw() -> dict:
     return dict(_ENTITY_REGISTRY_CACHE["raw"])
 
 
+_HALL_KEYWORDS_CACHE = None
+
+
 def detect_hall(content: str) -> str:
     """Route content to a hall based on keyword scoring.
 
     Halls connect rooms within a wing — they categorize the TYPE of content
     (emotional, technical, family, etc.) while rooms categorize the TOPIC.
     """
-    from .config import MempalaceConfig
+    global _HALL_KEYWORDS_CACHE
+    if _HALL_KEYWORDS_CACHE is None:
+        from .config import MempalaceConfig
 
-    config = MempalaceConfig()
-    hall_keywords = config.hall_keywords
+        _HALL_KEYWORDS_CACHE = MempalaceConfig().hall_keywords
     content_lower = content[:3000].lower()
 
     scores = {}
-    for hall, keywords in hall_keywords.items():
+    for hall, keywords in _HALL_KEYWORDS_CACHE.items():
         score = sum(1 for kw in keywords if kw in content_lower)
         if score > 0:
             scores[hall] = score

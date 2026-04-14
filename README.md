@@ -192,7 +192,7 @@ Decisions happen in conversations now. Not in docs. Not in Jira. In conversation
 |----------|--------------|-------------|
 | Paste everything | 19.5M — doesn't fit any context window | Impossible |
 | LLM summaries | ~650K | ~$507/yr |
-| **MemPalace wake-up** | ****~600-900 tokens** | **~$0.70/yr** |
+| **MemPalace wake-up** | **~600-900 tokens** | **~$0.70/yr** |
 | **MemPalace + 5 searches** | **~13,500 tokens** | **~$10/yr** |
 
 MemPalace loads ~600-900 tokens of critical facts on wake-up — your team, your projects, your preferences. Then searches only when needed. $10/year to remember everything vs $507/year for summaries that lose context.

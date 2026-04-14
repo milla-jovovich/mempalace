@@ -25,6 +25,26 @@ from .palace import (
 )
 
 
+# Cached hall keywords — avoids re-reading config per drawer
+_HALL_KEYWORDS_CACHE = None
+
+
+def _detect_hall_cached(content: str) -> str:
+    """Route content to a hall using cached keywords. Same logic as miner.detect_hall."""
+    global _HALL_KEYWORDS_CACHE
+    if _HALL_KEYWORDS_CACHE is None:
+        from .config import MempalaceConfig
+
+        _HALL_KEYWORDS_CACHE = MempalaceConfig().hall_keywords
+    content_lower = content[:3000].lower()
+    scores = {}
+    for hall, keywords in _HALL_KEYWORDS_CACHE.items():
+        score = sum(1 for kw in keywords if kw in content_lower)
+        if score > 0:
+            scores[hall] = score
+    return max(scores, key=scores.get) if scores else "general"
+
+
 # File types that might contain conversations
 CONVO_EXTENSIONS = {
     ".txt",
@@ -318,6 +338,7 @@ def _file_chunks_locked(collection, source_file, chunks, wing, room, agent, extr
                         {
                             "wing": wing,
                             "room": chunk_room,
+                            "hall": _detect_hall_cached(chunk["content"]),
                             "source_file": source_file,
                             "chunk_index": chunk["chunk_index"],
                             "added_by": agent,
