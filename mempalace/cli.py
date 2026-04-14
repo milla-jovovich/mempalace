@@ -62,10 +62,9 @@ def cmd_init(args):
             print("  No entities detected — proceeding with directory-based rooms.")
 
     # Pass 2: detect rooms from folder structure
-    import inspect
-    if "yes" in inspect.signature(detect_rooms_local).parameters:
+    try:
         detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
-    else:
+    except TypeError:
         detect_rooms_local(project_dir=args.dir)
 
     config = MempalaceConfig()
