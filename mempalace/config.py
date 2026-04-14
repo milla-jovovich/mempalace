@@ -218,18 +218,13 @@ class MempalaceConfig:
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,
             }
-<<<<<<< HEAD
             with open(self._config_file, "w", encoding="utf-8") as f:
                 json.dump(default_config, f, indent=2, ensure_ascii=False)
-=======
-            with open(self._config_file, "w") as f:
-                json.dump(default_config, f, indent=2)
             # Restrict config file to owner read/write only
             try:
                 self._config_file.chmod(0o600)
             except (OSError, NotImplementedError):
                 pass
->>>>>>> upstream/main
         return self._config_file
 
     def save_people_map(self, people_map):
