@@ -1,0 +1,48 @@
+{
+  "@context": [
+    "../contexts/core.context.jsonld",
+    "../contexts/full-stack-unit.context.jsonld"
+  ],
+  "@graph": [
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo",
+      "@type": ["RepoProfile", "FullStackUnit"],
+      "repoName": "mempalace",
+      "displayName": "MemPalace",
+      "repoUrl": "https://github.com/Fleet-to-Force/mempalace",
+      "packageName": "mempalace",
+      "commandName": "mempalace",
+      "hiddenDir": ".mempalace",
+      "moduleEntry": "mempalace.mcp_server"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#integration-profile",
+      "@type": "RuntimeConfig",
+      "packageName": "mempalace",
+      "commandName": "mempalace",
+      "hiddenDir": ".mempalace",
+      "moduleEntry": "mempalace.mcp_server"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/status",
+      "@type": "Capability",
+      "category": "runtime-status",
+      "enabled": true,
+      "description": "Show palace health, room counts, collection state, and integration status."
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search",
+      "@type": "Capability",
+      "category": "retrieval",
+      "enabled": true,
+      "description": "Search drawers and closets using MemPalace retrieval."
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine",
+      "@type": "Capability",
+      "category": "ingestion",
+      "enabled": true,
+      "description": "Mine a project or working directory into palace memory."
+    }
+  ]
+}
