@@ -1,0 +1,20 @@
+{
+  "@context": {
+    "id": "@id",
+    "type": "@type",
+    "FullStackUnit": "https://schema.fleet-to-force.dev/fsu#FullStackUnit",
+    "LayerPartition": "https://schema.fleet-to-force.dev/fsu#LayerPartition",
+    "L0Infra": "https://schema.fleet-to-force.dev/fsu#L0Infra",
+    "L1Tools": "https://schema.fleet-to-force.dev/fsu#L1Tools",
+    "L1McpServers": "https://schema.fleet-to-force.dev/fsu#L1McpServers",
+    "L2Agents": "https://schema.fleet-to-force.dev/fsu#L2Agents",
+    "L2Workflows": "https://schema.fleet-to-force.dev/fsu#L2Workflows",
+    "L3Observation": "https://schema.fleet-to-force.dev/fsu#L3Observation",
+    "L3Assembly": "https://schema.fleet-to-force.dev/fsu#L3Assembly",
+    "layerKey": "https://schema.fleet-to-force.dev/fsu#layerKey",
+    "partition": {"@id": "https://schema.fleet-to-force.dev/fsu#partition", "@type": "@id"},
+    "contains": {"@id": "https://schema.fleet-to-force.dev/fsu#contains", "@type": "@id"},
+    "repoRoot": {"@id": "https://schema.fleet-to-force.dev/fsu#repoRoot", "@type": "@id"},
+    "description": "https://schema.fleet-to-force.dev/fsu#description"
+  }
+}
