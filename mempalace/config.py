@@ -58,8 +58,14 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
     return value
 
 
-DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
+DEFAULT_CONFIG_DIR = os.path.expanduser("~/.mempalace")
+DEFAULT_PALACE_PATH = os.path.join(DEFAULT_CONFIG_DIR, "palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
+DEFAULT_COMPRESSED_COLLECTION_NAME = "mempalace_compressed"
+DEFAULT_CLOSETS_COLLECTION_NAME = "mempalace_closets"
+DEFAULT_HOOK_STATE_DIR = os.path.join(DEFAULT_CONFIG_DIR, "hook_state")
+DEFAULT_MCP_COMMAND = "mempalace-mcp"
+DEFAULT_PYTHON_COMMAND = "python"
 
 DEFAULT_TOPIC_WINGS = [
     "emotions",
@@ -125,19 +131,27 @@ class MempalaceConfig:
             config_dir: Override config directory (useful for testing).
                         Defaults to ~/.mempalace.
         """
-        self._config_dir = (
-            Path(config_dir) if config_dir else Path(os.path.expanduser("~/.mempalace"))
-        )
+        self._config_dir = Path(config_dir) if config_dir else Path(DEFAULT_CONFIG_DIR)
         self._config_file = self._config_dir / "config.json"
         self._people_map_file = self._config_dir / "people_map.json"
         self._file_config = {}
 
         if self._config_file.exists():
             try:
-                with open(self._config_file, "r") as f:
+                with open(self._config_file, "r", encoding="utf-8") as f:
                     self._file_config = json.load(f)
             except (json.JSONDecodeError, OSError):
                 self._file_config = {}
+
+    @property
+    def config_dir(self) -> str:
+        """Path to the MemPalace config root."""
+        return str(self._config_dir)
+
+    @property
+    def config_file(self) -> str:
+        """Path to the main config file."""
+        return str(self._config_file)
 
     @property
     def palace_path(self):
@@ -149,15 +163,32 @@ class MempalaceConfig:
 
     @property
     def collection_name(self):
-        """ChromaDB collection name."""
+        """Primary ChromaDB collection name for drawers."""
+        env_val = os.environ.get("MEMPALACE_COLLECTION_NAME") or os.environ.get(
+            "MEMPAL_COLLECTION_NAME"
+        )
+        if env_val:
+            return env_val
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
+
+    @property
+    def compressed_collection_name(self):
+        """Collection name for compressed drawers."""
+        return self._file_config.get(
+            "compressed_collection_name", DEFAULT_COMPRESSED_COLLECTION_NAME
+        )
+
+    @property
+    def closets_collection_name(self):
+        """Collection name for closet pointers."""
+        return self._file_config.get("closets_collection_name", DEFAULT_CLOSETS_COLLECTION_NAME)
 
     @property
     def people_map(self):
         """Mapping of name variants to canonical names."""
         if self._people_map_file.exists():
             try:
-                with open(self._people_map_file, "r") as f:
+                with open(self._people_map_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             except (json.JSONDecodeError, OSError):
                 pass
@@ -183,7 +214,27 @@ class MempalaceConfig:
         """Whether the stop hook shows a desktop notification via notify-send."""
         return self._file_config.get("hooks", {}).get("desktop_toast", False)
 
-    def set_hook_setting(self, key: str, value: bool):
+    @property
+    def hook_state_dir(self):
+        """Hook state directory used by save/precompact wrappers."""
+        env_val = os.environ.get("MEMPALACE_HOOK_STATE_DIR")
+        if env_val:
+            return os.path.expanduser(env_val)
+        return os.path.expanduser(
+            self._file_config.get("hooks", {}).get("state_dir", DEFAULT_HOOK_STATE_DIR)
+        )
+
+    @property
+    def mcp_command(self):
+        """Preferred installed MCP entrypoint for plugin manifests and docs."""
+        return os.environ.get("MEMPALACE_MCP_COMMAND", DEFAULT_MCP_COMMAND)
+
+    @property
+    def python_command(self):
+        """Preferred Python command for module fallback paths."""
+        return os.environ.get("MEMPALACE_PYTHON", DEFAULT_PYTHON_COMMAND)
+
+    def set_hook_setting(self, key: str, value):
         """Update a hook setting and write config to disk."""
         if "hooks" not in self._file_config:
             self._file_config["hooks"] = {}
@@ -209,7 +260,7 @@ class MempalaceConfig:
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,
             }
-            with open(self._config_file, "w") as f:
+            with open(self._config_file, "w", encoding="utf-8") as f:
                 json.dump(default_config, f, indent=2)
             # Restrict config file to owner read/write only
             try:
@@ -225,6 +276,6 @@ class MempalaceConfig:
             people_map: Dict mapping name variants to canonical names.
         """
         self._config_dir.mkdir(parents=True, exist_ok=True)
-        with open(self._people_map_file, "w") as f:
+        with open(self._people_map_file, "w", encoding="utf-8") as f:
             json.dump(people_map, f, indent=2)
         return self._people_map_file
