@@ -1,0 +1,34 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix fsu: <https://schema.fleet-to-force.dev/fsu#> .
+@prefix repo: <https://schema.fleet-to-force.dev/repo#> .
+
+fsu:RepoShape
+  a sh:NodeShape ;
+  sh:targetClass repo:RepoProfile ;
+  sh:property [ sh:path repo:repoName ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path repo:displayName ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path repo:repoUrl ; sh:minCount 1 ] ;
+  sh:property [ sh:path repo:packageName ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path repo:commandName ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path repo:hiddenDir ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path repo:moduleEntry ; sh:minCount 1 ; sh:datatype xsd:string ] .
+
+fsu:LayerPartitionShape
+  a sh:NodeShape ;
+  sh:targetClass fsu:LayerPartition ;
+  sh:property [ sh:path fsu:layerKey ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path fsu:description ; sh:minCount 1 ; sh:datatype xsd:string ] .
+
+fsu:CapabilityShape
+  a sh:NodeShape ;
+  sh:targetClass repo:Capability ;
+  sh:property [ sh:path repo:category ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path repo:enabled ; sh:minCount 1 ] ;
+  sh:property [ sh:path repo:description ; sh:minCount 1 ; sh:datatype xsd:string ] .
+
+fsu:ToggleShape
+  a sh:NodeShape ;
+  sh:targetClass repo:Toggle ;
+  sh:property [ sh:path repo:category ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path repo:enabled ; sh:minCount 1 ] .
