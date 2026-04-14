@@ -51,6 +51,13 @@ class TestSearchMemories:
         assert "source_file" in hit
         assert "similarity" in hit
         assert isinstance(hit["similarity"], float)
+        assert "created_at" in hit
+
+    def test_created_at_contains_filed_at(self, palace_path, seeded_collection):
+        """created_at surfaces the filed_at metadata from the drawer."""
+        result = search_memories("JWT authentication", palace_path)
+        hit = result["results"][0]
+        assert hit["created_at"] == "2026-01-01T00:00:00"
 
     def test_search_memories_query_error(self):
         """search_memories returns error dict when query raises."""
