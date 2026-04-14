@@ -1,0 +1,65 @@
+"@context":
+  - ../contexts/core.context.jsonld
+  - ../contexts/full-stack-unit.context.jsonld
+
+"@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+"@type":
+  - RepoProfile
+  - FullStackUnit
+repoName: mempalace
+displayName: MemPalace
+repoUrl: https://github.com/Fleet-to-Force/mempalace
+packageName: mempalace
+commandName: mempalace
+hiddenDir: .mempalace
+moduleEntry: mempalace.mcp_server
+
+partitions:
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L0-infra
+    "@type":
+      - LayerPartition
+      - L0Infra
+    layerKey: L0-infra
+    description: Runtime substrate, identity anchors, transport, storage, and environment assumptions
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-tools
+    "@type":
+      - LayerPartition
+      - L1Tools
+    layerKey: L1-tools
+    description: Tooling, compilers, loaders, validators, generators, and support utilities
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-mcp-servers
+    "@type":
+      - LayerPartition
+      - L1McpServers
+    layerKey: L1-mcp-servers
+    description: MCP server declarations, contracts, capabilities, and runtime manifests
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-agents
+    "@type":
+      - LayerPartition
+      - L2Agents
+    layerKey: L2-agents
+    description: Agent identities, roles, diaries, and capability attachments
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-workflows
+    "@type":
+      - LayerPartition
+      - L2Workflows
+    layerKey: L2-workflows
+    description: Compile, verify, ingest, export, deploy, and other operational flows
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L3-observation
+    "@type":
+      - LayerPartition
+      - L3Observation
+    layerKey: L3-observation
+    description: Events, telemetry, traces, diagnostics, and runtime observation outputs
+
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L3-assembly
+    "@type":
+      - LayerPartition
+      - L3Assembly
+    layerKey: L3-assembly
+    description: Compiled bundles, generated manifests, and release artifacts
