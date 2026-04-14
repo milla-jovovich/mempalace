@@ -1,0 +1,15 @@
+{
+  "@context": {
+    "id": "@id",
+    "type": "@type",
+    "LayerProjection": "https://schema.fleet-to-force.dev/progression#LayerProjection",
+    "ProjectionRule": "https://schema.fleet-to-force.dev/progression#ProjectionRule",
+    "dependsOnLayer": {"@id": "https://schema.fleet-to-force.dev/progression#dependsOnLayer", "@type": "@id"},
+    "projectsTo": {"@id": "https://schema.fleet-to-force.dev/progression#projectsTo", "@type": "@id"},
+    "sourceLayer": {"@id": "https://schema.fleet-to-force.dev/progression#sourceLayer", "@type": "@id"},
+    "targetLayer": {"@id": "https://schema.fleet-to-force.dev/progression#targetLayer", "@type": "@id"},
+    "projectionOrder": "https://schema.fleet-to-force.dev/progression#projectionOrder",
+    "projectionTarget": "https://schema.fleet-to-force.dev/progression#projectionTarget",
+    "description": "https://schema.fleet-to-force.dev/progression#description"
+  }
+}
