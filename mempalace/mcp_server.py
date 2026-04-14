@@ -20,22 +20,47 @@ Tools (maintenance):
   mempalace_reconnect       — force cache invalidation and reconnect after external writes
 """
 
-import argparse
 import os
 import sys
-import json
-import logging
-import hashlib
-import time
-from datetime import datetime
-from pathlib import Path
 
-from .config import MempalaceConfig, sanitize_kg_value, sanitize_name, sanitize_content
-from .version import __version__
-from .backends.chroma import ChromaBackend, ChromaCollection
-from .query_sanitizer import sanitize_query
-from .searcher import search_memories
-from .palace_graph import (
+# --- MCP stdio protection (issue #225) -----------------------------------
+# The MCP protocol multiplexes JSON-RPC over stdio: stdout MUST carry only
+# valid JSON-RPC messages, stderr is for human-readable logs. Some
+# transitive dependencies (chromadb → onnxruntime, posthog telemetry) print
+# banners and error messages directly to stdout — sometimes at C level —
+# which breaks Claude Desktop's JSON parser. Redirect stdout → stderr at
+# both the Python and file-descriptor level before heavy imports, then
+# restore the real stdout in main() before entering the protocol loop.
+_REAL_STDOUT = sys.stdout
+_REAL_STDOUT_FD = None
+try:
+    _REAL_STDOUT_FD = os.dup(1)
+    os.dup2(2, 1)
+except (OSError, AttributeError):
+    # Environments without fd-level stdio (embedded interpreters, some test
+    # harnesses). The Python-level redirect below still applies.
+    pass
+sys.stdout = sys.stderr
+
+import argparse  # noqa: E402  (deferred until after stdio protection above)
+import json  # noqa: E402
+import logging  # noqa: E402
+import hashlib  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from .config import (  # noqa: E402
+    MempalaceConfig,
+    sanitize_kg_value,
+    sanitize_name,
+    sanitize_content,
+)
+from .version import __version__  # noqa: E402
+from .backends.chroma import ChromaBackend, ChromaCollection  # noqa: E402
+from .query_sanitizer import sanitize_query  # noqa: E402
+from .searcher import search_memories  # noqa: E402
+from .palace_graph import (  # noqa: E402
     traverse,
     find_tunnels,
     graph_stats,
@@ -45,7 +70,7 @@ from .palace_graph import (
     follow_tunnels,
 )
 
-from .knowledge_graph import KnowledgeGraph
+from .knowledge_graph import KnowledgeGraph  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
@@ -1641,7 +1666,21 @@ def handle_request(request):
     }
 
 
+def _restore_stdout():
+    """Restore real stdout for MCP JSON-RPC output (see issue #225)."""
+    global _REAL_STDOUT, _REAL_STDOUT_FD
+    if _REAL_STDOUT_FD is not None:
+        try:
+            os.dup2(_REAL_STDOUT_FD, 1)
+            os.close(_REAL_STDOUT_FD)
+        except OSError:
+            pass
+        _REAL_STDOUT_FD = None
+    sys.stdout = _REAL_STDOUT
+
+
 def main():
+    _restore_stdout()
     logger.info("MemPalace MCP Server starting...")
     while True:
         try:
