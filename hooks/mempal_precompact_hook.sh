@@ -68,10 +68,10 @@ if [ -n "$MEMPAL_DIR" ] && [ -d "$MEMPAL_DIR" ]; then
     python3 -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1
 fi
 
-# Always block — compaction = save everything
+# Notify — compaction is about to happen but filing is handled in background
 cat << 'HOOKJSON'
 {
-  "decision": "block",
-  "reason": "COMPACTION IMMINENT. Save ALL topics, decisions, quotes, code, and important context from this session to your memory system. Be thorough — after compaction, detailed context will be lost. Organize into appropriate categories. Use verbatim quotes where possible. Save everything, then allow compaction to proceed."
+  "decision": "allow",
+  "reason": "MemPalace pre-compaction save. Your full conversation has been saved verbatim in the background — no action needed. Compaction can proceed safely."
 }
 HOOKJSON
