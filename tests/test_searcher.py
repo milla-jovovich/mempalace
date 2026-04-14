@@ -59,6 +59,21 @@ class TestSearchMemories:
         hit = result["results"][0]
         assert hit["created_at"] == "2026-01-01T00:00:00"
 
+    def test_created_at_fallback_when_filed_at_missing(self):
+        """created_at defaults to 'unknown' when filed_at is absent."""
+        mock_col = MagicMock()
+        mock_col.query.return_value = {
+            "ids": [["drawer_no_date"]],
+            "documents": [["Some text without a date"]],
+            "metadatas": [[{"wing": "project", "room": "backend", "source_file": "x.py"}]],
+            "distances": [[0.1]],
+        }
+
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
+            result = search_memories("test", "/fake/path")
+        hit = result["results"][0]
+        assert hit["created_at"] == "unknown"
+
     def test_search_memories_query_error(self):
         """search_memories returns error dict when query raises."""
         mock_col = MagicMock()

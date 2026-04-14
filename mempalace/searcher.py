@@ -397,7 +397,7 @@ def search_memories(
             "wing": meta.get("wing", "unknown"),
             "room": meta.get("room", "unknown"),
             "source_file": Path(source).name if source else "?",
-            "created_at": meta.get("filed_at"),
+            "created_at": meta.get("filed_at", "unknown"),
             "similarity": round(max(0.0, 1 - effective_dist), 3),
             "distance": round(dist, 4),
             "effective_distance": round(effective_dist, 4),
