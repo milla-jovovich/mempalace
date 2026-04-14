@@ -1,0 +1,21 @@
+path,category,reason,mechanical_or_semantic,priority
+pyproject.toml,package,"package name, entrypoints, dependencies, lint/test config",mechanical,critical
+mempalace/config.py,runtime,"paths, defaults, collection names, hall taxonomy",mechanical+semantic,critical
+mempalace/palace.py,storage,"shared collection names and storage behavior",mechanical+semantic,critical
+mempalace/cli.py,runtime,"CLI names, parser flags, module entrypoints",mechanical+semantic,critical
+mempalace/mcp_server.py,integration,"MCP tool surface and module path",semantic,critical
+hooks/mempal_save_hook.sh,hooks,"interpreter and command invocation policy",mechanical,critical
+hooks/mempal_precompact_hook.sh,hooks,"interpreter and command invocation policy",mechanical,critical
+.claude-plugin/.mcp.json,integration,"plugin launch command",mechanical,high
+.claude-plugin/plugin.json,integration,"plugin metadata and MCP server path",mechanical,high
+.codex-plugin/plugin.json,integration,"plugin metadata and MCP server path",mechanical,high
+.codex-plugin/hooks.json,integration,"hook registration paths",mechanical,high
+mempalace/miner.py,ingest,"project mining conventions",semantic,high
+mempalace/convo_miner.py,ingest,"conversation mining conventions",semantic,high
+mempalace/normalize.py,ingest,"supported transcript formats and stripping rules",semantic,high
+mempalace/searcher.py,retrieval,"ranking and filter behavior",semantic,high
+mempalace/knowledge_graph.py,knowledge,"SQLite path and fact schema",mechanical+semantic,high
+mempalace/onboarding.py,bootstrap,"default wings and setup prompts",semantic,high
+mempalace/closet_llm.py,optional-llm,"endpoint and model config",mechanical+semantic,medium
+README.md,docs,"public install and command surface",mechanical,medium
+website/*,docs-site,"docs consistency and branding",mechanical,medium
