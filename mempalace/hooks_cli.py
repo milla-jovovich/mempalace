@@ -43,9 +43,25 @@ def _sanitize_session_id(session_id: str) -> str:
     return sanitized or "unknown"
 
 
+def _is_safe_transcript_path(transcript_path: str) -> bool:
+    """Validate that transcript_path is a real file without traversal tricks."""
+    if not transcript_path:
+        return False
+    resolved = Path(transcript_path).expanduser().resolve()
+    # Block path traversal via ".." components in the raw input
+    if ".." in Path(transcript_path).parts:
+        return False
+    # Must be a regular file (not a symlink to something unexpected)
+    if not resolved.is_file():
+        return False
+    return True
+
+
 def _count_human_messages(transcript_path: str) -> int:
     """Count human messages in a JSONL transcript, skipping command-messages."""
-    path = Path(transcript_path).expanduser()
+    if not _is_safe_transcript_path(transcript_path):
+        return 0
+    path = Path(transcript_path).expanduser().resolve()
     if not path.is_file():
         return 0
     count = 0
@@ -99,15 +115,30 @@ def _output(data: dict):
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
+def _is_valid_mempal_dir(mempal_dir: str) -> bool:
+    """Validate MEMPAL_DIR is a real directory that looks like a mempalace project."""
+    if not mempal_dir:
+        return False
+    real_path = os.path.realpath(mempal_dir)
+    if not os.path.isdir(real_path):
+        return False
+    # Require the directory to contain recognizable project files
+    has_marker = any(
+        os.path.exists(os.path.join(real_path, f))
+        for f in ("mempalace.yaml", ".mempalace", "pyproject.toml", ".git")
+    )
+    return has_marker
+
+
 def _maybe_auto_ingest():
     """If MEMPAL_DIR is set and exists, run mempalace mine in background."""
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
-    if mempal_dir and os.path.isdir(mempal_dir):
+    if mempal_dir and _is_valid_mempal_dir(mempal_dir):
         try:
             log_path = STATE_DIR / "hook.log"
             with open(log_path, "a") as log_f:
                 subprocess.Popen(
-                    [sys.executable, "-m", "mempalace", "mine", mempal_dir],
+                    [sys.executable, "-m", "mempalace", "mine", os.path.realpath(mempal_dir)],
                     stdout=log_f,
                     stderr=log_f,
                 )
@@ -199,12 +230,12 @@ def hook_precompact(data: dict, harness: str):
 
     # Optional: auto-ingest synchronously before compaction (so memories land first)
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
-    if mempal_dir and os.path.isdir(mempal_dir):
+    if mempal_dir and _is_valid_mempal_dir(mempal_dir):
         try:
             log_path = STATE_DIR / "hook.log"
             with open(log_path, "a") as log_f:
                 subprocess.run(
-                    [sys.executable, "-m", "mempalace", "mine", mempal_dir],
+                    [sys.executable, "-m", "mempalace", "mine", os.path.realpath(mempal_dir)],
                     stdout=log_f,
                     stderr=log_f,
                     timeout=60,

@@ -292,7 +292,7 @@ def tool_status():
             rooms[r] = rooms.get(r, 0) + 1
     except Exception as e:
         logger.exception("tool_status metadata fetch failed")
-        result["error"] = str(e)
+        result["error"] = "Internal error"
         result["partial"] = True
     return result
 
@@ -343,7 +343,7 @@ def tool_list_wings():
             wings[w] = wings.get(w, 0) + 1
     except Exception as e:
         logger.exception("tool_list_wings metadata fetch failed")
-        result["error"] = str(e)
+        result["error"] = "Internal error"
         result["partial"] = True
     return result
 
@@ -366,7 +366,7 @@ def tool_list_rooms(wing: str = None):
             rooms[r] = rooms.get(r, 0) + 1
     except Exception as e:
         logger.exception("tool_list_rooms metadata fetch failed")
-        result["error"] = str(e)
+        result["error"] = "Internal error"
         result["partial"] = True
     return result
 
@@ -387,7 +387,7 @@ def tool_get_taxonomy():
             taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
     except Exception as e:
         logger.exception("tool_get_taxonomy metadata fetch failed")
-        result["error"] = str(e)
+        result["error"] = "Internal error"
         result["partial"] = True
     return result
 
@@ -628,7 +628,7 @@ def tool_add_drawer(
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Internal error"}
 
 
 def tool_delete_drawer(drawer_id: str):
@@ -659,7 +659,7 @@ def tool_delete_drawer(drawer_id: str):
         logger.info(f"Deleted drawer: {drawer_id}")
         return {"success": True, "drawer_id": drawer_id}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Internal error"}
 
 
 def tool_get_drawer(drawer_id: str):
@@ -681,7 +681,7 @@ def tool_get_drawer(drawer_id: str):
             "metadata": meta,
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": "Internal error"}
 
 
 def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offset: int = 0):
@@ -732,7 +732,7 @@ def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offse
             "limit": limit,
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": "Internal error"}
 
 
 def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, room: str = None):
@@ -801,7 +801,7 @@ def tool_update_drawer(drawer_id: str, content: str = None, wing: str = None, ro
             "room": new_meta.get("room", ""),
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Internal error"}
 
 
 # ==================== KNOWLEDGE GRAPH ====================
@@ -951,7 +951,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
             "timestamp": now.isoformat(),
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Internal error"}
 
 
 def tool_diary_read(agent_name: str, last_n: int = 10):
@@ -1021,7 +1021,7 @@ def tool_hook_settings(silent_save: bool = None, desktop_toast: bool = None):
     try:
         config = MempalaceConfig()
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Internal error"}
 
     changed = []
     if silent_save is not None:
@@ -1103,7 +1103,7 @@ def tool_reconnect():
             }
         return {"success": True, "message": "Reconnected to palace", "drawers": col.count()}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Internal error"}
 
 
 # ==================== MCP PROTOCOL ====================

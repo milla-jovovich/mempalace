@@ -247,6 +247,7 @@ def test_maybe_auto_ingest_with_env(tmp_path):
     """With MEMPAL_DIR set to a valid directory, spawns subprocess."""
     mempal_dir = tmp_path / "project"
     mempal_dir.mkdir()
+    (mempal_dir / ".git").mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
             with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
@@ -258,6 +259,7 @@ def test_maybe_auto_ingest_oserror(tmp_path):
     """OSError during subprocess spawn is silenced."""
     mempal_dir = tmp_path / "project"
     mempal_dir.mkdir()
+    (mempal_dir / ".git").mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
             with patch("mempalace.hooks_cli.subprocess.Popen", side_effect=OSError("fail")):
@@ -335,6 +337,7 @@ def test_precompact_with_mempal_dir(tmp_path):
     """Precompact runs subprocess.run when MEMPAL_DIR is set."""
     mempal_dir = tmp_path / "project"
     mempal_dir.mkdir()
+    (mempal_dir / ".git").mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
         with patch("mempalace.hooks_cli.subprocess.run") as mock_run:
             result = _capture_hook_output(
@@ -350,6 +353,7 @@ def test_precompact_with_mempal_dir_oserror(tmp_path):
     """Precompact handles OSError from subprocess gracefully."""
     mempal_dir = tmp_path / "project"
     mempal_dir.mkdir()
+    (mempal_dir / ".git").mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
         with patch("mempalace.hooks_cli.subprocess.run", side_effect=OSError("fail")):
             result = _capture_hook_output(

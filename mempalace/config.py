@@ -209,13 +209,10 @@ class MempalaceConfig:
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,
             }
-            with open(self._config_file, "w") as f:
+            # Create with restricted permissions atomically (no TOCTOU window)
+            fd = os.open(str(self._config_file), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as f:
                 json.dump(default_config, f, indent=2)
-            # Restrict config file to owner read/write only
-            try:
-                self._config_file.chmod(0o600)
-            except (OSError, NotImplementedError):
-                pass
         return self._config_file
 
     def save_people_map(self, people_map):
@@ -225,6 +222,7 @@ class MempalaceConfig:
             people_map: Dict mapping name variants to canonical names.
         """
         self._config_dir.mkdir(parents=True, exist_ok=True)
-        with open(self._people_map_file, "w") as f:
+        fd = os.open(str(self._people_map_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
             json.dump(people_map, f, indent=2)
         return self._people_map_file
