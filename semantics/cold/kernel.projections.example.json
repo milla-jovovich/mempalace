@@ -1,0 +1,47 @@
+{
+  "repo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo",
+  "projections": {
+    "python_runtime": {
+      "source_partition": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L0-infra",
+      "targets": [
+        "mempalace/config.py",
+        "mempalace/cli.py"
+      ]
+    },
+    "mcp_manifests": {
+      "source_partition": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L1-mcp-servers",
+      "targets": [
+        ".claude-plugin/.mcp.json",
+        ".claude-plugin/plugin.json",
+        ".codex-plugin/plugin.json",
+        ".codex-plugin/hooks.json"
+      ]
+    },
+    "agent_registry": {
+      "source_partition": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-agents",
+      "targets": [
+        "~/.mempalace/agents/"
+      ]
+    },
+    "workflow_manifests": {
+      "source_partition": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L2-workflows",
+      "targets": [
+        "tools/mempalace_execution_kit/"
+      ]
+    },
+    "observation_outputs": {
+      "source_partition": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L3-observation",
+      "targets": [
+        "logs/",
+        "telemetry/"
+      ]
+    },
+    "assembly_outputs": {
+      "source_partition": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#L3-assembly",
+      "targets": [
+        "dist/",
+        "build/"
+      ]
+    }
+  }
+}
