@@ -36,6 +36,37 @@ from pathlib import Path
 from .config import MempalaceConfig
 
 
+_MEMPALACE_PROJECT_FILES = ("mempalace.yaml", "entities.json")
+
+
+def _ensure_mempalace_files_gitignored(project_dir) -> bool:
+    """If project_dir is a git repo, ensure MemPalace's per-project files
+    are listed in .gitignore so they don't get committed by accident.
+
+    Returns True if .gitignore was updated, False otherwise. Issue #185:
+    `mempalace init` writes mempalace.yaml + entities.json into the
+    project root, where they previously had no protection against being
+    staged into git.
+    """
+    from pathlib import Path
+
+    project_path = Path(project_dir).expanduser().resolve()
+    if not (project_path / ".git").exists():
+        return False
+    gitignore = project_path / ".gitignore"
+    existing = gitignore.read_text() if gitignore.exists() else ""
+    existing_lines = {line.strip() for line in existing.splitlines()}
+    missing = [p for p in _MEMPALACE_PROJECT_FILES if p not in existing_lines]
+    if not missing:
+        return False
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    block = prefix + "\n# MemPalace per-project files (issue #185)\n" + "\n".join(missing) + "\n"
+    with open(gitignore, "a") as f:
+        f.write(block)
+    print(f"  Added {', '.join(missing)} to {gitignore.name}")
+    return True
+
+
 def cmd_init(args):
     import json
     from pathlib import Path
@@ -63,6 +94,9 @@ def cmd_init(args):
     # Pass 2: detect rooms from folder structure
     detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
     MempalaceConfig().init()
+
+    # Pass 3: protect git repos from accidentally committing per-project files
+    _ensure_mempalace_files_gitignored(args.dir)
 
 
 def cmd_mine(args):
