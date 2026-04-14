@@ -1,0 +1,17 @@
+wing: onboarding-service
+
+rooms:
+  - name: decisions
+    description: Architecture decisions, tradeoffs, and rejected approaches for this project
+
+  - name: planning
+    description: Sprint goals, constraints, open questions, and comparable prior work
+
+  - name: handoffs
+    description: Bounded handoff capsules for implementation and planning continuity
+
+  - name: incidents
+    description: Bug post-mortems, root-cause notes, and workarounds
+
+  - name: validation
+    description: Acceptance criteria, release checklists, and known failure modes

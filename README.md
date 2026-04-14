@@ -121,6 +121,8 @@ mempalace status
 
 Three mining modes: **projects** (code and docs), **convos** (conversation exports), and **general** (auto-classifies into decisions, preferences, milestones, problems, and emotional context). Everything stays on your machine.
 
+Want a worked engineering-memory example you can copy? See [examples/cdd-workflow/](examples/cdd-workflow/).
+
 ---
 
 ## How You Actually Use It
@@ -713,6 +715,7 @@ mempalace/
 │   └── mempal_precompact_hook.sh ← emergency save
 ├── examples/                  ← usage examples
 │   ├── basic_mining.py
+│   ├── cdd-workflow/          ← worked engineering-memory example
 │   ├── convo_import.py
 │   └── mcp_setup.md
 ├── tests/                     ← test suite (README)
