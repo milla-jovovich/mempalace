@@ -1,7 +1,7 @@
 {
   "name": "mempalace",
   "version": "3.3.0",
-  "description": "Give your AI a memory — mine projects and conversations into a searchable palace. 19 MCP tools, auto-save hooks, and guided setup.",
+  "description": "Give your AI a memory — mine projects and conversations into a searchable palace. 29 MCP tools, auto-save hooks, and guided setup.",
   "author": {
     "name": "milla-jovovich"
   },
@@ -9,11 +9,8 @@
   "commands": [],
   "mcpServers": {
     "mempalace": {
-      "command": "python3",
-      "args": [
-        "-m",
-        "mempalace.mcp_server"
-      ]
+      "command": "mempalace-mcp",
+      "args": []
     }
   },
   "keywords": [
@@ -25,5 +22,5 @@
     "palace",
     "search"
   ],
-  "repository": "https://github.com/MemPalace/mempalace"
+  "repository": "https://github.com/Fleet-to-Force/mempalace"
 }

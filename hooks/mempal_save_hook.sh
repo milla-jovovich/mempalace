@@ -1,98 +1,45 @@
 #!/bin/bash
 # MEMPALACE SAVE HOOK — Auto-save every N exchanges
-#
-# Claude Code "Stop" hook. After every assistant response:
-# 1. Counts human messages in the session transcript
-# 2. Every SAVE_INTERVAL messages, BLOCKS the AI from stopping
-# 3. Returns a reason telling the AI to save structured diary + palace entries
-# 4. AI does the save (topics, decisions, code, quotes → organized into palace)
-# 5. Next Stop fires with stop_hook_active=true → lets AI stop normally
-#
-# The AI does the classification — it knows what wing/hall/closet to use
-# because it has context about the conversation. No regex needed.
-#
-# === INSTALL ===
-# Add to .claude/settings.local.json:
-#
-#   "hooks": {
-#     "Stop": [{
-#       "matcher": "*",
-#       "hooks": [{
-#         "type": "command",
-#         "command": "/absolute/path/to/mempal_save_hook.sh",
-#         "timeout": 30
-#       }]
-#     }]
-#   }
-#
-# For Codex CLI, add to .codex/hooks.json:
-#
-#   "Stop": [{
-#     "type": "command",
-#     "command": "/absolute/path/to/mempal_save_hook.sh",
-#     "timeout": 30
-#   }]
-#
-# === HOW IT WORKS ===
-#
-# Claude Code sends JSON on stdin with these fields:
-#   session_id       — unique session identifier
-#   stop_hook_active — true if AI is already in a save cycle (prevents infinite loop)
-#   transcript_path  — path to the JSONL transcript file
-#
-# When we block, Claude Code shows our "reason" to the AI as a system message.
-# The AI then saves to memory, and when it tries to stop again,
-# stop_hook_active=true so we let it through. No infinite loop.
-#
-# === MEMPALACE CLI ===
-# This repo uses: mempalace mine <dir>
-# or:            mempalace mine <dir> --mode convos
-# Set MEMPAL_DIR below if you want the hook to auto-ingest after blocking.
-# Leave blank to rely on the AI's own save instructions.
-#
-# === CONFIGURATION ===
 
-SAVE_INTERVAL=15  # Save every N human messages (adjust to taste)
-STATE_DIR="$HOME/.mempalace/hook_state"
+SAVE_INTERVAL="${MEMPALACE_SAVE_INTERVAL:-15}"
+STATE_DIR="${MEMPALACE_HOOK_STATE_DIR:-$HOME/.mempalace/hook_state}"
+MEMPAL_DIR="${MEMPAL_DIR:-}"
+MEMPALACE_CMD="${MEMPALACE_COMMAND:-mempalace}"
+PYTHON="${MEMPALACE_PYTHON:-$(command -v python 2>/dev/null || command -v python3 2>/dev/null)}"
+
 mkdir -p "$STATE_DIR"
 
-# Optional: set to the directory you want auto-ingested on each save trigger.
-# Example: MEMPAL_DIR="$HOME/conversations"
-# Leave empty to skip auto-ingest (AI handles saving via the block reason).
-MEMPAL_DIR=""
+run_mempalace() {
+    if command -v "$MEMPALACE_CMD" >/dev/null 2>&1; then
+        "$MEMPALACE_CMD" "$@"
+    else
+        "$PYTHON" -m mempalace "$@"
+    fi
+}
 
-# Read JSON input from stdin
 INPUT=$(cat)
 
-# Parse all fields in a single Python call (3x faster than separate invocations)
-eval $(echo "$INPUT" | python3 -c "
-import sys, json
+eval $(echo "$INPUT" | "$PYTHON" -c "
+import sys, json, re
 data = json.load(sys.stdin)
 sid = data.get('session_id', 'unknown')
 sha = data.get('stop_hook_active', False)
 tp = data.get('transcript_path', '')
-# Shell-safe output — only allow alphanumeric, underscore, hyphen, slash, dot, tilde
-import re
-safe = lambda s: re.sub(r'[^a-zA-Z0-9_/.\-~]', '', str(s))
+safe = lambda s: re.sub(r'[^a-zA-Z0-9_/\.\-~]', '', str(s))
 print(f'SESSION_ID=\"{safe(sid)}\"')
 print(f'STOP_HOOK_ACTIVE=\"{sha}\"')
 print(f'TRANSCRIPT_PATH=\"{safe(tp)}\"')
 " 2>/dev/null)
 
-# Expand ~ in path
 TRANSCRIPT_PATH="${TRANSCRIPT_PATH/#\~/$HOME}"
 
-# If we're already in a save cycle, let the AI stop normally
-# This is the infinite-loop prevention: block once → AI saves → tries to stop again → we let it through
 if [ "$STOP_HOOK_ACTIVE" = "True" ] || [ "$STOP_HOOK_ACTIVE" = "true" ]; then
     echo "{}"
     exit 0
 fi
 
-# Count human messages in the JSONL transcript
-# SECURITY: Pass transcript path as sys.argv to avoid shell injection via crafted paths
 if [ -f "$TRANSCRIPT_PATH" ]; then
-    EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
+    EXCHANGE_COUNT=$("$PYTHON" - "$TRANSCRIPT_PATH" <<'PYEOF'
 import json, sys
 count = 0
 with open(sys.argv[1]) as f:
@@ -105,7 +52,7 @@ with open(sys.argv[1]) as f:
                 if isinstance(content, str) and '<command-message>' in content:
                     continue
                 count += 1
-        except:
+        except Exception:
             pass
 print(count)
 PYEOF
@@ -114,7 +61,6 @@ else
     EXCHANGE_COUNT=0
 fi
 
-# Track last save point for this session
 LAST_SAVE_FILE="$STATE_DIR/${SESSION_ID}_last_save"
 LAST_SAVE=0
 if [ -f "$LAST_SAVE_FILE" ]; then
@@ -123,21 +69,12 @@ fi
 
 SINCE_LAST=$((EXCHANGE_COUNT - LAST_SAVE))
 
-# Log for debugging (check ~/.mempalace/hook_state/hook.log)
 echo "[$(date '+%H:%M:%S')] Session $SESSION_ID: $EXCHANGE_COUNT exchanges, $SINCE_LAST since last save" >> "$STATE_DIR/hook.log"
 
-# Time to save?
 if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
-    # Update last save point
     echo "$EXCHANGE_COUNT" > "$LAST_SAVE_FILE"
-
     echo "[$(date '+%H:%M:%S')] TRIGGERING SAVE at exchange $EXCHANGE_COUNT" >> "$STATE_DIR/hook.log"
 
-    # Auto-mine the transcript. Two paths:
-    # 1. TRANSCRIPT_PATH (from Claude Code) — mine the directory it lives in
-    # 2. MEMPAL_DIR (user-configured) — mine that directory
-    # At least one should work. If neither is set, nothing mines.
-    PYTHON="$(command -v python3)"
     MINE_DIR=""
     if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
         MINE_DIR="$(dirname "$TRANSCRIPT_PATH")"
@@ -146,14 +83,9 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
         MINE_DIR="$MEMPAL_DIR"
     fi
     if [ -n "$MINE_DIR" ]; then
-        "$PYTHON" -m mempalace mine "$MINE_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
+        run_mempalace mine "$MINE_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
     fi
 
-    # Notify the AI that a checkpoint happened — but do NOT ask it to write
-    # anything in chat. All filing happens in the background via the pipeline.
-    # The old version asked the agent to write diary entries, add drawers, and
-    # add KG triples in the chat window — that cost ~$1/session in retransmitted
-    # tokens and cluttered the conversation.
     cat << 'HOOKJSON'
 {
   "decision": "allow",
@@ -161,6 +93,5 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
 }
 HOOKJSON
 else
-    # Not time yet — let the AI stop normally
     echo "{}"
 fi
