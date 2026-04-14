@@ -10,7 +10,6 @@ import pytest
 from mempalace.hooks_cli import (
     SAVE_INTERVAL,
     STOP_BLOCK_REASON,
-    PRECOMPACT_ALLOW_REASON,
     _count_human_messages,
     _get_mine_dir,
     _log,
@@ -213,8 +212,7 @@ def test_precompact_allows(tmp_path):
         {"session_id": "test"},
         state_dir=tmp_path,
     )
-    assert result["decision"] == "allow"
-    assert result["reason"] == PRECOMPACT_ALLOW_REASON
+    assert result == {}
 
 
 # --- _log ---
@@ -383,7 +381,7 @@ def test_precompact_with_mempal_dir(tmp_path):
                 {"session_id": "test"},
                 state_dir=tmp_path,
             )
-    assert result["decision"] == "allow"
+    assert result == {}
     mock_run.assert_called_once()
 
 
@@ -398,7 +396,7 @@ def test_precompact_with_mempal_dir_oserror(tmp_path):
                 {"session_id": "test"},
                 state_dir=tmp_path,
             )
-    assert result["decision"] == "allow"
+    assert result == {}
 
 
 def test_precompact_with_timeout(tmp_path):
@@ -413,7 +411,7 @@ def test_precompact_with_timeout(tmp_path):
             result = _capture_hook_output(
                 hook_precompact, {"session_id": "test"}, state_dir=tmp_path
             )
-    assert result["decision"] == "allow"
+    assert result == {}
 
 
 def test_precompact_mines_transcript_dir(tmp_path, monkeypatch):
@@ -427,7 +425,7 @@ def test_precompact_mines_transcript_dir(tmp_path, monkeypatch):
             {"session_id": "test", "transcript_path": str(transcript)},
             state_dir=tmp_path,
         )
-    assert result["decision"] == "allow"
+    assert result == {}
     mock_run.assert_called_once()
     # Verify mine dir is the transcript's parent
     call_args = mock_run.call_args[0][0]
@@ -472,9 +470,7 @@ def test_run_hook_dispatches_precompact(tmp_path):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
             with patch("mempalace.hooks_cli._output") as mock_output:
                 run_hook("precompact", "claude-code")
-    mock_output.assert_called_once()
-    call_args = mock_output.call_args[0][0]
-    assert call_args["decision"] == "allow"
+    mock_output.assert_called_once_with({})
 
 
 def test_run_hook_unknown_hook():

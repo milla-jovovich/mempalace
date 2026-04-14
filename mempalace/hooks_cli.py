@@ -36,11 +36,6 @@ PRECOMPACT_BLOCK_REASON = (
     "Save everything to MemPalace, then allow compaction to proceed."
 )
 
-PRECOMPACT_ALLOW_REASON = (
-    "MemPalace pre-compaction save. Your conversation has been saved "
-    "in the background. Compaction can proceed safely."
-)
-
 
 def _sanitize_session_id(session_id: str) -> str:
     """Only allow alnum, dash, underscore to prevent path traversal."""
@@ -262,7 +257,7 @@ def hook_precompact(data: dict, harness: str):
     # Mine synchronously so data lands before compaction proceeds
     _mine_sync(transcript_path)
 
-    _output({"decision": "allow", "reason": PRECOMPACT_ALLOW_REASON})
+    _output({})
 
 
 def run_hook(hook_name: str, harness: str):
