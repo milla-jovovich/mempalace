@@ -1,0 +1,36 @@
+{
+  "command": "mempalace",
+  "view": "cli-registry",
+  "operations": [
+    {
+      "name": "init",
+      "description": "Initialize a new MemPalace root and onboarding surface.",
+      "exposure": "public",
+      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/init"
+    },
+    {
+      "name": "mine",
+      "description": "Mine a project or working directory into palace memory.",
+      "exposure": "public",
+      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine"
+    },
+    {
+      "name": "search",
+      "description": "Search drawers and closets using MemPalace retrieval.",
+      "exposure": "public",
+      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search"
+    },
+    {
+      "name": "status",
+      "description": "Show palace health, room counts, collection state, and integration status.",
+      "exposure": "public",
+      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/status"
+    },
+    {
+      "name": "registry",
+      "description": "Return the projected MemPalace runtime registry, including operations, integration defaults, plugin profiles, and collection identities.",
+      "exposure": "public",
+      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/registry"
+    }
+  ]
+}
