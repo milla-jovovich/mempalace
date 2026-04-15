@@ -1,6 +1,8 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import chromadb
+
 from mempalace.config import MempalaceConfig
 from mempalace.embedding import (
     DEFAULT_MODEL,
@@ -9,6 +11,7 @@ from mempalace.embedding import (
     new_palace_model,
     resolve_model_from_metadata,
 )
+from mempalace.palace import get_collection
 
 
 def test_default_model_is_miniLM():
@@ -83,3 +86,30 @@ def test_new_palace_model_respects_config(tmp_path):
     config = MempalaceConfig(config_dir=str(cfg_dir))
     os.environ.pop("MEMPALACE_EMBEDDING_MODEL", None)
     assert new_palace_model(config) == "config-model"
+
+
+def test_get_collection_stamps_model_on_create(tmp_path):
+    """New palace creation stamps the embedding model in metadata."""
+    palace_path = str(tmp_path / "palace")
+    os.environ.pop("MEMPALACE_EMBEDDING_MODEL", None)
+
+    get_collection(palace_path, create=True)
+
+    # Verify the model was stamped
+    client = chromadb.PersistentClient(path=palace_path)
+    col = client.get_collection("mempalace_drawers")
+    assert col.metadata.get("embedding_model") == NEW_PALACE_MODEL
+
+
+def test_get_collection_legacy_palace_uses_default(tmp_path):
+    """Palace without embedding_model metadata resolves to MiniLM."""
+    palace_path = str(tmp_path / "palace")
+
+    # Create a legacy palace (no embedding_model in metadata)
+    client = chromadb.PersistentClient(path=palace_path)
+    client.get_or_create_collection("mempalace_drawers", metadata={"hnsw:space": "cosine"})
+    del client
+
+    # get_collection should detect legacy and use MiniLM — should not raise
+    col = get_collection(palace_path, create=False)
+    assert col is not None

@@ -6,6 +6,7 @@ from pathlib import Path
 import chromadb
 
 from mempalace.convo_miner import mine_convos
+from mempalace.embedding import get_embedding_function, resolve_model_from_metadata
 from mempalace.palace import file_already_mined
 
 
@@ -20,7 +21,10 @@ def test_convo_mining():
     mine_convos(tmpdir, palace_path, wing="test_convos")
 
     client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_collection("mempalace_drawers")
+    raw_col = client.get_collection("mempalace_drawers")
+    model = resolve_model_from_metadata(raw_col.metadata)
+    ef = get_embedding_function(model)
+    col = client.get_collection("mempalace_drawers", embedding_function=ef)
     assert col.count() >= 2
 
     # Verify search works
@@ -101,7 +105,10 @@ def test_mine_convos_rebuilds_stale_drawers_after_schema_bump(capsys):
         capsys.readouterr()
 
         client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        raw_col = client.get_collection("mempalace_drawers")
+        model = resolve_model_from_metadata(raw_col.metadata)
+        ef = get_embedding_function(model)
+        col = client.get_collection("mempalace_drawers", embedding_function=ef)
         resolved = str(Path(tmpdir).resolve() / "chat.txt")
         first_pass = col.get(where={"source_file": resolved})
         first_ids = set(first_pass["ids"])
@@ -140,12 +147,12 @@ def test_mine_convos_rebuilds_stale_drawers_after_schema_bump(capsys):
         # Second mine — version gate should trigger rebuild
         mine_convos(tmpdir, palace_path, wing="test")
         out = capsys.readouterr().out
-        assert (
-            "Files skipped (already filed): 0" in out
-        ), "stale drawers should force a rebuild, not a skip"
+        assert "Files skipped (already filed): 0" in out, (
+            "stale drawers should force a rebuild, not a skip"
+        )
 
         client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = client.get_collection("mempalace_drawers", embedding_function=ef)
         rebuilt = col.get(where={"source_file": resolved})
         # Orphan is gone
         assert "orphan_drawer" not in rebuilt["ids"]
