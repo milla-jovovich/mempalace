@@ -415,3 +415,41 @@ def test_check_triple_conflicts_ignores_invalidated(tmp_path):
     kg.add_triple("Alice", "works_at", obj="Globex")
     conflicts = kg.check_triple_conflicts()
     assert conflicts == []
+
+
+def test_read_during_long_write_does_not_block(tmp_path):
+    """Reads must not block while a write is in progress (WAL mode)."""
+    import threading
+    import time
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    kg.add_entity("Alice", entity_type="person")
+
+    read_completed = threading.Event()
+    write_started = threading.Event()
+
+    def long_write():
+        # Do many upserts to hold the write lock
+        write_started.set()
+        for i in range(200):
+            kg.upsert_triple(
+                subject="Alice", predicate=f"knows_{i}", obj=f"Entity_{i}",
+                confidence=0.5,
+            )
+
+    def concurrent_read():
+        write_started.wait(timeout=2)
+        kg.query_entity("Alice")
+        read_completed.set()
+
+    writer = threading.Thread(target=long_write)
+    reader = threading.Thread(target=concurrent_read)
+    writer.start()
+    reader.start()
+
+    read_completed_ok = read_completed.wait(timeout=5)
+    writer.join(timeout=10)
+    reader.join(timeout=2)
+
+    assert read_completed_ok, "Read timed out — likely blocked by write lock"

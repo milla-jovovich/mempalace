@@ -60,7 +60,7 @@ class KnowledgeGraph:
         self.db_path = db_path or DEFAULT_KG_PATH
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._connection = None
-        self._lock = threading.Lock()
+        self._write_lock = threading.Lock()
         self._init_db()
 
     def _init_db(self):
@@ -163,7 +163,7 @@ class KnowledgeGraph:
 
     def close(self):
         """Close the database connection."""
-        with self._lock:
+        with self._write_lock:
             if self._connection is not None:
                 self._connection.close()
                 self._connection = None
@@ -177,7 +177,7 @@ class KnowledgeGraph:
         """Add or update an entity node."""
         eid = self._entity_id(name)
         props = json.dumps(properties or {})
-        with self._lock:
+        with self._write_lock:
             conn = self._conn()
             with conn:
                 conn.execute(
@@ -223,7 +223,7 @@ class KnowledgeGraph:
         pred = predicate.lower().replace(" ", "_")
 
         # Auto-create entities if they don't exist
-        with self._lock:
+        with self._write_lock:
             conn = self._conn()
             with conn:
                 conn.execute(
@@ -293,7 +293,7 @@ class KnowledgeGraph:
         # Stable id — reused when updating an existing live row.
         stable_id = "t_" + hashlib.sha256(f"{sub_id}|{pred}|{obj_id}".encode()).hexdigest()[:24]
 
-        with self._lock:
+        with self._write_lock:
             conn = self._conn()
             # Close any implicit transaction Python auto-started (isolation_level != None).
             # Without this, conn.execute("BEGIN IMMEDIATE") raises OperationalError:
@@ -382,7 +382,7 @@ class KnowledgeGraph:
         pred = predicate.lower().replace(" ", "_")
         ended = ended or date.today().isoformat()
 
-        with self._lock:
+        with self._write_lock:
             conn = self._conn()
             with conn:
                 conn.execute(
@@ -444,50 +444,49 @@ class KnowledgeGraph:
         eid = self._entity_id(name)
 
         results = []
-        with self._lock:
-            conn = self._conn()
+        conn = self._conn()
 
-            if direction in ("outgoing", "both"):
-                query = "SELECT t.*, e.name as obj_name FROM triples t JOIN entities e ON t.object = e.id WHERE t.subject = ?"
-                params = [eid]
-                if as_of:
-                    query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
-                    params.extend([as_of, as_of])
-                for row in conn.execute(query, params).fetchall():
-                    results.append(
-                        {
-                            "direction": "outgoing",
-                            "subject": name,
-                            "predicate": row["predicate"],
-                            "object": row["obj_name"],
-                            "valid_from": row["valid_from"],
-                            "valid_to": row["valid_to"],
-                            "confidence": row["confidence"],
-                            "source_closet": row["source_closet"],
-                            "current": row["valid_to"] is None,
-                        }
-                    )
+        if direction in ("outgoing", "both"):
+            query = "SELECT t.*, e.name as obj_name FROM triples t JOIN entities e ON t.object = e.id WHERE t.subject = ?"
+            params = [eid]
+            if as_of:
+                query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+                params.extend([as_of, as_of])
+            for row in conn.execute(query, params).fetchall():
+                results.append(
+                    {
+                        "direction": "outgoing",
+                        "subject": name,
+                        "predicate": row["predicate"],
+                        "object": row["obj_name"],
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
+                    }
+                )
 
-            if direction in ("incoming", "both"):
-                query = "SELECT t.*, e.name as sub_name FROM triples t JOIN entities e ON t.subject = e.id WHERE t.object = ?"
-                params = [eid]
-                if as_of:
-                    query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
-                    params.extend([as_of, as_of])
-                for row in conn.execute(query, params).fetchall():
-                    results.append(
-                        {
-                            "direction": "incoming",
-                            "subject": row["sub_name"],
-                            "predicate": row["predicate"],
-                            "object": name,
-                            "valid_from": row["valid_from"],
-                            "valid_to": row["valid_to"],
-                            "confidence": row["confidence"],
-                            "source_closet": row["source_closet"],
-                            "current": row["valid_to"] is None,
-                        }
-                    )
+        if direction in ("incoming", "both"):
+            query = "SELECT t.*, e.name as sub_name FROM triples t JOIN entities e ON t.subject = e.id WHERE t.object = ?"
+            params = [eid]
+            if as_of:
+                query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
+                params.extend([as_of, as_of])
+            for row in conn.execute(query, params).fetchall():
+                results.append(
+                    {
+                        "direction": "incoming",
+                        "subject": row["sub_name"],
+                        "predicate": row["predicate"],
+                        "object": name,
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
+                    }
+                )
 
         return results
 
@@ -507,48 +506,46 @@ class KnowledgeGraph:
             params.extend([as_of, as_of])
 
         results = []
-        with self._lock:
-            conn = self._conn()
-            for row in conn.execute(query, params).fetchall():
-                results.append(
-                    {
-                        "subject": row["sub_name"],
-                        "predicate": pred,
-                        "object": row["obj_name"],
-                        "valid_from": row["valid_from"],
-                        "valid_to": row["valid_to"],
-                        "current": row["valid_to"] is None,
-                    }
-                )
+        conn = self._conn()
+        for row in conn.execute(query, params).fetchall():
+            results.append(
+                {
+                    "subject": row["sub_name"],
+                    "predicate": pred,
+                    "object": row["obj_name"],
+                    "valid_from": row["valid_from"],
+                    "valid_to": row["valid_to"],
+                    "current": row["valid_to"] is None,
+                }
+            )
         return results
 
     def timeline(self, entity_name: str = None):
         """Get all facts in chronological order, optionally filtered by entity."""
-        with self._lock:
-            conn = self._conn()
-            if entity_name:
-                eid = self._entity_id(entity_name)
-                rows = conn.execute(
-                    """
-                    SELECT t.*, s.name as sub_name, o.name as obj_name
-                    FROM triples t
-                    JOIN entities s ON t.subject = s.id
-                    JOIN entities o ON t.object = o.id
-                    WHERE (t.subject = ? OR t.object = ?)
-                    ORDER BY t.valid_from ASC NULLS LAST
-                    LIMIT 100
-                """,
-                    (eid, eid),
-                ).fetchall()
-            else:
-                rows = conn.execute("""
-                    SELECT t.*, s.name as sub_name, o.name as obj_name
-                    FROM triples t
-                    JOIN entities s ON t.subject = s.id
-                    JOIN entities o ON t.object = o.id
-                    ORDER BY t.valid_from ASC NULLS LAST
-                    LIMIT 100
-                """).fetchall()
+        conn = self._conn()
+        if entity_name:
+            eid = self._entity_id(entity_name)
+            rows = conn.execute(
+                """
+                SELECT t.*, s.name as sub_name, o.name as obj_name
+                FROM triples t
+                JOIN entities s ON t.subject = s.id
+                JOIN entities o ON t.object = o.id
+                WHERE (t.subject = ? OR t.object = ?)
+                ORDER BY t.valid_from ASC NULLS LAST
+                LIMIT 100
+            """,
+                (eid, eid),
+            ).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT t.*, s.name as sub_name, o.name as obj_name
+                FROM triples t
+                JOIN entities s ON t.subject = s.id
+                JOIN entities o ON t.object = o.id
+                ORDER BY t.valid_from ASC NULLS LAST
+                LIMIT 100
+            """).fetchall()
 
         return [
             {
@@ -565,20 +562,19 @@ class KnowledgeGraph:
     # ── Stats ─────────────────────────────────────────────────────────────
 
     def stats(self):
-        with self._lock:
-            conn = self._conn()
-            entities = conn.execute("SELECT COUNT(*) as cnt FROM entities").fetchone()["cnt"]
-            triples = conn.execute("SELECT COUNT(*) as cnt FROM triples").fetchone()["cnt"]
-            current = conn.execute(
-                "SELECT COUNT(*) as cnt FROM triples WHERE valid_to IS NULL"
-            ).fetchone()["cnt"]
-            expired = triples - current
-            predicates = [
-                r["predicate"]
-                for r in conn.execute(
-                    "SELECT DISTINCT predicate FROM triples ORDER BY predicate"
-                ).fetchall()
-            ]
+        conn = self._conn()
+        entities = conn.execute("SELECT COUNT(*) as cnt FROM entities").fetchone()["cnt"]
+        triples = conn.execute("SELECT COUNT(*) as cnt FROM triples").fetchone()["cnt"]
+        current = conn.execute(
+            "SELECT COUNT(*) as cnt FROM triples WHERE valid_to IS NULL"
+        ).fetchone()["cnt"]
+        expired = triples - current
+        predicates = [
+            r["predicate"]
+            for r in conn.execute(
+                "SELECT DISTINCT predicate FROM triples ORDER BY predicate"
+            ).fetchall()
+        ]
         return {
             "entities": entities,
             "triples": triples,
