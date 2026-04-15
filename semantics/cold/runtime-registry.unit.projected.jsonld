@@ -1,0 +1,119 @@
+{
+  "@context": [
+    "../contexts/core.context.jsonld",
+    "../contexts/full-stack-unit.context.jsonld",
+    {
+      "l0": {"@id": "https://schema.fleet-to-force.dev/layers#l0", "@container": "@graph"},
+      "l1": {"@id": "https://schema.fleet-to-force.dev/layers#l1", "@container": "@graph"},
+      "l2": {"@id": "https://schema.fleet-to-force.dev/layers#l2", "@container": "@graph"},
+      "l3": {"@id": "https://schema.fleet-to-force.dev/layers#l3", "@container": "@graph"},
+      "Binding": "https://schema.fleet-to-force.dev/binding#Binding",
+      "AtomicImplementation": "https://schema.fleet-to-force.dev/binding#AtomicImplementation",
+      "HostArtifact": "https://schema.fleet-to-force.dev/binding#HostArtifact",
+      "ProjectionView": "https://schema.fleet-to-force.dev/binding#ProjectionView",
+      "DwnProtocol": "https://schema.fleet-to-force.dev/dwn#Protocol",
+      "ObservationStream": "https://schema.fleet-to-force.dev/observation#Stream",
+      "AssemblyArtifact": "https://schema.fleet-to-force.dev/assembly#Artifact",
+      "authority": {"@id": "https://schema.fleet-to-force.dev/core#authority", "@type": "@id"},
+      "protocol": {"@id": "https://schema.fleet-to-force.dev/core#protocol", "@type": "@id"},
+      "permissionPolicy": {"@id": "https://schema.fleet-to-force.dev/core#permissionPolicy", "@type": "@id"},
+      "bindsTo": {"@id": "https://schema.fleet-to-force.dev/core#bindsTo", "@type": "@id"},
+      "realizedBy": {"@id": "https://schema.fleet-to-force.dev/core#realizedBy", "@type": "@id"},
+      "emitsArtifact": {"@id": "https://schema.fleet-to-force.dev/core#emitsArtifact", "@type": "@id"},
+      "observedBy": {"@id": "https://schema.fleet-to-force.dev/core#observedBy", "@type": "@id"},
+      "participatesIn": {"@id": "https://schema.fleet-to-force.dev/core#participatesIn", "@type": "@id"},
+      "pythonModule": "https://schema.fleet-to-force.dev/binding#pythonModule",
+      "pythonSymbol": "https://schema.fleet-to-force.dev/binding#pythonSymbol",
+      "artifactPath": "https://schema.fleet-to-force.dev/binding#artifactPath",
+      "projectionName": "https://schema.fleet-to-force.dev/binding#projectionName",
+      "toolName": "https://schema.fleet-to-force.dev/binding#toolName",
+      "commandName": "https://schema.fleet-to-force.dev/binding#commandName",
+      "exposure": "https://schema.fleet-to-force.dev/binding#exposure"
+    }
+  ],
+  "@graph": [
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry",
+      "@type": "Capability",
+      "category": "runtime-registry",
+      "description": "Canonical unit-node for the projected runtime registry of MemPalace.",
+      "enabled": true,
+      "l0": [
+        {
+          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l0",
+          "@type": "RuntimeConfig",
+          "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo",
+          "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/runtime-registry",
+          "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/runtime-registry-public"
+        }
+      ],
+      "l1": [
+        {
+          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l1",
+          "@type": "Binding",
+          "commandName": "registry",
+          "toolName": "mempalace_runtime_registry",
+          "exposure": "public",
+          "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/runtime-registry/python"
+        }
+      ],
+      "l2": [
+        {
+          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l2",
+          "@type": "ProjectionView",
+          "participatesIn": [
+            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-projection",
+            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-audit"
+          ]
+        }
+      ],
+      "l3": [
+        {
+          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l3",
+          "@type": "ProjectionView",
+          "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/runtime-registry-events",
+          "emitsArtifact": [
+            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-profile-view",
+            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/cli-registry-view",
+            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view"
+          ]
+        }
+      ]
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/runtime-registry/python",
+      "@type": "AtomicImplementation",
+      "pythonModule": "mempalace.mcp_server_ld",
+      "pythonSymbol": "tool_runtime_registry",
+      "realizedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-registry-python"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/runtime-registry",
+      "@type": "DwnProtocol"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/runtime-registry-events",
+      "@type": "ObservationStream"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-profile-view",
+      "@type": "HostArtifact",
+      "artifactPath": "mempalace/runtime_profile.json"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/cli-registry-view",
+      "@type": "HostArtifact",
+      "artifactPath": "mempalace/cli_registry.json"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view",
+      "@type": "HostArtifact",
+      "artifactPath": "mempalace/mcp_tool_registry.json"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-registry-python",
+      "@type": "AssemblyArtifact",
+      "artifactPath": "mempalace/mcp_server_ld.py"
+    }
+  ]
+}
