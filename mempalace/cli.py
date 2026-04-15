@@ -277,9 +277,25 @@ def cmd_repair(args):
     print(f"  Backing up to {backup_path}...")
     shutil.copytree(palace_path, backup_path)
 
+    # Read the embedding model from the existing collection before deleting
+    from .embedding import get_embedding_function, resolve_model_from_metadata
+
+    try:
+        raw_client = backend._client(palace_path)
+        raw_col = raw_client.get_collection("mempalace_drawers")
+        repair_model = resolve_model_from_metadata(raw_col.metadata)
+    except Exception:
+        repair_model = resolve_model_from_metadata(None)
+    repair_ef = get_embedding_function(repair_model)
+
     print("  Rebuilding collection...")
     backend.delete_collection(palace_path, "mempalace_drawers")
-    new_col = backend.create_collection(palace_path, "mempalace_drawers")
+    new_col = backend.create_collection(
+        palace_path,
+        "mempalace_drawers",
+        embedding_function=repair_ef,
+        embedding_model_name=repair_model,
+    )
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):

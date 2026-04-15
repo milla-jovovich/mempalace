@@ -53,11 +53,12 @@ def get_collection(
     palace_path: str,
     collection_name: str = "mempalace_drawers",
     create: bool = True,
+    config=None,
 ):
     """Get the palace collection through the backend layer.
 
     Resolves the correct embedding model:
-    - On create: uses new_palace_model() (mpnet by default)
+    - On create: uses new_palace_model(config) (mpnet by default)
     - On read: reads model from collection metadata, falls back to MiniLM
     """
     from .embedding import (
@@ -67,7 +68,7 @@ def get_collection(
     )
 
     if create:
-        model = new_palace_model()
+        model = new_palace_model(config)
         ef = get_embedding_function(model)
         return _DEFAULT_BACKEND.get_collection(
             palace_path,

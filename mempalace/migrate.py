@@ -208,8 +208,17 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
 
     temp_palace = tempfile.mkdtemp(prefix="mempalace_migrate_")
     print(f"  Creating fresh palace in {temp_palace}...")
+    from .embedding import get_embedding_function, new_palace_model
+
+    migrate_model = new_palace_model()
+    migrate_ef = get_embedding_function(migrate_model)
     fresh_backend = ChromaBackend()
-    col = fresh_backend.get_or_create_collection(temp_palace, "mempalace_drawers")
+    col = fresh_backend.get_or_create_collection(
+        temp_palace,
+        "mempalace_drawers",
+        embedding_function=migrate_ef,
+        embedding_model_name=migrate_model,
+    )
 
     # Re-import in batches
     batch_size = 500

@@ -260,10 +260,25 @@ def rebuild_index(palace_path=None):
         shutil.copy2(sqlite_path, backup_path)
         print(f"  Backup: {backup_path}")
 
-    # Rebuild with correct HNSW settings
+    # Read the embedding model from the existing collection before deleting
+    from .embedding import get_embedding_function, resolve_model_from_metadata
+
+    try:
+        raw_client = backend._client(palace_path)
+        raw_col = raw_client.get_collection(COLLECTION_NAME)
+        rebuild_model = resolve_model_from_metadata(raw_col.metadata)
+    except Exception:
+        rebuild_model = resolve_model_from_metadata(None)
+    rebuild_ef = get_embedding_function(rebuild_model)
+
     print("  Rebuilding collection with hnsw:space=cosine...")
     backend.delete_collection(palace_path, COLLECTION_NAME)
-    new_col = backend.create_collection(palace_path, COLLECTION_NAME)
+    new_col = backend.create_collection(
+        palace_path,
+        COLLECTION_NAME,
+        embedding_function=rebuild_ef,
+        embedding_model_name=rebuild_model,
+    )
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):

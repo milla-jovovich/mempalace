@@ -164,10 +164,19 @@ class ChromaBackend:
         self._client(palace_path).delete_collection(collection_name)
 
     def create_collection(
-        self, palace_path: str, collection_name: str, hnsw_space: str = "cosine"
+        self,
+        palace_path: str,
+        collection_name: str,
+        hnsw_space: str = "cosine",
+        embedding_function=None,
+        embedding_model_name: str = None,
     ) -> "ChromaCollection":
-        """Create (not get-or-create) *collection_name* with cosine HNSW space."""
+        """Create (not get-or-create) *collection_name* with HNSW space and optional embedding config."""
+        metadata = {"hnsw:space": hnsw_space}
+        if embedding_model_name:
+            metadata["embedding_model"] = embedding_model_name
+        ef_kwargs = {"embedding_function": embedding_function} if embedding_function else {}
         collection = self._client(palace_path).create_collection(
-            collection_name, metadata={"hnsw:space": hnsw_space}
+            collection_name, metadata=metadata, **ef_kwargs
         )
         return ChromaCollection(collection)
