@@ -25,7 +25,6 @@
       "pythonModule": "https://schema.fleet-to-force.dev/binding#pythonModule",
       "pythonSymbol": "https://schema.fleet-to-force.dev/binding#pythonSymbol",
       "artifactPath": "https://schema.fleet-to-force.dev/binding#artifactPath",
-      "projectionName": "https://schema.fleet-to-force.dev/binding#projectionName",
       "toolName": "https://schema.fleet-to-force.dev/binding#toolName",
       "commandName": "https://schema.fleet-to-force.dev/binding#commandName",
       "exposure": "https://schema.fleet-to-force.dev/binding#exposure"
@@ -38,82 +37,80 @@
       "category": "runtime-registry",
       "description": "Canonical unit-node for the projected runtime registry of MemPalace.",
       "enabled": true,
-      "l0": [
-        {
-          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l0",
-          "@type": "RuntimeConfig",
-          "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo",
-          "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/runtime-registry",
-          "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/runtime-registry-public"
-        }
-      ],
-      "l1": [
-        {
-          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l1",
-          "@type": "Binding",
-          "commandName": "registry",
-          "toolName": "mempalace_runtime_registry",
-          "exposure": "public",
-          "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/runtime-registry/python"
-        }
-      ],
-      "l2": [
-        {
-          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l2",
-          "@type": "ProjectionView",
-          "participatesIn": [
-            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-projection",
-            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-audit"
-          ]
-        }
-      ],
-      "l3": [
-        {
-          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l3",
-          "@type": "ProjectionView",
-          "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/runtime-registry-events",
-          "emitsArtifact": [
-            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-profile-view",
-            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/cli-registry-view",
-            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view"
-          ]
-        }
-      ]
+      "l0": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l0", "@type": "RuntimeConfig", "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo", "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/runtime-registry", "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/runtime-registry-public"}],
+      "l1": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l1", "@type": "Binding", "commandName": "registry", "toolName": "mempalace_runtime_registry", "exposure": "public", "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/runtime-registry/python"}],
+      "l2": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l2", "@type": "ProjectionView", "participatesIn": ["did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-projection", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-audit"]}],
+      "l3": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry/l3", "@type": "ProjectionView", "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/runtime-registry-events", "emitsArtifact": ["did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-profile-view", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/cli-registry-view", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view"]}]
     },
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/runtime-registry/python", "@type": "AtomicImplementation", "pythonModule": "mempalace.mcp_server_ld", "pythonSymbol": "tool_runtime_registry", "realizedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-registry-python"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/runtime-registry", "@type": "DwnProtocol"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/runtime-registry-events", "@type": "ObservationStream"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-registry-python", "@type": "AssemblyArtifact", "artifactPath": "mempalace/mcp_server_ld.py"},
+
     {
-      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/runtime-registry/python",
-      "@type": "AtomicImplementation",
-      "pythonModule": "mempalace.mcp_server_ld",
-      "pythonSymbol": "tool_runtime_registry",
-      "realizedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-registry-python"
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search",
+      "@type": "Capability",
+      "category": "retrieval",
+      "description": "Search drawers and closets using MemPalace retrieval.",
+      "enabled": true,
+      "l0": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search/l0", "@type": "RuntimeConfig", "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo", "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/search", "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/search-public"}],
+      "l1": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search/l1", "@type": "Binding", "commandName": "search", "toolName": "mempalace_search", "exposure": "public", "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/search/python"}],
+      "l2": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search/l2", "@type": "ProjectionView", "participatesIn": ["did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-query", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/agent-recall"]}],
+      "l3": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search/l3", "@type": "ProjectionView", "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/search-events", "emitsArtifact": ["did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/cli-registry-view", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view"]}]
     },
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/search/python", "@type": "AtomicImplementation", "pythonModule": "mempalace.searcher", "pythonSymbol": "search"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/search", "@type": "DwnProtocol"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/search-events", "@type": "ObservationStream"},
+
     {
-      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/runtime-registry",
-      "@type": "DwnProtocol"
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine",
+      "@type": "Capability",
+      "category": "ingestion",
+      "description": "Mine a project or working directory into palace memory.",
+      "enabled": true,
+      "l0": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine/l0", "@type": "RuntimeConfig", "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo", "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/mine", "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/mine-gated"}],
+      "l1": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine/l1", "@type": "Binding", "commandName": "mine", "toolName": "mempalace_mine", "exposure": "gated", "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/mine/python"}],
+      "l2": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine/l2", "@type": "ProjectionView", "participatesIn": ["did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-ingest", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/project-capture"]}],
+      "l3": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine/l3", "@type": "ProjectionView", "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/mine-events", "emitsArtifact": ["did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-profile-view", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view"]}]
     },
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/mine/python", "@type": "AtomicImplementation", "pythonModule": "mempalace.miner", "pythonSymbol": "mine"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/mine", "@type": "DwnProtocol"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/mine-events", "@type": "ObservationStream"},
+
     {
-      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/runtime-registry-events",
-      "@type": "ObservationStream"
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop",
+      "@type": "Capability",
+      "category": "hooks",
+      "description": "Execute the stop-hook runtime for background save behavior.",
+      "enabled": true,
+      "l0": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l0", "@type": "RuntimeConfig", "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo", "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-stop", "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/hook-internal"}],
+      "l1": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l1", "@type": "Binding", "commandName": "hook run --hook stop", "toolName": "mempalace_hook_stop", "exposure": "hidden", "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-stop/python"}],
+      "l2": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l2", "@type": "ProjectionView", "participatesIn": ["did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-save", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/session-boundary"]}],
+      "l3": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l3", "@type": "ProjectionView", "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-stop-events", "emitsArtifact": ["did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/claude-hook-manifest", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/codex-hook-manifest"]}]
     },
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-stop/python", "@type": "AtomicImplementation", "pythonModule": "mempalace.hooks_cli", "pythonSymbol": "hook_stop"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-stop", "@type": "DwnProtocol"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-stop-events", "@type": "ObservationStream"},
+
     {
-      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-profile-view",
-      "@type": "HostArtifact",
-      "artifactPath": "mempalace/runtime_profile.json"
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact",
+      "@type": "Capability",
+      "category": "hooks",
+      "description": "Execute the precompact hook runtime for emergency save behavior.",
+      "enabled": true,
+      "l0": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact/l0", "@type": "RuntimeConfig", "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo", "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-precompact", "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/hook-internal"}],
+      "l1": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact/l1", "@type": "Binding", "commandName": "hook run --hook precompact", "toolName": "mempalace_hook_precompact", "exposure": "hidden", "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-precompact/python"}],
+      "l2": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact/l2", "@type": "ProjectionView", "participatesIn": ["did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-save", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/precompact-guard"]}],
+      "l3": [{"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact/l3", "@type": "ProjectionView", "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-precompact-events", "emitsArtifact": ["did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/claude-hook-manifest", "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/codex-hook-manifest"]}]
     },
-    {
-      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/cli-registry-view",
-      "@type": "HostArtifact",
-      "artifactPath": "mempalace/cli_registry.json"
-    },
-    {
-      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view",
-      "@type": "HostArtifact",
-      "artifactPath": "mempalace/mcp_tool_registry.json"
-    },
-    {
-      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-registry-python",
-      "@type": "AssemblyArtifact",
-      "artifactPath": "mempalace/mcp_server_ld.py"
-    }
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-precompact/python", "@type": "AtomicImplementation", "pythonModule": "mempalace.hooks_cli", "pythonSymbol": "hook_precompact"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-precompact", "@type": "DwnProtocol"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-precompact-events", "@type": "ObservationStream"},
+
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-profile-view", "@type": "HostArtifact", "artifactPath": "mempalace/runtime_profile.json"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/cli-registry-view", "@type": "HostArtifact", "artifactPath": "mempalace/cli_registry.json"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view", "@type": "HostArtifact", "artifactPath": "mempalace/mcp_tool_registry.json"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/claude-hook-manifest", "@type": "HostArtifact", "artifactPath": ".claude-plugin/hooks/hooks.json"},
+    {"@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/codex-hook-manifest", "@type": "HostArtifact", "artifactPath": ".codex-plugin/hooks.json"}
   ]
 }
