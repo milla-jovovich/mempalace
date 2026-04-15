@@ -36,3 +36,10 @@ venv/
 
 # ChromaDB local data
 *.sqlite3-journal
+.codescout/private-memories/
+
+# Git worktrees
+.worktrees/
+
+# Git worktrees
+.worktrees/
