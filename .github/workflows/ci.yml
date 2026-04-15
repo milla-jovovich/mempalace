@@ -17,7 +17,22 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
+      - name: Install package (retry on transient PyPI/TLS errors)
+        shell: bash
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5; do
+            if python -m pip install --retries 10 --timeout 120 -e ".[dev]"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "pip install failed after 5 attempts"
+              exit 1
+            fi
+            echo "pip install failed (attempt ${attempt}/5), retrying..."
+            sleep $((attempt * 15))
+          done
       - run: python -m pytest tests/ -v --ignore=tests/benchmarks --cov=mempalace --cov-report=term-missing --cov-fail-under=80 --durations=10
 
   test-windows:
@@ -27,7 +42,22 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.9"
-      - run: pip install -e ".[dev]"
+      - name: Install package (retry on transient PyPI/TLS errors)
+        shell: bash
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5; do
+            if python -m pip install --retries 10 --timeout 120 -e ".[dev]"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "pip install failed after 5 attempts"
+              exit 1
+            fi
+            echo "pip install failed (attempt ${attempt}/5), retrying..."
+            sleep $((attempt * 15))
+          done
       - run: python -m pytest tests/ -v --ignore=tests/benchmarks --cov=mempalace --cov-report=term-missing --cov-fail-under=80 --durations=10
 
   test-macos:
@@ -37,7 +67,22 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.9"
-      - run: pip install -e ".[dev]"
+      - name: Install package (retry on transient PyPI/TLS errors)
+        shell: bash
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5; do
+            if python -m pip install --retries 10 --timeout 120 -e ".[dev]"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "pip install failed after 5 attempts"
+              exit 1
+            fi
+            echo "pip install failed (attempt ${attempt}/5), retrying..."
+            sleep $((attempt * 15))
+          done
       - run: python -m pytest tests/ -v --ignore=tests/benchmarks --cov=mempalace --cov-report=term-missing --cov-fail-under=80 --durations=10
   lint:
     runs-on: ubuntu-latest
@@ -46,6 +91,21 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - run: pip install "ruff>=0.4.0,<0.5"
+      - name: Install ruff (retry on transient PyPI/TLS errors)
+        shell: bash
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5; do
+            if python -m pip install --retries 10 --timeout 120 "ruff>=0.4.0,<0.5"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "pip install failed after 5 attempts"
+              exit 1
+            fi
+            echo "pip install failed (attempt ${attempt}/5), retrying..."
+            sleep $((attempt * 15))
+          done
       - run: ruff check .
       - run: ruff format --check .
