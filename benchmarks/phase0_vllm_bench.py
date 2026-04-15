@@ -38,7 +38,7 @@ REALISTIC_PROMPT = (
 def run_benchmark(model_id: str, n_trials: int) -> dict:
     from vllm import LLM, SamplingParams  # type: ignore[import-not-found]
 
-    llm = LLM(model=model_id, dtype="auto", gpu_memory_utilization=0.6)
+    llm = LLM(model=model_id, dtype="auto", gpu_memory_utilization=0.6, disable_log_stats=False)
     sampling = SamplingParams(temperature=0.0, max_tokens=80)
 
     # Warmup trial (not counted)
@@ -51,7 +51,11 @@ def run_benchmark(model_id: str, n_trials: int) -> dict:
     gen_tokens = 0
 
     for _ in range(n_trials):
+        import time as _time
+        t0 = _time.monotonic()
         outputs = llm.generate([REALISTIC_PROMPT], sampling)
+        total_ms = (_time.monotonic() - t0) * 1000
+
         out = outputs[0]
         prompt_tokens = len(out.prompt_token_ids)
         gen_tokens = len(out.outputs[0].token_ids)
@@ -59,26 +63,24 @@ def run_benchmark(model_id: str, n_trials: int) -> dict:
         metrics = getattr(out, "metrics", None)
         if metrics is None:
             print(
-                "vLLM output has no metrics attribute — cannot separate "
-                "prefill from generation latency. Upgrade vLLM or re-measure.",
+                "vLLM output has no metrics attribute — set disable_log_stats=False.",
                 file=sys.stderr,
             )
             sys.exit(2)
 
-        arrival = metrics.arrival_time
-        first_token = metrics.first_token_ts    # correct field name (not first_token_time)
-        finished = metrics.last_token_ts        # correct field name (not finished_time)
-        if arrival is None or first_token is None or finished is None:
+        first_token = metrics.first_token_ts
+        finished = metrics.last_token_ts
+        if first_token is None or finished is None:
             print(
-                "vLLM metrics incomplete (arrival/first_token/finished). "
-                "Cannot compute prefill/gen split.",
+                "vLLM metrics incomplete (first_token_ts/last_token_ts missing).",
                 file=sys.stderr,
             )
             sys.exit(2)
 
-        prefill_ms = (first_token - arrival) * 1000
+        # first_token_ts and last_token_ts are both time.monotonic() — safe to subtract.
+        # arrival_time is time.time() (different clock) so we measure wall time externally.
         gen_ms = (finished - first_token) * 1000
-        total_ms = (finished - arrival) * 1000
+        prefill_ms = total_ms - gen_ms  # total wall time minus generation time
         prefill_ms_list.append(prefill_ms)
         gen_ms_list.append(gen_ms)
         total_ms_list.append(total_ms)
