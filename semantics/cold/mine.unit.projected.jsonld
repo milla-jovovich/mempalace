@@ -1,0 +1,53 @@
+{
+  "@context": [
+    "../contexts/core.context.jsonld",
+    "../contexts/full-stack-unit.context.jsonld"
+  ],
+  "@graph": [
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine",
+      "@type": "Capability",
+      "category": "ingestion",
+      "description": "Mine a project or working directory into palace memory.",
+      "enabled": true,
+      "l0": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine/l0",
+        "@type": "RuntimeConfig",
+        "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo",
+        "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/mine",
+        "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/mine-gated"
+      }],
+      "l1": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine/l1",
+        "@type": "Binding",
+        "commandName": "mine",
+        "toolName": "mempalace_mine",
+        "exposure": "gated",
+        "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/mine/python"
+      }],
+      "l2": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine/l2",
+        "@type": "ProjectionView",
+        "participatesIn": [
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-ingest",
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/project-capture"
+        ]
+      }],
+      "l3": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine/l3",
+        "@type": "ProjectionView",
+        "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/mine-events",
+        "emitsArtifact": [
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-profile-view",
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view"
+        ]
+      }]
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/mine/python",
+      "@type": "AtomicImplementation",
+      "pythonModule": "mempalace.miner",
+      "pythonSymbol": "mine"
+    }
+  ]
+}
