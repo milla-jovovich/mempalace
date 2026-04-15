@@ -60,3 +60,16 @@ def test_walker_status_not_initialized(isolated_home, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "not initialized" in out.lower()
+
+
+def test_status_walker_flag_reports_subsystem(isolated_home, capsys):
+    """mempalace status --walker appends walker subsystem info to normal status output."""
+    fake_hw = WalkerHardware(HardwareTier.FULL, "NVIDIA RTX A5000", 24.0)
+    with patch(
+        "mempalace.walker.gpu_detect.detect_hardware", return_value=fake_hw
+    ):
+        rc = cli.main(["status", "--walker"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Walker" in out
+    assert "NVIDIA RTX A5000" in out or "not initialized" in out

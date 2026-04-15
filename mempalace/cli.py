@@ -163,11 +163,31 @@ def cmd_migrate(args):
     )
 
 
-def cmd_status(args):
+def cmd_status(args) -> int:
     from .miner import status
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     status(palace_path=palace_path)
+
+    if getattr(args, "walker", False):
+        from mempalace.walker.gpu_detect import detect_hardware
+
+        print("\nWalker subsystem")
+        print("─" * 40)
+        hw = detect_hardware()
+        print(f"  Hardware tier:  {hw.tier.value}")
+        if hw.device_name:
+            print(f"  Device:         {hw.device_name}")
+        if hw.vram_gb:
+            print(f"  VRAM:           {hw.vram_gb:.1f} GB")
+
+        flag = Path.home() / ".mempalace" / "walker_ready"
+        if flag.exists():
+            print("  Walker:         initialized")
+        else:
+            print("  Walker:         not initialized (run `mempalace walker init`)")
+
+    return 0
 
 
 def cmd_repair(args):
@@ -636,7 +656,12 @@ def main(argv=None):
         "--yes", action="store_true", help="Skip confirmation for destructive changes"
     )
 
-    sub.add_parser("status", help="Show what's been filed")
+    p_status = sub.add_parser("status", help="Show what's been filed")
+    p_status.add_argument(
+        "--walker",
+        action="store_true",
+        help="Include walker subsystem status",
+    )
 
     # walker
     p_walker = sub.add_parser(
