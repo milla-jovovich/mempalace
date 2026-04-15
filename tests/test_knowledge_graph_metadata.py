@@ -13,10 +13,14 @@ class TestEntityMetadata:
             properties={"role": "engineer", "team": "platform"},
         )
 
-        row = kg._conn().execute(
-            "SELECT name, type, properties FROM entities WHERE id = ?",
-            ("alice",),
-        ).fetchone()
+        row = (
+            kg._conn()
+            .execute(
+                "SELECT name, type, properties FROM entities WHERE id = ?",
+                ("alice",),
+            )
+            .fetchone()
+        )
 
         assert row["name"] == "Alice"
         assert row["type"] == "person"
@@ -29,10 +33,14 @@ class TestEntityMetadata:
         kg.add_entity("Alice", entity_type="person", properties={"role": "engineer"})
         kg.add_entity("Alice", entity_type="person", properties={"role": "manager"})
 
-        row = kg._conn().execute(
-            "SELECT properties FROM entities WHERE id = ?",
-            ("alice",),
-        ).fetchone()
+        row = (
+            kg._conn()
+            .execute(
+                "SELECT properties FROM entities WHERE id = ?",
+                ("alice",),
+            )
+            .fetchone()
+        )
 
         assert json.loads(row["properties"]) == {"role": "manager"}
 
@@ -48,10 +56,14 @@ class TestTripleMetadata:
             source_file="jobs.md",
         )
 
-        row = kg._conn().execute(
-            "SELECT confidence, source_closet, source_file FROM triples WHERE id = ?",
-            (tid,),
-        ).fetchone()
+        row = (
+            kg._conn()
+            .execute(
+                "SELECT confidence, source_closet, source_file FROM triples WHERE id = ?",
+                (tid,),
+            )
+            .fetchone()
+        )
 
         assert row["confidence"] == pytest.approx(0.65)
         assert row["source_closet"] == "career"
