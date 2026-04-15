@@ -1,0 +1,49 @@
+"@context":
+  - ../contexts/core.context.jsonld
+  - ../contexts/full-stack-unit.context.jsonld
+
+"@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine
+"@type": Capability
+
+repoRoot: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+category: ingestion
+description: Mine a project or working directory into palace memory.
+enabled: true
+
+l0:
+  "@type": RuntimeConfig
+  authority: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+  protocol: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/mine
+  permissionPolicy: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/mine-gated
+  persistenceClass: ingestion-capability
+
+l1:
+  cli:
+    command: mine
+    exposure: public
+  mcp:
+    tool: mempalace_mine
+    exposure: gated
+  binding:
+    pythonModule: mempalace.miner
+    pythonSymbol: mine
+    runtimeAdapter: mempalace.operation_registry
+
+l2:
+  workflowRole: ingestion
+  participatesIn:
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-ingest
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/project-capture
+  trigger: on-demand
+  agentAccess:
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#agent/operator
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#agent/architect
+
+l3:
+  observation:
+    stream: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/mine-events
+    auditClass: ingestion-observation
+  assembly:
+    emitsArtifacts:
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-profile-view
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view
