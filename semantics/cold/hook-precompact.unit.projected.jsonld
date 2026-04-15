@@ -1,0 +1,53 @@
+{
+  "@context": [
+    "../contexts/core.context.jsonld",
+    "../contexts/full-stack-unit.context.jsonld"
+  ],
+  "@graph": [
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact",
+      "@type": "Capability",
+      "category": "hooks",
+      "description": "Execute the precompact hook runtime for emergency save behavior.",
+      "enabled": true,
+      "l0": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact/l0",
+        "@type": "RuntimeConfig",
+        "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo",
+        "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-precompact",
+        "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/hook-internal"
+      }],
+      "l1": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact/l1",
+        "@type": "Binding",
+        "commandName": "hook run --hook precompact",
+        "toolName": "mempalace_hook_precompact",
+        "exposure": "hidden",
+        "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-precompact/python"
+      }],
+      "l2": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact/l2",
+        "@type": "ProjectionView",
+        "participatesIn": [
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-save",
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/precompact-guard"
+        ]
+      }],
+      "l3": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact/l3",
+        "@type": "ProjectionView",
+        "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-precompact-events",
+        "emitsArtifact": [
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/claude-hook-manifest",
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/codex-hook-manifest"
+        ]
+      }]
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-precompact/python",
+      "@type": "AtomicImplementation",
+      "pythonModule": "mempalace.hooks_cli",
+      "pythonSymbol": "hook_precompact"
+    }
+  ]
+}
