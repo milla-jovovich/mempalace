@@ -76,18 +76,21 @@ def run_baseline(questions: list[dict], palace_path: Path | None) -> list[WalkBe
     results: list[WalkBenchResult] = []
     for q in questions:
         t0 = time.monotonic()
-        hits = searcher.search_memories(
-            query=q["question"],
-            palace_path=str(palace_path) if palace_path else None,
-            n_results=10,
-        )
+        if palace_path is None:
+            hits = {"results": []}
+        else:
+            hits = searcher.search_memories(
+                query=q["question"],
+                palace_path=str(palace_path),
+                n_results=10,
+            )
         elapsed_ms = (time.monotonic() - t0) * 1000
 
         # search_memories returns no "id"/"drawer_id" key.
         # Actual keys: text, wing, room, source_file, similarity, ...
         # Hit metric = answer-text containment in retrieved chunks.
         retrieved_texts = [h.get("text", "") for h in hits.get("results", [])]
-        gold_answer = q["answer"].lower().strip()
+        gold_answer = str(q["answer"]).lower().strip()
 
         def answer_in(text: str) -> bool:
             return bool(gold_answer) and gold_answer in text.lower()
