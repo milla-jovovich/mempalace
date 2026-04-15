@@ -1,0 +1,50 @@
+"@context":
+  - ../contexts/core.context.jsonld
+  - ../contexts/full-stack-unit.context.jsonld
+
+"@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry
+"@type": Capability
+
+repoRoot: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+category: runtime-registry
+description: Canonical unit-node for the projected runtime registry of MemPalace.
+enabled: true
+
+l0:
+  "@type": RuntimeConfig
+  authority: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+  protocol: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/runtime-registry
+  permissionPolicy: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/runtime-registry-public
+  persistenceClass: projected-runtime-registry
+
+l1:
+  cli:
+    command: registry
+    exposure: public
+  mcp:
+    tool: mempalace_runtime_registry
+    exposure: public
+  binding:
+    pythonModule: mempalace.mcp_server_ld
+    pythonSymbol: tool_runtime_registry
+    runtimeAdapter: mempalace.operation_registry
+
+l2:
+  workflowRole: control-plane-introspection
+  participatesIn:
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-projection
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-audit
+  trigger: on-demand
+  agentAccess:
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#agent/operator
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#agent/architect
+
+l3:
+  observation:
+    stream: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/runtime-registry-events
+    auditClass: control-plane-observation
+  assembly:
+    emitsArtifacts:
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/runtime-profile-view
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/cli-registry-view
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view
