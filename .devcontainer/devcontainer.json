@@ -23,32 +23,6 @@
     "PYTHONDONTWRITEBYTECODE": "1",
     "PYTHONUNBUFFERED": "1"
   },
-  "postCreateCommand": "bash scripts/bootstrap_codespace.sh",
-  "updateContentCommand": "bash scripts/bootstrap_codespace.sh",
-  "customizations": {
-    "codespaces": {
-      "openFiles": [
-        "README.md",
-        "semantics/cold/mempalace.binding.graph.jsonld",
-        "mempalace/runtime_profile.json"
-      ]
-    },
-    "vscode": {
-      "settings": {
-        "python.defaultInterpreterPath": "/usr/local/python/current/bin/python",
-        "python.terminal.activateEnvironment": false,
-        "terminal.integrated.defaultProfile.linux": "bash",
-        "files.trimTrailingWhitespace": true,
-        "files.insertFinalNewline": true
-      },
-      "extensions": [
-        "ms-python.python",
-        "ms-python.vscode-pylance",
-        "ms-toolsai.jupyter",
-        "redhat.vscode-yaml",
-        "tamasfe.even-better-toml",
-        "GitHub.vscode-github-actions"
-      ]
-    }
-  }
+  "onCreateCommand": "bash scripts/bootstrap_codespace.sh",
+  "updateContentCommand": "bash scripts/bootstrap_codespace.sh"
 }
