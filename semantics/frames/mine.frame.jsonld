@@ -1,0 +1,12 @@
+{
+  "@context": [
+    "../contexts/core.context.jsonld",
+    "../contexts/full-stack-unit.context.jsonld"
+  ],
+  "@type": "Capability",
+  "category": "ingestion",
+  "l0": {},
+  "l1": {},
+  "l2": {},
+  "l3": {}
+}
