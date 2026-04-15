@@ -14,8 +14,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-SAVE_INTERVAL = 15
-STATE_DIR = Path.home() / ".mempalace" / "hook_state"
+from .integration_profile import cli_command, hook_state_dir, python_command
+
+SAVE_INTERVAL = int(os.environ.get("MEMPALACE_SAVE_INTERVAL", "15"))
+STATE_DIR = Path(hook_state_dir())
 
 STOP_BLOCK_REASON = (
     "AUTO-SAVE checkpoint (MemPalace). Save this session's key content:\n"
@@ -31,7 +33,7 @@ PRECOMPACT_BLOCK_REASON = (
     "1. mempalace_diary_write — thorough AAAK-compressed session summary\n"
     "2. mempalace_add_drawer — ALL verbatim quotes, decisions, code, context\n"
     "3. mempalace_kg_add — entity relationships (optional)\n"
-    "Be thorough \u2014 after compaction, detailed context will be lost. "
+    "Be thorough — after compaction, detailed context will be lost. "
     "Do NOT write to Claude Code's native auto-memory (.md files). "
     "Save everything to MemPalace, then allow compaction to proceed."
 )
@@ -99,6 +101,17 @@ def _output(data: dict):
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
+def _run_mempalace(args: list[str], sync: bool = False, timeout: int | None = None, stdout=None, stderr=None):
+    cmd = cli_command()
+    if cmd and shutil.which(cmd):
+        command = [cmd, *args]
+    else:
+        command = [python_command(), "-m", "mempalace", *args]
+    if sync:
+        return subprocess.run(command, stdout=stdout, stderr=stderr, timeout=timeout)
+    return subprocess.Popen(command, stdout=stdout, stderr=stderr)
+
+
 def _maybe_auto_ingest():
     """If MEMPAL_DIR is set and exists, run mempalace mine in background."""
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
@@ -106,11 +119,7 @@ def _maybe_auto_ingest():
         try:
             log_path = STATE_DIR / "hook.log"
             with open(log_path, "a") as log_f:
-                subprocess.Popen(
-                    [sys.executable, "-m", "mempalace", "mine", mempal_dir],
-                    stdout=log_f,
-                    stderr=log_f,
-                )
+                _run_mempalace(["mine", mempal_dir], sync=False, stdout=log_f, stderr=log_f)
         except OSError:
             pass
 
@@ -203,12 +212,7 @@ def hook_precompact(data: dict, harness: str):
         try:
             log_path = STATE_DIR / "hook.log"
             with open(log_path, "a") as log_f:
-                subprocess.run(
-                    [sys.executable, "-m", "mempalace", "mine", mempal_dir],
-                    stdout=log_f,
-                    stderr=log_f,
-                    timeout=60,
-                )
+                _run_mempalace(["mine", mempal_dir], sync=True, timeout=60, stdout=log_f, stderr=log_f)
         except OSError:
             pass
 
