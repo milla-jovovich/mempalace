@@ -102,7 +102,7 @@ def collection(palace_path):
     import chromadb
 
     client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
+    col = client.get_or_create_collection("mempalace_drawers", metadata={"hnsw:space": "cosine"})
     yield col
     client.delete_collection("mempalace_drawers")
     del client

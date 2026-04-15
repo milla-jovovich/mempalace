@@ -23,23 +23,16 @@ mempalace search "deploy process" --results 10
 
 ## How Search Works
 
-1. Your query is embedded using ChromaDB's default model (`all-MiniLM-L6-v2`)
-2. The embedding is compared against all drawers using cosine similarity
-3. Optional wing/room filters narrow the search scope
-4. Results are returned with similarity scores and source metadata
+1. Your query is embedded using the vector store's default model (`all-MiniLM-L6-v2` with the default ChromaDB backend).
+2. The embedding is compared against all drawers using cosine similarity.
+3. Optional wing/room filters narrow the search scope — standard metadata filtering in the underlying vector store.
+4. Results are returned with similarity scores and source metadata.
 
-### Why Structure Matters
+### Why Scoping Matters
 
-Tested on 22,000+ real conversation memories:
+Wing/room filtering is useful when a single palace contains many unrelated projects or people. Narrowing the search to a specific wing (or wing + room) means the vector store only scores candidates inside that scope, which keeps retrieval predictable as the palace grows.
 
-```
-Search all closets:          60.9%  R@10
-Search within wing:          73.1%  (+12%)
-Search wing + hall:          84.8%  (+24%)
-Search wing + room:          94.8%  (+34%)
-```
-
-Wings and rooms aren't cosmetic — they're a **34% retrieval improvement**.
+This is a metadata-filter feature of the vector store, not a novel retrieval mechanism. Treat it as an operational convenience: clear scoping rules that a human or an agent can apply predictably.
 
 ## Programmatic Search
 

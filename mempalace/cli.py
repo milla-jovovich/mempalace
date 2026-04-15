@@ -36,6 +36,37 @@ from pathlib import Path
 from .config import MempalaceConfig
 
 
+_MEMPALACE_PROJECT_FILES = ("mempalace.yaml", "entities.json")
+
+
+def _ensure_mempalace_files_gitignored(project_dir) -> bool:
+    """If project_dir is a git repo, ensure MemPalace's per-project files
+    are listed in .gitignore so they don't get committed by accident.
+
+    Returns True if .gitignore was updated, False otherwise. Issue #185:
+    `mempalace init` writes mempalace.yaml + entities.json into the
+    project root, where they previously had no protection against being
+    staged into git.
+    """
+    from pathlib import Path
+
+    project_path = Path(project_dir).expanduser().resolve()
+    if not (project_path / ".git").exists():
+        return False
+    gitignore = project_path / ".gitignore"
+    existing = gitignore.read_text() if gitignore.exists() else ""
+    existing_lines = {line.strip() for line in existing.splitlines()}
+    missing = [p for p in _MEMPALACE_PROJECT_FILES if p not in existing_lines]
+    if not missing:
+        return False
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    block = prefix + "\n# MemPalace per-project files (issue #185)\n" + "\n".join(missing) + "\n"
+    with open(gitignore, "a") as f:
+        f.write(block)
+    print(f"  Added {', '.join(missing)} to {gitignore.name}")
+    return True
+
+
 def cmd_init(args):
     import json
     from pathlib import Path
@@ -63,6 +94,9 @@ def cmd_init(args):
     # Pass 2: detect rooms from folder structure
     detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
     MempalaceConfig().init()
+
+    # Pass 3: protect git repos from accidentally committing per-project files
+    _ensure_mempalace_files_gitignored(args.dir)
 
 
 def cmd_mine(args):
@@ -156,7 +190,11 @@ def cmd_migrate(args):
     from .migrate import migrate
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-    migrate(palace_path=palace_path, dry_run=args.dry_run, confirm=getattr(args, "yes", False))
+    migrate(
+        palace_path=palace_path,
+        dry_run=args.dry_run,
+        confirm=getattr(args, "yes", False),
+    )
 
 
 def cmd_status(args):
@@ -167,8 +205,9 @@ def cmd_status(args):
 
 
 def cmd_repair(args):
-    """Rebuild palace vector index from stored metadata."""
+    """Rebuild palace vector index from SQLite metadata."""
     import shutil
+    from .backends.chroma import ChromaBackend
     from .migrate import confirm_destructive_action, contains_palace_database
 
     from .vector_store import get_collection, reset_collection
@@ -190,6 +229,8 @@ def cmd_repair(args):
     print("  MemPalace Repair")
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
+
+    backend = ChromaBackend()
 
     # Try to read existing drawers
     try:
@@ -329,7 +370,11 @@ def cmd_compress(args):
     offset = 0
     while True:
         try:
-            kwargs = {"include": ["documents", "metadatas"], "limit": _BATCH, "offset": offset}
+            kwargs = {
+                "include": ["documents", "metadatas"],
+                "limit": _BATCH,
+                "offset": offset,
+            }
             if where:
                 kwargs["where"] = where
             batch = col.get(**kwargs)
@@ -437,7 +482,9 @@ def main():
     p_init = sub.add_parser("init", help="Detect rooms from your folder structure")
     p_init.add_argument("dir", help="Project directory to set up")
     p_init.add_argument(
-        "--yes", action="store_true", help="Auto-accept all detected entities (non-interactive)"
+        "--yes",
+        action="store_true",
+        help="Auto-accept all detected entities (non-interactive)",
     )
 
     # mine

@@ -33,13 +33,15 @@ def extract_drawers_from_sqlite(db_path: str) -> list:
     conn.row_factory = sqlite3.Row
 
     # Get all embedding IDs and their documents
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT e.embedding_id,
                MAX(CASE WHEN em.key = 'chroma:document' THEN em.string_value END) as document
         FROM embeddings e
         JOIN embedding_metadata em ON em.id = e.id
         GROUP BY e.embedding_id
-    """).fetchall()
+    """
+    ).fetchall()
 
     drawers = []
     for row in rows:
@@ -132,7 +134,7 @@ def confirm_destructive_action(
 
 def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
     """Migrate a palace to the currently installed ChromaDB version."""
-    import chromadb
+    from .backends.chroma import ChromaBackend
 
     palace_path = os.path.abspath(os.path.expanduser(palace_path))
     db_path = os.path.join(palace_path, "chroma.sqlite3")
@@ -150,19 +152,19 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
 
     # Detect version
     source_version = detect_chromadb_version(db_path)
+    target_version = ChromaBackend.backend_version()
     print(f"  Source:    ChromaDB {source_version}")
-    print(f"  Target:    ChromaDB {chromadb.__version__}")
+    print(f"  Target:    ChromaDB {target_version}")
 
     # Try reading with current chromadb first
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = ChromaBackend().get_collection(palace_path, "mempalace_drawers")
         count = col.count()
-        print(f"\n  Palace is already readable by chromadb {chromadb.__version__}.")
+        print(f"\n  Palace is already readable by chromadb {target_version}.")
         print(f"  {count} drawers found. No migration needed.")
         return True
     except Exception:
-        print(f"\n  Palace is NOT readable by chromadb {chromadb.__version__}.")
+        print(f"\n  Palace is NOT readable by chromadb {target_version}.")
         print("  Extracting from SQLite directly...")
 
     # Extract all drawers via raw SQL
@@ -206,8 +208,8 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
 
     temp_palace = tempfile.mkdtemp(prefix="mempalace_migrate_")
     print(f"  Creating fresh palace in {temp_palace}...")
-    client = chromadb.PersistentClient(path=temp_palace)
-    col = client.get_or_create_collection("mempalace_drawers")
+    fresh_backend = ChromaBackend()
+    col = fresh_backend.get_or_create_collection(temp_palace, "mempalace_drawers")
 
     # Re-import in batches
     batch_size = 500
@@ -225,7 +227,7 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
     # Verify before swapping
     final_count = col.count()
     del col
-    del client
+    del fresh_backend
 
     # Swap: remove old palace, move new one into place
     print("  Swapping old palace for migrated version...")

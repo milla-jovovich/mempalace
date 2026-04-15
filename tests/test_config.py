@@ -3,7 +3,7 @@ import json
 import tempfile
 
 import pytest
-from mempalace.config import MempalaceConfig, sanitize_name
+from mempalace.config import MempalaceConfig, sanitize_kg_value, sanitize_name
 
 
 def test_default_config():
@@ -66,3 +66,54 @@ def test_sanitize_name_rejects_path_traversal():
 def test_sanitize_name_rejects_empty():
     with pytest.raises(ValueError):
         sanitize_name("")
+
+
+# --- sanitize_kg_value ---
+
+
+def test_kg_value_accepts_commas():
+    assert sanitize_kg_value("Alice, Bob, and Carol") == "Alice, Bob, and Carol"
+
+
+def test_kg_value_accepts_colons():
+    assert sanitize_kg_value("role: engineer") == "role: engineer"
+
+
+def test_kg_value_accepts_parentheses():
+    assert sanitize_kg_value("Python (programming)") == "Python (programming)"
+
+
+def test_kg_value_accepts_slashes():
+    assert sanitize_kg_value("owner/repo") == "owner/repo"
+
+
+def test_kg_value_accepts_hash():
+    assert sanitize_kg_value("issue #123") == "issue #123"
+
+
+def test_kg_value_accepts_unicode():
+    assert sanitize_kg_value("Jānis Bērziņš") == "Jānis Bērziņš"
+
+
+def test_kg_value_strips_whitespace():
+    assert sanitize_kg_value("  hello  ") == "hello"
+
+
+def test_kg_value_rejects_empty():
+    with pytest.raises(ValueError):
+        sanitize_kg_value("")
+
+
+def test_kg_value_rejects_whitespace_only():
+    with pytest.raises(ValueError):
+        sanitize_kg_value("   ")
+
+
+def test_kg_value_rejects_null_bytes():
+    with pytest.raises(ValueError):
+        sanitize_kg_value("hello\x00world")
+
+
+def test_kg_value_rejects_over_length():
+    with pytest.raises(ValueError):
+        sanitize_kg_value("a" * 129)
