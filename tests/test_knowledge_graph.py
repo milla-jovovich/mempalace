@@ -137,3 +137,86 @@ class TestStats:
         assert stats["triples"] == 5
         assert stats["current_facts"] == 4  # 1 expired (Acme Corp)
         assert stats["expired_facts"] == 1
+
+
+def test_source_drawer_ids_column_added_on_init(tmp_path):
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    cur = kg._conn().execute("PRAGMA table_info(triples)")
+    columns = [row[1] for row in cur.fetchall()]
+    assert "source_drawer_ids" in columns
+    assert "source" in columns
+
+
+def test_new_columns_accept_null_and_values(tmp_path):
+    import sqlite3
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    kg.add_entity("Alice", entity_type="person")
+    kg.add_entity("Ben", entity_type="person")
+
+    conn = kg._conn()
+    with conn:
+        conn.execute(
+            "INSERT INTO triples (id, subject, predicate, object, "
+            "source_drawer_ids, source) VALUES (?, ?, ?, ?, ?, ?)",
+            ("t1", "alice", "knows", "ben", None, None),
+        )
+        conn.execute(
+            "INSERT INTO triples (id, subject, predicate, object, "
+            "source_drawer_ids, source) VALUES (?, ?, ?, ?, ?, ?)",
+            ("t2", "ben", "knows", "alice", '[\"drw_a\", \"drw_b\"]', "extractor_v3"),
+        )
+
+    rows = dict(
+        (r["id"], (r["source_drawer_ids"], r["source"]))
+        for r in conn.execute(
+            "SELECT id, source_drawer_ids, source FROM triples "
+            "WHERE id IN ('t1', 't2')"
+        )
+    )
+    assert rows["t1"] == (None, None)
+    assert rows["t2"] == ('[\"drw_a\", \"drw_b\"]', "extractor_v3")
+
+
+def test_old_palace_upgrades_cleanly(tmp_path):
+    """A palace created without the new columns should ALTER cleanly."""
+    import sqlite3
+
+    db_path = tmp_path / "kg.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("""
+        CREATE TABLE entities (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'unknown',
+            properties TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE triples (
+            id TEXT PRIMARY KEY,
+            subject TEXT NOT NULL REFERENCES entities(id),
+            predicate TEXT NOT NULL,
+            object TEXT NOT NULL REFERENCES entities(id),
+            valid_from TEXT,
+            valid_to TEXT,
+            confidence REAL NOT NULL DEFAULT 1.0,
+            source_closet TEXT,
+            source_file TEXT,
+            extracted_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    from mempalace.knowledge_graph import KnowledgeGraph
+    kg = KnowledgeGraph(str(db_path))
+    cur = kg._conn().execute("PRAGMA table_info(triples)")
+    columns = [row[1] for row in cur.fetchall()]
+    assert "source_drawer_ids" in columns
+    assert "source" in columns

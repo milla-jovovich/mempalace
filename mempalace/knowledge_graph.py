@@ -78,6 +78,8 @@ class KnowledgeGraph:
                 confidence REAL DEFAULT 1.0,
                 source_closet TEXT,
                 source_file TEXT,
+                source_drawer_ids TEXT,
+                source TEXT,
                 extracted_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (subject) REFERENCES entities(id),
                 FOREIGN KEY (object) REFERENCES entities(id)
@@ -88,6 +90,14 @@ class KnowledgeGraph:
             CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
             CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);
         """)
+        conn.commit()
+        # Idempotent migration: add source_drawer_ids and source columns to triples.
+        # These are NULLable so old code that doesn't write them is unaffected.
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(triples)").fetchall()}
+        if "source_drawer_ids" not in existing_cols:
+            conn.execute("ALTER TABLE triples ADD COLUMN source_drawer_ids TEXT")
+        if "source" not in existing_cols:
+            conn.execute("ALTER TABLE triples ADD COLUMN source TEXT")
         conn.commit()
 
     def _conn(self):
