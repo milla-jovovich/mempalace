@@ -40,11 +40,19 @@ import json
 import os
 import sqlite3
 import threading
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
 
 DEFAULT_KG_PATH = os.path.expanduser("~/.mempalace/knowledge_graph.sqlite3")
+
+
+@dataclass
+class UpsertResult:
+    inserted: bool
+    updated: bool
+    triple_id: str
 
 
 class KnowledgeGraph:
@@ -252,6 +260,120 @@ class KnowledgeGraph:
                     ),
                 )
         return triple_id
+
+    def upsert_triple(
+        self,
+        subject: str,
+        predicate: str,
+        obj: str,
+        confidence: float = 1.0,
+        source: str | None = None,
+        source_drawer_ids: list[str] | None = None,
+        source_closet: str | None = None,
+        source_file: str | None = None,
+        valid_from: str | None = None,
+    ) -> "UpsertResult":
+        """Insert or update a live triple at (subject, predicate, obj).
+
+        Uses BEGIN IMMEDIATE to serialize concurrent writers. On an existing
+        live match (valid_to IS NULL), updates confidence/source/source_drawer_ids
+        /extracted_at in place. On no match, inserts a new row.
+        Invalidated rows (valid_to IS NOT NULL) are never touched.
+
+        The stable triple_id used for the live row is derived from
+        subject|predicate|object. When an invalidated row already occupies
+        that id, a timestamped fallback id is generated so the new live row
+        gets a distinct primary key.
+        """
+        sub_id = self._entity_id(subject)
+        obj_id = self._entity_id(obj)
+        pred = predicate.lower().replace(" ", "_")
+        drawer_ids_json = json.dumps(source_drawer_ids) if source_drawer_ids else None
+
+        # Stable id — reused when updating an existing live row.
+        stable_id = "t_" + hashlib.sha256(f"{sub_id}|{pred}|{obj_id}".encode()).hexdigest()[:24]
+
+        with self._lock:
+            conn = self._conn()
+            # Close any implicit transaction Python auto-started (isolation_level != None).
+            # Without this, conn.execute("BEGIN IMMEDIATE") raises OperationalError:
+            # "cannot start a transaction within a transaction".
+            conn.commit()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+
+                conn.execute(
+                    "INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)",
+                    (sub_id, subject),
+                )
+                conn.execute(
+                    "INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)",
+                    (obj_id, obj),
+                )
+
+                existing = conn.execute(
+                    "SELECT id FROM triples "
+                    "WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
+                    (sub_id, pred, obj_id),
+                ).fetchone()
+
+                if existing is None:
+                    # Use stable_id if not already taken by an invalidated row,
+                    # otherwise append a timestamp suffix to avoid PK collision.
+                    id_taken = conn.execute(
+                        "SELECT 1 FROM triples WHERE id=?", (stable_id,)
+                    ).fetchone()
+                    if id_taken:
+                        triple_id = (
+                            "t_"
+                            + hashlib.sha256(
+                                f"{sub_id}|{pred}|{obj_id}|{datetime.now().isoformat()}".encode()
+                            ).hexdigest()[:24]
+                        )
+                    else:
+                        triple_id = stable_id
+
+                    conn.execute(
+                        """INSERT INTO triples (
+                            id, subject, predicate, object,
+                            valid_from, valid_to, confidence,
+                            source_closet, source_file,
+                            source_drawer_ids, source,
+                            extracted_at
+                        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                        (
+                            triple_id,
+                            sub_id,
+                            pred,
+                            obj_id,
+                            valid_from,
+                            confidence,
+                            source_closet,
+                            source_file,
+                            drawer_ids_json,
+                            source,
+                        ),
+                    )
+                    conn.execute("COMMIT")
+                    return UpsertResult(inserted=True, updated=False, triple_id=triple_id)
+
+                existing_id = existing["id"]
+                conn.execute(
+                    """UPDATE triples SET
+                        confidence = ?,
+                        source = ?,
+                        source_drawer_ids = ?,
+                        source_closet = COALESCE(?, source_closet),
+                        source_file = COALESCE(?, source_file),
+                        extracted_at = CURRENT_TIMESTAMP
+                    WHERE id = ?""",
+                    (confidence, source, drawer_ids_json, source_closet, source_file, existing_id),
+                )
+                conn.execute("COMMIT")
+                return UpsertResult(inserted=False, updated=True, triple_id=existing_id)
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
 
     def invalidate(self, subject: str, predicate: str, obj: str, ended: str = None):
         """Mark a relationship as no longer valid (set valid_to date)."""

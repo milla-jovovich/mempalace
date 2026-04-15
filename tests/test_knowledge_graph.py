@@ -5,6 +5,8 @@ Covers: entity CRUD, triple CRUD, temporal queries, invalidation,
 timeline, stats, and edge cases (duplicate triples, ID collisions).
 """
 
+import pytest
+
 
 class TestEntityOperations:
     def test_add_entity(self, kg):
@@ -275,3 +277,88 @@ def test_old_palace_upgrades_cleanly(tmp_path):
     columns = [row[1] for row in cur.fetchall()]
     assert "source_drawer_ids" in columns
     assert "source" in columns
+
+
+def test_upsert_triple_inserts_new(tmp_path):
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    result = kg.upsert_triple(
+        subject="Alice",
+        predicate="knows",
+        obj="Ben",
+        confidence=0.9,
+        source="extractor_v3",
+    )
+    assert result.inserted is True
+    assert result.updated is False
+    assert result.triple_id is not None
+
+    rows = kg._conn().execute(
+        "SELECT confidence, source FROM triples WHERE id=?", (result.triple_id,)
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["confidence"] == pytest.approx(0.9)
+    assert rows[0]["source"] == "extractor_v3"
+
+
+def test_upsert_triple_updates_existing(tmp_path):
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    r1 = kg.upsert_triple(subject="Alice", predicate="knows", obj="Ben", confidence=0.5)
+    r2 = kg.upsert_triple(
+        subject="Alice", predicate="knows", obj="Ben",
+        confidence=0.95, source="extractor_v4",
+    )
+    assert r2.inserted is False
+    assert r2.updated is True
+    assert r2.triple_id == r1.triple_id
+
+    row = kg._conn().execute(
+        "SELECT confidence, source FROM triples WHERE id=?", (r1.triple_id,)
+    ).fetchone()
+    assert row["confidence"] == pytest.approx(0.95)
+    assert row["source"] == "extractor_v4"
+
+
+def test_upsert_triple_does_not_touch_invalidated(tmp_path):
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    r1 = kg.upsert_triple(subject="Alice", predicate="knows", obj="Ben", confidence=0.5)
+    kg.invalidate(subject="alice", predicate="knows", obj="ben")
+    r2 = kg.upsert_triple(subject="Alice", predicate="knows", obj="Ben", confidence=0.9)
+    assert r2.inserted is True  # new live row
+    assert r2.triple_id != r1.triple_id  # different id
+
+
+def test_upsert_triple_race_safe(tmp_path):
+    """Concurrent upserts must not raise exceptions or produce duplicate live rows."""
+    import threading
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    errors = []
+
+    def worker(i):
+        try:
+            kg.upsert_triple(
+                subject="Alice", predicate="knows", obj="Ben",
+                confidence=0.5 + i * 0.01,
+            )
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert not errors, f"Concurrent upserts raised: {errors}"
+    live = kg._conn().execute(
+        "SELECT COUNT(*) FROM triples WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
+        ("alice", "knows", "ben"),
+    ).fetchone()[0]
+    assert live == 1
