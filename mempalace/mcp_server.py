@@ -400,6 +400,8 @@ def tool_search(
     max_distance: float = 1.5,
     min_similarity: float = None,
     context: str = None,
+    where: dict = None,
+    sort_by: str = "relevance",
 ):
     limit = max(1, min(limit, _MAX_RESULTS))
     try:
@@ -411,6 +413,9 @@ def tool_search(
     # Backwards compat: convert old similarity scale (higher=stricter) to
     # distance scale (lower=stricter). Similarity 0.8 → distance 0.2.
     dist = (1.0 - min_similarity) if min_similarity is not None else max_distance
+    # Validate sort_by
+    if sort_by not in ("relevance", "recency"):
+        sort_by = "relevance"
     # Mitigate system prompt contamination (Issue #333)
     sanitized = sanitize_query(query)
     result = search_memories(
@@ -420,6 +425,8 @@ def tool_search(
         room=room,
         n_results=limit,
         max_distance=dist,
+        where=where,
+        sort_by=sort_by,
     )
     # Attach sanitizer metadata for transparency
     if sanitized["was_sanitized"]:
@@ -570,9 +577,18 @@ def tool_follow_tunnels(wing: str, room: str):
 
 
 def tool_add_drawer(
-    wing: str, room: str, content: str, source_file: str = None, added_by: str = "mcp"
+    wing: str, room: str, content: str, source_file: str = None,
+    added_by: str = "mcp", metadata: dict = None,
 ):
-    """File verbatim content into a wing/room. Checks for duplicates first."""
+    """File verbatim content into a wing/room. Checks for duplicates first.
+
+    Args:
+        metadata: Optional custom metadata dict. Merged with built-in fields
+            (wing, room, source_file, chunk_index, added_by, filed_at).
+            Custom keys are stored in ChromaDB metadata and can be used for
+            filtering via the ``where`` parameter in ``mempalace_search``.
+            Values must be str, int, float, or bool (ChromaDB requirement).
+    """
     global _metadata_cache
     try:
         wing = sanitize_name(wing, "wing")
@@ -609,20 +625,28 @@ def tool_add_drawer(
     except Exception:
         pass
 
+    # Built-in metadata fields
+    drawer_metadata = {
+        "wing": wing,
+        "room": room,
+        "source_file": source_file or "",
+        "chunk_index": 0,
+        "added_by": added_by,
+        "filed_at": datetime.now().isoformat(),
+    }
+    # Merge custom metadata (custom keys cannot override built-in fields)
+    if metadata and isinstance(metadata, dict):
+        for key, value in metadata.items():
+            if key in drawer_metadata:
+                continue  # Don't override built-in fields
+            if isinstance(value, (str, int, float, bool)):
+                drawer_metadata[key] = value
+
     try:
         col.upsert(
             ids=[drawer_id],
             documents=[content],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file or "",
-                    "chunk_index": 0,
-                    "added_by": added_by,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
+            metadatas=[drawer_metadata],
         )
         _metadata_cache = None
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
@@ -1314,7 +1338,7 @@ TOOLS = {
         "handler": tool_follow_tunnels,
     },
     "mempalace_search": {
-        "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY search keywords. Use 'context' for background. Results with cosine distance > max_distance are filtered out.",
+        "description": "Semantic search. Returns verbatim drawer content with similarity scores. IMPORTANT: 'query' must contain ONLY search keywords. Use 'context' for background. Results with cosine distance > max_distance are filtered out. Use 'where' for metadata filtering and 'sort_by' for ordering.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1338,6 +1362,15 @@ TOOLS = {
                 "context": {
                     "type": "string",
                     "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking.",
+                },
+                "where": {
+                    "type": "object",
+                    "description": "ChromaDB metadata filter. Supports operators: $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $and, $or. Example: {\"category\": \"session-handoff\"} or {\"$and\": [{\"category\": \"session-handoff\"}, {\"importance\": {\"$gte\": 5}}]}. Combined with wing/room filters via $and.",
+                },
+                "sort_by": {
+                    "type": "string",
+                    "enum": ["relevance", "recency"],
+                    "description": "Sort order: 'relevance' (default, similarity ranking) or 'recency' (filed_at descending).",
                 },
             },
             "required": ["query"],
@@ -1375,6 +1408,10 @@ TOOLS = {
                 },
                 "source_file": {"type": "string", "description": "Where this came from (optional)"},
                 "added_by": {"type": "string", "description": "Who is filing this (default: mcp)"},
+                "metadata": {
+                    "type": "object",
+                    "description": "Custom metadata stored alongside the drawer in ChromaDB. Can be queried via the 'where' parameter in mempalace_search. Values must be str, int, float, or bool. Built-in fields (wing, room, source_file, chunk_index, added_by, filed_at) cannot be overridden.",
+                },
             },
             "required": ["wing", "room", "content"],
         },

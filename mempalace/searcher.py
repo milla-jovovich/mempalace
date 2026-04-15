@@ -132,15 +132,21 @@ def _hybrid_rank(
     return results
 
 
-def build_where_filter(wing: str = None, room: str = None) -> dict:
-    """Build ChromaDB where filter for wing/room filtering."""
-    if wing and room:
-        return {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        return {"wing": wing}
-    elif room:
-        return {"room": room}
-    return {}
+def build_where_filter(wing: str = None, room: str = None, where: dict = None) -> dict:
+    """Build a combined ChromaDB where filter for wing/room + metadata."""
+    conditions = []
+    if wing:
+        conditions.append({"wing": wing})
+    if room:
+        conditions.append({"room": room})
+    if where:
+        conditions.append(where)
+
+    if not conditions:
+        return {}
+    if len(conditions) == 1:
+        return conditions[0]
+    return {"$and": conditions}
 
 
 def _extract_drawer_ids_from_closet(closet_doc: str) -> list:
@@ -222,40 +228,42 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
     }
 
 
-def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
+def search(
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    where: dict = None,
+    sort_by: str = "relevance",
+):
     """
     Search the palace. Returns verbatim drawer content.
-    Optionally filter by wing (project) or room (aspect).
+    Optionally filter by wing (project), room (aspect), or metadata conditions.
+
+    Args:
+        sort_by: "relevance" (default, similarity ranking) or "recency" (filed_at descending).
     """
-    try:
-        col = get_collection(palace_path, create=False)
-    except Exception:
-        print(f"\n  No palace found at {palace_path}")
-        print("  Run: mempalace init <dir> then mempalace mine <dir>")
-        raise SearchError(f"No palace found at {palace_path}")
+    result = search_memories(
+        query=query,
+        palace_path=palace_path,
+        wing=wing,
+        room=room,
+        n_results=n_results,
+        where=where,
+        sort_by=sort_by,
+    )
 
-    where = build_where_filter(wing, room)
+    if "error" in result:
+        if result["error"] == "No palace found":
+            print(f"\n  No palace found at {palace_path}")
+            print("  Run: mempalace init <dir> then mempalace mine <dir>")
+        else:
+            print(f"\n  Search error: {result['error']}")
+        raise SearchError(result["error"])
 
-    try:
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            kwargs["where"] = where
-
-        results = col.query(**kwargs)
-
-    except Exception as e:
-        print(f"\n  Search error: {e}")
-        raise SearchError(f"Search error: {e}") from e
-
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    dists = results["distances"][0]
-
-    if not docs:
+    hits = result["results"]
+    if not hits:
         print(f'\n  No results found for: "{query}"')
         return
 
@@ -267,18 +275,20 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"  Room: {room}")
     print(f"{'=' * 60}\n")
 
-    for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
-        similarity = round(max(0.0, 1 - dist), 3)
-        source = Path(meta.get("source_file", "?")).name
-        wing_name = meta.get("wing", "?")
-        room_name = meta.get("room", "?")
+    for i, hit in enumerate(hits, 1):
+        similarity = hit.get("similarity", 0.0)
+        source = hit.get("source_file", "?")
+        wing_name = hit.get("wing", "?")
+        room_name = hit.get("room", "?")
 
         print(f"  [{i}] {wing_name} / {room_name}")
         print(f"      Source: {source}")
         print(f"      Match:  {similarity}")
+        if sort_by == "recency":
+            print(f"      Filed:  {hit.get('filed_at', '?')}")
         print()
         # Print the verbatim text, indented
-        for line in doc.strip().split("\n"):
+        for line in hit.get("text", "").strip().split("\n"):
             print(f"      {line}")
         print()
         print(f"  {'─' * 56}")
@@ -293,6 +303,8 @@ def search_memories(
     room: str = None,
     n_results: int = 5,
     max_distance: float = 0.0,
+    where: dict = None,
+    sort_by: str = "relevance",
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
 
@@ -308,6 +320,13 @@ def search_memories(
             cosine distance (hnsw:space=cosine) — 0 = identical, 2 = opposite.
             Results with distance > this value are filtered out. A value of
             0.0 disables filtering. Typical useful range: 0.3–1.0.
+        where: Optional additional ChromaDB where conditions for metadata
+            filtering. Supports any ChromaDB where operators ($eq, $gt,
+            $gte, $lt, $lte, $in, $nin). These are combined with wing/room
+            filters via $and.
+        sort_by: "relevance" (default, similarity ranking) or "recency"
+            (filed_at descending). Recency sorting happens after ChromaDB
+            returns similarity-ranked results.
     """
     try:
         drawers_col = get_collection(palace_path, create=False)
@@ -318,7 +337,8 @@ def search_memories(
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
         }
 
-    where = build_where_filter(wing, room)
+    base_filter = build_where_filter(wing, room)
+    where_filter = build_where_filter(wing, room, where)
 
     # Hybrid retrieval: always query drawers directly (the floor), then use
     # closet hits to boost rankings. Closets are a ranking SIGNAL, never a
@@ -333,8 +353,8 @@ def search_memories(
             "n_results": n_results * 3,  # over-fetch for re-ranking
             "include": ["documents", "metadatas", "distances"],
         }
-        if where:
-            dkwargs["where"] = where
+        if where_filter:
+            dkwargs["where"] = where_filter
         drawer_results = drawers_col.query(**dkwargs)
     except Exception as e:
         return {"error": f"Search error: {e}"}
@@ -348,8 +368,8 @@ def search_memories(
             "n_results": n_results * 2,
             "include": ["documents", "metadatas", "distances"],
         }
-        if where:
-            ckwargs["where"] = where
+        if base_filter:
+            ckwargs["where"] = base_filter
         closet_results = closets_col.query(**ckwargs)
         for rank, (cdoc, cmeta, cdist) in enumerate(
             zip(
@@ -399,6 +419,12 @@ def search_memories(
             "source_file": Path(source).name if source else "?",
             "similarity": round(max(0.0, 1 - effective_dist), 3),
             "distance": round(dist, 4),
+            "filed_at": meta.get("filed_at", ""),
+            "metadata": {
+                k: v
+                for k, v in meta.items()
+                if k not in ("wing", "room", "source_file", "chunk_index")
+            },
             "effective_distance": round(effective_dist, 4),
             "closet_boost": round(boost, 3),
             "matched_via": matched_via,
@@ -414,8 +440,7 @@ def search_memories(
             entry["closet_preview"] = closet_preview
         scored.append(entry)
 
-    scored.sort(key=lambda h: h["_sort_key"])
-    hits = scored[:n_results]
+    hits = scored[:]
 
     # Drawer-grep enrichment: for closet-boosted hits whose source has
     # multiple drawers, return the keyword-best chunk + its immediate
@@ -479,9 +504,13 @@ def search_memories(
         h.pop("_source_file_full", None)
         h.pop("_chunk_index", None)
 
+    if sort_by == "recency":
+        hits.sort(key=lambda h: h.get("filed_at", ""), reverse=True)
+
     return {
         "query": query,
-        "filters": {"wing": wing, "room": room},
+        "filters": {"wing": wing, "room": room, "where": where},
+        "sort_by": sort_by,
         "total_before_filter": len(drawer_results["documents"][0]),
-        "results": hits,
+        "results": hits[:n_results],
     }

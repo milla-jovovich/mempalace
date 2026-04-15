@@ -27,6 +27,7 @@ Examples:
     mempalace search "pricing discussion" --wing my_app --room costs
 """
 
+import json
 import os
 import sys
 import shlex
@@ -102,6 +103,13 @@ def cmd_search(args):
     from .searcher import search, SearchError
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    where = None
+    if getattr(args, "where", None):
+        try:
+            where = json.loads(args.where)
+        except json.JSONDecodeError:
+            print(f"  Error: --where must be valid JSON, got: {args.where}", file=sys.stderr)
+            sys.exit(1)
     try:
         search(
             query=args.query,
@@ -109,6 +117,8 @@ def cmd_search(args):
             wing=args.wing,
             room=args.room,
             n_results=args.results,
+            where=where,
+            sort_by=getattr(args, "sort", "relevance"),
         )
     except SearchError:
         sys.exit(1)
@@ -488,6 +498,8 @@ def main():
     p_search.add_argument("--wing", default=None, help="Limit to one project")
     p_search.add_argument("--room", default=None, help="Limit to one room")
     p_search.add_argument("--results", type=int, default=5, help="Number of results")
+    p_search.add_argument("--where", default=None, help='ChromaDB metadata filter as JSON (e.g. \'{"category": "session-handoff"}\')')
+    p_search.add_argument("--sort", default="relevance", choices=["relevance", "recency"], help="Sort by relevance (default) or recency")
 
     # compress
     p_compress = sub.add_parser(
