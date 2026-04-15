@@ -29,7 +29,7 @@ def runtime_projection(ops_doc: dict, profile_doc: dict) -> dict:
     return {
         "package": profile_doc.get("packageName", "mempalace"),
         "command": profile_doc.get("commandName", "mempalace"),
-        "module_entry": profile_doc.get("moduleEntry", "mempalace.mcp_server"),
+        "module_entry": profile_doc.get("moduleEntry", "mempalace.mcp_server_ld"),
         "hidden_dir": profile_doc.get("hiddenDir", ".mempalace"),
         "repo_url": profile_doc.get("repoUrl", "https://github.com/Fleet-to-Force/mempalace"),
         "runtime": profile_doc.get("runtime", {}),
@@ -50,7 +50,9 @@ def claude_mcp_manifest(runtime: dict) -> dict:
     plugin = _find_plugin(runtime, "claude-plugin")
     return {
         runtime["package"]: {
-            "command": plugin.get("manifest", {}).get("mcpCommand", runtime.get("runtime", {}).get("mcpCommand", "mempalace-mcp")),
+            "command": plugin.get("manifest", {}).get(
+                "mcpCommand", runtime.get("runtime", {}).get("mcpCommand", "mempalace-mcp")
+            ),
             "args": plugin.get("manifest", {}).get("args", []),
         }
     }
@@ -97,7 +99,9 @@ def codex_plugin_manifest(runtime: dict) -> dict:
         "hooks": "./hooks.json",
         "mcpServers": {
             runtime["package"]: {
-                "command": plugin.get("manifest", {}).get("mcpCommand", runtime.get("runtime", {}).get("mcpCommand", "mempalace-mcp")),
+                "command": plugin.get("manifest", {}).get(
+                    "mcpCommand", runtime.get("runtime", {}).get("mcpCommand", "mempalace-mcp")
+                ),
                 "args": plugin.get("manifest", {}).get("args", []),
             }
         },
@@ -133,6 +137,42 @@ def codex_hooks_manifest(runtime: dict) -> dict:
     }
 
 
+def cli_registry_view(runtime: dict) -> dict:
+    operations = []
+    for op in runtime.get("operations", []):
+        cli = op.get("cli", {})
+        command = cli.get("command")
+        if not command or cli.get("exposure", "public") == "internal":
+            continue
+        operations.append(
+            {
+                "name": command,
+                "description": op.get("description", ""),
+                "exposure": cli.get("exposure", "public"),
+                "capability": op.get("id"),
+            }
+        )
+    return {"command": runtime.get("command", "mempalace"), "view": "cli-registry", "operations": operations}
+
+
+def mcp_tool_registry_view(runtime: dict) -> dict:
+    tools = []
+    for op in runtime.get("operations", []):
+        mcp = op.get("mcp", {})
+        tool = mcp.get("tool")
+        if not tool or mcp.get("exposure", "public") == "hidden":
+            continue
+        tools.append(
+            {
+                "name": tool,
+                "description": op.get("description", ""),
+                "exposure": mcp.get("exposure", "public"),
+                "capability": op.get("id"),
+            }
+        )
+    return {"server": runtime.get("package", "mempalace"), "view": "mcp-tool-registry", "tools": tools}
+
+
 def write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -157,6 +197,9 @@ def main() -> int:
         write_json(repo_root / ".claude-plugin/hooks/hooks.json", claude_hooks_manifest(runtime))
         write_json(repo_root / ".codex-plugin/plugin.json", codex_plugin_manifest(runtime))
         write_json(repo_root / ".codex-plugin/hooks.json", codex_hooks_manifest(runtime))
+        write_json(repo_root / "mempalace/runtime_profile.json", runtime)
+        write_json(repo_root / "mempalace/cli_registry.json", cli_registry_view(runtime))
+        write_json(repo_root / "mempalace/mcp_tool_registry.json", mcp_tool_registry_view(runtime))
 
     print(str(runtime_out))
     return 0

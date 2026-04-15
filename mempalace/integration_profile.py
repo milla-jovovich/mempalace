@@ -7,22 +7,30 @@ from functools import lru_cache
 from pathlib import Path
 
 DEFAULT_CLI_COMMAND = "mempalace"
-DEFAULT_SERVER_MODULE = "mempalace.mcp_server"
+DEFAULT_SERVER_MODULE = "mempalace.mcp_server_ld"
 DEFAULT_MCP_COMMAND = "mempalace-mcp"
 DEFAULT_PYTHON_COMMAND = "python"
 DEFAULT_HOOK_STATE_DIR = os.path.join(os.path.expanduser("~/.mempalace"), "hook_state")
-RUNTIME_PROFILE_PATH = (
+PACKAGE_RUNTIME_PROFILE_PATH = Path(__file__).resolve().with_name("runtime_profile.json")
+REPO_RUNTIME_PROFILE_PATH = (
     Path(__file__).resolve().parent.parent / "semantics" / "cold" / "mempalace.runtime.projected.json"
 )
 
 
 @lru_cache(maxsize=1)
 def runtime_profile() -> dict:
-    if RUNTIME_PROFILE_PATH.exists():
-        try:
-            return json.loads(RUNTIME_PROFILE_PATH.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {}
+    env_path = os.environ.get("MEMPALACE_RUNTIME_PROFILE")
+    candidates = []
+    if env_path:
+        candidates.append(Path(env_path).expanduser())
+    candidates.extend([PACKAGE_RUNTIME_PROFILE_PATH, REPO_RUNTIME_PROFILE_PATH])
+
+    for path in candidates:
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
     return {}
 
 

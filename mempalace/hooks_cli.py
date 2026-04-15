@@ -9,6 +9,7 @@ Supported harnesses: claude-code, codex (extensible to cursor, gemini, etc.)
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -69,8 +70,6 @@ def _count_human_messages(transcript_path: str) -> int:
                             if "<command-message>" in text:
                                 continue
                         count += 1
-                    # Also handle Codex CLI transcript format
-                    # {"type": "event_msg", "payload": {"type": "user_message", "message": "..."}}
                     elif entry.get("type") == "event_msg":
                         payload = entry.get("payload", {})
                         if isinstance(payload, dict) and payload.get("type") == "user_message":
@@ -146,15 +145,12 @@ def hook_stop(data: dict, harness: str):
     stop_hook_active = parsed["stop_hook_active"]
     transcript_path = parsed["transcript_path"]
 
-    # If already in a save cycle, let through (infinite-loop prevention)
     if str(stop_hook_active).lower() in ("true", "1", "yes"):
         _output({})
         return
 
-    # Count human messages
     exchange_count = _count_human_messages(transcript_path)
 
-    # Track last save point
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     last_save_file = STATE_DIR / f"{session_id}_last_save"
     last_save = 0
@@ -169,17 +165,13 @@ def hook_stop(data: dict, harness: str):
     _log(f"Session {session_id}: {exchange_count} exchanges, {since_last} since last save")
 
     if since_last >= SAVE_INTERVAL and exchange_count > 0:
-        # Update last save point
         try:
             last_save_file.write_text(str(exchange_count), encoding="utf-8")
         except OSError:
             pass
 
         _log(f"TRIGGERING SAVE at exchange {exchange_count}")
-
-        # Optional: auto-ingest if MEMPAL_DIR is set
         _maybe_auto_ingest()
-
         _output({"decision": "block", "reason": STOP_BLOCK_REASON})
     else:
         _output({})
@@ -191,11 +183,7 @@ def hook_session_start(data: dict, harness: str):
     session_id = parsed["session_id"]
 
     _log(f"SESSION START for session {session_id}")
-
-    # Initialize session state directory
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Pass through — no blocking on session start
     _output({})
 
 
@@ -206,7 +194,6 @@ def hook_precompact(data: dict, harness: str):
 
     _log(f"PRE-COMPACT triggered for session {session_id}")
 
-    # Optional: auto-ingest synchronously before compaction (so memories land first)
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
     if mempal_dir and os.path.isdir(mempal_dir):
         try:
@@ -216,7 +203,6 @@ def hook_precompact(data: dict, harness: str):
         except OSError:
             pass
 
-    # Always block -- compaction = save everything
     _output({"decision": "block", "reason": PRECOMPACT_BLOCK_REASON})
 
 
