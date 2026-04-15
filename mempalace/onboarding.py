@@ -306,17 +306,17 @@ def _generate_aaak_bootstrap(
         [
             "",
             "## AAAK Quick Reference",
-            "  Symbols: ♡=love ★=importance ⚠=warning →=relationship |=separator",
+            "  Symbols: HEART=love STAR=importance WARN=warning ARROW=relationship |=separator",
             "  Structure: KEY:value | GROUP(details) | entity.attribute",
-            "  Read naturally — expand codes, treat *markers* as emotional context.",
+            "  Read naturally - expand codes and treat *markers* as emotional context.",
         ]
     )
 
     (mempalace_dir / "aaak_entities.md").write_text("\n".join(registry_lines), encoding="utf-8")
 
-    # Critical facts bootstrap (pre-palace — before any mining)
+    # Critical facts bootstrap (pre-palace - before any mining)
     facts_lines = [
-        "# Critical Facts (bootstrap — will be enriched after mining)",
+        "# Critical Facts (bootstrap - will be enriched after mining)",
         "",
     ]
 
@@ -329,7 +329,7 @@ def _generate_aaak_bootstrap(
             code = entity_codes[p["name"]]
             rel = p.get("relationship", "")
             facts_lines.append(
-                f"- **{p['name']}** ({code}) — {rel}" if rel else f"- **{p['name']}** ({code})"
+                f"- **{p['name']}** ({code}) - {rel}" if rel else f"- **{p['name']}** ({code})"
             )
         facts_lines.append("")
 
@@ -339,7 +339,7 @@ def _generate_aaak_bootstrap(
             code = entity_codes[p["name"]]
             rel = p.get("relationship", "")
             facts_lines.append(
-                f"- **{p['name']}** ({code}) — {rel}" if rel else f"- **{p['name']}** ({code})"
+                f"- **{p['name']}** ({code}) - {rel}" if rel else f"- **{p['name']}** ({code})"
             )
         facts_lines.append("")
 

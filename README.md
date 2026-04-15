@@ -142,7 +142,7 @@ Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-Now your AI has 29 tools available through MCP. Ask it anything:
+Now your AI has 39 tools available through MCP. Ask it anything:
 
 > *"What did we decide about auth last month?"*
 
@@ -470,7 +470,7 @@ claude plugin install --scope user mempalace
 claude mcp add mempalace -- python -m mempalace.mcp_server
 ```
 
-### 29 Tools
+### 38 Tools
 
 **Palace (read)**
 
@@ -528,6 +528,21 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 | `mempalace_diary_write` | Write AAAK diary entry |
 | `mempalace_diary_read` | Read recent diary entries |
 
+**Project Tracker**
+
+| Tool | What |
+|------|------|
+| `mempalace_project_register` | Register a local project for tracking |
+| `mempalace_project_list` | List tracked projects with latest task state |
+| `mempalace_project_status` | Show one project's task summary or all tracked projects |
+| `mempalace_task_start` | Start a tracked task for a project |
+| `mempalace_task_update` | Update tracked task status, stage, or progress |
+| `mempalace_task_log` | Append a structured event log to a task |
+| `mempalace_task_checkpoint` | Save a resumable checkpoint |
+| `mempalace_task_get` | Fetch a task with recent events and checkpoints |
+| `mempalace_task_resume` | Recover the latest task state for a task or project |
+| `mempalace_context_pack` | Build a budgeted context pack from wake-up memory, retrieval, thread state, checkpoints, and event evidence |
+
 **System**
 
 | Tool | What |
@@ -537,6 +552,8 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 | `mempalace_reconnect` | Force DB reconnect after external writes |
 
 The AI learns AAAK and the memory protocol automatically from the `mempalace_status` response. No manual configuration.
+
+`mempalace_context_pack` is the bridge from raw memory to agent runtime use. It keeps MemPalace's native storage model, but shapes output using two battle-tested ideas from open-source agent systems: LangGraph's `thread + checkpoint + store` separation and `agent-evidence`-style structured event envelopes for resumable logs.
 
 ---
 
@@ -665,7 +682,7 @@ Plain text. Becomes Layer 0 — loaded every session.
 | `cli.py` | CLI entry point |
 | `config.py` | Configuration loading and defaults |
 | `normalize.py` | Converts 5 chat formats to standard transcript |
-| `mcp_server.py` | MCP server — 29 tools, AAAK auto-teach, memory protocol |
+| `mcp_server.py` | MCP server — 39 tools, AAAK auto-teach, memory protocol |
 | `miner.py` | Project file ingest |
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair |
 | `searcher.py` | Semantic search via ChromaDB |
@@ -689,7 +706,7 @@ mempalace/
 ├── README.md                  ← you are here
 ├── mempalace/                 ← core package (README)
 │   ├── cli.py                 ← CLI entry point
-│   ├── mcp_server.py          ← MCP server (29 tools)
+│   ├── mcp_server.py          ← MCP server (39 tools)
 │   ├── knowledge_graph.py     ← temporal entity graph
 │   ├── palace_graph.py        ← room navigation graph
 │   ├── dialect.py             ← AAAK compression
