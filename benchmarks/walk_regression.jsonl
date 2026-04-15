@@ -1,0 +1,5 @@
+{"question_id": "reg_001", "question": "Where did Alice work in January 2026?", "expected_entity": "alice", "expected_predicate": "works_at", "category": 2, "notes": "Basic temporal lookup"}
+{"question_id": "reg_002", "question": "What did Ben decide about the authentication approach?", "expected_entity": "ben", "expected_predicate": "decided", "category": 3, "notes": "Temporal inference over decision"}
+{"question_id": "reg_003", "question": "Who is Alice's current manager?", "expected_entity": "alice", "expected_predicate": "reports_to", "category": 2, "notes": "Current relationship lookup"}
+{"question_id": "reg_004", "question": "What projects was Carol involved in during Q1 2026?", "expected_entity": "carol", "expected_predicate": "works_on", "category": 2, "notes": "Multi-hop temporal across projects"}
+{"question_id": "reg_005", "question": "Did Alice change her stance on the migration after the incident?", "expected_entity": "alice", "expected_predicate": "position_on", "category": 3, "notes": "Before/after temporal inference"}
