@@ -422,7 +422,7 @@ def cmd_compress(args):
         print("  (dry run -- nothing stored)")
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -586,7 +586,7 @@ def main():
 
     sub.add_parser("status", help="Show what's been filed")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if not args.command:
         parser.print_help()

@@ -669,3 +669,13 @@ def test_cmd_repair_trailing_slash_does_not_recurse():
     palace_path = os.path.expanduser(args.palace).rstrip(os.sep)
     backup_path = palace_path + ".backup"
     assert not backup_path.startswith(palace_path + os.sep)
+
+
+def test_main_accepts_argv_parameter():
+    """main(argv) must accept an explicit argv list (Task 4a regression guard)."""
+    import inspect
+    from mempalace import cli
+    sig = inspect.signature(cli.main)
+    assert "argv" in sig.parameters, "cli.main must accept argv parameter"
+    p = sig.parameters["argv"]
+    assert p.default is None, "argv default must be None"
