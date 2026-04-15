@@ -296,6 +296,58 @@ def cmd_mcp(args):
         print(f"  {base_server_cmd} --palace /path/to/palace")
 
 
+def cmd_walker_init(args):
+    """Initialize the walker subsystem after hardware detection."""
+    from mempalace.walker.gpu_detect import detect_hardware, HardwareTier
+
+    hw = detect_hardware()
+    if hw.tier == HardwareTier.CPU_ONLY:
+        print(
+            "Walker init failed: CPU_ONLY hardware detected. "
+            "Walker requires a CUDA-capable GPU with ≥8 GB VRAM."
+        )
+        return 1
+
+    flag_dir = Path.home() / ".mempalace"
+    flag_dir.mkdir(parents=True, exist_ok=True)
+    flag_path = flag_dir / "walker_ready"
+    import json
+
+    flag_path.write_text(
+        json.dumps({"tier": hw.tier.value, "device": hw.device_name, "vram_gb": hw.vram_gb})
+    )
+    print(
+        f"Walker initialized: tier={hw.tier.value}, device={hw.device_name}, vram_gb={hw.vram_gb}"
+    )
+    return 0
+
+
+def cmd_walker_status(args):
+    """Show walker initialization status."""
+    import json
+
+    flag_path = Path.home() / ".mempalace" / "walker_ready"
+    if not flag_path.exists():
+        print("Walker: not initialized (run `mempalace walker init`)")
+        return 0
+
+    data = json.loads(flag_path.read_text())
+    print(
+        f"Walker: initialized — tier={data.get('tier')}, "
+        f"device={data.get('device')}, vram_gb={data.get('vram_gb')}"
+    )
+    return 0
+
+
+def cmd_walker(args):
+    """Dispatch walker sub-subcommands."""
+    walker_dispatch = {
+        "init": cmd_walker_init,
+        "status": cmd_walker_status,
+    }
+    return walker_dispatch[args.walker_command](args)
+
+
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
     from .backends.chroma import ChromaBackend
@@ -586,6 +638,15 @@ def main(argv=None):
 
     sub.add_parser("status", help="Show what's been filed")
 
+    # walker
+    p_walker = sub.add_parser(
+        "walker",
+        help="Walker subsystem — hardware detection and initialization",
+    )
+    walker_sub = p_walker.add_subparsers(dest="walker_command")
+    walker_sub.add_parser("init", help="Detect GPU and write walker_ready flag")
+    walker_sub.add_parser("status", help="Show walker initialization status")
+
     args = parser.parse_args(argv)
 
     if not args.command:
@@ -609,6 +670,12 @@ def main(argv=None):
         cmd_instructions(args)
         return
 
+    if args.command == "walker":
+        if not getattr(args, "walker_command", None):
+            p_walker.print_help()
+            return
+        return cmd_walker(args)
+
     dispatch = {
         "init": cmd_init,
         "mine": cmd_mine,
@@ -621,7 +688,7 @@ def main(argv=None):
         "migrate": cmd_migrate,
         "status": cmd_status,
     }
-    dispatch[args.command](args)
+    return dispatch[args.command](args)
 
 
 if __name__ == "__main__":
