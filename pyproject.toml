@@ -40,6 +40,13 @@ mempalace = "mempalace.cli:main"
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
 spellcheck = ["autocorrect>=2.0"]
+walker = [
+    "gliner>=0.2.0",
+    "vllm>=0.6.0",
+    "scipy>=1.11.0",
+    "lm-format-enforcer>=0.10.0",
+    "networkx>=3.0",
+]
 
 [dependency-groups]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
