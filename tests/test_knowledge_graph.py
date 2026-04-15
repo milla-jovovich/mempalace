@@ -139,6 +139,61 @@ class TestStats:
         assert stats["expired_facts"] == 1
 
 
+def test_fts5_trigram_substring_lookup(tmp_path):
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    kg.add_entity("Alice Smith", entity_type="person")
+    kg.add_entity("Ben Jones", entity_type="person")
+    kg.add_entity("Carol Alice-Jones", entity_type="person")
+
+    matches = kg.find_entities_by_name_trigram("alice")
+    names = {m["name"] for m in matches}
+    assert "Alice Smith" in names
+    assert "Carol Alice-Jones" in names
+    assert "Ben Jones" not in names
+
+
+def test_fts5_index_stays_in_sync_on_delete(tmp_path):
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    kg.add_entity("Alice", entity_type="person")
+    conn = kg._conn()
+    with conn:
+        conn.execute("DELETE FROM entities WHERE id=?", (kg._entity_id("Alice"),))
+    matches = kg.find_entities_by_name_trigram("alice")
+    assert matches == []
+
+
+def test_fts5_backfill_idempotent_on_repeat_init(tmp_path):
+    """Repeat KnowledgeGraph() opens should not duplicate rows in FTS."""
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    db_path = str(tmp_path / "kg.db")
+    kg1 = KnowledgeGraph(db_path)
+    kg1.add_entity("Alice", entity_type="person")
+
+    kg2 = KnowledgeGraph(db_path)
+    n = kg2._conn().execute("SELECT COUNT(*) FROM entities_name_fts").fetchone()[0]
+    assert n == 1
+
+
+def test_fts5_no_duplicates_on_repeated_add_entity(tmp_path):
+    """Calling add_entity multiple times on the same entity must not accumulate
+    duplicate FTS rows. INSERT OR REPLACE fires AFTER DELETE then AFTER INSERT;
+    the delete trigger must remove old rows via rowid to avoid accumulation."""
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    kg.add_entity("Alice", entity_type="person")
+    kg.add_entity("Alice", entity_type="person")
+    kg.add_entity("Alice", entity_type="person")
+
+    n = kg._conn().execute("SELECT COUNT(*) FROM entities_name_fts").fetchone()[0]
+    assert n == 1, f"Expected 1 FTS row, got {n} — rowid-based delete trigger broken"
+
+
 def test_source_drawer_ids_column_added_on_init(tmp_path):
     from mempalace.knowledge_graph import KnowledgeGraph
 

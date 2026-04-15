@@ -100,6 +100,52 @@ class KnowledgeGraph:
             conn.execute("ALTER TABLE triples ADD COLUMN source TEXT")
         conn.commit()
 
+        # FTS5 trigram index for entity-name substring lookups.
+        #
+        # NOTE on INSERT OR REPLACE behaviour: SQLite's INSERT OR REPLACE resolves
+        # PRIMARY KEY conflicts at the storage layer and fires only AFTER INSERT —
+        # it does NOT fire AFTER DELETE triggers. To prevent FTS row accumulation on
+        # repeated add_entity() calls, the AFTER INSERT trigger itself removes any
+        # stale FTS rows for new.id before inserting the fresh row.
+        conn.executescript("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS entities_name_fts USING fts5(
+                id UNINDEXED,
+                name,
+                tokenize='trigram'
+            );
+
+            CREATE TRIGGER IF NOT EXISTS entities_ai_fts AFTER INSERT ON entities
+            BEGIN
+                DELETE FROM entities_name_fts WHERE rowid IN (
+                    SELECT rowid FROM entities_name_fts WHERE id = new.id
+                );
+                INSERT INTO entities_name_fts(id, name) VALUES (new.id, new.name);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS entities_ad_fts AFTER DELETE ON entities
+            BEGIN
+                DELETE FROM entities_name_fts WHERE rowid IN (
+                    SELECT rowid FROM entities_name_fts WHERE id = old.id
+                );
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS entities_au_fts AFTER UPDATE ON entities
+            BEGIN
+                DELETE FROM entities_name_fts WHERE rowid IN (
+                    SELECT rowid FROM entities_name_fts WHERE id = old.id
+                );
+                INSERT INTO entities_name_fts(id, name) VALUES (new.id, new.name);
+            END;
+        """)
+
+        # One-time backfill: only when FTS is empty but entities exist.
+        fts_count = conn.execute("SELECT COUNT(*) FROM entities_name_fts").fetchone()[0]
+        ent_count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+        if fts_count == 0 and ent_count > 0:
+            conn.execute("INSERT INTO entities_name_fts(id, name) SELECT id, name FROM entities")
+
+        conn.commit()
+
     def _conn(self):
         if self._connection is None:
             self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
@@ -131,6 +177,19 @@ class KnowledgeGraph:
                     (eid, name, entity_type, props),
                 )
         return eid
+
+    def find_entities_by_name_trigram(self, query: str, limit: int = 20) -> list[dict]:
+        """Substring search on entity names via FTS5 trigram index."""
+        conn = self._conn()
+        cur = conn.execute(
+            "SELECT e.id, e.name, e.type "
+            "FROM entities_name_fts f "
+            "JOIN entities e ON e.id = f.id "
+            "WHERE entities_name_fts MATCH ? "
+            "LIMIT ?",
+            (query, limit),
+        )
+        return [dict(row) for row in cur.fetchall()]
 
     def add_triple(
         self,
