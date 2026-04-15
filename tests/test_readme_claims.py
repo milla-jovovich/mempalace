@@ -22,6 +22,8 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MEMPALACE_PKG = REPO_ROOT / "mempalace"
 README_PATH = REPO_ROOT / "README.md"
+MCP_TOOLS_DOC_PATH = REPO_ROOT / "website" / "reference" / "mcp-tools.md"
+MODULES_DOC_PATH = REPO_ROOT / "website" / "reference" / "modules.md"
 
 
 def _read(path: Path) -> str:
@@ -40,10 +42,15 @@ def _tools_dict_keys() -> list:
     return re.findall(r'"(mempalace_\w+)":\s*\{', src)
 
 
-def _readme_tool_table_names() -> list:
-    """Return tool names listed in the README's MCP tool table."""
-    readme = _readme()
-    return re.findall(r"^\| `(mempalace_\w+)`", readme, re.MULTILINE)
+def _doc_tool_names() -> list:
+    """Return the list of tool names documented in the MCP tools reference.
+
+    The MCP tool table lived in README.md prior to the #875 rewrite; it now
+    lives in website/reference/mcp-tools.md (linked from README). Each tool
+    is introduced by a level-3 heading `### \\`mempalace_xxx\\``.
+    """
+    doc = _read(MCP_TOOLS_DOC_PATH)
+    return re.findall(r"^###\s+`(mempalace_\w+)`", doc, re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -77,19 +84,28 @@ class TestToolCount:
 
 
 class TestReadmeToolsExistInCode:
-    """Every tool name in the README tool table must be a key in TOOLS."""
+    """Every tool name documented in the MCP tools reference must be a key in TOOLS."""
 
     def test_every_readme_tool_exists_in_tools_dict(self):
-        """Claim: README lists tools like mempalace_get_aaak_spec.
-        Each one must actually be registered in the TOOLS dict."""
-        code_tools = set(_tools_dict_keys())
-        readme_tools = _readme_tool_table_names()
-        assert len(readme_tools) > 0, "Could not parse any tools from README table"
+        """Claim: the MCP tools reference (website/reference/mcp-tools.md)
+        lists tools like mempalace_get_aaak_spec. Each one must actually be
+        registered in the TOOLS dict in mempalace/mcp_server.py.
 
-        missing = [t for t in readme_tools if t not in code_tools]
+        Pre-#875 this parsed the tool table that lived in README.md; that
+        table has moved to the website docs and README now links out.
+        """
+        code_tools = set(_tools_dict_keys())
+        doc_tools = _doc_tool_names()
+        assert len(doc_tools) > 0, (
+            f"Could not parse any tools from {MCP_TOOLS_DOC_PATH.relative_to(REPO_ROOT)} "
+            f"— expected `### \\`mempalace_xxx\\`` headings."
+        )
+
+        missing = [t for t in doc_tools if t not in code_tools]
         assert missing == [], (
-            f"README lists tools that don't exist in TOOLS dict: {missing}. "
-            f"Either add them to mcp_server.py or remove them from README."
+            f"Docs list tools that don't exist in TOOLS dict: {missing}. "
+            f"Either add them to mcp_server.py or remove them from "
+            f"{MCP_TOOLS_DOC_PATH.relative_to(REPO_ROOT)}."
         )
 
 
@@ -99,18 +115,20 @@ class TestReadmeToolsExistInCode:
 
 
 class TestNoUnlistedTools:
-    """Every tool in the TOOLS dict should be documented in the README."""
+    """Every tool in the TOOLS dict should be documented in the MCP tools reference."""
 
     def test_no_undocumented_tools(self):
-        """Claim: README's tool table is complete.
-        Any tool in TOOLS but not in README is undocumented."""
+        """Claim: the MCP tools reference
+        (website/reference/mcp-tools.md) is complete. Any tool in TOOLS
+        but not documented there is undocumented on the public surface."""
         code_tools = set(_tools_dict_keys())
-        readme_tools = set(_readme_tool_table_names())
+        doc_tools = set(_doc_tool_names())
 
-        undocumented = sorted(code_tools - readme_tools)
+        undocumented = sorted(code_tools - doc_tools)
         assert undocumented == [], (
-            f"Tools in TOOLS dict but missing from README: {undocumented}. "
-            f"Add rows for these to the tool table in README.md."
+            f"Tools in TOOLS dict but missing from docs: {undocumented}. "
+            f"Add sections for these to "
+            f"{MCP_TOOLS_DOC_PATH.relative_to(REPO_ROOT)}."
         )
 
 
@@ -485,21 +503,27 @@ class TestDialectNotLossless:
 
 
 class TestReadmeDialectNotLossless:
-    """README's file reference table must not say dialect.py is lossless."""
+    """The file-reference documentation must not say dialect.py is lossless.
+
+    Pre-#875 this lived in a README.md file table; it now lives in
+    website/reference/modules.md. The April 7 correction established that
+    AAAK is a lossy abbreviation system, not lossless compression, and
+    every docs surface that describes dialect.py must respect that.
+    """
 
     def test_readme_dialect_line_not_lossless(self):
-        """Claim: April 7 correction applied to README file table.
-        The dialect.py row must not say 'lossless'."""
-        readme = _readme()
-        # Find the line with dialect.py in the file reference table
-        dialect_lines = [
-            line for line in readme.splitlines() if "dialect.py" in line and "|" in line
-        ]
-        assert len(dialect_lines) > 0, "Could not find dialect.py in README file table"
+        doc = _read(MODULES_DOC_PATH)
+        # Any line mentioning dialect.py (narrative or table) must not call it lossless
+        dialect_lines = [line for line in doc.splitlines() if "dialect.py" in line]
+        assert len(dialect_lines) > 0, (
+            f"Could not find dialect.py in "
+            f"{MODULES_DOC_PATH.relative_to(REPO_ROOT)}. "
+            f"Expected at least one reference."
+        )
 
         for line in dialect_lines:
             assert "lossless" not in line.lower(), (
-                f"README file table still says dialect.py is lossless: {line.strip()!r}. "
+                f"Docs still call dialect.py lossless: {line.strip()!r}. "
                 f"After April 7 correction, this must say 'lossy' or remove the lossless claim."
             )
 
