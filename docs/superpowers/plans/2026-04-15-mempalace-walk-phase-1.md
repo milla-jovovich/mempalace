@@ -6,70 +6,233 @@
 
 **Architecture:** Two-model pipeline. GLiNER runs in-process (batched, 33k texts/s). Qwen3.5 35B is reached over HTTP at `localhost:43100` (OpenAI-compatible). An async orchestrator runs Qwen calls with `asyncio.gather` + a semaphore (concurrency=4). A new `extraction_state` SQLite table tracks which drawers have been extracted per `extractor_version`. Idempotent and resumable.
 
-**Tech Stack:** Python 3.13, GLiNER (`urchade/gliner_multi-v2.1`), httpx async, asyncio, SQLite (WAL), existing `KnowledgeGraph` + `CircuitBreaker` from Phase 0.
+**Tech Stack:** Python 3.13, GLiNER, httpx async, asyncio, SQLite (WAL), existing `KnowledgeGraph` + `CircuitBreaker` from Phase 0.
 
 **Spec:** `docs/superpowers/specs/2026-04-15-mempalace-walk-phase-1-design.md`
 
 ---
 
+## Task Dependency Graph
+
+Subagent-driven-development must respect this ordering. Parallel groups may run concurrently; each group must complete before the next starts.
+
+```
+Group A (parallel):  Task 1, Task 1b, Task 2, Task 3
+Group B (parallel):  Task 4 (needs 1, 1b, 3), Task 5a (needs 1)
+Group C:             Task 5 (needs 2, 3, 4)
+Group D:             Task 6 (needs 5, 5a)
+Group E (parallel):  Task 7, Task 8, Task 9 (all need 6; 9 also needs 2)
+Group F:             Task 10 (needs all above)
+Group G:             Task 11 smoke (needs 10)
+```
+
+Each task header declares its dependencies explicitly.
+
+---
+
 ## File Structure
 
-**New files:**
+**New/modified files:**
 ```
+mempalace/infra/circuit_breaker.py      # MODIFY — add async call_async()
+mempalace/backends/chroma.py            # MODIFY — add iter_drawers()
 mempalace/walker/extractor/
-  __init__.py                 # package exports
-  gliner_ner.py               # GlinerNER wrapper (batch extraction, device selection)
-  qwen_rel.py                 # QwenRelExtractor (async HTTP, CircuitBreaker-wrapped)
-  state.py                    # ExtractionState (SQLite table + is_extracted/mark_extracted)
-  pipeline.py                 # extract_drawers() async orchestrator + ExtractionStats
+  __init__.py
+  gliner_ner.py                         # GlinerNER
+  qwen_rel.py                           # QwenRelExtractor (async + CircuitBreaker)
+  state.py                              # ExtractionState
+  pipeline.py                           # extract_drawers() + ExtractionStats
 mempalace/dream/
   __init__.py
-  reextract.py                # run_job_a() — Dream Job A async entry point
-tests/walker/extractor/
-  __init__.py
-  test_gliner_ner.py
-  test_qwen_rel.py
-  test_state.py
-  test_pipeline.py
-tests/dream/
-  __init__.py
-  test_reextract.py
+  reextract.py                          # run_job_a()
+pyproject.toml                          # httpx + pytest-asyncio + asyncio_mode
+mempalace/cli.py                        # walker extract, dream-cycle, status --walker
+tests/walker/extractor/{__init__,test_state,test_gliner_ner,test_qwen_rel,test_pipeline}.py
+tests/dream/{__init__,test_reextract}.py
+tests/infra/test_circuit_breaker_async.py
+tests/backends/test_chroma_iter_drawers.py
+tests/test_cli_walker_extract.py
 ```
-
-**Modified files:**
-- `pyproject.toml` — add `httpx>=0.27.0` to `[walker]` extras
-- `mempalace/cli.py` — add `walker extract` subcommand + `dream-cycle --jobs A` subcommand + extend `status --walker`
 
 ---
 
-## Task 1: Add `httpx` to `[walker]` extras
+## Task 1: Dependencies — httpx + pytest-asyncio
+
+**Depends on:** nothing
+
+**Files:** modify `pyproject.toml`
+
+- [ ] **Step 1:** Add `"httpx>=0.27.0",` to the `[project.optional-dependencies].walker` list.
+- [ ] **Step 2:** Add `"pytest-asyncio>=0.23",` to the `[project.optional-dependencies].dev` list.
+- [ ] **Step 3:** In `[tool.pytest.ini_options]` add `asyncio_mode = "auto"`. Create the block if missing.
+- [ ] **Step 4:** Run `pip install -e ".[dev]"` — expect success.
+- [ ] **Step 5:** Verify: `python -c "import httpx, pytest_asyncio; print(httpx.__version__, pytest_asyncio.__version__)"`.
+- [ ] **Step 6:** Commit:
+  ```bash
+  git add pyproject.toml
+  git commit -m "deps: httpx (walker) + pytest-asyncio (dev) + asyncio_mode=auto"
+  ```
+
+---
+
+## Task 1b: Extend `CircuitBreaker` with `call_async()`
+
+**Depends on:** nothing (modifies Phase 0 file)
 
 **Files:**
-- Modify: `pyproject.toml` — add `httpx>=0.27.0` to `[project.optional-dependencies] walker`
+- Modify: `mempalace/infra/circuit_breaker.py`
+- Create: `tests/infra/__init__.py` (empty if missing)
+- Create: `tests/infra/test_circuit_breaker_async.py`
 
-- [ ] **Step 1: Read current `[walker]` block**
+**Why:** Phase 0 `CircuitBreaker.call(fn)` is synchronous; Task 4 needs async wrapping.
 
-Run: `grep -A 10 'walker = \[' pyproject.toml`
+- [ ] **Step 1: Write failing tests**
 
-- [ ] **Step 2: Add `httpx>=0.27.0` line**
+```python
+import asyncio
+import pytest
+from mempalace.infra.circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 
-Add to the `walker` list: `"httpx>=0.27.0",`
 
-- [ ] **Step 3: Verify `httpx` importable**
+async def _ok(v): return v
+async def _fail(): raise RuntimeError("boom")
 
-Run: `python -c "import httpx; print(httpx.__version__)"`
-Expected: version string, no error.
 
-- [ ] **Step 4: Commit**
+async def test_async_closed_passes_through():
+    cb = CircuitBreaker("t", failure_threshold=3, recovery_timeout_secs=1.0)
+    assert await cb.call_async(lambda: _ok("hi")) == "hi"
+    assert cb.state == CircuitState.CLOSED
 
-```bash
-git add pyproject.toml
-git commit -m "deps(walker): add httpx>=0.27.0 for Qwen HTTP client"
+
+async def test_async_opens_after_threshold():
+    cb = CircuitBreaker("t", failure_threshold=2, recovery_timeout_secs=1.0)
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            await cb.call_async(lambda: _fail())
+    assert cb.state == CircuitState.OPEN
+
+
+async def test_async_open_rejects_immediately():
+    cb = CircuitBreaker("t", failure_threshold=1, recovery_timeout_secs=10.0)
+    with pytest.raises(RuntimeError):
+        await cb.call_async(lambda: _fail())
+    with pytest.raises(CircuitOpenError):
+        await cb.call_async(lambda: _ok("x"))
+
+
+async def test_async_half_open_success_closes():
+    cb = CircuitBreaker("t", failure_threshold=1, recovery_timeout_secs=0.1)
+    with pytest.raises(RuntimeError):
+        await cb.call_async(lambda: _fail())
+    await asyncio.sleep(0.15)
+    assert await cb.call_async(lambda: _ok("probe")) == "probe"
+    assert cb.state == CircuitState.CLOSED
+
+
+async def test_async_half_open_failure_reopens():
+    cb = CircuitBreaker("t", failure_threshold=1, recovery_timeout_secs=0.1)
+    with pytest.raises(RuntimeError):
+        await cb.call_async(lambda: _fail())
+    await asyncio.sleep(0.15)
+    with pytest.raises(RuntimeError):
+        await cb.call_async(lambda: _fail())
+    assert cb.state == CircuitState.OPEN
+
+
+async def test_async_concurrent_probe_guard():
+    cb = CircuitBreaker("t", failure_threshold=1, recovery_timeout_secs=0.05)
+    with pytest.raises(RuntimeError):
+        await cb.call_async(lambda: _fail())
+    await asyncio.sleep(0.1)
+
+    async def slow():
+        await asyncio.sleep(0.05)
+        return "slow"
+
+    async def runner():
+        try:
+            return await cb.call_async(slow)
+        except CircuitOpenError:
+            return "blocked"
+
+    results = await asyncio.gather(runner(), runner())
+    assert results.count("slow") == 1
+    assert results.count("blocked") == 1
 ```
+
+- [ ] **Step 2:** Run: `python -m pytest tests/infra/test_circuit_breaker_async.py -v` — expect FAIL.
+
+- [ ] **Step 3: Implement**
+
+In `mempalace/infra/circuit_breaker.py`, inside the `CircuitBreaker` class (same indent as the existing `call` method), add:
+
+```python
+    async def call_async(self, afn):
+        """Async analog of .call(): awaits afn() under the same state machine.
+
+        afn must be a zero-arg callable returning an awaitable.
+        The breaker wraps ONLY the awaited call — any post-processing the
+        caller does with the result is NOT counted as a failure.
+        """
+        with self._lock:
+            if self._state == CircuitState.OPEN:
+                elapsed = time.monotonic() - self._last_failure_time
+                if elapsed >= self._recovery_timeout_secs:
+                    self._state = CircuitState.HALF_OPEN
+                    self._probe_in_flight = True
+                    allow_probe = True
+                else:
+                    raise CircuitOpenError(
+                        f"Circuit '{self._name}' is OPEN "
+                        f"(retry after {self._recovery_timeout_secs}s)"
+                    )
+            elif self._state == CircuitState.HALF_OPEN:
+                if self._probe_in_flight:
+                    raise CircuitOpenError(
+                        f"Circuit '{self._name}' is HALF_OPEN — probe already in flight"
+                    )
+                self._probe_in_flight = True
+                allow_probe = True
+            else:
+                allow_probe = False
+
+        try:
+            result = await afn()
+        except Exception:
+            with self._lock:
+                if allow_probe:
+                    self._state = CircuitState.OPEN
+                    self._last_failure_time = time.monotonic()
+                    self._probe_in_flight = False
+                else:
+                    self._failure_count += 1
+                    self._last_failure_time = time.monotonic()
+                    if self._failure_count >= self._failure_threshold:
+                        self._state = CircuitState.OPEN
+            raise
+
+        with self._lock:
+            if allow_probe:
+                self._state = CircuitState.CLOSED
+                self._failure_count = 0
+                self._probe_in_flight = False
+
+        return result
+```
+
+- [ ] **Step 4:** Run tests — expect 6 passed.
+- [ ] **Step 5:** Verify Phase 0 sync tests still pass: `python -m pytest tests/infra/ -v`.
+- [ ] **Step 6:** Commit:
+  ```bash
+  git add mempalace/infra/circuit_breaker.py tests/infra/test_circuit_breaker_async.py tests/infra/__init__.py
+  git commit -m "feat(infra): CircuitBreaker.call_async() for async wrapping"
+  ```
 
 ---
 
-## Task 2: `ExtractionState` — SQLite state table
+## Task 2: `ExtractionState` — SQLite table with shared write lock
+
+**Depends on:** nothing
 
 **Files:**
 - Create: `mempalace/walker/extractor/__init__.py` (empty)
@@ -77,25 +240,32 @@ git commit -m "deps(walker): add httpx>=0.27.0 for Qwen HTTP client"
 - Create: `tests/walker/extractor/__init__.py` (empty)
 - Create: `tests/walker/extractor/test_state.py`
 
+**Design note:** `ExtractionState` must acquire `KnowledgeGraph._write_lock` for every write. Both `upsert_triple()` and `mark_extracted()` share the same SQLite connection under WAL. Without the shared lock, a `mark_extracted()` INSERT can execute mid-transaction of a `BEGIN IMMEDIATE ... COMMIT` on `upsert_triple()`.
+
 - [ ] **Step 1: Write failing tests (`test_state.py`)**
 
 ```python
+import threading
 import pytest
 from mempalace.knowledge_graph import KnowledgeGraph
 from mempalace.walker.extractor.state import ExtractionState
 
 
-def test_table_created_on_init(tmp_path):
+def test_table_created_with_correct_schema(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
-    state = ExtractionState(kg)
-    conn = kg._conn()
-    tables = [r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    ).fetchall()]
-    assert "extraction_state" in tables
+    ExtractionState(kg)
+    cols = kg._conn().execute("PRAGMA table_info(extraction_state)").fetchall()
+    names = [c[1] for c in cols]
+    assert names == [
+        "drawer_id", "extractor_version", "extracted_at",
+        "triple_count", "entity_count",
+    ]
+    pk = [c for c in cols if c[5] == 1]
+    assert len(pk) == 1
+    assert pk[0][1] == "drawer_id"
 
 
-def test_is_extracted_false_for_unknown_drawer(tmp_path):
+def test_is_extracted_unknown_drawer(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
     assert state.is_extracted("drawer_1", "v1.0") is False
@@ -104,24 +274,23 @@ def test_is_extracted_false_for_unknown_drawer(tmp_path):
 def test_mark_and_query(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
-    state.mark_extracted("drawer_1", version="v1.0", triple_count=3, entity_count=5)
-    assert state.is_extracted("drawer_1", "v1.0") is True
-    assert state.is_extracted("drawer_1", "v1.1") is False  # different version
+    state.mark_extracted("d1", "v1.0", triple_count=3, entity_count=5)
+    assert state.is_extracted("d1", "v1.0") is True
+    assert state.is_extracted("d1", "v1.1") is False
 
 
-def test_mark_replaces_prior_entry(tmp_path):
+def test_mark_replaces_prior(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
-    state.mark_extracted("d1", "v1.0", triple_count=2, entity_count=3)
-    state.mark_extracted("d1", "v1.0", triple_count=4, entity_count=6)
+    state.mark_extracted("d1", "v1.0", 2, 3)
+    state.mark_extracted("d1", "v1.0", 4, 6)
     row = kg._conn().execute(
         "SELECT triple_count, entity_count FROM extraction_state WHERE drawer_id='d1'"
     ).fetchone()
-    assert row[0] == 4
-    assert row[1] == 6
+    assert row[0] == 4 and row[1] == 6
 
 
-def test_unextracted_ids_filters_already_extracted(tmp_path):
+def test_unextracted_ids_filters(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
     state.mark_extracted("d1", "v1.0", 0, 0)
@@ -134,61 +303,77 @@ def test_unextracted_ids_different_version(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
     state.mark_extracted("d1", "v1.0", 0, 0)
-    result = state.unextracted_ids(["d1"], "v1.1")
-    assert result == ["d1"]  # v1.1 not yet extracted
+    assert state.unextracted_ids(["d1"], "v1.1") == ["d1"]
 
 
 def test_max_extracted_at(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
     state.mark_extracted("d1", "v1.0", 0, 0)
-    state.mark_extracted("d2", "v1.0", 0, 0)
-    ts = state.max_extracted_at("v1.0")
-    assert ts is not None  # ISO timestamp string
-
+    assert state.max_extracted_at("v1.0") is not None
     assert state.max_extracted_at("v2.0") is None
+
+
+def test_concurrent_writes_no_errors(tmp_path):
+    """Verify shared-lock prevents mid-transaction collisions."""
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    state = ExtractionState(kg)
+    errors = []
+
+    def upsert_worker(i):
+        try:
+            kg.upsert_triple(f"Alice{i}", "knows", f"Bob{i}")
+        except Exception as e:
+            errors.append(e)
+
+    def state_worker(i):
+        try:
+            state.mark_extracted(f"d{i}", "v1.0", 1, 2)
+        except Exception as e:
+            errors.append(e)
+
+    threads = []
+    for i in range(20):
+        threads.append(threading.Thread(target=upsert_worker, args=(i,)))
+        threads.append(threading.Thread(target=state_worker, args=(i,)))
+    for t in threads: t.start()
+    for t in threads: t.join()
+    assert errors == []
 ```
 
-- [ ] **Step 2: Run tests — expect ImportError**
-
-Run: `python -m pytest tests/walker/extractor/test_state.py -v`
-Expected: FAIL (`ModuleNotFoundError: mempalace.walker.extractor.state`)
+- [ ] **Step 2:** Run: expect ImportError.
 
 - [ ] **Step 3: Implement `state.py`**
 
 ```python
-"""Tracks which drawers have been extracted per extractor_version.
-
-Shares the knowledge_graph.db SQLite file for zero-new-file storage.
-Uses the KnowledgeGraph's own connection (WAL mode) so cross-thread /
-asyncio access is safe without a separate lock.
-"""
+"""Tracks which drawers have been extracted per extractor_version."""
 from __future__ import annotations
 
 from mempalace.knowledge_graph import KnowledgeGraph
 
 
 class ExtractionState:
-    """SQLite-backed extraction tracking. Lives in knowledge_graph.db."""
+    """SQLite-backed extraction tracking. Shares knowledge_graph.db."""
 
     def __init__(self, kg: KnowledgeGraph) -> None:
         self._kg = kg
         self._init_table()
 
     def _init_table(self) -> None:
-        conn = self._kg._conn()
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS extraction_state (
-                drawer_id         TEXT PRIMARY KEY,
-                extractor_version TEXT NOT NULL,
-                extracted_at      TEXT DEFAULT CURRENT_TIMESTAMP,
-                triple_count      INTEGER DEFAULT 0,
-                entity_count      INTEGER DEFAULT 0
+        with self._kg._write_lock:
+            conn = self._kg._conn()
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS extraction_state (
+                    drawer_id         TEXT PRIMARY KEY,
+                    extractor_version TEXT NOT NULL,
+                    extracted_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+                    triple_count      INTEGER DEFAULT 0,
+                    entity_count      INTEGER DEFAULT 0
+                )
+                """
             )
-            """
-        )
-        conn.commit()
+            conn.commit()
 
     def is_extracted(self, drawer_id: str, version: str) -> bool:
         row = self._kg._conn().execute(
@@ -198,20 +383,18 @@ class ExtractionState:
         return row is not None
 
     def mark_extracted(
-        self,
-        drawer_id: str,
-        version: str,
-        triple_count: int,
-        entity_count: int,
+        self, drawer_id: str, version: str,
+        triple_count: int, entity_count: int,
     ) -> None:
-        conn = self._kg._conn()
-        conn.execute(
-            """INSERT OR REPLACE INTO extraction_state
-               (drawer_id, extractor_version, extracted_at, triple_count, entity_count)
-               VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?)""",
-            (drawer_id, version, triple_count, entity_count),
-        )
-        conn.commit()
+        with self._kg._write_lock:
+            conn = self._kg._conn()
+            conn.execute(
+                """INSERT OR REPLACE INTO extraction_state
+                   (drawer_id, extractor_version, extracted_at, triple_count, entity_count)
+                   VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?)""",
+                (drawer_id, version, triple_count, entity_count),
+            )
+            conn.commit()
 
     def unextracted_ids(self, all_ids: list[str], version: str) -> list[str]:
         if not all_ids:
@@ -234,42 +417,43 @@ class ExtractionState:
         return row[0] if row and row[0] else None
 ```
 
-- [ ] **Step 4: Run tests — expect all pass**
-
-Run: `python -m pytest tests/walker/extractor/test_state.py -v`
-Expected: 7 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mempalace/walker/extractor/__init__.py mempalace/walker/extractor/state.py \
-        tests/walker/extractor/__init__.py tests/walker/extractor/test_state.py
-git commit -m "feat(walker): ExtractionState SQLite table for per-drawer tracking"
-```
+- [ ] **Step 4:** Run tests — expect 8 passed.
+- [ ] **Step 5:** Commit:
+  ```bash
+  git add mempalace/walker/extractor/__init__.py mempalace/walker/extractor/state.py \
+          tests/walker/extractor/__init__.py tests/walker/extractor/test_state.py
+  git commit -m "feat(walker): ExtractionState with shared KG write lock"
+  ```
 
 ---
 
 ## Task 3: `GlinerNER` — entity extraction wrapper
 
+**Depends on:** nothing
+
 **Files:**
 - Create: `mempalace/walker/extractor/gliner_ner.py`
 - Create: `tests/walker/extractor/test_gliner_ner.py`
 
-Note: GLiNER model downloads (~500MB) on first use. Tests use a mock via `monkeypatch` — they do NOT load the real model.
+**Note:** Real GLiNER downloads a 500MB model. Tests mock via `__new__` bypass.
 
-- [ ] **Step 1: Write failing tests (`test_gliner_ner.py`)**
+- [ ] **Step 1:** Enumerate `HardwareTier` values:
+  ```bash
+  python -c "from mempalace.walker.gpu_detect import HardwareTier; print(list(HardwareTier))"
+  ```
+  Expected: `[HardwareTier.FULL, HardwareTier.REDUCED, HardwareTier.CPU_ONLY]`. Adjust the parametrized test in Step 2 if different.
+
+- [ ] **Step 2: Write failing tests**
 
 ```python
-"""Tests for GlinerNER — mocks the underlying gliner library so tests are fast
-and don't require a 500MB model download."""
 from unittest.mock import MagicMock
 import pytest
 from mempalace.walker.extractor.gliner_ner import GlinerNER, Entity, ENTITY_TYPES
+from mempalace.walker.gpu_detect import HardwareTier, WalkerHardware
 
 
-def _make_gliner_ner_with_fake_model(fake_predict):
-    """Helper: construct GlinerNER without loading the real GLiNER model."""
-    ner = GlinerNER.__new__(GlinerNER)  # bypass __init__
+def _fake_ner(fake_predict):
+    ner = GlinerNER.__new__(GlinerNER)
     ner._model = MagicMock()
     ner._model.batch_predict_entities.side_effect = fake_predict
     ner._device = "cpu"
@@ -277,95 +461,80 @@ def _make_gliner_ner_with_fake_model(fake_predict):
 
 
 def test_entity_dataclass():
-    e = Entity(text="Alice", type="person", score=0.92)
-    assert e.text == "Alice"
-    assert e.type == "person"
-    assert e.score == pytest.approx(0.92)
+    e = Entity("Alice", "person", 0.92)
+    assert e.text == "Alice" and e.type == "person"
 
 
-def test_entity_types_is_list():
-    assert isinstance(ENTITY_TYPES, list)
-    assert "person" in ENTITY_TYPES
-    assert "organization" in ENTITY_TYPES
+def test_entity_types_contains_core():
+    for t in ("person", "organization", "location", "date"):
+        assert t in ENTITY_TYPES
 
 
-def test_select_device_returns_cuda_or_cpu(monkeypatch):
-    from mempalace.walker.gpu_detect import HardwareTier, WalkerHardware
-    fake_hw = WalkerHardware(
-        tier=HardwareTier.FULL, device_name="A5000", vram_gb=24.0
-    )
+@pytest.mark.parametrize("tier,expected", [
+    (HardwareTier.FULL, "cuda"),
+    (HardwareTier.REDUCED, "cuda"),
+    (HardwareTier.CPU_ONLY, "cpu"),
+])
+def test_select_device_for_tier(monkeypatch, tier, expected):
+    fake = WalkerHardware(tier=tier, device_name="x", vram_gb=0.0)
     monkeypatch.setattr(
-        "mempalace.walker.extractor.gliner_ner.detect_hardware", lambda: fake_hw
+        "mempalace.walker.extractor.gliner_ner.detect_hardware", lambda: fake
     )
-    assert GlinerNER._select_device() == "cuda"
+    assert GlinerNER._select_device() == expected
 
-    cpu_hw = WalkerHardware(
-        tier=HardwareTier.CPU_ONLY, device_name="CPU", vram_gb=0.0
-    )
+
+def test_select_device_fallback_on_error(monkeypatch):
+    def boom(): raise RuntimeError("no cuda")
     monkeypatch.setattr(
-        "mempalace.walker.extractor.gliner_ner.detect_hardware", lambda: cpu_hw
+        "mempalace.walker.extractor.gliner_ner.detect_hardware", boom
     )
     assert GlinerNER._select_device() == "cpu"
 
 
-def test_extract_batch_returns_one_list_per_input():
+def test_extract_batch_maps_entities():
     fake_predict = lambda texts, labels, threshold: [
         [{"text": "Alice", "label": "person", "score": 0.9}],
         [{"text": "DeepMind", "label": "organization", "score": 0.85}],
     ]
-    ner = _make_gliner_ner_with_fake_model(fake_predict)
-    out = ner.extract_batch(["Alice works", "DeepMind"])
+    ner = _fake_ner(fake_predict)
+    out = ner.extract_batch(["a", "b"])
     assert len(out) == 2
     assert out[0][0].text == "Alice"
-    assert out[0][0].type == "person"
-    assert out[1][0].text == "DeepMind"
+    assert out[1][0].type == "organization"
 
 
 def test_extract_batch_empty_input():
-    ner = _make_gliner_ner_with_fake_model(lambda *a, **k: [])
-    out = ner.extract_batch([])
-    assert out == []
+    ner = _fake_ner(lambda *a, **k: [])
+    assert ner.extract_batch([]) == []
+    ner._model.batch_predict_entities.assert_not_called()
 
 
-def test_extract_batch_filters_by_threshold():
-    fake_predict = lambda texts, labels, threshold: [
-        [
-            {"text": "Alice", "label": "person", "score": 0.9},
-            {"text": "foo", "label": "person", "score": 0.2},  # below default 0.4
-        ]
-    ]
-    ner = _make_gliner_ner_with_fake_model(fake_predict)
-    # gliner library already applies threshold internally; we pass it through
-    out = ner.extract_batch(["text"], threshold=0.4)
-    # verify we called with threshold=0.4
+def test_extract_batch_passes_threshold():
+    ner = _fake_ner(lambda texts, labels, threshold: [[]])
+    ner.extract_batch(["t"], threshold=0.6)
     ner._model.batch_predict_entities.assert_called_with(
-        ["text"], ENTITY_TYPES, threshold=0.4
+        ["t"], ENTITY_TYPES, threshold=0.6
     )
 ```
 
-- [ ] **Step 2: Run tests — expect ImportError**
+- [ ] **Step 3:** Run — expect ImportError.
 
-Run: `python -m pytest tests/walker/extractor/test_gliner_ner.py -v`
-Expected: FAIL (module not found)
-
-- [ ] **Step 3: Implement `gliner_ner.py`**
+- [ ] **Step 4: Implement `gliner_ner.py`**
 
 ```python
 """GLiNER wrapper — batched entity extraction with GPU autodetect."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from mempalace.walker.gpu_detect import HardwareTier, detect_hardware
 
+log = logging.getLogger(__name__)
+
 ENTITY_TYPES: list[str] = [
-    "person",
-    "organization",
-    "location",
-    "date",
-    "project",
-    "technology",
-    "event",
+    "person", "organization", "location",
+    "date", "project", "technology", "event",
 ]
 
 
@@ -377,252 +546,287 @@ class Entity:
 
 
 class GlinerNER:
-    """Loaded once per `walker extract` run, reused across all drawers."""
-
     def __init__(
         self,
         model: str = "urchade/gliner_multi-v2.1",
         device: str | None = None,
     ) -> None:
-        from gliner import GLiNER  # local import — avoids hard dep at package load
-
+        from gliner import GLiNER
         self._device = device or GlinerNER._select_device()
-        self._model = GLiNER.from_pretrained(model).to(self._device)
+        try:
+            self._model = GLiNER.from_pretrained(model).to(self._device)
+        except Exception as e:
+            if self._device == "cuda":
+                log.warning("GLiNER failed on cuda (%s); falling back to cpu", e)
+                self._device = "cpu"
+                self._model = GLiNER.from_pretrained(model).to("cpu")
+            else:
+                raise
 
     def extract_batch(
         self, texts: list[str], threshold: float = 0.4
     ) -> list[list[Entity]]:
-        """Returns one Entity list per input text. Batched internally by gliner."""
         if not texts:
             return []
         raw = self._model.batch_predict_entities(
             texts, ENTITY_TYPES, threshold=threshold
         )
         return [
-            [Entity(text=r["text"], type=r["label"], score=r["score"]) for r in per_text]
+            [Entity(r["text"], r["label"], r["score"]) for r in per_text]
             for per_text in raw
         ]
 
     @staticmethod
     def _select_device() -> str:
-        """Returns 'cuda' if a GPU is available (per walker.gpu_detect), else 'cpu'."""
-        hw = detect_hardware()
+        """Returns 'cuda' if a GPU is available, else 'cpu'. Fallback on error."""
+        try:
+            hw = detect_hardware()
+        except Exception as e:
+            log.warning("detect_hardware failed: %s — falling back to cpu", e)
+            return "cpu"
         return "cpu" if hw.tier == HardwareTier.CPU_ONLY else "cuda"
 ```
 
-- [ ] **Step 4: Run tests — expect all pass**
-
-Run: `python -m pytest tests/walker/extractor/test_gliner_ner.py -v`
-Expected: 6 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mempalace/walker/extractor/gliner_ner.py tests/walker/extractor/test_gliner_ner.py
-git commit -m "feat(walker): GlinerNER entity extraction wrapper with device autodetect"
-```
+- [ ] **Step 5:** Run tests — expect 9 passed.
+- [ ] **Step 6:** Commit:
+  ```bash
+  git add mempalace/walker/extractor/gliner_ner.py tests/walker/extractor/test_gliner_ner.py
+  git commit -m "feat(walker): GlinerNER with device autodetect + CPU fallback"
+  ```
 
 ---
 
-## Task 4: `QwenRelExtractor` — async HTTP client + CircuitBreaker
+## Task 4: `QwenRelExtractor` — async HTTP via `call_async`
+
+**Depends on:** Task 1, Task 1b, Task 3
 
 **Files:**
 - Create: `mempalace/walker/extractor/qwen_rel.py`
 - Create: `tests/walker/extractor/test_qwen_rel.py`
 
-- [ ] **Step 1: Write failing tests (`test_qwen_rel.py`)**
+- [ ] **Step 0:** Verify exports:
+  ```bash
+  python -c "from mempalace.infra.circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState"
+  ```
+
+- [ ] **Step 1: Write failing tests**
 
 ```python
-"""Tests for QwenRelExtractor — uses httpx MockTransport to avoid real HTTP.
-No real Qwen endpoint is contacted."""
 import json
 import pytest
 import httpx
 from mempalace.walker.extractor.qwen_rel import (
-    QwenRelExtractor,
-    Triple,
-    SYSTEM_PROMPT,
+    QwenRelExtractor, Triple, SYSTEM_PROMPT, _parse_triples,
 )
 from mempalace.walker.extractor.gliner_ner import Entity
-from mempalace.infra.circuit_breaker import CircuitOpenError
+from mempalace.infra.circuit_breaker import CircuitBreaker, CircuitState
 
 
-def _mock_transport(handler):
-    return httpx.MockTransport(handler)
+def _ok_json(triples):
+    return httpx.Response(200, json={
+        "choices": [{"message": {"content": json.dumps(triples)}, "finish_reason": "stop"}]
+    })
 
 
-def _ok_response(triples: list[dict]) -> httpx.Response:
-    body = {
-        "choices": [
-            {
-                "message": {"content": json.dumps(triples)},
-                "finish_reason": "stop",
-            }
-        ]
-    }
-    return httpx.Response(200, json=body)
+def _ok_text(content):
+    return httpx.Response(200, json={
+        "choices": [{"message": {"content": content}, "finish_reason": "stop"}]
+    })
 
 
-def _ok_text_response(content: str) -> httpx.Response:
-    body = {"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}
-    return httpx.Response(200, json=body)
-
-
-def _models_ok_response() -> httpx.Response:
-    return httpx.Response(200, json={"data": [{"id": "qwen35"}]})
-
-
-def _build_extractor(request_handler) -> QwenRelExtractor:
-    """Build QwenRelExtractor with a MockTransport, bypassing the preflight check."""
-    transport = _mock_transport(request_handler)
+def _build_no_preflight(handler):
+    transport = httpx.MockTransport(handler)
     ex = QwenRelExtractor.__new__(QwenRelExtractor)
     ex._base_url = "http://mock"
     ex._model = "qwen35"
     ex._concurrency = 1
     ex._timeout_secs = 5.0
     ex._client = httpx.AsyncClient(transport=transport, base_url="http://mock")
-    from mempalace.infra.circuit_breaker import CircuitBreaker
     ex._cb = CircuitBreaker("qwen_rel", failure_threshold=3, recovery_timeout_secs=30.0)
     return ex
 
 
+# --- parser tests ---
+
+
+def test_parse_plain_json():
+    result = _parse_triples('[{"subject":"A","predicate":"knows","object":"B"}]')
+    assert result == [Triple("A", "knows", "B")]
+
+
+def test_parse_markdown_fenced():
+    content = '```json\n[{"subject":"A","predicate":"knows","object":"B"}]\n```'
+    assert len(_parse_triples(content)) == 1
+
+
+def test_parse_text_before_array():
+    content = 'Sure! [{"subject":"A","predicate":"knows","object":"B"}]'
+    assert len(_parse_triples(content)) == 1
+
+
+def test_parse_empty_array():
+    assert _parse_triples("[]") == []
+
+
+def test_parse_invalid_returns_none():
+    assert _parse_triples("not json") is None
+
+
+def test_parse_skips_malformed_items():
+    content = '[{"subject":"A"},{"subject":"B","predicate":"knows","object":"C"}]'
+    result = _parse_triples(content)
+    assert len(result) == 1
+    assert result[0].subject == "B"
+
+
+# --- extractor behavior ---
+
+
 def test_triple_dataclass():
-    t = Triple(subject="Alice", predicate="works_at", object="DeepMind")
+    t = Triple("Alice", "works_at", "DeepMind")
     assert t.subject == "Alice"
-    assert t.predicate == "works_at"
-    assert t.object == "DeepMind"
 
 
 def test_system_prompt_mentions_json():
     assert "JSON" in SYSTEM_PROMPT or "json" in SYSTEM_PROMPT
 
 
-@pytest.mark.asyncio
-async def test_empty_entities_returns_empty_without_http():
+async def test_empty_entities_returns_empty():
     calls = []
 
     def handler(request):
         calls.append(request)
-        return _ok_response([])
+        return _ok_json([])
 
-    ex = _build_extractor(handler)
-    result = await ex.extract("some text", entities=[])
-    assert result == []
-    assert len(calls) == 0  # Qwen was NOT called
+    ex = _build_no_preflight(handler)
+    assert await ex.extract("text", entities=[]) == []
+    assert len(calls) == 0
 
 
-@pytest.mark.asyncio
-async def test_valid_json_parsed_into_triples():
+async def test_empty_text_returns_empty():
+    calls = []
+
     def handler(request):
-        return _ok_response(
-            [{"subject": "Alice", "predicate": "works_at", "object": "DeepMind"}]
-        )
+        calls.append(request)
+        return _ok_json([])
 
-    ex = _build_extractor(handler)
-    entities = [Entity("Alice", "person", 0.9), Entity("DeepMind", "organization", 0.9)]
-    result = await ex.extract("Alice works at DeepMind.", entities)
+    ex = _build_no_preflight(handler)
+    assert await ex.extract("   ", [Entity("A", "person", 0.9)]) == []
+    assert len(calls) == 0
+
+
+async def test_valid_json_parsed():
+    def handler(request):
+        return _ok_json([{"subject": "Alice", "predicate": "works_at", "object": "DeepMind"}])
+
+    ex = _build_no_preflight(handler)
+    result = await ex.extract("Alice at DeepMind", [
+        Entity("Alice", "person", 0.9), Entity("DeepMind", "organization", 0.9)
+    ])
     assert len(result) == 1
     assert result[0].subject == "Alice"
-    assert result[0].predicate == "works_at"
-    assert result[0].object == "DeepMind"
 
 
-@pytest.mark.asyncio
-async def test_parse_failure_retries_once_then_returns_empty():
+async def test_parse_failure_retries_once():
     calls = {"n": 0}
 
     def handler(request):
         calls["n"] += 1
-        return _ok_text_response("definitely not json")
+        return _ok_text("not json")
 
-    ex = _build_extractor(handler)
-    entities = [Entity("Alice", "person", 0.9)]
-    result = await ex.extract("Alice text", entities)
-    assert result == []
-    assert calls["n"] == 2  # one original + one retry
+    ex = _build_no_preflight(handler)
+    assert await ex.extract("text", [Entity("A", "person", 0.9)]) == []
+    assert calls["n"] == 2
 
 
-@pytest.mark.asyncio
-async def test_markdown_fenced_json_parsed_correctly():
-    """Qwen sometimes wraps JSON in ```json ... ``` — should still parse."""
+async def test_parse_failure_does_not_open_circuit():
     def handler(request):
-        content = '```json\n[{"subject":"Alice","predicate":"knows","object":"Bob"}]\n```'
-        return _ok_text_response(content)
+        return _ok_text("not json")
 
-    ex = _build_extractor(handler)
-    result = await ex.extract("text", [Entity("Alice", "person", 0.9)])
-    assert len(result) == 1
-    assert result[0].subject == "Alice"
+    ex = _build_no_preflight(handler)
+    for _ in range(5):
+        await ex.extract("text", [Entity("A", "person", 0.9)])
+    assert ex._cb.state == CircuitState.CLOSED
 
 
-@pytest.mark.asyncio
-async def test_circuit_breaker_opens_after_3_failures():
+async def test_http_500_opens_circuit():
     def handler(request):
         return httpx.Response(500, json={"error": "boom"})
 
-    ex = _build_extractor(handler)
-    entities = [Entity("Alice", "person", 0.9)]
-
-    # 3 failures → circuit opens
+    ex = _build_no_preflight(handler)
     for _ in range(3):
-        result = await ex.extract("text", entities)
-        assert result == []
-
-    # 4th call returns [] immediately (circuit is open)
-    result = await ex.extract("text", entities)
-    assert result == []
+        assert await ex.extract("t", [Entity("A", "person", 0.9)]) == []
+    assert ex._cb.state == CircuitState.OPEN
 
 
-@pytest.mark.asyncio
 async def test_timeout_returns_empty():
     def handler(request):
         raise httpx.TimeoutException("slow")
 
-    ex = _build_extractor(handler)
-    entities = [Entity("Alice", "person", 0.9)]
-    result = await ex.extract("text", entities)
-    assert result == []
+    ex = _build_no_preflight(handler)
+    assert await ex.extract("t", [Entity("A", "person", 0.9)]) == []
+
+
+def test_preflight_raises_on_unreachable():
+    with pytest.raises(RuntimeError, match="unreachable"):
+        QwenRelExtractor(base_url="http://127.0.0.1:1")
+
+
+async def test_preflight_passes_with_mock(monkeypatch):
+    called = {"n": 0}
+
+    class FakeSync:
+        def __init__(self, *a, **kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def get(self, path):
+            called["n"] += 1
+            assert path == "/v1/models"
+            class R:
+                status_code = 200
+                def raise_for_status(self): pass
+            return R()
+
+    monkeypatch.setattr("httpx.Client", FakeSync)
+    ex = QwenRelExtractor(base_url="http://mock:1")
+    assert called["n"] == 1
+    await ex.aclose()
 ```
 
-Add to `tests/conftest.py` (or `tests/walker/extractor/conftest.py`) if missing:
-
-```python
-import pytest_asyncio  # noqa: F401
-```
-
-- [ ] **Step 2: Run tests — expect ImportError**
-
-Run: `python -m pytest tests/walker/extractor/test_qwen_rel.py -v`
-Expected: FAIL (module not found)
+- [ ] **Step 2:** Run — expect ImportError.
 
 - [ ] **Step 3: Implement `qwen_rel.py`**
 
 ```python
 """Async HTTP client for Qwen3.5 35B relationship extraction.
 
-Wraps the CircuitBreaker from Phase 0 (`mempalace.infra.circuit_breaker`).
-No model loading — the Qwen server must already be running on `base_url`.
+Uses CircuitBreaker.call_async() from Phase 0+Task 1b.
 """
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
-from typing import Iterable
 
 import httpx
 
 from mempalace.infra.circuit_breaker import CircuitBreaker, CircuitOpenError
 from mempalace.walker.extractor.gliner_ner import Entity
 
+log = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """Extract relationships as JSON triples from the text.
-Return ONLY a JSON array: [{"subject": "...", "predicate": "...", "object": "..."}]
-Use only entities from the provided list. Predicates must be snake_case verbs.
-Return [] if no clear relationships exist. No explanation, no markdown."""
+SYSTEM_PROMPT = (
+    "Extract relationships as JSON triples from the text.\n"
+    'Return ONLY a JSON array: [{"subject": "...", "predicate": "...", "object": "..."}]\n'
+    "Use only entities from the provided list. Predicates must be snake_case verbs.\n"
+    "Return [] if no clear relationships exist. No explanation, no markdown."
+)
 
-STRICTER_PROMPT = """Return ONLY a JSON array of {"subject","predicate","object"} objects.
-No markdown, no explanation, no other text. Just the JSON array."""
+STRICTER_PROMPT = (
+    'Return ONLY a JSON array of {"subject","predicate","object"} objects.\n'
+    "No markdown, no explanation, no other text. Just the JSON array."
+)
 
 
 @dataclass(slots=True)
@@ -632,12 +836,7 @@ class Triple:
     object: str
 
 
-_JSON_ARRAY_RE = re.compile(r"\[.*?\]", re.DOTALL)
-
-
 class QwenRelExtractor:
-    """Thin async HTTP client wrapping the already-running Qwen3.5 35B endpoint."""
-
     def __init__(
         self,
         base_url: str = "http://localhost:43100",
@@ -650,13 +849,10 @@ class QwenRelExtractor:
         self._concurrency = concurrency
         self._timeout_secs = timeout_secs
         self._client = httpx.AsyncClient(base_url=base_url, timeout=timeout_secs)
-        self._cb = CircuitBreaker(
-            "qwen_rel", failure_threshold=3, recovery_timeout_secs=30.0
-        )
+        self._cb = CircuitBreaker("qwen_rel", failure_threshold=3, recovery_timeout_secs=30.0)
         self._preflight_check()
 
     def _preflight_check(self) -> None:
-        """Verify the endpoint is reachable at construction time. Fail fast."""
         try:
             with httpx.Client(base_url=self._base_url, timeout=5.0) as sync:
                 r = sync.get("/v1/models")
@@ -671,147 +867,70 @@ class QwenRelExtractor:
         await self._client.aclose()
 
     async def extract(self, text: str, entities: list[Entity]) -> list[Triple]:
-        """Extract relationship triples for the given text + entities.
-
-        Returns [] if:
-          - entities is empty (Qwen not called)
-          - Qwen endpoint returns an error
-          - CircuitBreaker is OPEN
-          - Response still can't be parsed after one retry
-        """
-        if not entities:
+        if not entities or not text or not text.strip():
             return []
 
         entity_lines = "\n".join(f"- {e.text} ({e.type})" for e in entities)
         user_content = f"Text:\n{text}\n\nEntities:\n{entity_lines}"
 
-        try:
-            # Run the HTTP call through the CircuitBreaker.
-            # _call_once is a coroutine; we need to await it. CircuitBreaker.call()
-            # is synchronous, so we drive it manually instead.
-            if self._cb.state.name == "OPEN":
-                # Fast-path: check state first; .call() would raise immediately.
-                pass
-            content = await self._call_once_with_cb(
-                SYSTEM_PROMPT, user_content, stricter=False
-            )
-        except CircuitOpenError:
-            return []
-        except Exception:
+        content = await self._http_call(SYSTEM_PROMPT, user_content)
+        if content is None:
             return []
 
         triples = _parse_triples(content)
         if triples is not None:
             return triples
 
-        # Retry once with stricter prompt
+        # Parse failures do NOT count as HTTP failures — breaker stays closed.
+        content = await self._http_call(STRICTER_PROMPT, user_content)
+        if content is None:
+            return []
+
+        return _parse_triples(content) or []
+
+    async def _http_call(self, system: str, user: str) -> str | None:
         try:
-            content = await self._call_once_with_cb(
-                STRICTER_PROMPT, user_content, stricter=True
-            )
+            return await self._cb.call_async(lambda: self._do_post(system, user))
         except CircuitOpenError:
-            return []
-        except Exception:
-            return []
+            log.warning("Qwen circuit OPEN — skipping call")
+            return None
+        except Exception as e:
+            log.warning("Qwen HTTP call failed: %s", e)
+            return None
 
-        triples = _parse_triples(content)
-        return triples or []
-
-    async def _call_once_with_cb(
-        self, system: str, user: str, stricter: bool
-    ) -> str:
-        """Single HTTP call, with CircuitBreaker bookkeeping applied manually
-        (since the breaker's .call() is sync and we need async)."""
-        # Mirror the CircuitBreaker.call() flow but for async:
-        import time as _time
-
-        lock = self._cb._lock
-        with lock:
-            state_name = self._cb._state.name
-            if state_name == "OPEN":
-                elapsed = _time.monotonic() - self._cb._last_failure_time
-                if elapsed >= self._cb._recovery_timeout_secs:
-                    from mempalace.infra.circuit_breaker import CircuitState
-                    self._cb._state = CircuitState.HALF_OPEN
-                    self._cb._probe_in_flight = True
-                    allow_probe = True
-                else:
-                    raise CircuitOpenError(
-                        f"Circuit '{self._cb._name}' is OPEN"
-                    )
-            elif state_name == "HALF_OPEN":
-                if self._cb._probe_in_flight:
-                    raise CircuitOpenError(
-                        f"Circuit '{self._cb._name}' probe in flight"
-                    )
-                self._cb._probe_in_flight = True
-                allow_probe = True
-            else:
-                allow_probe = False
-
-        try:
-            resp = await self._client.post(
-                "/v1/chat/completions",
-                json={
-                    "model": self._model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "temperature": 0.0,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"]
-        except Exception:
-            with lock:
-                if allow_probe:
-                    from mempalace.infra.circuit_breaker import CircuitState
-                    self._cb._state = CircuitState.OPEN
-                    self._cb._last_failure_time = _time.monotonic()
-                    self._cb._probe_in_flight = False
-                else:
-                    self._cb._failure_count += 1
-                    self._cb._last_failure_time = _time.monotonic()
-                    if self._cb._failure_count >= self._cb._failure_threshold:
-                        from mempalace.infra.circuit_breaker import CircuitState
-                        self._cb._state = CircuitState.OPEN
-            raise
-
-        with lock:
-            if allow_probe:
-                from mempalace.infra.circuit_breaker import CircuitState
-                self._cb._state = CircuitState.CLOSED
-                self._cb._failure_count = 0
-                self._cb._probe_in_flight = False
-
-        return content
+    async def _do_post(self, system: str, user: str) -> str:
+        resp = await self._client.post(
+            "/v1/chat/completions",
+            json={
+                "model": self._model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": 0.0,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
 
 
 def _parse_triples(content: str) -> list[Triple] | None:
-    """Parse JSON triples from Qwen response. Returns None if parse fails,
-    [] if the response is valid JSON but contains no triples."""
+    """Parse JSON triples from Qwen response. Returns None if unparseable."""
     if content is None:
         return None
 
-    # Strip markdown fences if present
     stripped = content.strip()
     if stripped.startswith("```"):
         stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
         stripped = re.sub(r"\s*```\s*$", "", stripped)
+        stripped = stripped.strip()
 
-    # Try direct parse first
     try:
         data = json.loads(stripped)
     except json.JSONDecodeError:
-        # Fallback: find first JSON array in the string
-        m = _JSON_ARRAY_RE.search(stripped)
-        if not m:
-            return None
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError:
+        data = _extract_first_json_array(stripped)
+        if data is None:
             return None
 
     if not isinstance(data, list):
@@ -821,216 +940,355 @@ def _parse_triples(content: str) -> list[Triple] | None:
     for item in data:
         if not isinstance(item, dict):
             continue
-        s = item.get("subject")
-        p = item.get("predicate")
-        o = item.get("object")
+        s, p, o = item.get("subject"), item.get("predicate"), item.get("object")
         if isinstance(s, str) and isinstance(p, str) and isinstance(o, str):
-            triples.append(Triple(subject=s, predicate=p, object=o))
+            triples.append(Triple(s, p, o))
     return triples
+
+
+def _extract_first_json_array(text: str):
+    """Find the first balanced JSON array honoring string quoting."""
+    start = text.find("[")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
 ```
 
-**Note on `_call_once_with_cb`:** the CircuitBreaker in Phase 0 has a sync `.call(fn)` method that expects a sync callable. Because Qwen calls are async, we drive the breaker's state machine manually. This is a known wart — Phase 2 will add an async `.call_async()` helper to the breaker.
+- [ ] **Step 4:** Run tests — expect all pass (~16 tests).
+- [ ] **Step 5:** Commit:
+  ```bash
+  git add mempalace/walker/extractor/qwen_rel.py tests/walker/extractor/test_qwen_rel.py
+  git commit -m "feat(walker): QwenRelExtractor via CircuitBreaker.call_async()"
+  ```
 
-- [ ] **Step 4: Run tests — expect all pass**
+---
 
-Run: `python -m pytest tests/walker/extractor/test_qwen_rel.py -v`
-Expected: 8 passed
+## Task 5a: `ChromaBackend.iter_drawers()` helper
 
-- [ ] **Step 5: Commit**
+**Depends on:** Task 1
 
-```bash
-git add mempalace/walker/extractor/qwen_rel.py tests/walker/extractor/test_qwen_rel.py
-git commit -m "feat(walker): QwenRelExtractor async HTTP client with CircuitBreaker"
+**Files:**
+- Modify: `mempalace/backends/chroma.py`
+- Create: `tests/backends/test_chroma_iter_drawers.py`
+
+- [ ] **Step 1:** Read current `ChromaBackend` class and identify the drawer collection name. Grep for `mempalace_` in `palace.py`, `miner.py`, `backends/chroma.py`. Note the exact collection name used when filing drawers (typically `mempalace_drawers` but verify — it may include the wing name or use a different convention).
+
+- [ ] **Step 2: Write failing tests**
+
+```python
+"""Verify ChromaBackend.iter_drawers() against a real temp palace."""
+from pathlib import Path
+import pytest
+
+
+@pytest.fixture
+def tiny_palace(tmp_path):
+    """Write 3 drawers directly via ChromaBackend, bypassing miner."""
+    pytest.importorskip("chromadb")
+    from mempalace.backends.chroma import ChromaBackend
+
+    palace_path = tmp_path / "palace"
+    palace_path.mkdir()
+    backend = ChromaBackend()
+    col = backend.get_or_create_collection(str(palace_path), "mempalace_drawers")
+    col.add(
+        ids=["d0", "d1", "d2"],
+        documents=["Text zero about Alice.", "Text one about Bob.", "Text two about Carol."],
+        metadatas=[{"wing": "w1"}, {"wing": "w1"}, {"wing": "w2"}],
+    )
+    return str(palace_path)
+
+
+def test_iter_drawers_returns_all(tiny_palace):
+    from mempalace.backends.chroma import ChromaBackend
+    drawers = list(ChromaBackend().iter_drawers(tiny_palace))
+    assert len(drawers) == 3
+    ids = {d["id"] for d in drawers}
+    assert ids == {"d0", "d1", "d2"}
+    for d in drawers:
+        assert "text" in d and d["text"].startswith("Text")
+
+
+def test_iter_drawers_filters_by_wing(tiny_palace):
+    from mempalace.backends.chroma import ChromaBackend
+    w1 = list(ChromaBackend().iter_drawers(tiny_palace, wing="w1"))
+    assert len(w1) == 2
+    w_none = list(ChromaBackend().iter_drawers(tiny_palace, wing="nope"))
+    assert w_none == []
+
+
+def test_iter_drawers_empty_palace(tmp_path):
+    pytest.importorskip("chromadb")
+    from mempalace.backends.chroma import ChromaBackend
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert list(ChromaBackend().iter_drawers(str(empty))) == []
 ```
+
+- [ ] **Step 3:** Run — expect `AttributeError`.
+
+- [ ] **Step 4: Implement `iter_drawers()`**
+
+Add to `mempalace/backends/chroma.py`:
+
+```python
+    def iter_drawers(
+        self,
+        palace_path: str,
+        wing: str | None = None,
+        batch_size: int = 500,
+    ):
+        """Yield {'id', 'text', 'metadata'} for every drawer.
+
+        Filters by wing if given. Pages via limit/offset when supported.
+        """
+        try:
+            col = self.get_collection(palace_path, "mempalace_drawers")
+        except Exception:
+            return
+        try:
+            total = col.count()
+        except Exception:
+            total = 0
+        if total == 0:
+            return
+
+        offset = 0
+        while offset < total:
+            try:
+                page = col.get(
+                    limit=batch_size,
+                    offset=offset,
+                    include=["documents", "metadatas"],
+                )
+            except TypeError:
+                page = col.get(include=["documents", "metadatas"])
+                ids = page.get("ids", [])
+                docs = page.get("documents", []) or [""] * len(ids)
+                metas = page.get("metadatas", []) or [{}] * len(ids)
+                for i, d, m in zip(ids, docs, metas):
+                    if wing is not None and (m or {}).get("wing") != wing:
+                        continue
+                    yield {"id": i, "text": d, "metadata": m or {}}
+                return
+
+            ids = page.get("ids", [])
+            docs = page.get("documents", []) or [""] * len(ids)
+            metas = page.get("metadatas", []) or [{}] * len(ids)
+            if not ids:
+                break
+            for i, d, m in zip(ids, docs, metas):
+                if wing is not None and (m or {}).get("wing") != wing:
+                    continue
+                yield {"id": i, "text": d, "metadata": m or {}}
+            offset += len(ids)
+```
+
+**Collection name caveat:** if the project uses a different collection name (e.g. `mempalace_{wing}_drawers`), adapt `get_collection(...)` accordingly. If drawers are split across multiple collections, iterate every collection whose name matches the pattern.
+
+- [ ] **Step 5:** Run tests — expect 3 passed.
+- [ ] **Step 6:** Commit:
+  ```bash
+  git add mempalace/backends/chroma.py tests/backends/test_chroma_iter_drawers.py
+  git commit -m "feat(backends): ChromaBackend.iter_drawers() with wing filter + paging"
+  ```
 
 ---
 
 ## Task 5: `pipeline.py` — async orchestrator
 
+**Depends on:** Tasks 2, 3, 4
+
 **Files:**
 - Create: `mempalace/walker/extractor/pipeline.py`
 - Create: `tests/walker/extractor/test_pipeline.py`
 
-- [ ] **Step 1: Write failing tests (`test_pipeline.py`)**
+- [ ] **Step 1: Write failing tests**
 
 ```python
-"""End-to-end pipeline tests with mocked GLiNER and mocked Qwen."""
+import json
 from unittest.mock import MagicMock, AsyncMock
 import pytest
 from mempalace.knowledge_graph import KnowledgeGraph
 from mempalace.walker.extractor.state import ExtractionState
 from mempalace.walker.extractor.gliner_ner import Entity
 from mempalace.walker.extractor.qwen_rel import Triple
-from mempalace.walker.extractor.pipeline import extract_drawers, ExtractionStats
+from mempalace.walker.extractor.pipeline import extract_drawers
 
 
-def _make_mock_gliner(per_text_entities: list[list[Entity]]) -> MagicMock:
-    gliner = MagicMock()
-    gliner.extract_batch.return_value = per_text_entities
-    return gliner
+def _mock_gliner(per_drawer):
+    g = MagicMock()
+    g.extract_batch.return_value = per_drawer
+    return g
 
 
-def _make_mock_qwen(triples_per_call: list[list[Triple]]) -> MagicMock:
-    qwen = MagicMock()
-    it = iter(triples_per_call)
-    async def _extract(text, entities):
-        return next(it, [])
-    qwen.extract = _extract
-    return qwen
+def _mock_qwen(triples_sequence):
+    q = AsyncMock()
+    q.extract = AsyncMock(side_effect=triples_sequence)
+    return q
 
 
-@pytest.mark.asyncio
 async def test_empty_drawer_list(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
-    stats = await extract_drawers(
-        drawers=[], kg=kg, state=state,
-        gliner=_make_mock_gliner([]),
-        qwen=_make_mock_qwen([]),
-    )
+    g = _mock_gliner([])
+    q = _mock_qwen([])
+    stats = await extract_drawers(drawers=[], kg=kg, state=state, gliner=g, qwen=q)
     assert stats.drawers_processed == 0
+    g.extract_batch.assert_not_called()
+    q.extract.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_single_drawer_full_pipeline(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
     drawer = {"id": "d1", "text": "Alice works at DeepMind."}
-    gliner = _make_mock_gliner([[Entity("Alice", "person", 0.9),
-                                  Entity("DeepMind", "organization", 0.9)]])
-    qwen = _make_mock_qwen([[Triple("Alice", "works_at", "DeepMind")]])
+    g = _mock_gliner([[Entity("Alice", "person", 0.9), Entity("DeepMind", "organization", 0.9)]])
+    q = _mock_qwen([[Triple("Alice", "works_at", "DeepMind")]])
 
-    stats = await extract_drawers(
-        drawers=[drawer], kg=kg, state=state, gliner=gliner, qwen=qwen
-    )
+    stats = await extract_drawers(drawers=[drawer], kg=kg, state=state, gliner=g, qwen=q)
+
     assert stats.drawers_processed == 1
     assert stats.entities_found == 2
     assert stats.triples_inserted == 1
-    assert state.is_extracted("d1", "v1.0") is True
+    assert state.is_extracted("d1", "v1.0")
 
-    # Verify KG has the triple
-    conn = kg._conn()
-    rows = conn.execute("SELECT subject, predicate, object FROM triples").fetchall()
-    assert len(rows) == 1
+    row = kg._conn().execute(
+        "SELECT source, source_drawer_ids FROM triples"
+    ).fetchone()
+    assert row[0] == "extractor_v1.0"
+    assert json.loads(row[1]) == ["d1"]
+
+    row = kg._conn().execute(
+        "SELECT triple_count, entity_count FROM extraction_state WHERE drawer_id='d1'"
+    ).fetchone()
+    assert row[0] == 1 and row[1] == 2
 
 
-@pytest.mark.asyncio
-async def test_zero_entity_drawer_skips_qwen_but_marks_extracted(tmp_path):
+async def test_zero_entity_skips_qwen_marks_extracted(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
-    drawer = {"id": "d1", "text": "nothing interesting"}
-    gliner = _make_mock_gliner([[]])  # no entities
-    qwen_call_count = {"n": 0}
-    async def _extract(text, entities):
-        qwen_call_count["n"] += 1
-        return []
-    qwen = MagicMock()
-    qwen.extract = _extract
+    g = _mock_gliner([[]])
+    q = _mock_qwen([])
 
     stats = await extract_drawers(
-        drawers=[drawer], kg=kg, state=state, gliner=gliner, qwen=qwen
+        drawers=[{"id": "d1", "text": "bland"}],
+        kg=kg, state=state, gliner=g, qwen=q,
     )
-    assert qwen_call_count["n"] == 0  # Qwen NOT called
-    assert state.is_extracted("d1", "v1.0") is True
+    q.extract.assert_not_called()
+    assert state.is_extracted("d1", "v1.0")
     assert stats.drawers_processed == 1
     assert stats.triples_inserted == 0
 
 
-@pytest.mark.asyncio
-async def test_already_extracted_drawer_skipped(tmp_path):
+async def test_already_extracted_skipped(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
     state.mark_extracted("d1", "v1.0", 0, 0)
-    drawer = {"id": "d1", "text": "Alice."}
+    g = _mock_gliner([])
+    q = _mock_qwen([])
 
     stats = await extract_drawers(
-        drawers=[drawer], kg=kg, state=state,
-        gliner=_make_mock_gliner([]),  # not called
-        qwen=_make_mock_qwen([]),
+        drawers=[{"id": "d1", "text": "x"}],
+        kg=kg, state=state, gliner=g, qwen=q,
     )
-    assert stats.drawers_processed == 0
     assert stats.drawers_skipped == 1
+    g.extract_batch.assert_not_called()
+    q.extract.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_idempotent_run_twice(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
     drawer = {"id": "d1", "text": "Alice works at DeepMind."}
+    entities = [Entity("Alice", "person", 0.9), Entity("DeepMind", "organization", 0.9)]
+    triples = [Triple("Alice", "works_at", "DeepMind")]
 
-    def _fresh_gliner():
-        return _make_mock_gliner([[Entity("Alice", "person", 0.9),
-                                    Entity("DeepMind", "organization", 0.9)]])
-    def _fresh_qwen():
-        return _make_mock_qwen([[Triple("Alice", "works_at", "DeepMind")]])
+    for _ in range(2):
+        await extract_drawers(
+            drawers=[drawer], kg=kg, state=state,
+            gliner=_mock_gliner([entities]),
+            qwen=_mock_qwen([triples]),
+        )
 
-    await extract_drawers(
-        drawers=[drawer], kg=kg, state=state,
-        gliner=_fresh_gliner(), qwen=_fresh_qwen(),
-    )
-    await extract_drawers(
-        drawers=[drawer], kg=kg, state=state,
-        gliner=_fresh_gliner(), qwen=_fresh_qwen(),
-    )
-
-    rows = kg._conn().execute(
+    live = kg._conn().execute(
         "SELECT COUNT(*) FROM triples WHERE valid_to IS NULL"
-    ).fetchone()
-    assert rows[0] == 1  # upsert_triple dedupes — only ONE live row
+    ).fetchone()[0]
+    assert live == 1
 
 
-@pytest.mark.asyncio
-async def test_source_drawer_ids_populated(tmp_path):
+async def test_dry_run_prints_and_does_not_write(tmp_path, capsys):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
-    drawer = {"id": "d_abc", "text": "Alice works at DeepMind."}
-    gliner = _make_mock_gliner([[Entity("Alice", "person", 0.9),
-                                  Entity("DeepMind", "organization", 0.9)]])
-    qwen = _make_mock_qwen([[Triple("Alice", "works_at", "DeepMind")]])
+    g = _mock_gliner([[Entity("Alice", "person", 0.9)]])
+    q = _mock_qwen([[Triple("Alice", "works_at", "DeepMind")]])
 
-    await extract_drawers(
-        drawers=[drawer], kg=kg, state=state, gliner=gliner, qwen=qwen
+    stats = await extract_drawers(
+        drawers=[{"id": "d1", "text": "Alice."}],
+        kg=kg, state=state, gliner=g, qwen=q, dry_run=True,
     )
+    out = capsys.readouterr().out
+    assert "[DRY]" in out and "d1" in out and "Alice" in out
+    assert stats.drawers_processed == 1
+    assert not state.is_extracted("d1", "v1.0")
+    assert kg._conn().execute("SELECT COUNT(*) FROM triples").fetchone()[0] == 0
 
-    row = kg._conn().execute(
-        "SELECT source_drawer_ids FROM triples LIMIT 1"
-    ).fetchone()
-    import json as _json
-    assert _json.loads(row[0]) == ["d_abc"]
 
-
-@pytest.mark.asyncio
-async def test_dry_run_does_not_write(tmp_path):
+async def test_custom_version_propagates(tmp_path):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
-    drawer = {"id": "d1", "text": "Alice."}
-    gliner = _make_mock_gliner([[Entity("Alice", "person", 0.9)]])
-    qwen = _make_mock_qwen([[Triple("Alice", "works_at", "DeepMind")]])
+    g = _mock_gliner([[Entity("Alice", "person", 0.9)]])
+    q = _mock_qwen([[Triple("Alice", "is_a", "person")]])
 
     await extract_drawers(
-        drawers=[drawer], kg=kg, state=state,
-        gliner=gliner, qwen=qwen, dry_run=True,
+        drawers=[{"id": "d1", "text": "Alice."}],
+        kg=kg, state=state, gliner=g, qwen=q,
+        extractor_version="v2.5",
     )
-    assert state.is_extracted("d1", "v1.0") is False
-    rows = kg._conn().execute("SELECT COUNT(*) FROM triples").fetchone()
-    assert rows[0] == 0
+    source = kg._conn().execute("SELECT source FROM triples").fetchone()[0]
+    assert source == "extractor_v2.5"
+    assert state.is_extracted("d1", "v2.5")
+    assert not state.is_extracted("d1", "v1.0")
 ```
 
-- [ ] **Step 2: Run tests — expect ImportError**
-
-Run: `python -m pytest tests/walker/extractor/test_pipeline.py -v`
-Expected: FAIL (module not found)
+- [ ] **Step 2:** Run — expect ImportError.
 
 - [ ] **Step 3: Implement `pipeline.py`**
 
 ```python
-"""Async orchestrator: GLiNER batch → Qwen per-drawer → upsert_triple → mark_extracted."""
+"""Async orchestrator: GLiNER batch -> Qwen per-drawer -> upsert_triple -> mark_extracted."""
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from mempalace.knowledge_graph import KnowledgeGraph
 from mempalace.walker.extractor.gliner_ner import GlinerNER
@@ -1062,12 +1320,7 @@ async def extract_drawers(
     concurrency: int = 4,
     dry_run: bool = False,
 ) -> ExtractionStats:
-    """Run the extraction pipeline over `drawers`.
-
-    Each drawer dict must have `id` and `text` keys.
-    `mark_extracted()` is called per-drawer inside the per-drawer loop —
-    partial batch failure leaves unprocessed drawers eligible for retry.
-    """
+    """Run the extraction pipeline over drawers. Per-drawer atomicity."""
     stats = ExtractionStats()
     start = time.monotonic()
 
@@ -1075,11 +1328,8 @@ async def extract_drawers(
         stats.elapsed_secs = time.monotonic() - start
         return stats
 
-    # Step 1: filter already-extracted
     drawer_by_id = {d["id"]: d for d in drawers}
-    unextracted_ids = state.unextracted_ids(
-        list(drawer_by_id.keys()), extractor_version
-    )
+    unextracted_ids = state.unextracted_ids(list(drawer_by_id.keys()), extractor_version)
     stats.drawers_skipped = len(drawers) - len(unextracted_ids)
 
     if not unextracted_ids:
@@ -1089,25 +1339,23 @@ async def extract_drawers(
     unextracted = [drawer_by_id[i] for i in unextracted_ids]
     texts = [d["text"] for d in unextracted]
 
-    # Step 2: GLiNER batch (sync — runs in default thread pool)
     loop = asyncio.get_running_loop()
     entities_per_drawer = await loop.run_in_executor(
         None, gliner.extract_batch, texts
     )
 
-    # Step 3: process each drawer — Qwen + KG writes
+    stats_lock = asyncio.Lock()
     sem = asyncio.Semaphore(concurrency)
 
-    async def process(drawer: dict, entities):
+    async def process(drawer, entities):
         async with sem:
             await _process_single(
                 drawer, entities, kg, state, qwen,
-                extractor_version, dry_run, stats,
+                extractor_version, dry_run, stats, stats_lock,
             )
 
     await asyncio.gather(*[
-        process(d, ents)
-        for d, ents in zip(unextracted, entities_per_drawer)
+        process(d, ents) for d, ents in zip(unextracted, entities_per_drawer)
     ])
 
     stats.elapsed_secs = time.monotonic() - start
@@ -1115,52 +1363,49 @@ async def extract_drawers(
 
 
 async def _process_single(
-    drawer: dict,
-    entities: list,
-    kg: KnowledgeGraph,
-    state: ExtractionState,
-    qwen: QwenRelExtractor,
-    version: str,
-    dry_run: bool,
-    stats: ExtractionStats,
-) -> None:
+    drawer, entities, kg, state, qwen,
+    version, dry_run, stats, stats_lock,
+):
     drawer_id = drawer["id"]
     text = drawer["text"]
     entity_count = len(entities)
-    stats.entities_found += entity_count
 
-    # Zero entities → skip Qwen, still mark drawer processed
+    async with stats_lock:
+        stats.entities_found += entity_count
+
     if entity_count == 0:
-        stats.drawers_processed += 1
+        async with stats_lock:
+            stats.drawers_processed += 1
         if not dry_run:
             state.mark_extracted(drawer_id, version, triple_count=0, entity_count=0)
         return
 
-    # Call Qwen (returns [] on any failure)
     try:
         triples: list[Triple] = await qwen.extract(text, entities)
     except Exception as e:
         log.warning("Qwen extract failed for %s: %s", drawer_id, e)
-        stats.qwen_failures += 1
+        async with stats_lock:
+            stats.qwen_failures += 1
         triples = []
 
     if dry_run:
         for t in triples:
             print(f"[DRY] {drawer_id}: {t.subject} -[{t.predicate}]-> {t.object}")
-        stats.drawers_processed += 1
+        async with stats_lock:
+            stats.drawers_processed += 1
         return
 
-    # Write triples to KG
     all_ok = True
     inserted_n = 0
     updated_n = 0
+    source_tag = f"extractor_{version}"
     for t in triples:
         try:
             result = kg.upsert_triple(
                 subject=t.subject,
                 predicate=t.predicate,
                 obj=t.object,
-                source="extractor_v1.0",
+                source=source_tag,
                 source_drawer_ids=[drawer_id],
             )
             if result.inserted:
@@ -1171,35 +1416,33 @@ async def _process_single(
             log.error("upsert_triple failed on %s: %s", drawer_id, e)
             all_ok = False
 
-    stats.triples_inserted += inserted_n
-    stats.triples_updated += updated_n
+    async with stats_lock:
+        stats.triples_inserted += inserted_n
+        stats.triples_updated += updated_n
 
     if all_ok:
-        stats.drawers_processed += 1
+        async with stats_lock:
+            stats.drawers_processed += 1
         state.mark_extracted(
             drawer_id, version,
             triple_count=len(triples), entity_count=entity_count,
         )
     else:
-        # Do NOT mark extracted — drawer will be retried next run
         log.warning("Drawer %s had upsert failures — not marking extracted", drawer_id)
 ```
 
-- [ ] **Step 4: Run tests — expect all pass**
-
-Run: `python -m pytest tests/walker/extractor/test_pipeline.py -v`
-Expected: 7 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mempalace/walker/extractor/pipeline.py tests/walker/extractor/test_pipeline.py
-git commit -m "feat(walker): async extract_drawers pipeline with per-drawer atomicity"
-```
+- [ ] **Step 4:** Run tests — expect 7 passed.
+- [ ] **Step 5:** Commit:
+  ```bash
+  git add mempalace/walker/extractor/pipeline.py tests/walker/extractor/test_pipeline.py
+  git commit -m "feat(walker): async extract_drawers with per-drawer atomicity"
+  ```
 
 ---
 
 ## Task 6: `dream/reextract.py` — Dream Job A
+
+**Depends on:** Tasks 5, 5a
 
 **Files:**
 - Create: `mempalace/dream/__init__.py` (empty)
@@ -1207,10 +1450,10 @@ git commit -m "feat(walker): async extract_drawers pipeline with per-drawer atom
 - Create: `tests/dream/__init__.py` (empty)
 - Create: `tests/dream/test_reextract.py`
 
-- [ ] **Step 1: Write failing tests (`test_reextract.py`)**
+- [ ] **Step 1: Write failing tests**
 
 ```python
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 import pytest
 from mempalace.knowledge_graph import KnowledgeGraph
 from mempalace.walker.extractor.state import ExtractionState
@@ -1219,167 +1462,174 @@ from mempalace.walker.extractor.qwen_rel import Triple
 from mempalace.dream.reextract import run_job_a, JobAResult
 
 
-@pytest.mark.asyncio
-async def test_run_job_a_processes_unextracted(tmp_path, monkeypatch):
+def _mock_gliner(per_drawer):
+    g = MagicMock()
+    g.extract_batch.return_value = per_drawer
+    return g
+
+
+def _mock_qwen(triples_seq):
+    q = AsyncMock()
+    q.extract = AsyncMock(side_effect=triples_seq)
+    q.aclose = AsyncMock()
+    return q
+
+
+async def test_processes_unextracted(tmp_path, monkeypatch):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
-    state = ExtractionState(kg)
-
-    fake_drawers = [
-        {"id": "d1", "text": "Alice."},
-        {"id": "d2", "text": "Bob."},
-    ]
-
-    async def fake_load(palace, wing):
-        return fake_drawers
-
-    def fake_gliner():
-        g = MagicMock()
-        g.extract_batch.return_value = [[Entity("Alice", "person", 0.9)],
-                                         [Entity("Bob", "person", 0.9)]]
-        return g
-
-    def fake_qwen():
-        q = MagicMock()
-        async def _extract(text, entities):
-            return [Triple(entities[0].text, "is_a", "person")]
-        q.extract = _extract
-        q.aclose = MagicMock(return_value=None)
-        async def _aclose():
-            pass
-        q.aclose = _aclose
-        return q
 
     monkeypatch.setattr(
-        "mempalace.dream.reextract._load_drawers_from_palace", fake_load
+        "mempalace.dream.reextract._load_drawers_from_palace",
+        AsyncMock(return_value=[
+            {"id": "d1", "text": "Alice."},
+            {"id": "d2", "text": "Bob."},
+        ]),
     )
-    monkeypatch.setattr(
-        "mempalace.dream.reextract._build_gliner", lambda: fake_gliner()
-    )
-    monkeypatch.setattr(
-        "mempalace.dream.reextract._build_qwen", lambda: fake_qwen()
-    )
+    gliner = _mock_gliner([
+        [Entity("Alice", "person", 0.9)],
+        [Entity("Bob", "person", 0.9)],
+    ])
+    qwen = _mock_qwen([
+        [Triple("Alice", "is_a", "person")],
+        [Triple("Bob", "is_a", "person")],
+    ])
+    monkeypatch.setattr("mempalace.dream.reextract._build_gliner", lambda: gliner)
+    monkeypatch.setattr("mempalace.dream.reextract._build_qwen", lambda url: qwen)
 
     result = await run_job_a(
         palace_path=str(tmp_path / "palace"),
-        kg=kg,
-        version="v1.0",
-        batch_size=500,
+        kg=kg, version="v1.0", batch_size=500,
     )
     assert isinstance(result, JobAResult)
     assert result.drawers_processed == 2
+    assert result.batches == 1
+    qwen.aclose.assert_called()
 
 
-@pytest.mark.asyncio
-async def test_run_job_a_only_processes_stale_version(tmp_path, monkeypatch):
+async def test_only_processes_stale_version(tmp_path, monkeypatch):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
     state = ExtractionState(kg)
-    # Pre-extract d1 at v1.0
     state.mark_extracted("d1", "v1.0", 1, 1)
-    # Now request v2.0 — d1 should be re-processed
-
-    fake_drawers = [
-        {"id": "d1", "text": "Alice."},
-    ]
-
-    async def fake_load(palace, wing):
-        return fake_drawers
-
-    def fake_gliner():
-        g = MagicMock()
-        g.extract_batch.return_value = [[Entity("Alice", "person", 0.9)]]
-        return g
-
-    def fake_qwen():
-        q = MagicMock()
-        async def _extract(text, entities):
-            return []
-        q.extract = _extract
-        async def _aclose():
-            pass
-        q.aclose = _aclose
-        return q
 
     monkeypatch.setattr(
-        "mempalace.dream.reextract._load_drawers_from_palace", fake_load
+        "mempalace.dream.reextract._load_drawers_from_palace",
+        AsyncMock(return_value=[{"id": "d1", "text": "Alice."}]),
     )
     monkeypatch.setattr(
-        "mempalace.dream.reextract._build_gliner", lambda: fake_gliner()
+        "mempalace.dream.reextract._build_gliner",
+        lambda: _mock_gliner([[Entity("Alice", "person", 0.9)]]),
     )
     monkeypatch.setattr(
-        "mempalace.dream.reextract._build_qwen", lambda: fake_qwen()
+        "mempalace.dream.reextract._build_qwen",
+        lambda url: _mock_qwen([[]]),
     )
 
     result = await run_job_a(
-        palace_path=str(tmp_path / "palace"),
-        kg=kg,
-        version="v2.0",
-        batch_size=500,
+        palace_path=str(tmp_path / "palace"), kg=kg, version="v2.0",
     )
-    assert result.drawers_processed == 1  # d1 re-processed at v2.0
+    assert result.drawers_processed == 1  # re-processed at v2.0
 
 
-@pytest.mark.asyncio
-async def test_run_job_a_batches(tmp_path, monkeypatch):
+async def test_batches(tmp_path, monkeypatch):
     kg = KnowledgeGraph(str(tmp_path / "kg.db"))
-    state = ExtractionState(kg)
+    fake = [{"id": f"d{i}", "text": f"t{i}"} for i in range(501)]
 
-    # 501 drawers → 2 batches
-    fake_drawers = [{"id": f"d{i}", "text": f"text {i}"} for i in range(501)]
-
-    async def fake_load(palace, wing):
-        return fake_drawers
-
-    def fake_gliner():
-        g = MagicMock()
-        g.extract_batch.side_effect = lambda texts: [[] for _ in texts]
-        return g
-
-    def fake_qwen():
-        q = MagicMock()
-        async def _extract(text, entities):
-            return []
-        q.extract = _extract
-        async def _aclose():
-            pass
-        q.aclose = _aclose
-        return q
+    gliner = MagicMock()
+    gliner.extract_batch.side_effect = lambda texts: [[] for _ in texts]
 
     monkeypatch.setattr(
-        "mempalace.dream.reextract._load_drawers_from_palace", fake_load
+        "mempalace.dream.reextract._load_drawers_from_palace",
+        AsyncMock(return_value=fake),
     )
-    monkeypatch.setattr(
-        "mempalace.dream.reextract._build_gliner", lambda: fake_gliner()
-    )
-    monkeypatch.setattr(
-        "mempalace.dream.reextract._build_qwen", lambda: fake_qwen()
-    )
+    monkeypatch.setattr("mempalace.dream.reextract._build_gliner", lambda: gliner)
+    monkeypatch.setattr("mempalace.dream.reextract._build_qwen", lambda url: _mock_qwen([]))
 
     result = await run_job_a(
-        palace_path=str(tmp_path / "palace"),
-        kg=kg,
-        version="v1.0",
-        batch_size=500,
+        palace_path=str(tmp_path / "palace"), kg=kg,
+        version="v1.0", batch_size=500,
     )
     assert result.drawers_processed == 501
     assert result.batches == 2
+
+
+async def test_dry_run_propagates(tmp_path, monkeypatch):
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    monkeypatch.setattr(
+        "mempalace.dream.reextract._load_drawers_from_palace",
+        AsyncMock(return_value=[{"id": "d1", "text": "A."}]),
+    )
+    monkeypatch.setattr(
+        "mempalace.dream.reextract._build_gliner",
+        lambda: _mock_gliner([[Entity("A", "person", 0.9)]]),
+    )
+    monkeypatch.setattr(
+        "mempalace.dream.reextract._build_qwen",
+        lambda url: _mock_qwen([[Triple("A", "is_a", "person")]]),
+    )
+
+    await run_job_a(
+        palace_path=str(tmp_path / "palace"), kg=kg, version="v1.0", dry_run=True,
+    )
+    assert kg._conn().execute("SELECT COUNT(*) FROM triples").fetchone()[0] == 0
+
+
+async def test_verbatim_invariant_real_backend(tmp_path, monkeypatch):
+    """Dream Job A must not mutate drawer content in the real ChromaBackend."""
+    pytest.importorskip("chromadb")
+    from mempalace.backends.chroma import ChromaBackend
+
+    palace_path = tmp_path / "palace"
+    palace_path.mkdir()
+    backend = ChromaBackend()
+    col = backend.get_or_create_collection(str(palace_path), "mempalace_drawers")
+    originals = {
+        "d1": "Alice works at DeepMind.",
+        "d2": "Bob lives in London.",
+    }
+    col.add(
+        ids=list(originals.keys()),
+        documents=list(originals.values()),
+        metadatas=[{"wing": "w"}, {"wing": "w"}],
+    )
+
+    kg = KnowledgeGraph(str(palace_path / "knowledge_graph.db"))
+    monkeypatch.setattr(
+        "mempalace.dream.reextract._build_gliner",
+        lambda: _mock_gliner([
+            [Entity("Alice", "person", 0.9)],
+            [Entity("Bob", "person", 0.9)],
+        ]),
+    )
+    monkeypatch.setattr(
+        "mempalace.dream.reextract._build_qwen",
+        lambda url: _mock_qwen([
+            [Triple("Alice", "is_a", "person")],
+            [Triple("Bob", "is_a", "person")],
+        ]),
+    )
+
+    await run_job_a(palace_path=str(palace_path), kg=kg, version="v1.0")
+
+    col2 = backend.get_collection(str(palace_path), "mempalace_drawers")
+    result = col2.get(include=["documents"])
+    assert col2.count() == 2
+    for i, doc in zip(result["ids"], result["documents"]):
+        assert doc == originals[i]
 ```
 
-- [ ] **Step 2: Run tests — expect ImportError**
-
-Run: `python -m pytest tests/dream/test_reextract.py -v`
-Expected: FAIL (module not found)
+- [ ] **Step 2:** Run — expect ImportError.
 
 - [ ] **Step 3: Implement `reextract.py`**
 
 ```python
-"""Dream Job A — re-extract palace drawers that are not yet at `version`."""
+"""Dream Job A — re-extract palace drawers not yet at `version`."""
 from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from mempalace.knowledge_graph import KnowledgeGraph
@@ -1389,7 +1639,6 @@ from mempalace.walker.extractor.qwen_rel import QwenRelExtractor
 from mempalace.walker.extractor.state import ExtractionState
 
 log = logging.getLogger(__name__)
-
 DREAM_LOG_PATH = Path.home() / ".mempalace" / "dream_log.jsonl"
 
 
@@ -1414,16 +1663,16 @@ async def run_job_a(
     version: str = "v1.0",
     batch_size: int = 500,
     wing: str | None = None,
+    dry_run: bool = False,
+    qwen_url: str = "http://localhost:43100",
 ) -> JobAResult:
-    """Re-extract all drawers not yet at `version`. Idempotent, batch-safe."""
-    from datetime import datetime
-
-    started_at = datetime.utcnow().isoformat()
+    """Re-extract drawers not yet at version. Idempotent, batch-safe."""
+    started_at = datetime.now(timezone.utc).isoformat()
     start = time.monotonic()
 
     drawers = await _load_drawers_from_palace(palace_path, wing)
     gliner = _build_gliner()
-    qwen = _build_qwen()
+    qwen = _build_qwen(qwen_url)
     state = ExtractionState(kg)
 
     totals = ExtractionStats()
@@ -1433,12 +1682,9 @@ async def run_job_a(
             batch = drawers[i : i + batch_size]
             batches_run += 1
             stats = await extract_drawers(
-                drawers=batch,
-                kg=kg,
-                state=state,
-                gliner=gliner,
-                qwen=qwen,
-                extractor_version=version,
+                drawers=batch, kg=kg, state=state,
+                gliner=gliner, qwen=qwen,
+                extractor_version=version, dry_run=dry_run,
             )
             totals.drawers_processed += stats.drawers_processed
             totals.drawers_skipped += stats.drawers_skipped
@@ -1448,12 +1694,13 @@ async def run_job_a(
             totals.qwen_failures += stats.qwen_failures
             totals.circuit_open_events += stats.circuit_open_events
     finally:
-        await qwen.aclose()
+        try:
+            await qwen.aclose()
+        except Exception:
+            pass
 
     result = JobAResult(
-        job="A",
-        version=version,
-        started_at=started_at,
+        job="A", version=version, started_at=started_at,
         elapsed_secs=time.monotonic() - start,
         drawers_processed=totals.drawers_processed,
         drawers_skipped=totals.drawers_skipped,
@@ -1468,195 +1715,252 @@ async def run_job_a(
 
 
 def _append_log(result: JobAResult) -> None:
-    DREAM_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(DREAM_LOG_PATH, "a") as f:
-        f.write(json.dumps(asdict(result)) + "\n")
+    try:
+        DREAM_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(DREAM_LOG_PATH, "a") as f:
+            f.write(json.dumps(asdict(result)) + "\n")
+    except Exception as e:
+        log.warning("Failed to write dream log: %s", e)
 
 
-async def _load_drawers_from_palace(
-    palace_path: str, wing: str | None
-) -> list[dict]:
-    """Load all drawers from the palace ChromaDB.
-
-    Returns list of {id, text} dicts. `wing` filters to a single wing if given.
-    Note: this is a thin seam — tests monkeypatch this function directly.
-    """
-    from mempalace.backends import get_backend
-
-    backend = get_backend("chroma", palace_path=palace_path)
-    # Use backend's dump interface — all drawers with id + text
-    drawers = []
-    for entry in backend.iter_all_drawers(wing=wing):
-        drawers.append({"id": entry["id"], "text": entry["text"]})
-    return drawers
+async def _load_drawers_from_palace(palace_path: str, wing: str | None) -> list[dict]:
+    """Seam for tests — real impl uses ChromaBackend.iter_drawers()."""
+    from mempalace.backends.chroma import ChromaBackend
+    backend = ChromaBackend()
+    return [
+        {"id": d["id"], "text": d["text"]}
+        for d in backend.iter_drawers(palace_path, wing=wing)
+    ]
 
 
 def _build_gliner() -> GlinerNER:
     return GlinerNER()
 
 
-def _build_qwen() -> QwenRelExtractor:
-    return QwenRelExtractor()
+def _build_qwen(url: str) -> QwenRelExtractor:
+    return QwenRelExtractor(base_url=url)
 ```
 
-**Note:** `_load_drawers_from_palace` uses a `backend.iter_all_drawers()` seam that may not exist on the ChromaBackend. Before running the test:
-
-1. Check if `ChromaBackend` has `iter_all_drawers` — if not, add a minimal implementation that calls `.get()` with no filter and returns `[{"id": i, "text": t} for i, t in zip(ids, docs)]`.
-2. If the backends module exposes a different name (e.g. `get_all`, `dump`), adjust the seam accordingly.
-
-This task may need a small backend addition in the same commit. Tests use `monkeypatch` so they don't exercise the real backend.
-
-- [ ] **Step 4: Run tests — expect all pass**
-
-Run: `python -m pytest tests/dream/test_reextract.py -v`
-Expected: 3 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mempalace/dream/__init__.py mempalace/dream/reextract.py \
-        tests/dream/__init__.py tests/dream/test_reextract.py
-git commit -m "feat(dream): Job A — re-extract stale drawers with batched pipeline"
-```
+- [ ] **Step 4:** Run tests — expect 5 passed (last one auto-skips if chromadb missing).
+- [ ] **Step 5:** Commit:
+  ```bash
+  git add mempalace/dream/__init__.py mempalace/dream/reextract.py \
+          tests/dream/__init__.py tests/dream/test_reextract.py
+  git commit -m "feat(dream): Job A with real-backend verbatim invariant test"
+  ```
 
 ---
 
 ## Task 7: `walker extract` CLI subcommand
 
+**Depends on:** Task 6
+
 **Files:**
-- Modify: `mempalace/cli.py` — add `walker extract` subcommand
+- Modify: `mempalace/cli.py`
 - Create: `tests/test_cli_walker_extract.py`
 
 - [ ] **Step 1: Write failing tests**
 
 ```python
-from unittest.mock import patch
 import pytest
 from mempalace.cli import main
+from mempalace.dream.reextract import JobAResult
+
+
+def _fake_result(version="v1.0"):
+    return JobAResult(
+        job="A", version=version, started_at="now",
+        elapsed_secs=0.1, drawers_processed=0, drawers_skipped=0,
+        triples_inserted=0, triples_updated=0, qwen_failures=0,
+        circuit_open_events=0, batches=0,
+    )
 
 
 def test_walker_extract_help(capsys):
     with pytest.raises(SystemExit):
         main(["walker", "extract", "--help"])
-    captured = capsys.readouterr()
-    assert "--wing" in captured.out
-    assert "--concurrency" in captured.out
-    assert "--version" in captured.out
-    assert "--dry-run" in captured.out
+    out = capsys.readouterr().out
+    for flag in ("--wing", "--concurrency", "--version", "--dry-run", "--qwen-url"):
+        assert flag in out
 
 
-def test_walker_extract_dispatches(monkeypatch):
-    called = {"n": 0}
+def test_walker_extract_dispatches(monkeypatch, capsys):
+    captured = {}
 
     async def fake_run(**kwargs):
-        called["n"] += 1
-        called["kwargs"] = kwargs
-        from mempalace.dream.reextract import JobAResult
-        return JobAResult(
-            job="A", version=kwargs["version"], started_at="now",
-            elapsed_secs=0.1, drawers_processed=0, drawers_skipped=0,
-            triples_inserted=0, triples_updated=0, qwen_failures=0,
-            circuit_open_events=0, batches=0,
-        )
+        captured.update(kwargs)
+        return _fake_result(version=kwargs.get("version", "v1.0"))
 
     monkeypatch.setattr("mempalace.dream.reextract.run_job_a", fake_run)
-    rc = main(["--palace", "/tmp/p", "walker", "extract", "--version", "v1.0"])
+    rc = main([
+        "--palace", "/tmp/p",
+        "walker", "extract",
+        "--version", "v1.5",
+        "--wing", "mywing",
+        "--qwen-url", "http://example:1234",
+    ])
     assert rc == 0
-    assert called["n"] == 1
-    assert called["kwargs"]["version"] == "v1.0"
+    assert captured["version"] == "v1.5"
+    assert captured["wing"] == "mywing"
+    assert captured["qwen_url"] == "http://example:1234"
+    assert captured["palace_path"] == "/tmp/p"
+    assert "Extracted" in capsys.readouterr().out
+
+
+def test_walker_extract_dry_run_propagates(monkeypatch):
+    captured = {}
+
+    async def fake_run(**kwargs):
+        captured.update(kwargs)
+        return _fake_result()
+
+    monkeypatch.setattr("mempalace.dream.reextract.run_job_a", fake_run)
+    main(["walker", "extract", "--dry-run"])
+    assert captured["dry_run"] is True
+
+
+def test_walker_extract_preflight_error_friendly(monkeypatch, capsys):
+    async def boom(**kwargs):
+        raise RuntimeError("Qwen endpoint http://localhost:43100 unreachable")
+
+    monkeypatch.setattr("mempalace.dream.reextract.run_job_a", boom)
+    rc = main(["walker", "extract"])
+    assert rc != 0
+    out = capsys.readouterr().out
+    assert "unreachable" in out or "Qwen" in out
 ```
 
-- [ ] **Step 2: Run tests — expect FAIL (subcommand missing)**
+- [ ] **Step 2:** Run — expect FAIL.
 
-Run: `python -m pytest tests/test_cli_walker_extract.py -v`
+- [ ] **Step 3: Extend `cli.py`**
 
-- [ ] **Step 3: Extend `cli.py` — add `extract` to `walker_sub` parser**
-
-Add inside the existing `p_walker` block (after `walker_sub.add_parser("status", ...)`):
+Inside `main()`, add these flags to the existing `walker_sub` parser (after `walker_sub.add_parser("status", ...)`):
 
 ```python
 p_extract = walker_sub.add_parser(
     "extract", help="Extract entities + triples from palace drawers"
 )
-p_extract.add_argument("--wing", default=None, help="Limit to one wing; error if wing not found")
-p_extract.add_argument("--concurrency", type=int, default=4, help="Qwen parallel requests")
-p_extract.add_argument("--version", default="v1.0", help="extractor_version tag")
+p_extract.add_argument("--wing", default=None)
+p_extract.add_argument("--concurrency", type=int, default=4)
+p_extract.add_argument("--version", default="v1.0")
 p_extract.add_argument("--gliner-threshold", type=float, default=0.4)
-p_extract.add_argument("--dry-run", action="store_true", help="Run pipeline, write nothing")
+p_extract.add_argument("--dry-run", action="store_true")
+p_extract.add_argument("--qwen-url", default="http://localhost:43100")
+p_extract.add_argument("--batch-size", type=int, default=500)
 ```
 
-Add `"extract": cmd_walker_extract` to the `walker_dispatch` dict in `cmd_walker`.
+Update `walker_dispatch` in `cmd_walker`:
+```python
+walker_dispatch = {
+    "init": cmd_walker_init,
+    "status": cmd_walker_status,
+    "extract": cmd_walker_extract,
+}
+```
 
-Add the handler function near `cmd_walker_init`:
+Add the shared helper + handler:
 
 ```python
-def cmd_walker_extract(args):
-    """Run the extraction pipeline over palace drawers."""
-    import asyncio
-    from mempalace.dream.reextract import run_job_a
+def _resolve_palace_and_kg(args):
+    from pathlib import Path
     from mempalace.knowledge_graph import KnowledgeGraph
-
     palace_path = args.palace or str(Path.home() / ".mempalace" / "palace")
     kg_path = str(Path(palace_path) / "knowledge_graph.db")
-    kg = KnowledgeGraph(kg_path)
+    return palace_path, KnowledgeGraph(kg_path)
 
-    result = asyncio.run(run_job_a(
-        palace_path=palace_path,
-        kg=kg,
-        version=args.version,
-        wing=args.wing,
-    ))
+
+def cmd_walker_extract(args):
+    import asyncio
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    from mempalace.dream import reextract as _reextract
+
+    palace_path, kg = _resolve_palace_and_kg(args)
+    try:
+        result = asyncio.run(_reextract.run_job_a(
+            palace_path=palace_path,
+            kg=kg,
+            version=args.version,
+            wing=args.wing,
+            dry_run=args.dry_run,
+            qwen_url=args.qwen_url,
+            batch_size=args.batch_size,
+        ))
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        print(f"Hint: start Qwen at {args.qwen_url} or pass --qwen-url <url>")
+        return 2
+
     print(f"Extracted: {result.drawers_processed} processed, "
           f"{result.drawers_skipped} skipped")
     print(f"Triples: {result.triples_inserted} inserted, "
           f"{result.triples_updated} updated")
-    print(f"Elapsed: {result.elapsed_secs:.1f}s")
+    print(f"Elapsed: {result.elapsed_secs:.1f}s ({result.batches} batches)")
     return 0
 ```
 
-- [ ] **Step 4: Run tests — expect pass**
+**Note on monkeypatching:** The test monkeypatches `mempalace.dream.reextract.run_job_a`. For the monkeypatch to affect `cmd_walker_extract`, the handler must reference `_reextract.run_job_a` via the module (as shown above) — NOT import it directly (`from mempalace.dream.reextract import run_job_a` would capture the original function).
 
-Run: `python -m pytest tests/test_cli_walker_extract.py -v`
-Expected: 2 passed
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mempalace/cli.py tests/test_cli_walker_extract.py
-git commit -m "feat(cli): walker extract subcommand runs Job A pipeline"
-```
+- [ ] **Step 4:** Run tests — expect 4 passed.
+- [ ] **Step 5:** Commit:
+  ```bash
+  git add mempalace/cli.py tests/test_cli_walker_extract.py
+  git commit -m "feat(cli): walker extract with --qwen-url, --dry-run, friendly errors"
+  ```
 
 ---
 
 ## Task 8: `dream-cycle --jobs A` CLI subcommand
 
-**Files:**
-- Modify: `mempalace/cli.py` — add `dream-cycle` subcommand
+**Depends on:** Task 6, Task 7 (uses `_resolve_palace_and_kg`)
 
-- [ ] **Step 1: Write failing test**
+**Files:**
+- Modify: `mempalace/cli.py`
+- Modify: `tests/test_cli_walker_extract.py` (append)
+
+- [ ] **Step 1: Append failing tests**
 
 ```python
-def test_dream_cycle_jobs_a_help(capsys):
-    from mempalace.cli import main
+def test_dream_cycle_help(capsys):
     with pytest.raises(SystemExit):
         main(["dream-cycle", "--help"])
-    captured = capsys.readouterr()
-    assert "--jobs" in captured.out
+    out = capsys.readouterr().out
+    for flag in ("--jobs", "--wing", "--dry-run"):
+        assert flag in out
+
+
+def test_dream_cycle_jobs_a(monkeypatch):
+    captured = {}
+
+    async def fake_run(**kwargs):
+        captured.update(kwargs)
+        return _fake_result()
+
+    monkeypatch.setattr("mempalace.dream.reextract.run_job_a", fake_run)
+    rc = main(["dream-cycle", "--jobs", "A", "--wing", "mywing", "--dry-run"])
+    assert rc == 0
+    assert captured["wing"] == "mywing"
+    assert captured["dry_run"] is True
+
+
+def test_dream_cycle_unsupported_jobs(capsys):
+    rc = main(["dream-cycle", "--jobs", "B"])
+    assert rc == 2
+    assert "Phase 1" in capsys.readouterr().out
 ```
 
-(Append to `tests/test_cli_walker_extract.py`.)
-
-- [ ] **Step 2: Run — expect FAIL**
-
-- [ ] **Step 3: Add `dream-cycle` subcommand**
+- [ ] **Step 2: Add `dream-cycle` parser + handler**
 
 In `main()`:
 
 ```python
-p_dream = sub.add_parser("dream-cycle", help="Run Dream Cycle jobs over the palace")
-p_dream.add_argument("--jobs", default="A", help="Comma-separated job letters (Phase 1: A only)")
+p_dream = sub.add_parser("dream-cycle", help="Run Dream Cycle jobs")
+p_dream.add_argument("--jobs", default="A")
 p_dream.add_argument("--version", default="v1.0")
 p_dream.add_argument("--batch-size", type=int, default=500)
+p_dream.add_argument("--wing", default=None)
+p_dream.add_argument("--dry-run", action="store_true")
+p_dream.add_argument("--qwen-url", default="http://localhost:43100")
 ```
 
 Add to `dispatch`:
@@ -1669,47 +1973,52 @@ Handler:
 ```python
 def cmd_dream_cycle(args):
     import asyncio
-    from mempalace.dream.reextract import run_job_a
-    from mempalace.knowledge_graph import KnowledgeGraph
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    from mempalace.dream import reextract as _reextract
 
     jobs = [j.strip() for j in args.jobs.split(",")]
     if jobs != ["A"]:
         print(f"Phase 1 only supports --jobs A; got {args.jobs}")
         return 2
 
-    palace_path = args.palace or str(Path.home() / ".mempalace" / "palace")
-    kg = KnowledgeGraph(str(Path(palace_path) / "knowledge_graph.db"))
+    palace_path, kg = _resolve_palace_and_kg(args)
+    try:
+        result = asyncio.run(_reextract.run_job_a(
+            palace_path=palace_path, kg=kg,
+            version=args.version, batch_size=args.batch_size,
+            wing=args.wing, dry_run=args.dry_run, qwen_url=args.qwen_url,
+        ))
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        return 2
 
-    result = asyncio.run(run_job_a(
-        palace_path=palace_path, kg=kg,
-        version=args.version, batch_size=args.batch_size,
-    ))
     print(f"Dream Job A: {result.drawers_processed} processed in "
           f"{result.batches} batches, {result.elapsed_secs:.1f}s")
     return 0
 ```
 
-- [ ] **Step 4: Run tests — expect pass**
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mempalace/cli.py tests/test_cli_walker_extract.py
-git commit -m "feat(cli): dream-cycle --jobs A runs Job A from Phase 1"
-```
+- [ ] **Step 3:** Run tests — expect pass.
+- [ ] **Step 4:** Commit:
+  ```bash
+  git add mempalace/cli.py tests/test_cli_walker_extract.py
+  git commit -m "feat(cli): dream-cycle --jobs A with shared palace helper"
+  ```
 
 ---
 
 ## Task 9: Extend `status --walker` with extraction stats
 
-**Files:**
-- Modify: `mempalace/cli.py` — `cmd_status` (the `--walker` branch)
-- Modify: `tests/test_cli_walker.py` — add extraction status tests
+**Depends on:** Task 2, Task 6
 
-- [ ] **Step 1: Write failing test**
+**Files:**
+- Modify: `mempalace/cli.py` (walker status branch)
+- Modify: `tests/test_cli_walker.py`
+
+- [ ] **Step 1: Append failing tests**
 
 ```python
-def test_status_walker_reports_extraction_stats(tmp_path, monkeypatch):
+def test_status_walker_reports_latest_version_dynamically(tmp_path):
     from mempalace.cli import main
     from mempalace.knowledge_graph import KnowledgeGraph
     from mempalace.walker.extractor.state import ExtractionState
@@ -1719,266 +2028,174 @@ def test_status_walker_reports_extraction_stats(tmp_path, monkeypatch):
     kg = KnowledgeGraph(str(palace / "knowledge_graph.db"))
     state = ExtractionState(kg)
     state.mark_extracted("d1", "v1.0", 3, 5)
+    state.mark_extracted("d2", "v2.0", 4, 6)  # newer
 
-    # capture stdout
     import io, contextlib
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         main(["--palace", str(palace), "status", "--walker"])
     out = buf.getvalue()
-    assert "Extracted:" in out
-    assert "v1.0" in out
+    assert "Extracted" in out
+    assert "v2.0" in out
+
+
+def test_status_walker_no_extraction(tmp_path):
+    from mempalace.cli import main
+
+    palace = tmp_path / "palace"
+    palace.mkdir()
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        main(["--palace", str(palace), "status", "--walker"])
+    # Must not crash
 ```
 
-- [ ] **Step 2: Run — expect FAIL or inaccurate output**
+- [ ] **Step 2:** Run — expect FAIL.
 
-- [ ] **Step 3: Extend `cmd_status` walker branch**
+- [ ] **Step 3: Extend `cmd_status` walker block**
 
-In the existing `--walker` block of `cmd_status`, add after the walker_ready flag check:
+In the existing `--walker` branch of `cmd_status`, after the existing walker_ready flag reporting, add:
 
 ```python
-# Extraction stats
 try:
+    from pathlib import Path as _Path
     from mempalace.knowledge_graph import KnowledgeGraph
-    from mempalace.walker.extractor.state import ExtractionState
-    kg_path = Path(palace_path) / "knowledge_graph.db"
+    palace_dir = _Path(args.palace or (_Path.home() / ".mempalace" / "palace"))
+    kg_path = palace_dir / "knowledge_graph.db"
     if kg_path.exists():
         kg = KnowledgeGraph(str(kg_path))
-        state = ExtractionState(kg)
-        # count extracted drawers at current version
         row = kg._conn().execute(
-            "SELECT COUNT(*), SUM(triple_count), SUM(entity_count) "
-            "FROM extraction_state WHERE extractor_version='v1.0'"
+            """
+            SELECT extractor_version, COUNT(*), SUM(triple_count),
+                   SUM(entity_count), MAX(extracted_at)
+            FROM extraction_state
+            GROUP BY extractor_version
+            ORDER BY MAX(extracted_at) DESC
+            LIMIT 1
+            """
         ).fetchone()
-        n = row[0] or 0
-        triples = row[1] or 0
-        entities = row[2] or 0
-        last_run = state.max_extracted_at("v1.0") or "never"
-        print(f"KG triples:     {triples} ({entities} entities)")
-        print(f"Extracted:      {n} drawers (v1.0) — last run {last_run}")
+        if row:
+            version, n, triples, entities, last_run = row
+            print(f"KG triples:     {triples or 0} ({entities or 0} entities)")
+            print(f"Extracted:      {n} drawers ({version}) — last run {last_run}")
+        else:
+            print("Extracted:      0 drawers")
 except Exception as e:
     print(f"Extraction stats unavailable: {e}")
 ```
 
-- [ ] **Step 4: Run tests — expect pass**
-
-Run: `python -m pytest tests/test_cli_walker.py tests/test_cli_walker_extract.py -v`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mempalace/cli.py tests/test_cli_walker.py
-git commit -m "feat(cli): status --walker reports extraction stats"
-```
+- [ ] **Step 4:** Run tests — expect pass.
+- [ ] **Step 5:** Commit:
+  ```bash
+  git add mempalace/cli.py tests/test_cli_walker.py
+  git commit -m "feat(cli): status --walker reads latest extractor_version dynamically"
+  ```
 
 ---
 
-## Task 10: Verbatim-invariant test for Dream Job A
+## Task 10: Full test suite + coverage + ruff
 
-**Files:**
-- Modify: `tests/dream/test_reextract.py` — add verbatim invariant test
+**Depends on:** Tasks 1–9
 
-- [ ] **Step 1: Write failing test**
-
-```python
-@pytest.mark.asyncio
-async def test_verbatim_invariant_drawer_text_unchanged(tmp_path, monkeypatch):
-    """Dream Job A must never modify drawer content."""
-    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
-
-    original_drawers = [
-        {"id": "d1", "text": "Alice works at DeepMind."},
-        {"id": "d2", "text": "Bob lives in London."},
-    ]
-    # Deep copy to compare against
-    import copy
-    snapshot = copy.deepcopy(original_drawers)
-
-    async def fake_load(palace, wing):
-        return original_drawers
-
-    def fake_gliner():
-        g = MagicMock()
-        g.extract_batch.return_value = [
-            [Entity("Alice", "person", 0.9)],
-            [Entity("Bob", "person", 0.9)],
-        ]
-        return g
-
-    def fake_qwen():
-        q = MagicMock()
-        async def _extract(text, entities):
-            return [Triple(entities[0].text, "is_a", "person")]
-        q.extract = _extract
-        async def _aclose():
-            pass
-        q.aclose = _aclose
-        return q
-
-    monkeypatch.setattr("mempalace.dream.reextract._load_drawers_from_palace", fake_load)
-    monkeypatch.setattr("mempalace.dream.reextract._build_gliner", lambda: fake_gliner())
-    monkeypatch.setattr("mempalace.dream.reextract._build_qwen", lambda: fake_qwen())
-
-    await run_job_a(palace_path=str(tmp_path / "palace"), kg=kg, version="v1.0")
-
-    # Drawer text must be unchanged
-    assert original_drawers == snapshot
-```
-
-- [ ] **Step 2: Run — expect pass (pipeline is read-only)**
-
-Run: `python -m pytest tests/dream/test_reextract.py::test_verbatim_invariant_drawer_text_unchanged -v`
-Expected: PASS
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add tests/dream/test_reextract.py
-git commit -m "test(dream): verify Job A verbatim invariant on drawer content"
-```
+- [ ] **Step 1:** `python -m pytest tests/ --ignore=tests/benchmarks -q` — expect all pass.
+- [ ] **Step 2:** Coverage:
+  ```bash
+  python -m pytest tests/walker/extractor tests/dream tests/infra/test_circuit_breaker_async.py \
+    --cov=mempalace/walker/extractor --cov=mempalace/dream \
+    --cov-report=term-missing
+  ```
+  Expected: coverage ≥ 85%.
+- [ ] **Step 3:** Ruff: `ruff check mempalace/walker/extractor mempalace/dream tests/walker/extractor tests/dream tests/infra/test_circuit_breaker_async.py` — apply `--fix` if safe.
+- [ ] **Step 4:** Format: `ruff format mempalace/walker/extractor mempalace/dream tests/walker/extractor tests/dream`.
+- [ ] **Step 5:** Commit formatting if any: `git diff --quiet || git commit -am "style: ruff format Phase 1 modules"`.
 
 ---
 
-## Task 11: Full test suite + coverage check
+## Task 11: End-to-end smoke test on a real palace
 
-**Files:** none (verification only)
+**Depends on:** Task 10
 
-- [ ] **Step 1: Run entire test suite**
+**Prerequisites:** Qwen3.5 35B running at `http://localhost:43100`.
 
-Run: `python -m pytest tests/ --ignore=tests/benchmarks -q`
-Expected: all pass (~945 tests, up from 919)
-
-- [ ] **Step 2: Run coverage on new modules**
-
-Run:
-```
-python -m pytest tests/walker/extractor tests/dream \
-  --cov=mempalace/walker/extractor --cov=mempalace/dream \
-  --cov-report=term-missing
-```
-Expected: coverage ≥ 85% on new modules.
-
-- [ ] **Step 3: Ruff check**
-
-Run: `ruff check mempalace/walker/extractor mempalace/dream tests/walker/extractor tests/dream`
-Expected: clean or auto-fix with `ruff check --fix`
-
-- [ ] **Step 4: Ruff format**
-
-Run: `ruff format mempalace/walker/extractor mempalace/dream tests/walker/extractor tests/dream`
-
-- [ ] **Step 5: Commit formatting if needed**
-
-```bash
-git diff --quiet || git commit -am "style: ruff format Phase 1 modules"
-```
-
----
-
-## Task 12: End-to-end smoke test on a real palace
-
-**Files:** none (manual verification)
-
-**Prerequisites:**
-1. Qwen3.5 35B is running on `http://localhost:43100`
-2. A test palace exists (use `/tmp/test-palace` from earlier if still available, otherwise mine a small set of drawers)
-
-- [ ] **Step 1: Mine a test palace if needed**
-
-Run: `python -m mempalace.cli --palace /tmp/test-palace mine . --wing mempalace --limit 20`
-
-- [ ] **Step 2: Run extraction in dry-run mode first**
-
-Run: `python -m mempalace.cli --palace /tmp/test-palace walker extract --dry-run`
-Expected: triples printed to stdout, nothing written.
-
-- [ ] **Step 3: Run extraction for real**
-
-Run: `python -m mempalace.cli --palace /tmp/test-palace walker extract --version v1.0`
-Expected: reports N drawers processed, M triples inserted, no crashes.
-
-- [ ] **Step 4: Verify KG has triples**
-
-Run: `python -c "from mempalace.knowledge_graph import KnowledgeGraph; kg = KnowledgeGraph('/tmp/test-palace/knowledge_graph.db'); print(kg._conn().execute('SELECT COUNT(*) FROM triples WHERE valid_to IS NULL').fetchone())"`
-Expected: non-zero triple count.
-
-- [ ] **Step 5: Re-run extraction — verify idempotent**
-
-Run: `python -m mempalace.cli --palace /tmp/test-palace walker extract --version v1.0`
-Expected: "N drawers skipped (already extracted)", 0 new triples.
-
-- [ ] **Step 6: Check Gate 1 (median triples/drawer ≥ 2)**
-
-Run:
-```bash
-python -c "
-from mempalace.knowledge_graph import KnowledgeGraph
-kg = KnowledgeGraph('/tmp/test-palace/knowledge_graph.db')
-rows = kg._conn().execute(
-    'SELECT triple_count FROM extraction_state WHERE extractor_version=\"v1.0\"'
-).fetchall()
-import statistics
-counts = [r[0] for r in rows]
-print(f'drawers: {len(counts)}, median: {statistics.median(counts)}, mean: {statistics.mean(counts):.1f}')
-"
-```
-Expected: median ≥ 2 (Phase 1 gate).
-
-If gate fails: the Qwen prompt likely needs tuning; document the actual numbers and open a follow-up task.
-
-- [ ] **Step 7: Check Gate 7 (LongMemEval R@5 unchanged ±0.5pp)**
-
-Only run if you have the LongMemEval dataset locally. Skip otherwise — note as "LongMemEval dataset not available on this machine" in the phase completion report.
-
-- [ ] **Step 8: Commit smoke test results**
-
-Create `docs/superpowers/plans/phase-1-smoke-results.md` with the actual numbers:
-
-```markdown
-# Phase 1 Smoke Test Results
-
-- Palace: /tmp/test-palace
-- Drawers: 542
-- Median triples/drawer: X.X
-- Mean triples/drawer: X.X
-- Elapsed (walker extract): Xs
-- Gate 1 (median ≥ 2): PASS / FAIL
-- Gate 3 (throughput > 3 drawers/s): PASS / FAIL
-- LongMemEval R@5: skipped (no dataset)
-```
-
-```bash
-git add docs/superpowers/plans/phase-1-smoke-results.md
-git commit -m "docs: Phase 1 smoke test results on real palace"
-```
+- [ ] **Step 1:** Mine a small palace:
+  ```bash
+  python -m mempalace.cli --palace /tmp/test-palace mine . --wing mempalace --limit 20
+  ```
+- [ ] **Step 2:** Dry run:
+  ```bash
+  python -m mempalace.cli --palace /tmp/test-palace walker extract --dry-run
+  ```
+  Expected: triples printed, nothing written.
+- [ ] **Step 3:** Real run + timing:
+  ```bash
+  time python -m mempalace.cli --palace /tmp/test-palace walker extract --version v1.0
+  ```
+- [ ] **Step 4:** Verify KG:
+  ```bash
+  python -c "
+  from mempalace.knowledge_graph import KnowledgeGraph
+  kg = KnowledgeGraph('/tmp/test-palace/knowledge_graph.db')
+  n = kg._conn().execute('SELECT COUNT(*) FROM triples WHERE valid_to IS NULL').fetchone()[0]
+  print(f'live triples: {n}')
+  "
+  ```
+- [ ] **Step 5:** Idempotent re-run:
+  ```bash
+  python -m mempalace.cli --palace /tmp/test-palace walker extract --version v1.0
+  ```
+  Expected: skipped count == drawer count, 0 new triples.
+- [ ] **Step 6:** Median/mean triples per drawer:
+  ```bash
+  python -c "
+  import statistics
+  from mempalace.knowledge_graph import KnowledgeGraph
+  kg = KnowledgeGraph('/tmp/test-palace/knowledge_graph.db')
+  counts = [r[0] for r in kg._conn().execute(
+      'SELECT triple_count FROM extraction_state WHERE extractor_version=\"v1.0\"'
+  ).fetchall()]
+  print(f'drawers: {len(counts)}')
+  print(f'median: {statistics.median(counts)}')
+  print(f'mean: {statistics.mean(counts):.1f}')
+  "
+  ```
+- [ ] **Step 7:** Throughput from dream log:
+  ```bash
+  python -c "
+  import json
+  from pathlib import Path
+  logs = [json.loads(l) for l in open(Path.home() / '.mempalace' / 'dream_log.jsonl')]
+  last = logs[-1]
+  print(f'drawers: {last[\"drawers_processed\"]}, elapsed: {last[\"elapsed_secs\"]:.1f}s, throughput: {last[\"drawers_processed\"]/last[\"elapsed_secs\"]:.2f} drawers/s')
+  "
+  ```
+- [ ] **Step 8:** Document results in `docs/superpowers/plans/phase-1-smoke-results.md` and commit.
 
 ---
 
 ## Phase 1 Go/No-Go Gates Summary
 
-Verified via Task 11 (automated) + Task 12 (smoke):
-
-| # | Gate | Verified in |
-|---|------|-------------|
-| 1 | Median triples/drawer ≥ 2 | Task 12 Step 6 |
-| 2 | Avg triples/drawer ≥ 3 | Task 12 Step 6 |
-| 3 | Throughput > 3 drawers/sec on A5000 | Task 12 Step 8 |
-| 4 | Dream Job A on 5k drawers < 30 min | Optional if 5k-drawer palace exists |
-| 5 | Dream Job A idempotent | Task 5 `test_idempotent_run_twice` + Task 12 Step 5 |
-| 6 | Verbatim invariant | Task 10 |
-| 7 | LongMemEval R@5 unchanged | Task 12 Step 7 (skip if dataset absent) |
-| 8 | Extractor test coverage ≥ 85% | Task 11 Step 2 |
+| # | Gate | Target | Verified in |
+|---|------|--------|-------------|
+| 1 | Median triples/drawer | ≥ 2 | Task 11 Step 6 |
+| 2 | Mean triples/drawer | ≥ 3 | Task 11 Step 6 |
+| 3 | Throughput | > 3 drawers/sec on A5000 | Task 11 Step 7 |
+| 4 | Dream Job A on 5k drawers | < 30 min | Optional (needs 5k-drawer palace) |
+| 5 | Dream Job A idempotent | same KG state on rerun | Task 5 tests + Task 11 Step 5 |
+| 6 | Verbatim invariant | drawer content unchanged | Task 6 real-backend test |
+| 7 | LongMemEval R@5 | ±0.5pp baseline | Skip if dataset absent |
+| 8 | Coverage | ≥ 85% on new modules | Task 10 Step 2 |
 
 ---
 
 ## Completion Checklist
 
-- [ ] All 12 tasks completed with commits
-- [ ] Full test suite passing (~945 tests)
+- [ ] All tasks completed with commits in dependency-group order (A → G)
+- [ ] Full test suite passing
 - [ ] Coverage ≥ 85% on new modules
 - [ ] Ruff clean
 - [ ] Smoke test on real palace documented
-- [ ] Phase 1 go/no-go gates all PASS (or documented waivers)
-- [ ] Branch `feat/mempalace-walk-phase-1` ready to merge into `feat/mempalace-walk-phase-0` (or develop once Phase 0 lands)
+- [ ] Gates 1–3, 5, 6, 8 all PASS (Gates 4, 7 may be waived)
+- [ ] Branch ready to merge into `feat/mempalace-walk-phase-0` (or develop once Phase 0 lands)
 
 **Do NOT open a PR to `MemPalace/mempalace` without first opening a GitHub issue per CONTRIBUTING.md — discussion before code.**
