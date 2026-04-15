@@ -362,3 +362,56 @@ def test_upsert_triple_race_safe(tmp_path):
         ("alice", "knows", "ben"),
     ).fetchone()[0]
     assert live == 1
+
+
+def test_check_triple_conflicts_no_conflict(tmp_path):
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    kg.add_triple("Alice", "works_at", obj="Acme")
+    conflicts = kg.check_triple_conflicts()
+    assert conflicts == []
+
+
+def test_check_triple_conflicts_detects_relationship_mismatch(tmp_path):
+    """Two live triples with same (subject, predicate) but different objects = conflict."""
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    # Force two different objects for same (subject, predicate)
+    conn = kg._conn()
+    with conn:
+        kg.add_entity("Alice", entity_type="person")
+        kg.add_entity("Acme", entity_type="org")
+        kg.add_entity("Globex", entity_type="org")
+        conn.execute(
+            "INSERT INTO triples (id, subject, predicate, object, confidence) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("t1", "alice", "works_at", "acme", 0.9),
+        )
+        conn.execute(
+            "INSERT INTO triples (id, subject, predicate, object, confidence) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("t2", "alice", "works_at", "globex", 0.8),
+        )
+
+    conflicts = kg.check_triple_conflicts()
+    assert len(conflicts) == 1
+    c = conflicts[0]
+    assert c["type"] == "relationship_mismatch"
+    assert c["subject"] == "alice"
+    assert c["predicate"] == "works_at"
+    assert set(c["conflicting_objects"]) == {"acme", "globex"}
+
+
+def test_check_triple_conflicts_ignores_invalidated(tmp_path):
+    """Invalidated triples must not contribute to conflicts."""
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    kg = KnowledgeGraph(str(tmp_path / "kg.db"))
+    kg.add_triple("Alice", "works_at", obj="Acme")
+    kg.invalidate(subject="alice", predicate="works_at", obj="acme")
+    # Now add a different live triple — no conflict (old one is invalidated)
+    kg.add_triple("Alice", "works_at", obj="Globex")
+    conflicts = kg.check_triple_conflicts()
+    assert conflicts == []

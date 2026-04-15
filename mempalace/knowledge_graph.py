@@ -390,6 +390,48 @@ class KnowledgeGraph:
                     (ended, sub_id, pred, obj_id),
                 )
 
+    def check_triple_conflicts(self) -> list[dict]:
+        """Detect relationship_mismatch conflicts in the knowledge graph.
+
+        A conflict occurs when the same (subject, predicate) pair has multiple
+        live triples (valid_to IS NULL) pointing to different objects.
+
+        Returns a list of conflict dicts:
+            {
+                "type": "relationship_mismatch",
+                "subject": str,
+                "predicate": str,
+                "conflicting_objects": list[str],
+                "triple_ids": list[str],
+            }
+        """
+        conn = self._conn()
+        rows = conn.execute(
+            """
+            SELECT subject, predicate,
+                   GROUP_CONCAT(object, '|||') AS objects,
+                   GROUP_CONCAT(id, '|||') AS ids,
+                   COUNT(DISTINCT object) AS n_objects
+            FROM triples
+            WHERE valid_to IS NULL
+            GROUP BY subject, predicate
+            HAVING COUNT(DISTINCT object) > 1
+            """
+        ).fetchall()
+
+        conflicts = []
+        for row in rows:
+            conflicts.append(
+                {
+                    "type": "relationship_mismatch",
+                    "subject": row["subject"],
+                    "predicate": row["predicate"],
+                    "conflicting_objects": list(set(row["objects"].split("|||"))),
+                    "triple_ids": row["ids"].split("|||"),
+                }
+            )
+        return conflicts
+
     # ── Query operations ──────────────────────────────────────────────────
 
     def query_entity(self, name: str, as_of: str = None, direction: str = "outgoing"):
