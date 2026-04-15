@@ -1,0 +1,48 @@
+"@context":
+  - ../contexts/core.context.jsonld
+  - ../contexts/full-stack-unit.context.jsonld
+
+"@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop
+"@type": Capability
+
+repoRoot: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+category: hooks
+description: Execute the stop-hook runtime for background save behavior.
+enabled: true
+
+l0:
+  "@type": RuntimeConfig
+  authority: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+  protocol: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-stop
+  permissionPolicy: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/hook-internal
+  persistenceClass: hook-capability
+
+l1:
+  cli:
+    command: hook run --hook stop
+    exposure: internal
+  mcp:
+    tool: mempalace_hook_stop
+    exposure: hidden
+  binding:
+    pythonModule: mempalace.hooks_cli
+    pythonSymbol: hook_stop
+    runtimeAdapter: mempalace.operation_registry
+
+l2:
+  workflowRole: session-save
+  participatesIn:
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-save
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/session-boundary
+  trigger: session-stop
+  agentAccess:
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#agent/operator
+
+l3:
+  observation:
+    stream: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-stop-events
+    auditClass: hook-observation
+  assembly:
+    emitsArtifacts:
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/claude-hook-manifest
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/codex-hook-manifest
