@@ -230,7 +230,7 @@ def cmd_repair(args):
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
 
-    backend = ChromaBackend()
+    ChromaBackend()
 
     # Try to read existing drawers
     try:
