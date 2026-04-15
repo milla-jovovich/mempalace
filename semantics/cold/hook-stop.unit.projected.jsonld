@@ -1,0 +1,53 @@
+{
+  "@context": [
+    "../contexts/core.context.jsonld",
+    "../contexts/full-stack-unit.context.jsonld"
+  ],
+  "@graph": [
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop",
+      "@type": "Capability",
+      "category": "hooks",
+      "description": "Execute the stop-hook runtime for background save behavior.",
+      "enabled": true,
+      "l0": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l0",
+        "@type": "RuntimeConfig",
+        "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo",
+        "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-stop",
+        "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/hook-internal"
+      }],
+      "l1": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l1",
+        "@type": "Binding",
+        "commandName": "hook run --hook stop",
+        "toolName": "mempalace_hook_stop",
+        "exposure": "hidden",
+        "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-stop/python"
+      }],
+      "l2": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l2",
+        "@type": "ProjectionView",
+        "participatesIn": [
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-save",
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/session-boundary"
+        ]
+      }],
+      "l3": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l3",
+        "@type": "ProjectionView",
+        "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-stop-events",
+        "emitsArtifact": [
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/claude-hook-manifest",
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/codex-hook-manifest"
+        ]
+      }]
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-stop/python",
+      "@type": "AtomicImplementation",
+      "pythonModule": "mempalace.hooks_cli",
+      "pythonSymbol": "hook_stop"
+    }
+  ]
+}
