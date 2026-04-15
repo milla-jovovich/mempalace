@@ -11,7 +11,7 @@ MemPalace works natively with [Gemini CLI](https://github.com/google/gemini-cli)
 
 ```bash
 # Clone the repository
-git clone https://github.com/milla-jovovich/mempalace.git
+git clone https://github.com/MemPalace/mempalace.git
 cd mempalace
 
 # Create a virtual environment

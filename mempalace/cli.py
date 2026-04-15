@@ -36,18 +36,62 @@ from pathlib import Path
 from .config import MempalaceConfig
 
 
+_MEMPALACE_PROJECT_FILES = ("mempalace.yaml", "entities.json")
+
+
+def _ensure_mempalace_files_gitignored(project_dir) -> bool:
+    """If project_dir is a git repo, ensure MemPalace's per-project files
+    are listed in .gitignore so they don't get committed by accident.
+
+    Returns True if .gitignore was updated, False otherwise. Issue #185:
+    `mempalace init` writes mempalace.yaml + entities.json into the
+    project root, where they previously had no protection against being
+    staged into git.
+    """
+    from pathlib import Path
+
+    project_path = Path(project_dir).expanduser().resolve()
+    if not (project_path / ".git").exists():
+        return False
+    gitignore = project_path / ".gitignore"
+    existing = gitignore.read_text() if gitignore.exists() else ""
+    existing_lines = {line.strip() for line in existing.splitlines()}
+    missing = [p for p in _MEMPALACE_PROJECT_FILES if p not in existing_lines]
+    if not missing:
+        return False
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    block = prefix + "\n# MemPalace per-project files (issue #185)\n" + "\n".join(missing) + "\n"
+    with open(gitignore, "a") as f:
+        f.write(block)
+    print(f"  Added {', '.join(missing)} to {gitignore.name}")
+    return True
+
+
 def cmd_init(args):
     import json
     from pathlib import Path
     from .entity_detector import scan_for_detection, detect_entities, confirm_entities
     from .room_detector_local import detect_rooms_local
 
+    cfg = MempalaceConfig()
+
+    # Resolve entity-detection languages: --lang overrides config.
+    lang_arg = getattr(args, "lang", None)
+    if lang_arg:
+        languages = [s.strip() for s in lang_arg.split(",") if s.strip()] or ["en"]
+        cfg.set_entity_languages(languages)
+    else:
+        languages = cfg.entity_languages
+    languages_tuple = tuple(languages)
+
     # Pass 1: auto-detect people and projects from file content
     print(f"\n  Scanning for entities in: {args.dir}")
+    if languages_tuple != ("en",):
+        print(f"  Languages: {', '.join(languages_tuple)}")
     files = scan_for_detection(args.dir)
     if files:
         print(f"  Reading {len(files)} files...")
-        detected = detect_entities(files)
+        detected = detect_entities(files, languages=languages_tuple)
         total = len(detected["people"]) + len(detected["projects"]) + len(detected["uncertain"])
         if total > 0:
             confirmed = confirm_entities(detected, yes=getattr(args, "yes", False))
@@ -62,7 +106,10 @@ def cmd_init(args):
 
     # Pass 2: detect rooms from folder structure
     detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
-    MempalaceConfig().init()
+    cfg.init()
+
+    # Pass 3: protect git repos from accidentally committing per-project files
+    _ensure_mempalace_files_gitignored(args.dir)
 
 
 def cmd_mine(args):
@@ -156,7 +203,11 @@ def cmd_migrate(args):
     from .migrate import migrate
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-    migrate(palace_path=palace_path, dry_run=args.dry_run, confirm=getattr(args, "yes", False))
+    migrate(
+        palace_path=palace_path,
+        dry_run=args.dry_run,
+        confirm=getattr(args, "yes", False),
+    )
 
 
 def cmd_status(args):
@@ -168,8 +219,8 @@ def cmd_status(args):
 
 def cmd_repair(args):
     """Rebuild palace vector index from SQLite metadata."""
-    import chromadb
     import shutil
+    from .backends.chroma import ChromaBackend
     from .migrate import confirm_destructive_action, contains_palace_database
 
     palace_path = os.path.abspath(
@@ -189,10 +240,11 @@ def cmd_repair(args):
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
 
+    backend = ChromaBackend()
+
     # Try to read existing drawers
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = backend.get_collection(palace_path, "mempalace_drawers")
         total = col.count()
         print(f"  Drawers found: {total}")
     except Exception as e:
@@ -239,8 +291,8 @@ def cmd_repair(args):
     shutil.copytree(palace_path, backup_path)
 
     print("  Rebuilding collection...")
-    client.delete_collection("mempalace_drawers")
-    new_col = client.create_collection("mempalace_drawers")
+    backend.delete_collection(palace_path, "mempalace_drawers")
+    new_col = backend.create_collection(palace_path, "mempalace_drawers")
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
@@ -293,7 +345,7 @@ def cmd_mcp(args):
 
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
-    import chromadb
+    from .backends.chroma import ChromaBackend
     from .dialect import Dialect
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
@@ -313,9 +365,9 @@ def cmd_compress(args):
         dialect = Dialect()
 
     # Connect to palace
+    backend = ChromaBackend()
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = backend.get_collection(palace_path, "mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
@@ -328,7 +380,11 @@ def cmd_compress(args):
     offset = 0
     while True:
         try:
-            kwargs = {"include": ["documents", "metadatas"], "limit": _BATCH, "offset": offset}
+            kwargs = {
+                "include": ["documents", "metadatas"],
+                "limit": _BATCH,
+                "offset": offset,
+            }
             if where:
                 kwargs["where"] = where
             batch = col.get(**kwargs)
@@ -386,7 +442,7 @@ def cmd_compress(args):
     # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
-            comp_col = client.get_or_create_collection("mempalace_compressed")
+            comp_col = backend.get_or_create_collection(palace_path, "mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
                 comp_meta["compression_ratio"] = round(stats["size_ratio"], 1)
@@ -431,7 +487,19 @@ def main():
     p_init = sub.add_parser("init", help="Detect rooms from your folder structure")
     p_init.add_argument("dir", help="Project directory to set up")
     p_init.add_argument(
-        "--yes", action="store_true", help="Auto-accept all detected entities (non-interactive)"
+        "--yes",
+        action="store_true",
+        help="Auto-accept all detected entities (non-interactive)",
+    )
+    p_init.add_argument(
+        "--lang",
+        default=None,
+        help=(
+            "Comma-separated language codes for entity detection "
+            "(e.g. 'en' or 'en,pt-br'). Defaults to value from config "
+            "(MEMPALACE_ENTITY_LANGUAGES env var or config.json), or 'en'. "
+            "When given, the value is also persisted to config.json."
+        ),
     )
 
     # mine

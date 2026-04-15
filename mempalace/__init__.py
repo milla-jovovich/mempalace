@@ -2,7 +2,6 @@
 
 import logging
 
-from .cli import main  # noqa: E402
 from .version import __version__  # noqa: E402
 
 # ChromaDB 0.6.x ships a Posthog telemetry client whose capture() signature is
@@ -25,4 +24,4 @@ logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICA
 # intact, so the real fix is upgrading chromadb to 1.5.4+, which #581
 # proposes.  See #397 for the history of this line.
 
-__all__ = ["main", "__version__"]
+__all__ = ["__version__"]

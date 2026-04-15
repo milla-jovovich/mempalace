@@ -2,7 +2,7 @@ name: Deploy Docs
 
 on:
   push:
-    branches: [main, develop]
+    branches: [develop]
     paths:
       - ".github/workflows/deploy-docs.yml"
       - "website/**"
@@ -51,7 +51,7 @@ jobs:
           path: website/.vitepress/dist
 
   deploy:
-    if: github.ref_name == 'main' || github.ref_name == 'develop'
+    if: github.ref_name == 'develop'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
