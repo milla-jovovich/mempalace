@@ -41,6 +41,13 @@ def mcp_description(tool_name: str, fallback: str) -> str:
     return fallback
 
 
+def cli_description(command_name: str, fallback: str) -> str:
+    op = cli_operation_map().get(command_name)
+    if op and op.get("description"):
+        return op["description"]
+    return fallback
+
+
 def mcp_exposure(tool_name: str, default: str = "public") -> str:
     op = mcp_operation_map().get(tool_name)
     if not op:
