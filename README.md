@@ -142,7 +142,7 @@ Restart Claude Code, then type `/skills` to verify "mempalace" appears.
 
 ```bash
 # Connect MemPalace once
-claude mcp add mempalace -- python -m mempalace.mcp_server
+claude mcp add mempalace -- mempalace mcp run
 ```
 
 Now your AI has 29 tools available through MCP. Ask it anything:
@@ -470,7 +470,7 @@ claude plugin marketplace add MemPalace/mempalace
 claude plugin install --scope user mempalace
 
 # Or manually
-claude mcp add mempalace -- python -m mempalace.mcp_server
+claude mcp add mempalace -- mempalace mcp run
 ```
 
 ### 29 Tools
