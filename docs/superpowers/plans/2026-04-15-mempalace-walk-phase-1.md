@@ -991,7 +991,7 @@ def _extract_first_json_array(text: str):
 
 ## Task 5a: `ChromaBackend.iter_drawers()` helper
 
-**Depends on:** Task 1
+**Depends on:** nothing (can run in Group A)
 
 **Files:**
 - Modify: `mempalace/backends/chroma.py`
@@ -1306,8 +1306,9 @@ class ExtractionStats:
     triples_inserted: int = 0
     triples_updated: int = 0
     qwen_failures: int = 0
-    circuit_open_events: int = 0
     elapsed_secs: float = 0.0
+    # Note: circuit_open_events intentionally omitted in Phase 1 — the
+    # pipeline cannot observe breaker state from inside. Wire up in Phase 2.
 
 
 async def extract_drawers(
@@ -1653,7 +1654,6 @@ class JobAResult:
     triples_inserted: int
     triples_updated: int
     qwen_failures: int
-    circuit_open_events: int
     batches: int
 
 
@@ -1692,7 +1692,6 @@ async def run_job_a(
             totals.triples_inserted += stats.triples_inserted
             totals.triples_updated += stats.triples_updated
             totals.qwen_failures += stats.qwen_failures
-            totals.circuit_open_events += stats.circuit_open_events
     finally:
         try:
             await qwen.aclose()
@@ -1707,7 +1706,6 @@ async def run_job_a(
         triples_inserted=totals.triples_inserted,
         triples_updated=totals.triples_updated,
         qwen_failures=totals.qwen_failures,
-        circuit_open_events=totals.circuit_open_events,
         batches=batches_run,
     )
     _append_log(result)
@@ -1772,7 +1770,7 @@ def _fake_result(version="v1.0"):
         job="A", version=version, started_at="now",
         elapsed_secs=0.1, drawers_processed=0, drawers_skipped=0,
         triples_inserted=0, triples_updated=0, qwen_failures=0,
-        circuit_open_events=0, batches=0,
+        batches=0,
     )
 
 
