@@ -35,8 +35,8 @@ Repository = "https://github.com/MemPalace/mempalace"
 "Bug Tracker" = "https://github.com/MemPalace/mempalace/issues"
 
 [project.scripts]
-mempalace = "mempalace.cli:main"
-mempalace-mcp = "mempalace.mcp_server:main"
+mempalace = "mempalace.cli_ld:main"
+mempalace-mcp = "mempalace.mcp_server_ld:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
