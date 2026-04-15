@@ -150,3 +150,54 @@ class ChromaBackend:
             collection_name, metadata={"hnsw:space": hnsw_space}
         )
         return ChromaCollection(collection)
+
+    def iter_drawers(
+        self,
+        palace_path: str,
+        wing: str | None = None,
+        batch_size: int = 500,
+    ):
+        """Yield {'id', 'text', 'metadata'} for every drawer.
+
+        Filters by wing if given. Pages via limit/offset when supported.
+        """
+        try:
+            col = self.get_collection(palace_path, "mempalace_drawers")
+        except Exception:
+            return
+        try:
+            total = col.count()
+        except Exception:
+            total = 0
+        if total == 0:
+            return
+
+        offset = 0
+        while offset < total:
+            try:
+                page = col.get(
+                    limit=batch_size,
+                    offset=offset,
+                    include=["documents", "metadatas"],
+                )
+            except TypeError:
+                page = col.get(include=["documents", "metadatas"])
+                ids = page.get("ids", [])
+                docs = page.get("documents", []) or [""] * len(ids)
+                metas = page.get("metadatas", []) or [{}] * len(ids)
+                for i, d, m in zip(ids, docs, metas):
+                    if wing is not None and (m or {}).get("wing") != wing:
+                        continue
+                    yield {"id": i, "text": d, "metadata": m or {}}
+                return
+
+            ids = page.get("ids", [])
+            docs = page.get("documents", []) or [""] * len(ids)
+            metas = page.get("metadatas", []) or [{}] * len(ids)
+            if not ids:
+                break
+            for i, d, m in zip(ids, docs, metas):
+                if wing is not None and (m or {}).get("wing") != wing:
+                    continue
+                yield {"id": i, "text": d, "metadata": m or {}}
+            offset += len(ids)
