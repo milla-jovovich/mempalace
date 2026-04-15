@@ -36,3 +36,8 @@ venv/
 
 # ChromaDB local data
 *.sqlite3-journal
+
+# Local notes (not for PRs)
+MemPalace_*_UA.md
+MemPalace_*_UA.pdf
+PR_DEEP_DIVE.md
