@@ -38,7 +38,7 @@ Repository = "https://github.com/MemPalace/mempalace"
 mempalace = "mempalace.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9", "pytest-asyncio>=0.23"]
 spellcheck = ["autocorrect>=2.0"]
 walker = [
     "gliner>=0.2.0",
@@ -46,6 +46,7 @@ walker = [
     "scipy>=1.11.0",
     "lm-format-enforcer>=0.10.0",
     "networkx>=3.0",
+    "httpx>=0.27.0",
 ]
 
 [dependency-groups]
@@ -76,6 +77,7 @@ quote-style = "double"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"
 addopts = "-m 'not benchmark and not slow and not stress'"
 markers = [
     "benchmark: scale/performance benchmark tests",
