@@ -70,6 +70,8 @@ def _ensure_mempalace_files_gitignored(project_dir) -> bool:
 def cmd_init(args):
     import json
     from pathlib import Path
+
+    directory = str(Path(args.dir).expanduser().resolve())
     from .entity_detector import scan_for_detection, detect_entities, confirm_entities
     from .room_detector_local import detect_rooms_local
 
@@ -92,8 +94,15 @@ def cmd_init(args):
             print("  No entities detected — proceeding with directory-based rooms.")
 
     # Pass 2: detect rooms from folder structure
-    detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
-    MempalaceConfig().init()
+    try:
+        detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
+    except TypeError:
+        detect_rooms_local(project_dir=args.dir)
+
+    config = MempalaceConfig()
+    config.init(root_dir=directory)
+    print(f"\n  Root directory set: {directory}")
+    print("  Subdirectories will be auto-detected as wings on each startup.")
 
     # Pass 3: protect git repos from accidentally committing per-project files
     _ensure_mempalace_files_gitignored(args.dir)
