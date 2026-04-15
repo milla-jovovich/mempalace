@@ -1,0 +1,48 @@
+"@context":
+  - ../contexts/core.context.jsonld
+  - ../contexts/full-stack-unit.context.jsonld
+
+"@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact
+"@type": Capability
+
+repoRoot: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+category: hooks
+description: Execute the precompact hook runtime for emergency save behavior.
+enabled: true
+
+l0:
+  "@type": RuntimeConfig
+  authority: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+  protocol: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-precompact
+  permissionPolicy: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/hook-internal
+  persistenceClass: hook-capability
+
+l1:
+  cli:
+    command: hook run --hook precompact
+    exposure: internal
+  mcp:
+    tool: mempalace_hook_precompact
+    exposure: hidden
+  binding:
+    pythonModule: mempalace.hooks_cli
+    pythonSymbol: hook_precompact
+    runtimeAdapter: mempalace.operation_registry
+
+l2:
+  workflowRole: emergency-save
+  participatesIn:
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-save
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/precompact-guard
+  trigger: precompact
+  agentAccess:
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#agent/operator
+
+l3:
+  observation:
+    stream: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-precompact-events
+    auditClass: hook-observation
+  assembly:
+    emitsArtifacts:
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/claude-hook-manifest
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/codex-hook-manifest
