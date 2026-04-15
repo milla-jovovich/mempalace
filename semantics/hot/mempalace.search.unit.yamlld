@@ -1,0 +1,49 @@
+"@context":
+  - ../contexts/core.context.jsonld
+  - ../contexts/full-stack-unit.context.jsonld
+
+"@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search
+"@type": Capability
+
+repoRoot: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+category: retrieval
+description: Search drawers and closets using MemPalace retrieval.
+enabled: true
+
+l0:
+  "@type": RuntimeConfig
+  authority: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
+  protocol: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/search
+  permissionPolicy: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/search-public
+  persistenceClass: retrieval-capability
+
+l1:
+  cli:
+    command: search
+    exposure: public
+  mcp:
+    tool: mempalace_search
+    exposure: public
+  binding:
+    pythonModule: mempalace.searcher
+    pythonSymbol: search
+    runtimeAdapter: mempalace.operation_registry
+
+l2:
+  workflowRole: retrieval
+  participatesIn:
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-query
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/agent-recall
+  trigger: on-demand
+  agentAccess:
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#agent/operator
+    - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#agent/architect
+
+l3:
+  observation:
+    stream: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/search-events
+    auditClass: retrieval-observation
+  assembly:
+    emitsArtifacts:
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/cli-registry-view
+      - did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view
