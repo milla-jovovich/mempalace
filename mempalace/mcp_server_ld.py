@@ -4,7 +4,13 @@ import json
 import sys
 
 from . import mcp_server as legacy_mcp
-from .operation_registry import mcp_description, mcp_exposure, projected_registry
+from .operation_registry import (
+    mcp_description,
+    mcp_exposure,
+    mcp_tool_registry_view,
+    projected_registry,
+    visible_mcp_tools,
+)
 
 
 def tool_runtime_registry():
@@ -28,8 +34,23 @@ SUPPORTED_PROTOCOL_VERSIONS = legacy_mcp.SUPPORTED_PROTOCOL_VERSIONS
 
 def _visible_tools() -> list[dict]:
     visible = []
+    seen: set[str] = set()
+
+    for name in visible_mcp_tools():
+        spec = TOOLS.get(name)
+        if not spec or mcp_exposure(name, "public") == "hidden":
+            continue
+        visible.append(
+            {
+                "name": name,
+                "description": spec["description"],
+                "inputSchema": spec["input_schema"],
+            }
+        )
+        seen.add(name)
+
     for name, spec in TOOLS.items():
-        if mcp_exposure(name, "public") == "hidden":
+        if name in seen or mcp_exposure(name, "public") == "hidden":
             continue
         visible.append(
             {
