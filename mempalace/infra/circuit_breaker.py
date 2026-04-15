@@ -107,3 +107,55 @@ class CircuitBreaker:
                 self._probe_in_flight = False
 
         return result
+
+    async def call_async(self, afn):
+        """Async analog of .call(): awaits afn() under the same state machine.
+
+        afn must be a zero-arg callable returning an awaitable.
+        The breaker wraps ONLY the awaited call — any post-processing the
+        caller does with the result is NOT counted as a failure.
+        """
+        with self._lock:
+            if self._state == CircuitState.OPEN:
+                elapsed = time.monotonic() - self._last_failure_time
+                if elapsed >= self._recovery_timeout_secs:
+                    self._state = CircuitState.HALF_OPEN
+                    self._probe_in_flight = True
+                    allow_probe = True
+                else:
+                    raise CircuitOpenError(
+                        f"Circuit '{self._name}' is OPEN "
+                        f"(retry after {self._recovery_timeout_secs}s)"
+                    )
+            elif self._state == CircuitState.HALF_OPEN:
+                if self._probe_in_flight:
+                    raise CircuitOpenError(
+                        f"Circuit '{self._name}' is HALF_OPEN — probe already in flight"
+                    )
+                self._probe_in_flight = True
+                allow_probe = True
+            else:
+                allow_probe = False
+
+        try:
+            result = await afn()
+        except Exception:
+            with self._lock:
+                if allow_probe:
+                    self._state = CircuitState.OPEN
+                    self._last_failure_time = time.monotonic()
+                    self._probe_in_flight = False
+                else:
+                    self._failure_count += 1
+                    self._last_failure_time = time.monotonic()
+                    if self._failure_count >= self._failure_threshold:
+                        self._state = CircuitState.OPEN
+            raise
+
+        with self._lock:
+            if allow_probe:
+                self._state = CircuitState.CLOSED
+                self._failure_count = 0
+                self._probe_in_flight = False
+
+        return result
