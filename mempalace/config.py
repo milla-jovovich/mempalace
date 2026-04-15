@@ -207,6 +207,20 @@ class MempalaceConfig:
         """Whether the stop hook shows a desktop notification via notify-send."""
         return self._file_config.get("hooks", {}).get("desktop_toast", False)
 
+    @property
+    def embedding_model(self):
+        """Preferred embedding model for new palaces.
+
+        Used only when creating a new palace. Existing palaces read
+        the model from their collection metadata (see embedding.py).
+        """
+        from .embedding import NEW_PALACE_MODEL
+
+        env = os.environ.get("MEMPALACE_EMBEDDING_MODEL")
+        if env:
+            return env
+        return self._file_config.get("embedding_model", NEW_PALACE_MODEL)
+
     def set_hook_setting(self, key: str, value: bool):
         """Update a hook setting and write config to disk."""
         if "hooks" not in self._file_config:

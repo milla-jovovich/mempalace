@@ -1,6 +1,7 @@
 import os
 from unittest.mock import MagicMock, patch
 
+from mempalace.config import MempalaceConfig
 from mempalace.embedding import (
     DEFAULT_MODEL,
     NEW_PALACE_MODEL,
@@ -57,3 +58,28 @@ def test_get_embedding_function_returns_callable():
         ef = get_embedding_function(DEFAULT_MODEL)
         assert callable(ef)
         mock_ef_class.assert_called_once_with(model_name=DEFAULT_MODEL)
+
+
+def test_config_embedding_model_default(tmp_path):
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text("{}")
+    config = MempalaceConfig(config_dir=str(cfg_dir))
+    assert config.embedding_model == NEW_PALACE_MODEL
+
+
+def test_config_embedding_model_from_file(tmp_path):
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text('{"embedding_model": "custom-model"}')
+    config = MempalaceConfig(config_dir=str(cfg_dir))
+    assert config.embedding_model == "custom-model"
+
+
+def test_new_palace_model_respects_config(tmp_path):
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text('{"embedding_model": "config-model"}')
+    config = MempalaceConfig(config_dir=str(cfg_dir))
+    os.environ.pop("MEMPALACE_EMBEDDING_MODEL", None)
+    assert new_palace_model(config) == "config-model"
