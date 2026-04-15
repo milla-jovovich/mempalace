@@ -178,6 +178,12 @@ def _wikipedia_lookup(word: str) -> dict:
     Look up a word via Wikipedia REST API.
     Returns inferred type (person/place/concept/unknown) + confidence + summary.
     Free, no API key, handles disambiguation pages.
+
+    **Privacy warning:** This function makes an outbound HTTPS request to
+    en.wikipedia.org, sending the queried word over the network.  It should
+    only be called when the caller has explicitly opted in via
+    ``allow_network=True`` in :meth:`EntityRegistry.research`.  The default
+    behaviour of ``research()`` is local-only (no network calls).
     """
     try:
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(word)}"
@@ -244,13 +250,14 @@ def _wikipedia_lookup(word: str) -> dict:
 
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            # Not in Wikipedia — strong signal it's a proper noun (unusual name, nickname)
+            # Not in Wikipedia — this tells us nothing definitive about
+            # the word.  Return "unknown" so the caller can decide.
             return {
-                "inferred_type": "person",
-                "confidence": 0.70,
+                "inferred_type": "unknown",
+                "confidence": 0.3,
                 "wiki_summary": None,
                 "wiki_title": None,
-                "note": "not found in Wikipedia — likely a proper noun or unusual name",
+                "note": "not found in Wikipedia",
             }
         return {"inferred_type": "unknown", "confidence": 0.0, "wiki_summary": None}
     except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError):
@@ -309,7 +316,15 @@ class EntityRegistry:
 
     def save(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._path.parent.chmod(0o700)
+        except (OSError, NotImplementedError):
+            pass
         self._path.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
+        try:
+            self._path.chmod(0o600)
+        except (OSError, NotImplementedError):
+            pass
 
     @staticmethod
     def _empty() -> dict:
@@ -502,20 +517,41 @@ class EntityRegistry:
 
     # ── Research unknown words ───────────────────────────────────────────────
 
-    def research(self, word: str, auto_confirm: bool = False) -> dict:
+    def research(self, word: str, auto_confirm: bool = False, allow_network: bool = False) -> dict:
         """
-        Research an unknown word via Wikipedia.
-        Caches result. If auto_confirm=False, marks as unconfirmed (needs user review).
-        Returns the lookup result.
+        Research an unknown word.
+
+        By default this is **local-only**: it checks the wiki cache and
+        returns ``"unknown"`` for uncached words.  Pass
+        ``allow_network=True`` to explicitly opt in to an outbound
+        Wikipedia lookup.  This design honours the project's
+        *local-first, zero API* and *privacy by architecture* principles
+        — no data leaves the machine unless the caller requests it.
+
+        Caches result.  If *auto_confirm* is ``False``, marks the entry
+        as unconfirmed (needs user review).
         """
-        # Already cached?
-        cache = self._data.setdefault("wiki_cache", {})
+        # Check cache (read-only — no mutation when allow_network is False)
+        cache = self._data.get("wiki_cache", {})
         if word in cache:
             return cache[word]
 
+        if not allow_network:
+            return {
+                "inferred_type": "unknown",
+                "confidence": 0.0,
+                "wiki_summary": None,
+                "wiki_title": None,
+                "word": word,
+                "confirmed": False,
+                "note": "network lookup disabled — pass allow_network=True to query Wikipedia",
+            }
+
+        # Network path — ensure wiki_cache key exists before writing
+        cache = self._data.setdefault("wiki_cache", {})
         result = _wikipedia_lookup(word)
-        result["word"] = word
-        result["confirmed"] = auto_confirm
+        result.setdefault("word", word)
+        result.setdefault("confirmed", auto_confirm)
 
         cache[word] = result
         self.save()

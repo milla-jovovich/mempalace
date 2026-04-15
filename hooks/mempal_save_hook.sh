@@ -65,15 +65,18 @@ MEMPAL_DIR=""
 INPUT=$(cat)
 
 # Parse all fields in a single Python call (3x faster than separate invocations)
+# SECURITY: All values are sanitized before being interpolated into shell assignments.
+# stop_hook_active is coerced to a strict True/False to prevent command injection via eval.
 eval $(echo "$INPUT" | python3 -c "
-import sys, json
+import sys, json, re
 data = json.load(sys.stdin)
 sid = data.get('session_id', 'unknown')
-sha = data.get('stop_hook_active', False)
+sha_raw = data.get('stop_hook_active', False)
 tp = data.get('transcript_path', '')
 # Shell-safe output — only allow alphanumeric, underscore, hyphen, slash, dot, tilde
-import re
 safe = lambda s: re.sub(r'[^a-zA-Z0-9_/.\-~]', '', str(s))
+# Coerce stop_hook_active to strict boolean string
+sha = 'True' if sha_raw is True or str(sha_raw).lower() in ('true', '1', 'yes') else 'False'
 print(f'SESSION_ID=\"{safe(sid)}\"')
 print(f'STOP_HOOK_ACTIVE=\"{sha}\"')
 print(f'TRANSCRIPT_PATH=\"{safe(tp)}\"')
@@ -118,7 +121,11 @@ fi
 LAST_SAVE_FILE="$STATE_DIR/${SESSION_ID}_last_save"
 LAST_SAVE=0
 if [ -f "$LAST_SAVE_FILE" ]; then
-    LAST_SAVE=$(cat "$LAST_SAVE_FILE")
+    LAST_SAVE_RAW=$(cat "$LAST_SAVE_FILE")
+    # SECURITY: Validate as plain integer before arithmetic to prevent command injection
+    if [[ "$LAST_SAVE_RAW" =~ ^[0-9]+$ ]]; then
+        LAST_SAVE="$LAST_SAVE_RAW"
+    fi
 fi
 
 SINCE_LAST=$((EXCHANGE_COUNT - LAST_SAVE))
@@ -149,17 +156,22 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
         "$PYTHON" -m mempalace mine "$MINE_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
     fi
 
-    # Notify the AI that a checkpoint happened — but do NOT ask it to write
-    # anything in chat. All filing happens in the background via the pipeline.
-    # The old version asked the agent to write diary entries, add drawers, and
-    # add KG triples in the chat window — that cost ~$1/session in retransmitted
-    # tokens and cluttered the conversation.
-    cat << 'HOOKJSON'
+    # MEMPAL_VERBOSE toggle:
+    #   true  = developer mode — block and show diaries/code in chat
+    #   false = silent mode (default) — save in background, no chat clutter
+    # Set via: export MEMPAL_VERBOSE=true
+    if [ "$MEMPAL_VERBOSE" = "true" ] || [ "$MEMPAL_VERBOSE" = "1" ]; then
+        cat << 'HOOKJSON'
 {
-  "decision": "allow",
-  "reason": "MemPalace auto-save checkpoint. Your conversation is being saved verbatim in the background — no action needed from you. Continue working."
+  "decision": "block",
+  "reason": "MemPalace save checkpoint. Write a brief session diary entry covering key topics, decisions, and code changes since the last save. Use verbatim quotes where possible. Continue after saving."
 }
 HOOKJSON
+    else
+        # Silent mode: return empty JSON to not block. "decision": "allow" is
+        # not a valid value — only "block" or {} are recognized.
+        echo '{}'
+    fi
 else
     # Not time yet — let the AI stop normally
     echo "{}"

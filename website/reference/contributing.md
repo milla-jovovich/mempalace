@@ -68,7 +68,7 @@ If you're planning a significant change, open an issue first. Key principles:
 - **Verbatim first** — never summarize user content. Store exact words.
 - **Local first** — everything runs on the user's machine. No cloud dependencies.
 - **Zero API by default** — core features must work without any API key.
-- **Palace structure matters** — wings, halls, and rooms aren't cosmetic — they drive a 34% retrieval improvement.
+- **Palace structure is scoping, not magic** — wings, halls, and rooms act as metadata filters in the underlying vector store. They make scoping predictable when a palace holds many unrelated projects; they are not a novel retrieval mechanism.
 
 ## Community
 

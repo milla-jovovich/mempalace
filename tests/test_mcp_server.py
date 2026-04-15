@@ -212,6 +212,25 @@ class TestHandleRequest:
 
 
 class TestReadTools:
+    def test_status_cold_start_no_collection(self, monkeypatch, config, palace_path, kg):
+        """Status on a valid palace with no ChromaDB collection yet (#830).
+
+        After `mempalace init`, chroma.sqlite3 exists but the mempalace_drawers
+        collection has not been created (no mine or add_drawer yet).  Status
+        should return total_drawers: 0, not 'No palace found'.
+        """
+        import chromadb
+
+        _patch_mcp_server(monkeypatch, config, kg)
+        # Create the DB file (init does this) but NOT the collection
+        client = chromadb.PersistentClient(path=palace_path)
+        del client
+        from mempalace.mcp_server import tool_status
+
+        result = tool_status()
+        assert "error" not in result, f"cold-start should not error: {result}"
+        assert result["total_drawers"] == 0
+
     def test_status_empty_palace(self, monkeypatch, config, palace_path, kg):
         _patch_mcp_server(monkeypatch, config, kg)
         _client, _col = _get_collection(palace_path, create=True)

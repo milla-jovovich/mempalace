@@ -47,6 +47,30 @@ def sanitize_name(value: str, field_name: str = "name") -> str:
     return value
 
 
+def sanitize_kg_value(value: str, field_name: str = "value") -> str:
+    """Validate a knowledge-graph entity name (subject or object).
+
+    More permissive than sanitize_name — allows punctuation like commas,
+    colons, and parentheses that are common in natural-language KG values.
+    Only blocks null bytes and over-length strings.
+
+    Not used for wing/room names (which have filesystem constraints) or
+    predicates (which should be simple relationship identifiers).
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+
+    value = value.strip()
+
+    if len(value) > MAX_NAME_LENGTH:
+        raise ValueError(f"{field_name} exceeds maximum length of {MAX_NAME_LENGTH} characters")
+
+    if "\x00" in value:
+        raise ValueError(f"{field_name} contains null bytes")
+
+    return value
+
+
 def sanitize_content(value: str, max_length: int = 100_000) -> str:
     """Validate drawer/diary content length."""
     if not isinstance(value, str) or not value.strip():
@@ -297,4 +321,8 @@ class MempalaceConfig:
         self._config_dir.mkdir(parents=True, exist_ok=True)
         with open(self._people_map_file, "w") as f:
             json.dump(people_map, f, indent=2)
+        try:
+            self._people_map_file.chmod(0o600)
+        except (OSError, NotImplementedError):
+            pass
         return self._people_map_file

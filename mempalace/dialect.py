@@ -158,6 +158,8 @@ _FLAG_SIGNALS = {
 }
 
 # Common filler/stop words to strip from topic extraction
+_ALPHA_RE = re.compile(r"[^a-zA-Z]")
+
 _STOP_WORDS = {
     "the",
     "a",
@@ -541,7 +543,7 @@ class Dialect:
         # Fallback: find capitalized words that look like names (2+ chars, not sentence-start)
         words = text.split()
         for i, w in enumerate(words):
-            clean = re.sub(r"[^a-zA-Z]", "", w)
+            clean = _ALPHA_RE.sub("", w)
             if (
                 len(clean) >= 2
                 and clean[0].isupper()

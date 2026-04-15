@@ -83,6 +83,20 @@ class SearchError(Exception):
 _TOKEN_RE = re.compile(r"\w{2,}", re.UNICODE)
 
 
+def _first_or_empty(results: dict, key: str) -> list:
+    """Return the first inner list of a ChromaDB query result, or [].
+
+    ChromaDB returns shapes like ``{"documents": [["a", "b"]], ...}`` for a
+    successful query, but ``{"documents": [], ...}`` (empty outer list) when
+    the collection is empty or the filter excludes everything. Indexing
+    ``[0]`` blindly raises IndexError in that case (issue #195).
+    """
+    outer = results.get(key)
+    if not outer:
+        return []
+    return outer[0] or []
+
+
 def _tokenize(text: str) -> list:
     """Lowercase + strip to alphanumeric tokens of length ≥ 2."""
     return _TOKEN_RE.findall(text.lower())
@@ -304,9 +318,9 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"\n  Search error: {e}")
         raise SearchError(f"Search error: {e}") from e
 
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    dists = results["distances"][0]
+    docs = _first_or_empty(results, "documents")
+    metas = _first_or_empty(results, "metadatas")
+    dists = _first_or_empty(results, "distances")
 
     if not docs:
         print(f'\n  No results found for: "{query}"')
@@ -438,9 +452,9 @@ def search_memories(  # noqa: C901
         closet_results = closets_col.query(**ckwargs)
         for rank, (cdoc, cmeta, cdist) in enumerate(
             zip(
-                closet_results["documents"][0],
-                closet_results["metadatas"][0],
-                closet_results["distances"][0],
+                _first_or_empty(closet_results, "documents"),
+                _first_or_empty(closet_results, "metadatas"),
+                _first_or_empty(closet_results, "distances"),
             )
         ):
             source = cmeta.get("source_file", "")
@@ -456,13 +470,13 @@ def search_memories(  # noqa: C901
     CLOSET_DISTANCE_CAP = 1.5  # cosine dist > 1.5 = too weak to use as signal
 
     scored: list = []
-    ids_row = drawer_results.get("ids", [[]])[0] or []
-    for doc, meta, dist, drawer_id in zip(
-        drawer_results["documents"][0],
-        drawer_results["metadatas"][0],
-        drawer_results["distances"][0],
-        ids_row,
-    ):
+    docs = _first_or_empty(drawer_results, "documents")
+    metas = _first_or_empty(drawer_results, "metadatas")
+    dists = _first_or_empty(drawer_results, "distances")
+    ids_row = (drawer_results.get("ids") or [[]])[0] or []
+    if len(ids_row) < len(docs):
+        ids_row = list(ids_row) + [""] * (len(docs) - len(ids_row))
+    for doc, meta, dist, drawer_id in zip(docs, metas, dists, ids_row):
         # Filter on raw distance before rounding to avoid precision loss.
         if max_distance > 0.0 and dist > max_distance:
             continue
@@ -488,6 +502,7 @@ def search_memories(  # noqa: C901
             "wing": meta.get("wing", "unknown"),
             "room": meta.get("room", "unknown"),
             "source_file": Path(source).name if source else "?",
+            "created_at": meta.get("filed_at", "unknown"),
             "similarity": sim,
             "original_similarity": sim,
             "distance": round(dist, 4),
@@ -574,7 +589,7 @@ def search_memories(  # noqa: C901
     result: dict[str, Any] = {
         "query": query,
         "filters": {"wing": wing, "room": room},
-        "total_before_filter": len(drawer_results["documents"][0]),
+        "total_before_filter": len(_first_or_empty(drawer_results, "documents")),
         "results": hits,
         "hits": hits,
     }

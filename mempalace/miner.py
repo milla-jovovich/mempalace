@@ -264,16 +264,32 @@ def load_config(project_dir: str) -> dict:
     """Load mempalace.yaml from project directory (falls back to mempal.yaml)."""
     import yaml
 
-    config_path = Path(project_dir).expanduser().resolve() / "mempalace.yaml"
+    resolved_project_dir = Path(project_dir).expanduser().resolve()
+    config_path = resolved_project_dir / "mempalace.yaml"
     if not config_path.exists():
         # Fallback to legacy name
-        legacy_path = Path(project_dir).expanduser().resolve() / "mempal.yaml"
+        legacy_path = resolved_project_dir / "mempal.yaml"
         if legacy_path.exists():
             config_path = legacy_path
         else:
-            print(f"ERROR: No mempalace.yaml found in {project_dir}")
-            print(f"Run: mempalace init {project_dir}")
-            sys.exit(1)
+            wing_name = resolved_project_dir.name
+            print(
+                f"  No mempalace.yaml found in {resolved_project_dir} "
+                f"— using auto-detected defaults (wing='{wing_name}'). "
+                "Directories with the same basename will share a wing; "
+                "add mempalace.yaml to disambiguate.",
+                file=sys.stderr,
+            )
+            return {
+                "wing": wing_name,
+                "rooms": [
+                    {
+                        "name": "general",
+                        "description": "All project files",
+                        "keywords": ["general"],
+                    }
+                ],
+            }
     with open(config_path) as f:
         return yaml.safe_load(f)
 

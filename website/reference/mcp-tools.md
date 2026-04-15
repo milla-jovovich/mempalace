@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-Detailed parameter schemas for all 19 MCP tools.
+Detailed parameter schemas for all 29 MCP tools.
 
 ## Palace — Read Tools
 
@@ -114,6 +114,48 @@ Delete a drawer by ID. Irreversible.
 
 ---
 
+### `mempalace_get_drawer`
+
+Fetch a single drawer by ID — returns full content and metadata.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `drawer_id` | string | **Yes** | ID of the drawer to fetch |
+
+**Returns:** `{ drawer: { id, wing, room, content, ... } }`
+
+---
+
+### `mempalace_list_drawers`
+
+List drawers with pagination. Optional wing/room filter. Returns IDs, wings, rooms, and content previews.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `wing` | string | No | Filter by wing |
+| `room` | string | No | Filter by room |
+| `limit` | integer | No | Max results per page (default 20, max 100) |
+| `offset` | integer | No | Offset for pagination (default 0) |
+
+**Returns:** `{ drawers: [...], total, limit, offset }`
+
+---
+
+### `mempalace_update_drawer`
+
+Update an existing drawer's content and/or metadata (wing, room). Fetches the existing drawer first; returns an error if not found.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `drawer_id` | string | **Yes** | ID of the drawer to update |
+| `content` | string | No | New content (omit to keep existing) |
+| `wing` | string | No | New wing (omit to keep existing) |
+| `room` | string | No | New room (omit to keep existing) |
+
+**Returns:** `{ success, drawer_id, updated_fields }`
+
+---
+
 ## Knowledge Graph Tools
 
 ### `mempalace_kg_query`
@@ -221,6 +263,61 @@ Palace graph overview: nodes, tunnels, edges, connectivity.
 
 ---
 
+### `mempalace_create_tunnel`
+
+Create a cross-wing tunnel linking two palace locations. Use when content in one project relates to another — e.g., an API design in `project_api` connects to a database schema in `project_database`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `source_wing` | string | **Yes** | Wing of the source |
+| `source_room` | string | **Yes** | Room in the source wing |
+| `target_wing` | string | **Yes** | Wing of the target |
+| `target_room` | string | **Yes** | Room in the target wing |
+| `label` | string | No | Description of the connection |
+| `source_drawer_id` | string | No | Specific source drawer ID |
+| `target_drawer_id` | string | No | Specific target drawer ID |
+
+**Returns:** `{ success, tunnel_id, source, target }`
+
+---
+
+### `mempalace_list_tunnels`
+
+List all explicit cross-wing tunnels. Optionally filter by wing.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `wing` | string | No | Filter tunnels by wing (source or target) |
+
+**Returns:** `{ tunnels: [...], count }`
+
+---
+
+### `mempalace_delete_tunnel`
+
+Delete an explicit tunnel by its ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `tunnel_id` | string | **Yes** | Tunnel ID to delete |
+
+**Returns:** `{ success, tunnel_id }`
+
+---
+
+### `mempalace_follow_tunnels`
+
+Follow tunnels from a room to see what it connects to in other wings. Returns connected rooms with drawer previews.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `wing` | string | **Yes** | Wing to start from |
+| `room` | string | **Yes** | Room to follow tunnels from |
+
+**Returns:** `[{ wing, room, label, previews }]`
+
+---
+
 ## Agent Diary Tools
 
 ### `mempalace_diary_write`
@@ -247,3 +344,38 @@ Read recent diary entries.
 | `last_n` | integer | No | Number of recent entries (default: 10) |
 
 **Returns:** `{ agent, entries: [{ date, timestamp, topic, content }], total, showing }`
+
+---
+
+## System Tools
+
+### `mempalace_hook_settings`
+
+Get or set auto-save hook behaviour. `silent_save=true` saves directly without MCP-level clutter; `silent_save=false` uses the legacy blocking path. `desktop_toast=true` surfaces a desktop notification when a save completes. Call with no arguments to view the current settings.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `silent_save` | boolean | No | `true` = silent direct save, `false` = blocking MCP calls |
+| `desktop_toast` | boolean | No | `true` = show desktop toast via `notify-send` |
+
+**Returns:** `{ silent_save, desktop_toast }`
+
+---
+
+### `mempalace_memories_filed_away`
+
+Check whether a recent palace checkpoint was saved. Returns message count and timestamp of the last save.
+
+**Parameters:** None
+
+**Returns:** `{ filed, message_count, timestamp }`
+
+---
+
+### `mempalace_reconnect`
+
+Force a reconnect to the palace database. Use this after external scripts or CLI commands modified the palace directly, which can leave the in-memory HNSW index stale.
+
+**Parameters:** None
+
+**Returns:** `{ success, palace_path }`

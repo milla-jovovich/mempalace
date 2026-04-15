@@ -49,9 +49,15 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
         return {"wings": 0, "rooms": 0, "drawers": 0}
 
     os.makedirs(output_dir, exist_ok=True)
+    try:
+        os.chmod(output_dir, 0o700)
+    except (OSError, NotImplementedError):
+        pass
 
     # Track which room files have been opened (so we can append vs overwrite)
     opened_rooms: set[tuple[str, str]] = set()
+    # Track which wing directories have been created and chmoded
+    created_wing_dirs: set[str] = set()
     # Track stats per wing: {wing: {room: count}}
     wing_stats: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     total_drawers = 0
@@ -82,7 +88,13 @@ def export_palace(palace_path: str, output_dir: str, format: str = "markdown") -
         for wing, rooms in batch_grouped.items():
             safe_wing = _safe_path_component(wing)
             wing_dir = os.path.join(output_dir, safe_wing)
-            os.makedirs(wing_dir, exist_ok=True)
+            if wing_dir not in created_wing_dirs:
+                os.makedirs(wing_dir, exist_ok=True)
+                try:
+                    os.chmod(wing_dir, 0o700)
+                except (OSError, NotImplementedError):
+                    pass
+                created_wing_dirs.add(wing_dir)
 
             for room, drawers in rooms.items():
                 safe_room = _safe_path_component(room)

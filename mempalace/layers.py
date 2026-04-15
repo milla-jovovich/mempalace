@@ -23,7 +23,7 @@ from collections import defaultdict
 
 from .config import MempalaceConfig
 from .palace import get_collection as _get_collection
-from .searcher import build_where_filter
+from .searcher import _first_or_empty, build_where_filter
 
 
 # ---------------------------------------------------------------------------
@@ -272,9 +272,9 @@ class Layer3:
         except Exception as e:
             return f"Search error: {e}"
 
-        docs = results["documents"][0]
-        metas = results["metadatas"][0]
-        dists = results["distances"][0]
+        docs = _first_or_empty(results, "documents")
+        metas = _first_or_empty(results, "metadatas")
+        dists = _first_or_empty(results, "distances")
 
         if not docs:
             return "No results found."
@@ -323,9 +323,9 @@ class Layer3:
 
         hits = []
         for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
+            _first_or_empty(results, "documents"),
+            _first_or_empty(results, "metadatas"),
+            _first_or_empty(results, "distances"),
         ):
             hits.append(
                 {
