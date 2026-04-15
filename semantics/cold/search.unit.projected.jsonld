@@ -1,0 +1,53 @@
+{
+  "@context": [
+    "../contexts/core.context.jsonld",
+    "../contexts/full-stack-unit.context.jsonld"
+  ],
+  "@graph": [
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search",
+      "@type": "Capability",
+      "category": "retrieval",
+      "description": "Search drawers and closets using MemPalace retrieval.",
+      "enabled": true,
+      "l0": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search/l0",
+        "@type": "RuntimeConfig",
+        "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo",
+        "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/search",
+        "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/search-public"
+      }],
+      "l1": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search/l1",
+        "@type": "Binding",
+        "commandName": "search",
+        "toolName": "mempalace_search",
+        "exposure": "public",
+        "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/search/python"
+      }],
+      "l2": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search/l2",
+        "@type": "ProjectionView",
+        "participatesIn": [
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-query",
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/agent-recall"
+        ]
+      }],
+      "l3": [{
+        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search/l3",
+        "@type": "ProjectionView",
+        "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/search-events",
+        "emitsArtifact": [
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/cli-registry-view",
+          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/mcp-tool-registry-view"
+        ]
+      }]
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/search/python",
+      "@type": "AtomicImplementation",
+      "pythonModule": "mempalace.searcher",
+      "pythonSymbol": "search"
+    }
+  ]
+}
