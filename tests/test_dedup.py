@@ -198,8 +198,15 @@ def test_dedup_source_group_query_failure_keeps():
 # ── show_stats ────────────────────────────────────────────────────────
 
 
-@patch("mempalace.dedup.chromadb")
-def test_show_stats(mock_chromadb, tmp_path):
+def _install_mock_backend(mock_backend_cls, collection):
+    mock_backend = MagicMock()
+    mock_backend.get_collection.return_value = collection
+    mock_backend_cls.return_value = mock_backend
+    return mock_backend
+
+
+@patch("mempalace.dedup.ChromaBackend")
+def test_show_stats(mock_backend_cls, tmp_path):
     mock_col = MagicMock()
     mock_col.count.return_value = 5
     mock_col.get.side_effect = [
@@ -215,9 +222,7 @@ def test_show_stats(mock_chromadb, tmp_path):
         },
         {"ids": []},
     ]
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    _install_mock_backend(mock_backend_cls, mock_col)
 
     dedup.show_stats(palace_path=str(tmp_path))  # should not raise
 
@@ -227,13 +232,11 @@ def test_show_stats(mock_chromadb, tmp_path):
 
 @patch("mempalace.dedup.dedup_source_group")
 @patch("mempalace.dedup.get_source_groups")
-@patch("mempalace.dedup.chromadb")
-def test_dedup_palace_dry_run(mock_chromadb, mock_groups, mock_dedup_group, tmp_path):
+@patch("mempalace.dedup.ChromaBackend")
+def test_dedup_palace_dry_run(mock_backend_cls, mock_groups, mock_dedup_group, tmp_path):
     mock_col = MagicMock()
     mock_col.count.return_value = 10
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    _install_mock_backend(mock_backend_cls, mock_col)
 
     mock_groups.return_value = {"a.txt": ["d1", "d2", "d3", "d4", "d5"]}
     mock_dedup_group.return_value = (["d1", "d2", "d3"], ["d4", "d5"])
@@ -244,13 +247,11 @@ def test_dedup_palace_dry_run(mock_chromadb, mock_groups, mock_dedup_group, tmp_
 
 @patch("mempalace.dedup.dedup_source_group")
 @patch("mempalace.dedup.get_source_groups")
-@patch("mempalace.dedup.chromadb")
-def test_dedup_palace_with_wing(mock_chromadb, mock_groups, mock_dedup_group, tmp_path):
+@patch("mempalace.dedup.ChromaBackend")
+def test_dedup_palace_with_wing(mock_backend_cls, mock_groups, mock_dedup_group, tmp_path):
     mock_col = MagicMock()
     mock_col.count.return_value = 10
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    _install_mock_backend(mock_backend_cls, mock_col)
 
     mock_groups.return_value = {}
     dedup.dedup_palace(palace_path=str(tmp_path), wing="test_wing", dry_run=True)
@@ -259,13 +260,11 @@ def test_dedup_palace_with_wing(mock_chromadb, mock_groups, mock_dedup_group, tm
 
 @patch("mempalace.dedup.dedup_source_group")
 @patch("mempalace.dedup.get_source_groups")
-@patch("mempalace.dedup.chromadb")
-def test_dedup_palace_no_groups(mock_chromadb, mock_groups, mock_dedup_group, tmp_path):
+@patch("mempalace.dedup.ChromaBackend")
+def test_dedup_palace_no_groups(mock_backend_cls, mock_groups, mock_dedup_group, tmp_path):
     mock_col = MagicMock()
     mock_col.count.return_value = 3
-    mock_client = MagicMock()
-    mock_client.get_collection.return_value = mock_col
-    mock_chromadb.PersistentClient.return_value = mock_client
+    _install_mock_backend(mock_backend_cls, mock_col)
 
     mock_groups.return_value = {}
     dedup.dedup_palace(palace_path=str(tmp_path), dry_run=True)

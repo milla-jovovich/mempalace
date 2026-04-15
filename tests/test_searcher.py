@@ -51,15 +51,35 @@ class TestSearchMemories:
         assert "source_file" in hit
         assert "similarity" in hit
         assert isinstance(hit["similarity"], float)
+        assert "created_at" in hit
+
+    def test_created_at_contains_filed_at(self, palace_path, seeded_collection):
+        """created_at surfaces the filed_at metadata from the drawer."""
+        result = search_memories("JWT authentication", palace_path)
+        hit = result["results"][0]
+        assert hit["created_at"] == "2026-01-01T00:00:00"
+
+    def test_created_at_fallback_when_filed_at_missing(self):
+        """created_at defaults to 'unknown' when filed_at is absent."""
+        mock_col = MagicMock()
+        mock_col.query.return_value = {
+            "ids": [["drawer_no_date"]],
+            "documents": [["Some text without a date"]],
+            "metadatas": [[{"wing": "project", "room": "backend", "source_file": "x.py"}]],
+            "distances": [[0.1]],
+        }
+
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
+            result = search_memories("test", "/fake/path")
+        hit = result["results"][0]
+        assert hit["created_at"] == "unknown"
 
     def test_search_memories_query_error(self):
         """search_memories returns error dict when query raises."""
         mock_col = MagicMock()
         mock_col.query.side_effect = RuntimeError("query failed")
-        mock_client = MagicMock()
-        mock_client.get_collection.return_value = mock_col
 
-        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
             result = search_memories("test", "/fake/path")
         assert "error" in result
         assert "query failed" in result["error"]
@@ -111,10 +131,8 @@ class TestSearchCLI:
         """search raises SearchError when query fails."""
         mock_col = MagicMock()
         mock_col.query.side_effect = RuntimeError("boom")
-        mock_client = MagicMock()
-        mock_client.get_collection.return_value = mock_col
 
-        with patch("mempalace.searcher.chromadb.PersistentClient", return_value=mock_client):
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
             with pytest.raises(SearchError, match="Search error"):
                 search("test", "/fake/path")
 
