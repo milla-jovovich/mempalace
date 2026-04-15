@@ -1,33 +1,53 @@
 {
   "name": "MemPalace Codespace",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "args": {
-      "VARIANT": "3.11-bookworm"
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.13"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": "false",
+      "configureZshAsDefaultShell": "false",
+      "upgradePackages": "true"
     }
   },
   "remoteUser": "vscode",
-  "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+  "hostRequirements": {
+    "cpus": 8,
+    "memory": "16gb",
+    "storage": "32gb"
   },
   "containerEnv": {
     "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-    "PYTHONDONTWRITEBYTECODE": "1"
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUNBUFFERED": "1"
   },
   "postCreateCommand": "bash scripts/bootstrap_codespace.sh",
   "updateContentCommand": "bash scripts/bootstrap_codespace.sh",
   "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "README.md",
+        "semantics/cold/mempalace.binding.graph.jsonld",
+        "mempalace/runtime_profile.json"
+      ]
+    },
     "vscode": {
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/python/current/bin/python",
-        "terminal.integrated.defaultProfile.linux": "bash"
+        "python.terminal.activateEnvironment": false,
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true
       },
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
         "ms-toolsai.jupyter",
         "redhat.vscode-yaml",
-        "tamasfe.even-better-toml"
+        "tamasfe.even-better-toml",
+        "GitHub.vscode-github-actions"
       ]
     }
   }
