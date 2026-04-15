@@ -13,12 +13,14 @@ import sys
 import pytest
 
 
-def _patch_mcp_server(monkeypatch, config, kg):
+def _patch_mcp_server(monkeypatch, config, kg, tracker=None):
     """Patch the mcp_server module globals to use test fixtures."""
     from mempalace import mcp_server
 
     monkeypatch.setattr(mcp_server, "_config", config)
     monkeypatch.setattr(mcp_server, "_kg", kg)
+    if tracker is not None:
+        monkeypatch.setattr(mcp_server, "_tracker", tracker)
 
 
 def _get_collection(palace_path, create=False):
@@ -116,6 +118,9 @@ class TestHandleRequest:
         assert "mempalace_search" in names
         assert "mempalace_add_drawer" in names
         assert "mempalace_kg_add" in names
+        assert "mempalace_project_register" in names
+        assert "mempalace_task_resume" in names
+        assert "mempalace_context_pack" in names
 
     def test_null_arguments_does_not_hang(self, monkeypatch, config, palace_path, seeded_kg):
         """Sending arguments: null should return a result, not hang (#394)."""
@@ -425,9 +430,9 @@ class TestWriteTools:
 
         assert result1["success"] is True
         assert result2["success"] is True
-        assert (
-            result1["drawer_id"] != result2["drawer_id"]
-        ), "Documents with shared header but different content must have distinct drawer IDs"
+        assert result1["drawer_id"] != result2["drawer_id"], (
+            "Documents with shared header but different content must have distinct drawer IDs"
+        )
 
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
@@ -691,6 +696,82 @@ class TestDiaryTools:
 
 
 # ── Cache Invalidation (inode/mtime) ──────────────────────────────────
+
+
+class TestProjectTrackerTools:
+    def test_project_register_and_status(self, monkeypatch, config, palace_path, kg, tmp_path):
+        from mempalace.project_tracker import ProjectTracker
+
+        tracker = ProjectTracker(db_path=str(tmp_path / "tracker.sqlite3"))
+        _patch_mcp_server(monkeypatch, config, kg, tracker=tracker)
+        from mempalace.mcp_server import tool_project_register, tool_project_status
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        (project_dir / "mempalace.yaml").write_text("wing: demo\n", encoding="utf-8")
+
+        registered = tool_project_register(path=str(project_dir))
+        assert registered["wing"] == "demo"
+
+        status = tool_project_status(project=registered["project_id"])
+        assert status["project"]["project_id"] == registered["project_id"]
+
+    def test_task_start_log_checkpoint_and_resume(
+        self, monkeypatch, config, palace_path, kg, tmp_path
+    ):
+        from mempalace.project_tracker import ProjectTracker
+
+        tracker = ProjectTracker(db_path=str(tmp_path / "tracker.sqlite3"))
+        _patch_mcp_server(monkeypatch, config, kg, tracker=tracker)
+        from mempalace.mcp_server import (
+            tool_project_register,
+            tool_task_checkpoint,
+            tool_task_log,
+            tool_task_resume,
+            tool_task_start,
+        )
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        project = tool_project_register(path=str(project_dir))
+
+        task = tool_task_start(project=project["project_id"], title="Track me", stage="plan")
+        task_id = task["task_id"]
+
+        logged = tool_task_log(task_id=task_id, message="event", stage="work", percent=50)
+        assert logged["task"]["stage"] == "work"
+
+        checkpoint = tool_task_checkpoint(task_id=task_id, summary="saved", stage="work")
+        assert checkpoint["checkpoint"]["summary"] == "saved"
+
+        resumed = tool_task_resume(project=project["project_id"])
+        assert resumed["task"]["task_id"] == task_id
+        assert resumed["latest_checkpoint"]["summary"] == "saved"
+
+    def test_context_pack_builds_threaded_prompt(
+        self, monkeypatch, config, palace_path, kg, tmp_path, seeded_collection
+    ):
+        from mempalace.project_tracker import ProjectTracker
+
+        tracker = ProjectTracker(db_path=str(tmp_path / "tracker.sqlite3"))
+        _patch_mcp_server(monkeypatch, config, kg, tracker=tracker)
+        from mempalace.mcp_server import tool_context_pack, tool_project_register, tool_task_start
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        project = tool_project_register(path=str(project_dir), wing="project")
+        task = tool_task_start(project=project["project_id"], title="Trace auth", stage="plan")
+
+        packed = tool_context_pack(
+            query="JWT authentication",
+            project=project["project_id"],
+            task_id=task["task_id"],
+            max_chars=4000,
+        )
+
+        assert packed["thread"]["thread_id"] == task["task_id"]
+        assert "THREAD SNAPSHOT" in packed["prompt"]
+        assert packed["search"]["results"]
 
 
 class TestCacheInvalidation:

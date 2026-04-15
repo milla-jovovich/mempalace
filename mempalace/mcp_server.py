@@ -45,7 +45,9 @@ from .palace_graph import (
     follow_tunnels,
 )
 
+from .context_manager import ContextManager, ContextManagerError
 from .knowledge_graph import KnowledgeGraph
+from .project_tracker import ProjectTracker, ProjectTrackerError
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
@@ -76,6 +78,17 @@ if _args.palace:
     _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
 else:
     _kg = KnowledgeGraph()
+
+if _args.palace:
+    _tracker = ProjectTracker(
+        db_path=os.path.join(os.path.dirname(_config.palace_path), "project_tracker.sqlite3")
+    )
+else:
+    _tracker = ProjectTracker(db_path=_config.project_tracker_path)
+
+
+def _get_context_manager():
+    return ContextManager(palace_path=_config.palace_path, tracker=_tracker)
 
 
 _client_cache = None
@@ -1080,6 +1093,230 @@ def tool_memories_filed_away():
         }
 
 
+# ==================== PROJECT TRACKER ====================
+
+
+def tool_project_register(
+    path: str,
+    name: str = None,
+    wing: str = None,
+    source_type: str = "local",
+    status: str = "active",
+    metadata: dict = None,
+):
+    try:
+        _wal_log(
+            "project_register",
+            {
+                "path": path,
+                "name": name,
+                "wing": wing,
+                "source_type": source_type,
+                "status": status,
+            },
+        )
+        return _tracker.register_project(
+            path,
+            name=name,
+            wing=wing,
+            source_type=source_type,
+            status=status,
+            metadata=metadata,
+        )
+    except ProjectTrackerError as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_project_list(limit: int = 50):
+    try:
+        return _tracker.list_projects(limit=limit)
+    except ProjectTrackerError as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_project_status(project: str = None):
+    try:
+        return _tracker.project_status(selector=project)
+    except ProjectTrackerError as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_task_start(
+    project: str,
+    title: str,
+    status: str = "running",
+    stage: str = None,
+    percent: float = None,
+    summary: str = None,
+    metadata: dict = None,
+):
+    try:
+        _wal_log(
+            "task_start",
+            {
+                "project": project,
+                "title": title,
+                "status": status,
+                "stage": stage,
+                "percent": percent,
+                "summary": summary,
+            },
+        )
+        return _tracker.start_task(
+            project,
+            title,
+            status=status,
+            stage=stage,
+            percent=percent,
+            summary=summary,
+            metadata=metadata,
+        )
+    except ProjectTrackerError as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_task_update(
+    task_id: str,
+    status: str = None,
+    stage: str = None,
+    percent: float = None,
+    summary: str = None,
+    metadata: dict = None,
+):
+    try:
+        _wal_log(
+            "task_update",
+            {
+                "task_id": task_id,
+                "status": status,
+                "stage": stage,
+                "percent": percent,
+                "summary": summary,
+            },
+        )
+        return _tracker.update_task(
+            task_id,
+            status=status,
+            stage=stage,
+            percent=percent,
+            summary=summary,
+            metadata=metadata,
+        )
+    except ProjectTrackerError as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_task_log(
+    task_id: str,
+    message: str,
+    level: str = "info",
+    kind: str = "log",
+    stage: str = None,
+    percent: float = None,
+    payload: dict = None,
+):
+    try:
+        _wal_log(
+            "task_log",
+            {
+                "task_id": task_id,
+                "message": message,
+                "level": level,
+                "kind": kind,
+                "stage": stage,
+                "percent": percent,
+            },
+        )
+        return _tracker.log_event(
+            task_id,
+            message,
+            level=level,
+            kind=kind,
+            stage=stage,
+            percent=percent,
+            payload=payload,
+        )
+    except ProjectTrackerError as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_task_checkpoint(task_id: str, summary: str, stage: str = None, state: dict = None):
+    try:
+        _wal_log(
+            "task_checkpoint",
+            {
+                "task_id": task_id,
+                "summary": summary,
+                "stage": stage,
+            },
+        )
+        return _tracker.add_checkpoint(task_id, summary, stage=stage, state=state)
+    except ProjectTrackerError as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_task_get(task_id: str, events: int = 20, checkpoints: int = 5):
+    try:
+        return _tracker.get_task(
+            task_id,
+            include_events=events,
+            include_checkpoints=checkpoints,
+        )
+    except ProjectTrackerError as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_task_resume(
+    task_id: str = None,
+    project: str = None,
+    events: int = 20,
+    checkpoints: int = 5,
+):
+    try:
+        return _tracker.resume_task(
+            task_id=task_id,
+            project_selector=project,
+            events_limit=events,
+            checkpoints_limit=checkpoints,
+        )
+    except ProjectTrackerError as e:
+        return {"success": False, "error": str(e)}
+
+
+def tool_context_pack(
+    query: str = None,
+    wing: str = None,
+    room: str = None,
+    task_id: str = None,
+    project: str = None,
+    agent_name: str = None,
+    memory_results: int = 5,
+    search_results: int = 5,
+    events: int = 8,
+    checkpoints: int = 3,
+    diary_entries: int = 3,
+    max_chars: int = 12000,
+):
+    try:
+        manager = _get_context_manager()
+        return manager.build_context_pack(
+            query=query,
+            wing=wing,
+            room=room,
+            task_id=task_id,
+            project_selector=project,
+            agent_name=agent_name,
+            memory_results=memory_results,
+            search_results=search_results,
+            events_limit=events,
+            checkpoints_limit=checkpoints,
+            diary_entries=diary_entries,
+            max_chars=max_chars,
+        )
+    except (ContextManagerError, ValueError) as e:
+        return {"success": False, "error": str(e)}
+
+
 # ==================== SETTINGS TOOLS ====================
 
 
@@ -1486,6 +1723,238 @@ TOOLS = {
             "required": ["agent_name"],
         },
         "handler": tool_diary_read,
+    },
+    "mempalace_project_register": {
+        "description": "Register a local project for task tracking and cross-session resume.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Project directory path"},
+                "name": {"type": "string", "description": "Override project display name"},
+                "wing": {"type": "string", "description": "Linked MemPalace wing"},
+                "source_type": {"type": "string", "description": "Project source type"},
+                "status": {"type": "string", "description": "Project status"},
+                "metadata": {
+                    "type": "object",
+                    "description": "Extra project metadata as a JSON object",
+                },
+            },
+            "required": ["path"],
+        },
+        "handler": tool_project_register,
+    },
+    "mempalace_project_list": {
+        "description": "List tracked projects with their latest task state.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max projects to return (default 50)",
+                    "minimum": 1,
+                    "maximum": 200,
+                },
+            },
+        },
+        "handler": tool_project_list,
+    },
+    "mempalace_project_status": {
+        "description": "Show the status of one tracked project or all tracked projects.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project": {
+                    "type": "string",
+                    "description": "Project id, path, or name (optional)",
+                },
+            },
+        },
+        "handler": tool_project_status,
+    },
+    "mempalace_task_start": {
+        "description": "Start a tracked task for a project.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "Project id, path, or name"},
+                "title": {"type": "string", "description": "Task title"},
+                "status": {"type": "string", "description": "Initial task status"},
+                "stage": {"type": "string", "description": "Current task stage"},
+                "percent": {"type": "number", "description": "Completion percent"},
+                "summary": {"type": "string", "description": "Short task summary"},
+                "metadata": {
+                    "type": "object",
+                    "description": "Extra task metadata as a JSON object",
+                },
+            },
+            "required": ["project", "title"],
+        },
+        "handler": tool_task_start,
+    },
+    "mempalace_task_update": {
+        "description": "Update tracked task status, stage, progress, or summary.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task id"},
+                "status": {"type": "string", "description": "New task status"},
+                "stage": {"type": "string", "description": "Current task stage"},
+                "percent": {"type": "number", "description": "Completion percent"},
+                "summary": {"type": "string", "description": "Updated summary"},
+                "metadata": {
+                    "type": "object",
+                    "description": "Task metadata patch as a JSON object",
+                },
+            },
+            "required": ["task_id"],
+        },
+        "handler": tool_task_update,
+    },
+    "mempalace_task_log": {
+        "description": "Append a structured event to a tracked task.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task id"},
+                "message": {"type": "string", "description": "Event message"},
+                "level": {"type": "string", "description": "Event level"},
+                "kind": {"type": "string", "description": "Event kind"},
+                "stage": {"type": "string", "description": "Event stage"},
+                "percent": {"type": "number", "description": "Completion percent"},
+                "payload": {
+                    "type": "object",
+                    "description": "Event payload as a JSON object",
+                },
+            },
+            "required": ["task_id", "message"],
+        },
+        "handler": tool_task_log,
+    },
+    "mempalace_task_checkpoint": {
+        "description": "Save a resumable checkpoint for a tracked task.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task id"},
+                "summary": {"type": "string", "description": "Checkpoint summary"},
+                "stage": {"type": "string", "description": "Checkpoint stage"},
+                "state": {
+                    "type": "object",
+                    "description": "Checkpoint state as a JSON object",
+                },
+            },
+            "required": ["task_id", "summary"],
+        },
+        "handler": tool_task_checkpoint,
+    },
+    "mempalace_task_get": {
+        "description": "Fetch a tracked task with recent events and checkpoints.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task id"},
+                "events": {
+                    "type": "integer",
+                    "description": "Recent events to include (default 20)",
+                    "minimum": 0,
+                    "maximum": 200,
+                },
+                "checkpoints": {
+                    "type": "integer",
+                    "description": "Recent checkpoints to include (default 5)",
+                    "minimum": 0,
+                    "maximum": 50,
+                },
+            },
+            "required": ["task_id"],
+        },
+        "handler": tool_task_get,
+    },
+    "mempalace_task_resume": {
+        "description": "Recover the latest task state for a task or project.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task id (optional)"},
+                "project": {
+                    "type": "string",
+                    "description": "Project id, path, or name (optional)",
+                },
+                "events": {
+                    "type": "integer",
+                    "description": "Recent events to include (default 20)",
+                    "minimum": 0,
+                    "maximum": 200,
+                },
+                "checkpoints": {
+                    "type": "integer",
+                    "description": "Recent checkpoints to include (default 5)",
+                    "minimum": 0,
+                    "maximum": 50,
+                },
+            },
+        },
+        "handler": tool_task_resume,
+    },
+    "mempalace_context_pack": {
+        "description": (
+            "Build a budgeted agent context pack that combines wake-up memory, "
+            "semantic search, recent thread state, checkpoints, and structured event evidence."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural language query to ground retrieval"},
+                "wing": {"type": "string", "description": "Optional wing filter"},
+                "room": {"type": "string", "description": "Optional room filter"},
+                "task_id": {"type": "string", "description": "Tracked task id to resume"},
+                "project": {
+                    "type": "string",
+                    "description": "Project id, path, or name to recover the latest task from",
+                },
+                "agent_name": {
+                    "type": "string",
+                    "description": "Agent name whose diary entries should be included",
+                },
+                "memory_results": {
+                    "type": "integer",
+                    "description": "Number of L2 recall items to include",
+                    "minimum": 1,
+                    "maximum": 20,
+                },
+                "search_results": {
+                    "type": "integer",
+                    "description": "Number of semantic search hits to include",
+                    "minimum": 1,
+                    "maximum": 20,
+                },
+                "events": {
+                    "type": "integer",
+                    "description": "Recent task events to include",
+                    "minimum": 0,
+                    "maximum": 50,
+                },
+                "checkpoints": {
+                    "type": "integer",
+                    "description": "Recent checkpoints to inspect",
+                    "minimum": 0,
+                    "maximum": 20,
+                },
+                "diary_entries": {
+                    "type": "integer",
+                    "description": "Recent diary entries to include",
+                    "minimum": 0,
+                    "maximum": 20,
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "Approximate max size of the assembled prompt",
+                    "minimum": 1200,
+                    "maximum": 100000,
+                },
+            },
+        },
+        "handler": tool_context_pack,
     },
     "mempalace_hook_settings": {
         "description": (

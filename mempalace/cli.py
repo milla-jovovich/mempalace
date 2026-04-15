@@ -16,6 +16,7 @@ Commands:
     mempalace search "query"              Find anything, exact words
     mempalace mcp                         Show MCP setup command
     mempalace wake-up                     Show L0 + L1 wake-up context
+    mempalace context pack                Build a budgeted agent context pack
     mempalace wake-up --wing my_app       Wake-up for a specific project
     mempalace status                      Show what's been filed
 
@@ -24,16 +25,58 @@ Examples:
     mempalace mine ~/projects/my_app
     mempalace mine ~/chats/claude-sessions --mode convos
     mempalace search "why did we switch to GraphQL"
+    mempalace context pack --project my_app --query "auth decisions"
     mempalace search "pricing discussion" --wing my_app --room costs
 """
 
 import os
 import sys
+import json
 import shlex
 import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+
+
+def _print_json(payload):
+    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        safe_text = text.encode(encoding, errors="backslashreplace").decode(encoding)
+        print(safe_text)
+
+
+def _parse_json_option(raw_value, field_name):
+    if raw_value is None:
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{field_name} must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise SystemExit(f"{field_name} must be a JSON object")
+    return parsed
+
+
+def _project_tracker(args):
+    from .project_tracker import ProjectTracker
+
+    return ProjectTracker(db_path=MempalaceConfig().project_tracker_path)
+
+
+def _context_manager(args):
+    from .context_manager import ContextManager
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    return ContextManager(palace_path=palace_path)
+
+
+def _tracker_error(exc):
+    print(f"Tracker error: {exc}", file=sys.stderr)
+    raise SystemExit(1) from exc
 
 
 def cmd_init(args):
@@ -168,6 +211,168 @@ def cmd_status(args):
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     status(palace_path=palace_path)
+
+
+def cmd_project_register(args):
+    from .project_tracker import ProjectTrackerError
+
+    tracker = _project_tracker(args)
+    try:
+        result = tracker.register_project(
+            args.path,
+            name=args.name,
+            wing=args.wing,
+            source_type=args.source_type,
+            status=args.status,
+            metadata=_parse_json_option(args.metadata_json, "metadata_json"),
+        )
+    except ProjectTrackerError as exc:
+        _tracker_error(exc)
+    _print_json(result)
+
+
+def cmd_project_list(args):
+    tracker = _project_tracker(args)
+    _print_json(tracker.list_projects(limit=args.limit))
+
+
+def cmd_project_status(args):
+    from .project_tracker import ProjectTrackerError
+
+    tracker = _project_tracker(args)
+    try:
+        result = tracker.project_status(selector=args.project)
+    except ProjectTrackerError as exc:
+        _tracker_error(exc)
+    _print_json(result)
+
+
+def cmd_task_start(args):
+    from .project_tracker import ProjectTrackerError
+
+    tracker = _project_tracker(args)
+    try:
+        result = tracker.start_task(
+            args.project,
+            args.title,
+            status=args.status,
+            stage=args.stage,
+            percent=args.percent,
+            summary=args.summary,
+            metadata=_parse_json_option(args.metadata_json, "metadata_json"),
+        )
+    except ProjectTrackerError as exc:
+        _tracker_error(exc)
+    _print_json(result)
+
+
+def cmd_task_update(args):
+    from .project_tracker import ProjectTrackerError
+
+    tracker = _project_tracker(args)
+    try:
+        result = tracker.update_task(
+            args.task_id,
+            status=args.status,
+            stage=args.stage,
+            percent=args.percent,
+            summary=args.summary,
+            metadata=_parse_json_option(args.metadata_json, "metadata_json"),
+        )
+    except ProjectTrackerError as exc:
+        _tracker_error(exc)
+    _print_json(result)
+
+
+def cmd_task_log(args):
+    from .project_tracker import ProjectTrackerError
+
+    tracker = _project_tracker(args)
+    try:
+        result = tracker.log_event(
+            args.task_id,
+            args.message,
+            level=args.level,
+            kind=args.kind,
+            stage=args.stage,
+            percent=args.percent,
+            payload=_parse_json_option(args.payload_json, "payload_json"),
+        )
+    except ProjectTrackerError as exc:
+        _tracker_error(exc)
+    _print_json(result)
+
+
+def cmd_task_checkpoint(args):
+    from .project_tracker import ProjectTrackerError
+
+    tracker = _project_tracker(args)
+    try:
+        result = tracker.add_checkpoint(
+            args.task_id,
+            args.summary,
+            stage=args.stage,
+            state=_parse_json_option(args.state_json, "state_json"),
+        )
+    except ProjectTrackerError as exc:
+        _tracker_error(exc)
+    _print_json(result)
+
+
+def cmd_task_show(args):
+    from .project_tracker import ProjectTrackerError
+
+    tracker = _project_tracker(args)
+    try:
+        result = tracker.get_task(
+            args.task_id,
+            include_events=args.events,
+            include_checkpoints=args.checkpoints,
+        )
+    except ProjectTrackerError as exc:
+        _tracker_error(exc)
+    _print_json(result)
+
+
+def cmd_task_resume(args):
+    from .project_tracker import ProjectTrackerError
+
+    tracker = _project_tracker(args)
+    try:
+        result = tracker.resume_task(
+            task_id=args.task_id,
+            project_selector=args.project,
+            events_limit=args.events,
+            checkpoints_limit=args.checkpoints,
+        )
+    except ProjectTrackerError as exc:
+        _tracker_error(exc)
+    _print_json(result)
+
+
+def cmd_context_pack(args):
+    from .context_manager import ContextManagerError
+
+    manager = _context_manager(args)
+    try:
+        result = manager.build_context_pack(
+            query=args.query,
+            wing=args.wing,
+            room=args.room,
+            task_id=args.task_id,
+            project_selector=args.project,
+            agent_name=args.agent,
+            memory_results=args.memory_results,
+            search_results=args.search_results,
+            events_limit=args.events,
+            checkpoints_limit=args.checkpoints,
+            diary_entries=args.diary_entries,
+            max_chars=args.max_chars,
+        )
+    except ContextManagerError as exc:
+        print(f"Context error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    _print_json(result)
 
 
 def cmd_repair(args):
@@ -557,6 +762,197 @@ def main():
     for instr_name in ["init", "search", "mine", "help", "status"]:
         instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
 
+    # project tracker
+    p_project = sub.add_parser("project", help="Manage tracked projects")
+    project_sub = p_project.add_subparsers(dest="project_action")
+
+    p_project_register = project_sub.add_parser("register", help="Register a local project path")
+    p_project_register.add_argument("path", help="Project directory path")
+    p_project_register.add_argument("--name", default=None, help="Override project display name")
+    p_project_register.add_argument("--wing", default=None, help="Override linked MemPalace wing")
+    p_project_register.add_argument(
+        "--source-type",
+        default="local",
+        help="Project source type (default: local)",
+    )
+    p_project_register.add_argument(
+        "--status",
+        choices=["active", "paused", "archived"],
+        default="active",
+        help="Project lifecycle status",
+    )
+    p_project_register.add_argument(
+        "--metadata-json",
+        default=None,
+        help="Extra project metadata as a JSON object",
+    )
+
+    p_project_list = project_sub.add_parser("list", help="List tracked projects")
+    p_project_list.add_argument("--limit", type=int, default=50, help="Max projects to return")
+
+    p_project_status = project_sub.add_parser(
+        "status",
+        help="Show one tracked project or all tracked projects",
+    )
+    p_project_status.add_argument(
+        "project",
+        nargs="?",
+        default=None,
+        help="Project id, path, or name (omit for all projects)",
+    )
+
+    p_task = sub.add_parser("task", help="Manage tracked tasks")
+    task_sub = p_task.add_subparsers(dest="task_action")
+
+    p_task_start = task_sub.add_parser("start", help="Start a tracked task for a project")
+    p_task_start.add_argument("project", help="Project id, path, or name")
+    p_task_start.add_argument("title", help="Task title")
+    p_task_start.add_argument(
+        "--status",
+        choices=["queued", "running", "waiting", "completed", "failed", "cancelled"],
+        default="running",
+        help="Initial task status",
+    )
+    p_task_start.add_argument("--stage", default=None, help="Current task stage")
+    p_task_start.add_argument("--percent", type=float, default=None, help="Completion percent")
+    p_task_start.add_argument("--summary", default=None, help="Short task summary")
+    p_task_start.add_argument(
+        "--metadata-json",
+        default=None,
+        help="Extra task metadata as a JSON object",
+    )
+
+    p_task_update = task_sub.add_parser("update", help="Update tracked task status/progress")
+    p_task_update.add_argument("task_id", help="Task id")
+    p_task_update.add_argument(
+        "--status",
+        choices=["queued", "running", "waiting", "completed", "failed", "cancelled"],
+        default=None,
+        help="New task status",
+    )
+    p_task_update.add_argument("--stage", default=None, help="Current task stage")
+    p_task_update.add_argument("--percent", type=float, default=None, help="Completion percent")
+    p_task_update.add_argument("--summary", default=None, help="Updated summary")
+    p_task_update.add_argument(
+        "--metadata-json",
+        default=None,
+        help="Task metadata patch as a JSON object",
+    )
+
+    p_task_log = task_sub.add_parser("log", help="Append a structured task event")
+    p_task_log.add_argument("task_id", help="Task id")
+    p_task_log.add_argument("message", help="Log message")
+    p_task_log.add_argument(
+        "--level",
+        choices=["debug", "info", "warning", "error"],
+        default="info",
+        help="Event level",
+    )
+    p_task_log.add_argument("--kind", default="log", help="Event kind")
+    p_task_log.add_argument("--stage", default=None, help="Stage associated with the event")
+    p_task_log.add_argument("--percent", type=float, default=None, help="Completion percent")
+    p_task_log.add_argument(
+        "--payload-json",
+        default=None,
+        help="Event payload as a JSON object",
+    )
+
+    p_task_checkpoint = task_sub.add_parser("checkpoint", help="Save a resumable checkpoint")
+    p_task_checkpoint.add_argument("task_id", help="Task id")
+    p_task_checkpoint.add_argument("summary", help="Checkpoint summary")
+    p_task_checkpoint.add_argument("--stage", default=None, help="Checkpoint stage")
+    p_task_checkpoint.add_argument(
+        "--state-json",
+        default=None,
+        help="Checkpoint state as a JSON object",
+    )
+
+    p_task_show = task_sub.add_parser("show", help="Show a tracked task")
+    p_task_show.add_argument("task_id", help="Task id")
+    p_task_show.add_argument("--events", type=int, default=20, help="Recent events to include")
+    p_task_show.add_argument(
+        "--checkpoints",
+        type=int,
+        default=5,
+        help="Recent checkpoints to include",
+    )
+
+    p_task_resume = task_sub.add_parser("resume", help="Recover the latest task state")
+    p_task_resume.add_argument("task_id", nargs="?", default=None, help="Task id (optional)")
+    p_task_resume.add_argument(
+        "--project",
+        default=None,
+        help="Project id, path, or name (used when task_id is omitted)",
+    )
+    p_task_resume.add_argument("--events", type=int, default=20, help="Recent events to include")
+    p_task_resume.add_argument(
+        "--checkpoints",
+        type=int,
+        default=5,
+        help="Recent checkpoints to include",
+    )
+
+    p_context = sub.add_parser(
+        "context",
+        help="Build a budgeted context pack from memory and tracked work",
+    )
+    context_sub = p_context.add_subparsers(dest="context_action")
+
+    p_context_pack = context_sub.add_parser(
+        "pack",
+        help="Assemble wake-up, retrieval, resume state, and event evidence",
+    )
+    p_context_pack.add_argument("--query", default=None, help="Natural language query to ground search")
+    p_context_pack.add_argument("--wing", default=None, help="Limit memory retrieval to one wing")
+    p_context_pack.add_argument("--room", default=None, help="Limit memory retrieval to one room")
+    p_context_pack.add_argument("--task-id", default=None, help="Tracked task id to resume")
+    p_context_pack.add_argument(
+        "--project",
+        default=None,
+        help="Project id, path, or name for latest-task recovery",
+    )
+    p_context_pack.add_argument(
+        "--agent",
+        default=None,
+        help="Agent name whose diary entries should be included",
+    )
+    p_context_pack.add_argument(
+        "--memory-results",
+        type=int,
+        default=5,
+        help="Number of wing/room recall results to include",
+    )
+    p_context_pack.add_argument(
+        "--search-results",
+        type=int,
+        default=5,
+        help="Number of semantic search hits to include",
+    )
+    p_context_pack.add_argument(
+        "--events",
+        type=int,
+        default=8,
+        help="Recent task events to include",
+    )
+    p_context_pack.add_argument(
+        "--checkpoints",
+        type=int,
+        default=3,
+        help="Recent checkpoints to inspect",
+    )
+    p_context_pack.add_argument(
+        "--diary-entries",
+        type=int,
+        default=3,
+        help="Recent diary entries to include",
+    )
+    p_context_pack.add_argument(
+        "--max-chars",
+        type=int,
+        default=12000,
+        help="Approximate max context size in characters",
+    )
+
     # repair
     sub.add_parser(
         "repair",
@@ -607,6 +1003,43 @@ def main():
             return
         args.name = name
         cmd_instructions(args)
+        return
+
+    if args.command == "project":
+        action = getattr(args, "project_action", None)
+        if not action:
+            p_project.print_help()
+            return
+        {
+            "register": cmd_project_register,
+            "list": cmd_project_list,
+            "status": cmd_project_status,
+        }[action](args)
+        return
+
+    if args.command == "task":
+        action = getattr(args, "task_action", None)
+        if not action:
+            p_task.print_help()
+            return
+        {
+            "start": cmd_task_start,
+            "update": cmd_task_update,
+            "log": cmd_task_log,
+            "checkpoint": cmd_task_checkpoint,
+            "show": cmd_task_show,
+            "resume": cmd_task_resume,
+        }[action](args)
+        return
+
+    if args.command == "context":
+        action = getattr(args, "context_action", None)
+        if not action:
+            p_context.print_help()
+            return
+        {
+            "pack": cmd_context_pack,
+        }[action](args)
         return
 
     dispatch = {

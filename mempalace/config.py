@@ -59,6 +59,7 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 
 
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
+DEFAULT_PROJECT_TRACKER_PATH = os.path.expanduser("~/.mempalace/project_tracker.sqlite3")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
 
 DEFAULT_TOPIC_WINGS = [
@@ -153,6 +154,14 @@ class MempalaceConfig:
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
 
     @property
+    def project_tracker_path(self):
+        """Path to the standalone project tracker SQLite database."""
+        env_val = os.environ.get("MEMPALACE_PROJECT_TRACKER_PATH")
+        if env_val:
+            return env_val
+        return self._file_config.get("project_tracker_path", DEFAULT_PROJECT_TRACKER_PATH)
+
+    @property
     def people_map(self):
         """Mapping of name variants to canonical names."""
         if self._people_map_file.exists():
@@ -205,6 +214,7 @@ class MempalaceConfig:
         if not self._config_file.exists():
             default_config = {
                 "palace_path": DEFAULT_PALACE_PATH,
+                "project_tracker_path": DEFAULT_PROJECT_TRACKER_PATH,
                 "collection_name": DEFAULT_COLLECTION_NAME,
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,

@@ -9,14 +9,24 @@ import pytest
 
 from mempalace.cli import (
     cmd_compress,
+    cmd_context_pack,
     cmd_hook,
     cmd_init,
     cmd_instructions,
     cmd_mine,
+    cmd_project_list,
+    cmd_project_register,
+    cmd_project_status,
     cmd_repair,
     cmd_search,
     cmd_split,
     cmd_status,
+    cmd_task_checkpoint,
+    cmd_task_log,
+    cmd_task_resume,
+    cmd_task_show,
+    cmd_task_start,
+    cmd_task_update,
     cmd_wakeup,
     main,
 )
@@ -263,6 +273,163 @@ def test_cmd_split_all_options():
     assert sys.argv[0] != "mempalace split"
 
 
+# 鈹€鈹€ project/task tracker commands 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+
+
+def test_cmd_project_register_prints_json(capsys):
+    tracker = MagicMock()
+    tracker.register_project.return_value = {"project_id": "project_123", "created": True}
+    args = argparse.Namespace(
+        path="/repo",
+        name=None,
+        wing=None,
+        source_type="local",
+        status="active",
+        metadata_json='{"owner":"me"}',
+    )
+    with patch("mempalace.cli._project_tracker", return_value=tracker):
+        cmd_project_register(args)
+    out = capsys.readouterr().out
+    assert "project_123" in out
+    tracker.register_project.assert_called_once()
+
+
+def test_cmd_project_list_prints_json(capsys):
+    tracker = MagicMock()
+    tracker.list_projects.return_value = {"count": 1, "projects": [{"project_id": "project_123"}]}
+    args = argparse.Namespace(limit=10)
+    with patch("mempalace.cli._project_tracker", return_value=tracker):
+        cmd_project_list(args)
+    out = capsys.readouterr().out
+    assert "project_123" in out
+    tracker.list_projects.assert_called_once_with(limit=10)
+
+
+def test_cmd_project_status_prints_json(capsys):
+    tracker = MagicMock()
+    tracker.project_status.return_value = {"project": {"project_id": "project_123"}}
+    args = argparse.Namespace(project="project_123")
+    with patch("mempalace.cli._project_tracker", return_value=tracker):
+        cmd_project_status(args)
+    out = capsys.readouterr().out
+    assert "project_123" in out
+
+
+def test_cmd_task_start_prints_json(capsys):
+    tracker = MagicMock()
+    tracker.start_task.return_value = {"task_id": "task_123"}
+    args = argparse.Namespace(
+        project="project_123",
+        title="Do work",
+        status="running",
+        stage="analysis",
+        percent=25,
+        summary="Starting",
+        metadata_json='{"ticket":"A-1"}',
+    )
+    with patch("mempalace.cli._project_tracker", return_value=tracker):
+        cmd_task_start(args)
+    out = capsys.readouterr().out
+    assert "task_123" in out
+
+
+def test_cmd_task_update_prints_json(capsys):
+    tracker = MagicMock()
+    tracker.update_task.return_value = {"task_id": "task_123", "status": "completed"}
+    args = argparse.Namespace(
+        task_id="task_123",
+        status="completed",
+        stage=None,
+        percent=100,
+        summary="Done",
+        metadata_json=None,
+    )
+    with patch("mempalace.cli._project_tracker", return_value=tracker):
+        cmd_task_update(args)
+    out = capsys.readouterr().out
+    assert "completed" in out
+
+
+def test_cmd_task_log_prints_json(capsys):
+    tracker = MagicMock()
+    tracker.log_event.return_value = {"event": {"event_id": 1}}
+    args = argparse.Namespace(
+        task_id="task_123",
+        message="hello",
+        level="info",
+        kind="log",
+        stage=None,
+        percent=None,
+        payload_json='{"x":1}',
+    )
+    with patch("mempalace.cli._project_tracker", return_value=tracker):
+        cmd_task_log(args)
+    out = capsys.readouterr().out
+    assert '"event_id": 1' in out
+
+
+def test_cmd_task_checkpoint_prints_json(capsys):
+    tracker = MagicMock()
+    tracker.add_checkpoint.return_value = {"checkpoint": {"checkpoint_id": "cp_1"}}
+    args = argparse.Namespace(
+        task_id="task_123",
+        summary="saved",
+        stage="analysis",
+        state_json='{"cursor":1}',
+    )
+    with patch("mempalace.cli._project_tracker", return_value=tracker):
+        cmd_task_checkpoint(args)
+    out = capsys.readouterr().out
+    assert "cp_1" in out
+
+
+def test_cmd_task_show_prints_json(capsys):
+    tracker = MagicMock()
+    tracker.get_task.return_value = {"task_id": "task_123"}
+    args = argparse.Namespace(task_id="task_123", events=5, checkpoints=2)
+    with patch("mempalace.cli._project_tracker", return_value=tracker):
+        cmd_task_show(args)
+    out = capsys.readouterr().out
+    assert "task_123" in out
+
+
+def test_cmd_task_resume_prints_json(capsys):
+    tracker = MagicMock()
+    tracker.resume_task.return_value = {"task": {"task_id": "task_123"}}
+    args = argparse.Namespace(task_id=None, project="project_123", events=5, checkpoints=2)
+    with patch("mempalace.cli._project_tracker", return_value=tracker):
+        cmd_task_resume(args)
+    out = capsys.readouterr().out
+    assert "task_123" in out
+
+
+def test_cmd_context_pack_prints_json(capsys):
+    manager = MagicMock()
+    manager.build_context_pack.return_value = {
+        "thread": {"thread_id": "task_123"},
+        "prompt": "## THREAD SNAPSHOT\nthread_id: task_123",
+    }
+    args = argparse.Namespace(
+        palace=None,
+        query="auth decisions",
+        wing="project",
+        room=None,
+        task_id="task_123",
+        project=None,
+        agent="Codex",
+        memory_results=5,
+        search_results=5,
+        events=8,
+        checkpoints=3,
+        diary_entries=3,
+        max_chars=12000,
+    )
+    with patch("mempalace.cli._context_manager", return_value=manager):
+        cmd_context_pack(args)
+    out = capsys.readouterr().out
+    assert "task_123" in out
+
+
 # ── main() argparse dispatch ──────────────────────────────────────────
 
 
@@ -313,6 +480,15 @@ def test_main_wakeup_dispatches():
     with (
         patch("sys.argv", ["mempalace", "wake-up"]),
         patch("mempalace.cli.cmd_wakeup") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+
+
+def test_main_context_dispatches():
+    with (
+        patch("sys.argv", ["mempalace", "context", "pack", "--query", "auth"]),
+        patch("mempalace.cli.cmd_context_pack") as mock_cmd,
     ):
         main()
         mock_cmd.assert_called_once()
@@ -386,6 +562,38 @@ def test_main_instructions_dispatches():
     with (
         patch("sys.argv", ["mempalace", "instructions", "help"]),
         patch("mempalace.cli.cmd_instructions") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+
+
+def test_main_project_no_subcommand_prints_help(capsys):
+    with patch("sys.argv", ["mempalace", "project"]):
+        main()
+    out = capsys.readouterr().out
+    assert "project" in out.lower() or "register" in out.lower()
+
+
+def test_main_project_register_dispatches():
+    with (
+        patch("sys.argv", ["mempalace", "project", "register", "/repo"]),
+        patch("mempalace.cli.cmd_project_register") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+
+
+def test_main_task_no_subcommand_prints_help(capsys):
+    with patch("sys.argv", ["mempalace", "task"]):
+        main()
+    out = capsys.readouterr().out
+    assert "task" in out.lower() or "start" in out.lower()
+
+
+def test_main_task_start_dispatches():
+    with (
+        patch("sys.argv", ["mempalace", "task", "start", "project_123", "Do work"]),
+        patch("mempalace.cli.cmd_task_start") as mock_cmd,
     ):
         main()
         mock_cmd.assert_called_once()
