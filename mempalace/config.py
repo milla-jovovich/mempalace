@@ -16,7 +16,7 @@ from pathlib import Path
 # in file paths, SQLite, or ChromaDB metadata.
 
 MAX_NAME_LENGTH = 128
-_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_ .'-]{0,126}[a-zA-Z0-9]?$")
+_SAFE_NAME_RE = re.compile(r"^(?:[^\W_]|[^\W_][\w .'-]{0,126}[^\W_])$")
 
 
 def sanitize_name(value: str, field_name: str = "name") -> str:
@@ -172,6 +172,27 @@ class MempalaceConfig:
     def hall_keywords(self):
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
+
+    @property
+    def hook_silent_save(self):
+        """Whether the stop hook saves directly (True) or blocks for MCP calls (False)."""
+        return self._file_config.get("hooks", {}).get("silent_save", True)
+
+    @property
+    def hook_desktop_toast(self):
+        """Whether the stop hook shows a desktop notification via notify-send."""
+        return self._file_config.get("hooks", {}).get("desktop_toast", False)
+
+    def set_hook_setting(self, key: str, value: bool):
+        """Update a hook setting and write config to disk."""
+        if "hooks" not in self._file_config:
+            self._file_config["hooks"] = {}
+        self._file_config["hooks"][key] = value
+        try:
+            with open(self._config_file, "w", encoding="utf-8") as f:
+                json.dump(self._file_config, f, indent=2, ensure_ascii=False)
+        except OSError:
+            pass
 
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""

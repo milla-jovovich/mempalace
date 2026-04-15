@@ -1,0 +1,44 @@
+{
+  "lang": "fr",
+  "label": "Français",
+  "terms": {
+    "palace": "palais",
+    "wing": "aile",
+    "hall": "couloir",
+    "closet": "placard",
+    "drawer": "tiroir",
+    "mine": "extraire",
+    "search": "chercher",
+    "status": "état",
+    "init": "initialiser",
+    "repair": "réparer",
+    "migrate": "migrer",
+    "entity": "entité",
+    "topic": "sujet"
+  },
+  "cli": {
+    "mine_start": "Extraction de {path}...",
+    "mine_complete": "Terminé. {closets} placards, {drawers} tiroirs créés.",
+    "mine_skip": "Déjà extrait. Utilisez --force pour refaire.",
+    "search_no_results": "Aucun résultat pour : {query}",
+    "search_results": "{count} résultats trouvés :",
+    "status_palace": "Palais : {path}",
+    "status_wings": "{count} ailes",
+    "status_closets": "{count} placards",
+    "status_drawers": "{count} tiroirs",
+    "init_complete": "Palais initialisé dans {path}",
+    "init_exists": "Un palais existe déjà dans {path}",
+    "repair_complete": "Réparation terminée. {fixed} problèmes corrigés.",
+    "migrate_complete": "Migration terminée.",
+    "no_palace": "Aucun palais trouvé. Exécutez : mempalace init <dossier>"
+  },
+  "aaak": {
+    "instruction": "Comprimez en français. Tirets entre les mots, pipes entre les concepts. Supprimez les articles et mots de remplissage. Gardez les noms propres et chiffres exacts."
+  },
+  "regex": {
+    "topic_pattern": "[A-ZÀ-Ý][a-zà-ÿ]{2,}|[A-Za-zÀ-ÿ]{3,}",
+    "stop_words": "le la les un une des de du au aux en et ou mais donc or ni car que qui ce cette ces son sa ses mon ma mes ton ta tes leur leurs nous vous ils elles on ne pas plus très bien aussi avec pour dans sur par est sont fait être avoir été comme tout tous toute toutes",
+    "quote_pattern": "«\\s*([^»]{10,200})\\s*»|\"([^\"]{10,200})\"",
+    "action_pattern": "(?:construit|corrigé|écrit|ajouté|poussé|mesuré|testé|révisé|créé|supprimé|mis à jour|configuré|déployé|migré)\\s+[\\wà-ÿ\\s]{3,30}"
+  }
+}

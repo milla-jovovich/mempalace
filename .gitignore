@@ -6,8 +6,33 @@ __pycache__/
 .pytest_cache/
 mempal.yaml
 .a5c/
+.claude/
+.codex/
+.codex
+
+# Environment
 .env
 .env.*
-!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Coverage
+htmlcov/
+.coverage
+coverage.xml
+
+# Virtual environments
 .venv/
-.mempalace/
+venv/
+
+# ChromaDB local data
+*.sqlite3-journal

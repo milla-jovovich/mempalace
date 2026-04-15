@@ -16,7 +16,33 @@ from datetime import datetime
 from collections import defaultdict
 
 from .normalize import normalize
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import (
+    NORMALIZE_VERSION,
+    SKIP_DIRS,
+    file_already_mined,
+    get_collection,
+    mine_lock,
+)
+
+
+# Cached hall keywords — avoids re-reading config per drawer
+_HALL_KEYWORDS_CACHE = None
+
+
+def _detect_hall_cached(content: str) -> str:
+    """Route content to a hall using cached keywords. Same logic as miner.detect_hall."""
+    global _HALL_KEYWORDS_CACHE
+    if _HALL_KEYWORDS_CACHE is None:
+        from .config import MempalaceConfig
+
+        _HALL_KEYWORDS_CACHE = MempalaceConfig().hall_keywords
+    content_lower = content[:3000].lower()
+    scores = {}
+    for hall, keywords in _HALL_KEYWORDS_CACHE.items():
+        score = sum(1 for kw in keywords if kw in content_lower)
+        if score > 0:
+            scores[hall] = score
+    return max(scores, key=scores.get) if scores else "general"
 
 
 # File types that might contain conversations
@@ -28,7 +54,33 @@ CONVO_EXTENSIONS = {
 }
 
 MIN_CHUNK_SIZE = 30
+CHUNK_SIZE = 800  # chars per drawer — align with miner.py
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+
+
+def _register_file(collection, source_file: str, wing: str, agent: str):
+    """Write a sentinel so file_already_mined() returns True for 0-chunk files.
+
+    Without this, files that normalize to nothing or produce zero chunks are
+    re-read and re-processed on every mine run because nothing was written to
+    ChromaDB on the first pass.
+    """
+    sentinel_id = f"_reg_{hashlib.sha256(source_file.encode()).hexdigest()[:24]}"
+    collection.upsert(
+        documents=[f"[registry] {source_file}"],
+        ids=[sentinel_id],
+        metadatas=[
+            {
+                "wing": wing,
+                "room": "_registry",
+                "source_file": source_file,
+                "added_by": agent,
+                "filed_at": datetime.now().isoformat(),
+                "ingest_mode": "registry",
+                "normalize_version": NORMALIZE_VERSION,
+            }
+        ],
+    )
 
 
 # =============================================================================
@@ -51,7 +103,12 @@ def chunk_exchanges(content: str) -> list:
 
 
 def _chunk_by_exchange(lines: list) -> list:
-    """One user turn (>) + the AI response that follows = one chunk."""
+    """One user turn (>) + the AI response that follows = one or more chunks.
+
+    The full AI response is preserved verbatim.  When the combined
+    user-turn + response exceeds CHUNK_SIZE the response is split across
+    consecutive drawers so nothing is silently discarded.
+    """
     chunks = []
     i = 0
 
@@ -70,10 +127,23 @@ def _chunk_by_exchange(lines: list) -> list:
                     ai_lines.append(next_line.strip())
                 i += 1
 
-            ai_response = " ".join(ai_lines[:8])
+            ai_response = " ".join(ai_lines)
             content = f"{user_turn}\n{ai_response}" if ai_response else user_turn
 
-            if len(content.strip()) > MIN_CHUNK_SIZE:
+            # Split into multiple drawers when the exchange exceeds CHUNK_SIZE
+            if len(content) > CHUNK_SIZE:
+                # First chunk: user turn + as much response as fits
+                first_part = content[:CHUNK_SIZE]
+                if len(first_part.strip()) > MIN_CHUNK_SIZE:
+                    chunks.append({"content": first_part, "chunk_index": len(chunks)})
+                # Remaining response in CHUNK_SIZE-sized continuation drawers
+                remainder = content[CHUNK_SIZE:]
+                while remainder:
+                    part = remainder[:CHUNK_SIZE]
+                    remainder = remainder[CHUNK_SIZE:]
+                    if len(part.strip()) > MIN_CHUNK_SIZE:
+                        chunks.append({"content": part, "chunk_index": len(chunks)})
+            elif len(content.strip()) > MIN_CHUNK_SIZE:
                 chunks.append(
                     {
                         "content": content,
@@ -229,6 +299,63 @@ def scan_convos(convo_dir: str) -> list:
 # =============================================================================
 
 
+def _file_chunks_locked(collection, source_file, chunks, wing, room, agent, extract_mode):
+    """Lock the source file, purge stale drawers, and upsert fresh chunks.
+
+    Combines the per-file serialization that prevents concurrent agents from
+    duplicating work (via mine_lock) with the normalize-version rebuild
+    contract (purge-before-insert so pre-v2 drawers don't survive).
+
+    Returns (drawers_added, room_counts_delta, skipped).
+    """
+    room_counts_delta: dict = defaultdict(int)
+    drawers_added = 0
+    with mine_lock(source_file):
+        # Re-check after lock — another agent may have just finished this file
+        # at the current schema. A stale-version hit here returns False, so we
+        # still fall through to the purge+rebuild path below.
+        if file_already_mined(collection, source_file):
+            return 0, room_counts_delta, True
+
+        # Purge stale drawers first. When the normalize schema bumps,
+        # file_already_mined() returned False for pre-v2 drawers — clean
+        # them out so the source doesn't end up with mixed old/new drawers.
+        try:
+            collection.delete(where={"source_file": source_file})
+        except Exception:
+            pass
+
+        for chunk in chunks:
+            chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
+            if extract_mode == "general":
+                room_counts_delta[chunk_room] += 1
+            drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
+            try:
+                collection.upsert(
+                    documents=[chunk["content"]],
+                    ids=[drawer_id],
+                    metadatas=[
+                        {
+                            "wing": wing,
+                            "room": chunk_room,
+                            "hall": _detect_hall_cached(chunk["content"]),
+                            "source_file": source_file,
+                            "chunk_index": chunk["chunk_index"],
+                            "added_by": agent,
+                            "filed_at": datetime.now().isoformat(),
+                            "ingest_mode": "convos",
+                            "extract_mode": extract_mode,
+                            "normalize_version": NORMALIZE_VERSION,
+                        }
+                    ],
+                )
+                drawers_added += 1
+            except Exception as e:
+                if "already exists" not in str(e).lower():
+                    raise
+    return drawers_added, room_counts_delta, False
+
+
 def mine_convos(
     convo_dir: str,
     palace_path: str,
@@ -282,9 +409,13 @@ def mine_convos(
         try:
             content = normalize(str(filepath))
         except (OSError, ValueError):
+            if not dry_run:
+                _register_file(collection, source_file, wing, agent)
             continue
 
         if not content or len(content.strip()) < MIN_CHUNK_SIZE:
+            if not dry_run:
+                _register_file(collection, source_file, wing, agent)
             continue
 
         # Chunk — either exchange pairs or general extraction
@@ -297,6 +428,8 @@ def mine_convos(
             chunks = chunk_exchanges(content)
 
         if not chunks:
+            if not dry_run:
+                _register_file(collection, source_file, wing, agent)
             continue
 
         # Detect room from content (general mode uses memory_type instead)
@@ -326,34 +459,16 @@ def mine_convos(
         if extract_mode != "general":
             room_counts[room] += 1
 
-        # File each chunk
-        drawers_added = 0
-        for chunk in chunks:
-            chunk_room = chunk.get("memory_type", room) if extract_mode == "general" else room
-            if extract_mode == "general":
-                room_counts[chunk_room] += 1
-            drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
-            try:
-                collection.add(
-                    documents=[chunk["content"]],
-                    ids=[drawer_id],
-                    metadatas=[
-                        {
-                            "wing": wing,
-                            "room": chunk_room,
-                            "source_file": source_file,
-                            "chunk_index": chunk["chunk_index"],
-                            "added_by": agent,
-                            "filed_at": datetime.now().isoformat(),
-                            "ingest_mode": "convos",
-                            "extract_mode": extract_mode,
-                        }
-                    ],
-                )
-                drawers_added += 1
-            except Exception as e:
-                if "already exists" not in str(e).lower():
-                    raise
+        # Lock + purge stale + file fresh chunks. Lock serializes concurrent
+        # agents; purge removes pre-v2 drawers so the schema bump applies.
+        drawers_added, room_delta, skipped = _file_chunks_locked(
+            collection, source_file, chunks, wing, room, agent, extract_mode
+        )
+        if skipped:
+            files_skipped += 1
+            continue
+        for r, n in room_delta.items():
+            room_counts[r] += n
 
         total_drawers += drawers_added
         print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
