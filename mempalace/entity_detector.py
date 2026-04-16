@@ -9,9 +9,21 @@ Two-pass approach:
 Used by mempalace init before mining begins.
 The confirmed entity map feeds the miner as the taxonomy.
 
+Multi-language support:
+    All lexical patterns (person verbs, pronouns, dialogue markers, project
+    verbs, stopwords, and the candidate-extraction character class) live in
+    the ``entity`` section of ``mempalace/i18n/<lang>.json``. Every public
+    function accepts a ``languages`` tuple and applies the union of the
+    requested locales' patterns. The default is ``("en",)`` — existing
+    English-only callers behave exactly as before.
+
+    To add a new language: add an ``entity`` section to that locale's JSON.
+    No code changes required.
+
 Usage:
-    from entity_detector import detect_entities, confirm_entities
-    candidates = detect_entities(file_paths)
+    from mempalace.entity_detector import detect_entities, confirm_entities
+    candidates = detect_entities(file_paths)                    # English only
+    candidates = detect_entities(paths, languages=("en", "pt-br"))
     confirmed = confirm_entities(candidates)  # interactive review
 """
 
@@ -21,382 +33,46 @@ import functools
 from pathlib import Path
 from collections import defaultdict
 
+from mempalace.i18n import get_entity_patterns
 
-# ==================== SIGNAL PATTERNS ====================
 
-# Person signals — things people do
-PERSON_VERB_PATTERNS = [
-    r"\b{name}\s+said\b",
-    r"\b{name}\s+asked\b",
-    r"\b{name}\s+told\b",
-    r"\b{name}\s+replied\b",
-    r"\b{name}\s+laughed\b",
-    r"\b{name}\s+smiled\b",
-    r"\b{name}\s+cried\b",
-    r"\b{name}\s+felt\b",
-    r"\b{name}\s+thinks?\b",
-    r"\b{name}\s+wants?\b",
-    r"\b{name}\s+loves?\b",
-    r"\b{name}\s+hates?\b",
-    r"\b{name}\s+knows?\b",
-    r"\b{name}\s+decided\b",
-    r"\b{name}\s+pushed\b",
-    r"\b{name}\s+wrote\b",
-    r"\bhey\s+{name}\b",
-    r"\bthanks?\s+{name}\b",
-    r"\bhi\s+{name}\b",
-    r"\bdear\s+{name}\b",
-]
+# ==================== LANGUAGE-AWARE PATTERN LOADING ====================
 
-# Person signals — pronouns resolving nearby
-PRONOUN_PATTERNS = [
-    r"\bshe\b",
-    r"\bher\b",
-    r"\bhers\b",
-    r"\bhe\b",
-    r"\bhim\b",
-    r"\bhis\b",
-    r"\bthey\b",
-    r"\bthem\b",
-    r"\btheir\b",
-]
 
-PRONOUN_RE = re.compile("|".join(PRONOUN_PATTERNS), re.IGNORECASE)
+def _normalize_langs(languages) -> tuple:
+    """Coerce a language input into a non-empty hashable tuple."""
+    if not languages:
+        return ("en",)
+    if isinstance(languages, str):
+        return (languages,)
+    return tuple(languages)
 
-# Person signals — dialogue markers
-DIALOGUE_PATTERNS = [
-    r"^>\s*{name}[:\s]",  # > Speaker: ...
-    r"^{name}:\s",  # Speaker: ...
-    r"^\[{name}\]",  # [Speaker]
-    r'"{name}\s+said',
-]
 
-# Project signals — things projects have/do
-PROJECT_VERB_PATTERNS = [
-    r"\bbuilding\s+{name}\b",
-    r"\bbuilt\s+{name}\b",
-    r"\bship(?:ping|ped)?\s+{name}\b",
-    r"\blaunch(?:ing|ed)?\s+{name}\b",
-    r"\bdeploy(?:ing|ed)?\s+{name}\b",
-    r"\binstall(?:ing|ed)?\s+{name}\b",
-    r"\bthe\s+{name}\s+architecture\b",
-    r"\bthe\s+{name}\s+pipeline\b",
-    r"\bthe\s+{name}\s+system\b",
-    r"\bthe\s+{name}\s+repo\b",
-    r"\b{name}\s+v\d+\b",  # MemPal v2
-    r"\b{name}\.py\b",  # mempalace.py
-    r"\b{name}-core\b",  # mempal-core (hyphen only, not underscore)
-    r"\b{name}-local\b",
-    r"\bimport\s+{name}\b",
-    r"\bpip\s+install\s+{name}\b",
-]
+@functools.lru_cache(maxsize=32)
+def _get_stopwords(languages: tuple) -> frozenset:
+    """Return the union of stopwords across the given languages."""
+    patterns = get_entity_patterns(languages)
+    return frozenset(patterns["stopwords"])
 
-# Words that are almost certainly NOT entities
-STOPWORDS = {
-    "the",
-    "a",
-    "an",
-    "and",
-    "or",
-    "but",
-    "in",
-    "on",
-    "at",
-    "to",
-    "for",
-    "of",
-    "with",
-    "by",
-    "from",
-    "as",
-    "is",
-    "was",
-    "are",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "do",
-    "does",
-    "did",
-    "will",
-    "would",
-    "could",
-    "should",
-    "may",
-    "might",
-    "must",
-    "shall",
-    "can",
-    "this",
-    "that",
-    "these",
-    "those",
-    "it",
-    "its",
-    "they",
-    "them",
-    "their",
-    "we",
-    "our",
-    "you",
-    "your",
-    "i",
-    "my",
-    "me",
-    "he",
-    "she",
-    "his",
-    "her",
-    "who",
-    "what",
-    "when",
-    "where",
-    "why",
-    "how",
-    "which",
-    "if",
-    "then",
-    "so",
-    "not",
-    "no",
-    "yes",
-    "ok",
-    "okay",
-    "just",
-    "very",
-    "really",
-    "also",
-    "already",
-    "still",
-    "even",
-    "only",
-    "here",
-    "there",
-    "now",
-    "then",
-    "too",
-    "up",
-    "out",
-    "about",
-    "like",
-    "use",
-    "get",
-    "got",
-    "make",
-    "made",
-    "take",
-    "put",
-    "come",
-    "go",
-    "see",
-    "know",
-    "think",
-    "true",
-    "false",
-    "none",
-    "null",
-    "new",
-    "old",
-    "all",
-    "any",
-    "some",
-    "true",
-    "false",
-    "return",
-    "print",
-    "def",
-    "class",
-    "import",
-    "from",
-    # Common capitalized words in prose that aren't entities
-    "step",
-    "usage",
-    "run",
-    "check",
-    "find",
-    "add",
-    "get",
-    "set",
-    "list",
-    "args",
-    "dict",
-    "str",
-    "int",
-    "bool",
-    "path",
-    "file",
-    "type",
-    "name",
-    "note",
-    "example",
-    "option",
-    "result",
-    "error",
-    "warning",
-    "info",
-    "every",
-    "each",
-    "more",
-    "less",
-    "next",
-    "last",
-    "first",
-    "second",
-    "stack",
-    "layer",
-    "mode",
-    "test",
-    "stop",
-    "start",
-    "copy",
-    "move",
-    "source",
-    "target",
-    "output",
-    "input",
-    "data",
-    "item",
-    "key",
-    "value",
-    "returns",
-    "raises",
-    "yields",
-    "none",
-    "self",
-    "cls",
-    "kwargs",
-    # Common sentence-starting / abstract words that aren't entities
-    "world",
-    "well",
-    "want",
-    "topic",
-    "choose",
-    "social",
-    "cars",
-    "phones",
-    "healthcare",
-    "ex",
-    "machina",
-    "deus",
-    "human",
-    "humans",
-    "people",
-    "things",
-    "something",
-    "nothing",
-    "everything",
-    "anything",
-    "someone",
-    "everyone",
-    "anyone",
-    "way",
-    "time",
-    "day",
-    "life",
-    "place",
-    "thing",
-    "part",
-    "kind",
-    "sort",
-    "case",
-    "point",
-    "idea",
-    "fact",
-    "sense",
-    "question",
-    "answer",
-    "reason",
-    "number",
-    "version",
-    "system",
-    # Greetings and filler words at sentence starts
-    "hey",
-    "hi",
-    "hello",
-    "thanks",
-    "thank",
-    "right",
-    "let",
-    "ok",
-    # UI/action words that appear in how-to content
-    "click",
-    "hit",
-    "press",
-    "tap",
-    "drag",
-    "drop",
-    "open",
-    "close",
-    "save",
-    "load",
-    "launch",
-    "install",
-    "download",
-    "upload",
-    "scroll",
-    "select",
-    "enter",
-    "submit",
-    "cancel",
-    "confirm",
-    "delete",
-    "copy",
-    "paste",
-    "type",
-    "write",
-    "read",
-    "search",
-    "find",
-    "show",
-    "hide",
-    # Common filesystem/technical capitalized words
-    "desktop",
-    "documents",
-    "downloads",
-    "users",
-    "home",
-    "library",
-    "applications",
-    "system",
-    "preferences",
-    "settings",
-    "terminal",
-    # Abstract/topic words
-    "actor",
-    "vector",
-    "remote",
-    "control",
-    "duration",
-    "fetch",
-    # Abstract concepts that appear as subjects but aren't entities
-    "agents",
-    "tools",
-    "others",
-    "guards",
-    "ethics",
-    "regulation",
-    "learning",
-    "thinking",
-    "memory",
-    "language",
-    "intelligence",
-    "technology",
-    "society",
-    "culture",
-    "future",
-    "history",
-    "science",
-    "model",
-    "models",
-    "network",
-    "networks",
-    "training",
-    "inference",
-}
+
+# ==================== BACKWARD-COMPAT MODULE CONSTANTS ====================
+#
+# These mirror the old module-level constants so existing imports keep working.
+# They reflect the English defaults and are populated at import time from
+# ``mempalace/i18n/en.json``. Callers that need multi-language behavior should
+# pass the ``languages`` parameter to the public functions below.
+
+_EN = get_entity_patterns(("en",))
+
+PERSON_VERB_PATTERNS = list(_EN["person_verb_patterns"])
+PRONOUN_PATTERNS = list(_EN["pronoun_patterns"])
+PRONOUN_RE = re.compile("|".join(PRONOUN_PATTERNS), re.IGNORECASE) if PRONOUN_PATTERNS else None
+DIALOGUE_PATTERNS = list(_EN["dialogue_patterns"])
+PROJECT_VERB_PATTERNS = list(_EN["project_verb_patterns"])
+STOPWORDS = set(_EN["stopwords"])
+
+
+# ==================== EXTENSION POINTS (not language-scoped) ====================
 
 # For entity detection — prose only, no code files
 # Code files have too many capitalized names (classes, functions) that aren't entities
@@ -443,56 +119,107 @@ SKIP_DIRS = {
 # ==================== CANDIDATE EXTRACTION ====================
 
 
-def extract_candidates(text: str) -> dict:
+def extract_candidates(text: str, languages=("en",)) -> dict:
     """
     Extract all capitalized proper noun candidates from text.
     Returns {name: frequency} for names appearing 3+ times.
-    """
-    # Find all capitalized words (not at sentence start — harder, so we use frequency as filter)
-    raw = re.findall(r"\b([A-Z][a-z]{1,19})\b", text)
 
-    counts = defaultdict(int)
-    for word in raw:
-        if word.lower() not in STOPWORDS and len(word) > 1:
+    Each language contributes its own character-class pattern (e.g. ASCII
+    for English, Latin+diacritics for pt-br, Cyrillic for Russian,
+    Devanagari for Hindi). Matches from all languages are unioned.
+    """
+    langs = _normalize_langs(languages)
+    patterns = get_entity_patterns(langs)
+    stopwords = _get_stopwords(langs)
+
+    counts: defaultdict = defaultdict(int)
+
+    # Single-word candidates — one pre-wrapped pattern per language
+    for wrapped_pat in patterns["candidate_patterns"]:
+        try:
+            rx = re.compile(wrapped_pat)
+        except re.error:
+            continue
+        for word in rx.findall(text):
+            if word.lower() in stopwords:
+                continue
+            if len(word) < 2:
+                continue
             counts[word] += 1
 
-    # Also find multi-word proper nouns (e.g. "Memory Palace", "Claude Code")
-    multi = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", text)
-    for phrase in multi:
-        if not any(w.lower() in STOPWORDS for w in phrase.split()):
+    # Multi-word candidates — one pre-wrapped pattern per language
+    for wrapped_pat in patterns["multi_word_patterns"]:
+        try:
+            rx = re.compile(wrapped_pat)
+        except re.error:
+            continue
+        for phrase in rx.findall(text):
+            if any(w.lower() in stopwords for w in phrase.split()):
+                continue
             counts[phrase] += 1
 
-    # Filter: must appear at least 3 times to be a candidate
     return {name: count for name, count in counts.items() if count >= 3}
 
 
 # ==================== SIGNAL SCORING ====================
 
 
-@functools.lru_cache(maxsize=128)
-def _build_patterns(name: str) -> dict:
-    """Pre-compile all regex patterns for a single entity name."""
+@functools.lru_cache(maxsize=256)
+def _build_patterns(name: str, languages: tuple = ("en",)) -> dict:
+    """Pre-compile all regex patterns for a single entity name, per language set."""
     n = re.escape(name)
+    langs = _normalize_langs(languages)
+    sources = get_entity_patterns(langs)
+
+    def _compile_each(raw_patterns, flags=re.IGNORECASE):
+        compiled = []
+        for p in raw_patterns:
+            try:
+                compiled.append(re.compile(p.format(name=n), flags))
+            except (re.error, KeyError, IndexError):
+                continue
+        return compiled
+
+    direct_sources = sources.get("direct_address_patterns") or []
+    direct_compiled = []
+    for raw in direct_sources:
+        try:
+            direct_compiled.append(re.compile(raw.format(name=n), re.IGNORECASE))
+        except (re.error, KeyError, IndexError):
+            continue
+
     return {
-        "dialogue": [
-            re.compile(p.format(name=n), re.MULTILINE | re.IGNORECASE) for p in DIALOGUE_PATTERNS
-        ],
-        "person_verbs": [re.compile(p.format(name=n), re.IGNORECASE) for p in PERSON_VERB_PATTERNS],
-        "project_verbs": [
-            re.compile(p.format(name=n), re.IGNORECASE) for p in PROJECT_VERB_PATTERNS
-        ],
-        "direct": re.compile(rf"\bhey\s+{n}\b|\bthanks?\s+{n}\b|\bhi\s+{n}\b", re.IGNORECASE),
+        "dialogue": _compile_each(sources["dialogue_patterns"], re.MULTILINE | re.IGNORECASE),
+        "person_verbs": _compile_each(sources["person_verb_patterns"]),
+        "project_verbs": _compile_each(sources["project_verb_patterns"]),
+        "direct": direct_compiled,
         "versioned": re.compile(rf"\b{n}[-v]\w+", re.IGNORECASE),
         "code_ref": re.compile(rf"\b{n}\.(py|js|ts|yaml|yml|json|sh)\b", re.IGNORECASE),
     }
 
 
-def score_entity(name: str, text: str, lines: list) -> dict:
+@functools.lru_cache(maxsize=32)
+def _pronoun_re(languages: tuple):
+    """Compile a combined pronoun regex for the given languages."""
+    langs = _normalize_langs(languages)
+    patterns = get_entity_patterns(langs)
+    pronouns = patterns.get("pronoun_patterns") or []
+    if not pronouns:
+        return None
+    try:
+        return re.compile("|".join(pronouns), re.IGNORECASE)
+    except re.error:
+        return None
+
+
+def score_entity(name: str, text: str, lines: list, languages=("en",)) -> dict:
     """
     Score a candidate entity as person vs project.
     Returns scores and the signals that fired.
     """
-    patterns = _build_patterns(name)
+    langs = _normalize_langs(languages)
+    patterns = _build_patterns(name, langs)
+    pronoun_re = _pronoun_re(langs)
     person_score = 0
     project_score = 0
     person_signals = []
@@ -515,22 +242,25 @@ def score_entity(name: str, text: str, lines: list) -> dict:
             person_signals.append(f"'{name} ...' action ({matches}x)")
 
     # Pronoun proximity — pronouns within 3 lines of the name
-    name_lower = name.lower()
-    name_line_indices = [i for i, line in enumerate(lines) if name_lower in line.lower()]
-    pronoun_hits = 0
-    for idx in name_line_indices:
-        window_text = " ".join(lines[max(0, idx - 2) : idx + 3])
-        if PRONOUN_RE.search(window_text):
-            pronoun_hits += 1
-    if pronoun_hits > 0:
-        person_score += pronoun_hits * 2
-        person_signals.append(f"pronoun nearby ({pronoun_hits}x)")
+    if pronoun_re is not None:
+        name_lower = name.lower()
+        name_line_indices = [i for i, line in enumerate(lines) if name_lower in line.lower()]
+        pronoun_hits = 0
+        for idx in name_line_indices:
+            window_text = " ".join(lines[max(0, idx - 2) : idx + 3])
+            if pronoun_re.search(window_text):
+                pronoun_hits += 1
+        if pronoun_hits > 0:
+            person_score += pronoun_hits * 2
+            person_signals.append(f"pronoun nearby ({pronoun_hits}x)")
 
     # Direct address
-    direct = len(patterns["direct"].findall(text))
-    if direct > 0:
-        person_score += direct * 4
-        person_signals.append(f"addressed directly ({direct}x)")
+    direct_hits = 0
+    for rx in patterns["direct"]:
+        direct_hits += len(rx.findall(text))
+    if direct_hits > 0:
+        person_score += direct_hits * 4
+        person_signals.append(f"addressed directly ({direct_hits}x)")
 
     # --- Project signals ---
 
@@ -631,13 +361,15 @@ def classify_entity(name: str, frequency: int, scores: dict) -> dict:
 # ==================== MAIN DETECT ====================
 
 
-def detect_entities(file_paths: list, max_files: int = 10) -> dict:
+def detect_entities(file_paths: list, max_files: int = 10, languages=("en",)) -> dict:
     """
     Scan files and detect entity candidates.
 
     Args:
         file_paths: List of Path objects to scan
         max_files: Max files to read (for speed)
+        languages: Tuple of language codes whose entity patterns should be
+            applied (union). Defaults to ``("en",)``.
 
     Returns:
         {
@@ -646,6 +378,8 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
             "uncertain":[...entity dicts...],
         }
     """
+    langs = _normalize_langs(languages)
+
     # Collect text from files
     all_text = []
     all_lines = []
@@ -668,7 +402,7 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
     combined_text = "\n".join(all_text)
 
     # Extract candidates
-    candidates = extract_candidates(combined_text)
+    candidates = extract_candidates(combined_text, languages=langs)
 
     if not candidates:
         return {"people": [], "projects": [], "uncertain": []}
@@ -679,7 +413,7 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
     uncertain = []
 
     for name, frequency in sorted(candidates.items(), key=lambda x: x[1], reverse=True):
-        scores = score_entity(name, combined_text, all_lines)
+        scores = score_entity(name, combined_text, all_lines, languages=langs)
         entity = classify_entity(name, frequency, scores)
 
         if entity["type"] == "person":
@@ -843,13 +577,14 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage: python entity_detector.py <directory>")
+        print("Usage: python entity_detector.py <directory> [lang1,lang2,...]")
         sys.exit(1)
 
     project_dir = sys.argv[1]
-    print(f"Scanning: {project_dir}")
+    langs = tuple(sys.argv[2].split(",")) if len(sys.argv) >= 3 else ("en",)
+    print(f"Scanning: {project_dir} (languages: {', '.join(langs)})")
     files = scan_for_detection(project_dir)
     print(f"Reading {len(files)} files...")
-    detected = detect_entities(files)
+    detected = detect_entities(files, languages=langs)
     confirmed = confirm_entities(detected)
     print("Confirmed entities:", confirmed)

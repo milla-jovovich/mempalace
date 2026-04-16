@@ -34,14 +34,20 @@ Three steps: **init**, **mine**, **search**.
 
 ### 1. Initialize Your Palace
 
+`mempalace init` requires a project directory to scan. Pass a path,
+or `.` to use the current directory.
+
 ```bash
 mempalace init ~/projects/myapp
+# or, from inside the project:
+mempalace init .
 ```
 
 This scans your project directory and:
+
 - Detects people and projects from file content
 - Creates rooms from your folder structure
-- Sets up `~/.mempalace/` config directory
+- Ensures the `~/.mempalace/` config directory exists
 
 ### 2. Mine Your Data
 
