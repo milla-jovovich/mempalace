@@ -264,32 +264,38 @@ def load_config(project_dir: str) -> dict:
     """Load mempalace.yaml from project directory (falls back to mempal.yaml)."""
     import yaml
 
-    resolved_project_dir = Path(project_dir).expanduser().resolve()
-    config_path = resolved_project_dir / "mempalace.yaml"
-    if not config_path.exists():
-        # Fallback to legacy name
-        legacy_path = resolved_project_dir / "mempal.yaml"
-        if legacy_path.exists():
-            config_path = legacy_path
-        else:
-            wing_name = resolved_project_dir.name
-            print(
-                f"  No mempalace.yaml found in {resolved_project_dir} "
-                f"— using auto-detected defaults (wing='{wing_name}'). "
-                "Directories with the same basename will share a wing; "
-                "add mempalace.yaml to disambiguate.",
-                file=sys.stderr,
-            )
-            return {
-                "wing": wing_name,
-                "rooms": [
-                    {
-                        "name": "general",
-                        "description": "All project files",
-                        "keywords": ["general"],
-                    }
-                ],
-            }
+    base = Path(project_dir).expanduser().resolve()
+    # Prefer .mempalace/ subdirectory, then project root, then legacy name
+    candidates = [
+        base / ".mempalace" / "mempalace.yaml",
+        base / "mempalace.yaml",
+        base / ".mempalace" / "mempal.yaml",
+        base / "mempal.yaml",
+    ]
+    config_path = None
+    for candidate in candidates:
+        if candidate.exists():
+            config_path = candidate
+            break
+    if config_path is None:
+        wing_name = base.name
+        print(
+            f"  No mempalace.yaml found in {base} "
+            f"— using auto-detected defaults (wing='{wing_name}'). "
+            "Directories with the same basename will share a wing; "
+            "add mempalace.yaml to disambiguate.",
+            file=sys.stderr,
+        )
+        return {
+            "wing": wing_name,
+            "rooms": [
+                {
+                    "name": "general",
+                    "description": "All project files",
+                    "keywords": ["general"],
+                }
+            ],
+        }
     with open(config_path) as f:
         return yaml.safe_load(f)
 

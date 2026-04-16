@@ -95,9 +95,11 @@ def cmd_init(args):
         total = len(detected["people"]) + len(detected["projects"]) + len(detected["uncertain"])
         if total > 0:
             confirmed = confirm_entities(detected, yes=getattr(args, "yes", False))
-            # Save confirmed entities to <project>/entities.json for the miner
+            # Save confirmed entities to <project>/.mempalace/entities.json for the miner
             if confirmed["people"] or confirmed["projects"]:
-                entities_path = Path(args.dir).expanduser().resolve() / "entities.json"
+                mempalace_dir = Path(args.dir).expanduser().resolve() / ".mempalace"
+                mempalace_dir.mkdir(exist_ok=True)
+                entities_path = mempalace_dir / "entities.json"
                 with open(entities_path, "w") as f:
                     json.dump(confirmed, f, indent=2)
                 print(f"  Entities saved: {entities_path}")
@@ -353,7 +355,7 @@ def cmd_compress(args):
     # Load dialect (with optional entity config)
     config_path = args.config
     if not config_path:
-        for candidate in ["entities.json", os.path.join(palace_path, "entities.json")]:
+        for candidate in [os.path.join(".mempalace", "entities.json"), "entities.json", os.path.join(palace_path, "entities.json")]:
             if os.path.exists(candidate):
                 config_path = candidate
                 break
