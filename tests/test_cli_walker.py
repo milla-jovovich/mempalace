@@ -73,3 +73,36 @@ def test_status_walker_flag_reports_subsystem(isolated_home, capsys):
     out = capsys.readouterr().out
     assert "Walker" in out
     assert "NVIDIA RTX A5000" in out or "not initialized" in out
+
+
+def test_status_walker_reports_latest_version_dynamically(tmp_path):
+    from mempalace.cli import main
+    from mempalace.knowledge_graph import KnowledgeGraph
+    from mempalace.walker.extractor.state import ExtractionState
+
+    palace = tmp_path / "palace"
+    palace.mkdir()
+    kg = KnowledgeGraph(str(palace / "knowledge_graph.db"))
+    state = ExtractionState(kg)
+    state.mark_extracted("d1", "v1.0", 3, 5)
+    state.mark_extracted("d2", "v2.0", 4, 6)  # newer
+
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        main(["--palace", str(palace), "status", "--walker"])
+    out = buf.getvalue()
+    assert "Extracted" in out
+    assert "v2.0" in out
+
+
+def test_status_walker_no_extraction(tmp_path):
+    from mempalace.cli import main
+
+    palace = tmp_path / "palace"
+    palace.mkdir()
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        main(["--palace", str(palace), "status", "--walker"])
+    # Must not crash

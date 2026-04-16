@@ -187,6 +187,33 @@ def cmd_status(args) -> int:
         else:
             print("  Walker:         not initialized (run `mempalace walker init`)")
 
+        try:
+            from pathlib import Path as _Path
+            from mempalace.knowledge_graph import KnowledgeGraph
+
+            palace_dir = _Path(args.palace) if args.palace else (_Path.home() / ".mempalace" / "palace")
+            kg_path = palace_dir / "knowledge_graph.db"
+            if kg_path.exists():
+                kg = KnowledgeGraph(str(kg_path))
+                row = kg._conn().execute(
+                    """
+                    SELECT extractor_version, COUNT(*), SUM(triple_count),
+                           SUM(entity_count), MAX(extracted_at)
+                    FROM extraction_state
+                    GROUP BY extractor_version
+                    ORDER BY MAX(extracted_at) DESC
+                    LIMIT 1
+                    """
+                ).fetchone()
+                if row:
+                    version, n, triples, entities, last_run = row
+                    print(f"  KG triples:     {triples or 0} ({entities or 0} entities)")
+                    print(f"  Extracted:      {n} drawers ({version}) — last run {last_run}")
+                else:
+                    print("  Extracted:      0 drawers")
+        except Exception as e:
+            print(f"  Extraction stats unavailable: {e}")
+
     return 0
 
 
