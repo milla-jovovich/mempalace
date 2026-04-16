@@ -132,6 +132,51 @@ def _hybrid_rank(
     return results
 
 
+def _fallback_drawer_query(drawers_col, query: str, where_filter: dict) -> tuple[dict, str | None]:
+    """Fallback when filtered Chroma query planning fails.
+
+    Chroma's Rust query planner can fail on some metadata-filtered queries
+    even though the same ``where`` clause succeeds via ``get()``. In that
+    case, fall back to fetching the filtered candidate set and ranking it
+    lexically so MemPalace returns partial-but-useful results instead of a
+    hard error.
+    """
+    try:
+        filtered = drawers_col.get(where=where_filter, include=["documents", "metadatas"])
+    except Exception as get_error:
+        return {}, f"Search error: {get_error}"
+
+    documents = filtered.get("documents") or []
+    metadatas = filtered.get("metadatas") or []
+    if not documents:
+        return {
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+            "search_mode": "filtered_get_fallback",
+            "fallback_candidate_count": 0,
+        }, None
+
+    bm25_raw = _bm25_scores(query, documents)
+    max_bm25 = max(bm25_raw) if bm25_raw else 0.0
+
+    ranked = []
+    for doc, meta, raw in zip(documents, metadatas, bm25_raw):
+        norm = raw / max_bm25 if max_bm25 > 0 else 0.0
+        ranked.append((norm, doc, meta))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+
+    return {
+        "documents": [[doc for _, doc, _ in ranked]],
+        "metadatas": [[meta for _, _, meta in ranked]],
+        # Synthetic distance so downstream scoring/hydration can reuse the
+        # same shape. 0 = best lexical match, 1 = no lexical signal.
+        "distances": [[max(0.0, 1.0 - score) for score, _, _ in ranked]],
+        "search_mode": "filtered_get_fallback",
+        "fallback_candidate_count": len(documents),
+    }, None
+
+
 def build_where_filter(wing: str = None, room: str = None, where: dict = None) -> dict:
     """Build a combined ChromaDB where filter for wing/room + metadata."""
     conditions = []
@@ -339,6 +384,7 @@ def search_memories(
 
     base_filter = build_where_filter(wing, room)
     where_filter = build_where_filter(wing, room, where)
+    drawer_search_mode = "vector"
 
     # Hybrid retrieval: always query drawers directly (the floor), then use
     # closet hits to boost rankings. Closets are a ranking SIGNAL, never a
@@ -357,7 +403,19 @@ def search_memories(
             dkwargs["where"] = where_filter
         drawer_results = drawers_col.query(**dkwargs)
     except Exception as e:
-        return {"error": f"Search error: {e}"}
+        if not where_filter:
+            return {"error": f"Search error: {e}"}
+        drawer_results, fallback_error = _fallback_drawer_query(drawers_col, query, where_filter)
+        if fallback_error:
+            return {"error": fallback_error}
+        drawer_search_mode = drawer_results.get("search_mode", "filtered_get_fallback")
+        logger.warning(
+            "Filtered Chroma query failed; using lexical get() fallback. "
+            "query=%r filter=%s error=%s",
+            query,
+            where_filter,
+            e,
+        )
 
     # Gather closet hits (best-per-source) to build a boost lookup.
     closet_boost_by_source: dict = {}  # source_file -> (rank, closet_dist, preview)
@@ -419,6 +477,7 @@ def search_memories(
             "source_file": Path(source).name if source else "?",
             "similarity": round(max(0.0, 1 - effective_dist), 3),
             "distance": round(dist, 4),
+            "bm25_score": 0.0,
             "filed_at": meta.get("filed_at", ""),
             "metadata": {
                 k: v
@@ -498,7 +557,10 @@ def search_memories(
         h["total_drawers"] = len(ordered_docs)
 
     # BM25 hybrid re-rank within the final candidate set.
-    hits = _hybrid_rank(hits, query)
+    if drawer_search_mode == "vector":
+        hits = _hybrid_rank(hits, query)
+    else:
+        hits.sort(key=lambda h: h.get("_sort_key", 1.0))
     for h in hits:
         h.pop("_sort_key", None)
         h.pop("_source_file_full", None)
@@ -510,6 +572,7 @@ def search_memories(
     return {
         "query": query,
         "filters": {"wing": wing, "room": room, "where": where},
+        "search_mode": drawer_search_mode,
         "sort_by": sort_by,
         "total_before_filter": len(drawer_results["documents"][0]),
         "results": hits[:n_results],

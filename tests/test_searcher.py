@@ -62,6 +62,50 @@ class TestSearchMemories:
         assert "error" in result
         assert "query failed" in result["error"]
 
+    def test_search_memories_filtered_query_falls_back_to_get(self):
+        """Filtered query planner failures should degrade to lexical get()."""
+        mock_col = MagicMock()
+        mock_col.query.side_effect = RuntimeError("Error finding id")
+        mock_col.get.return_value = {
+            "ids": ["D1", "D2"],
+            "documents": [
+                "Session handoff for native MemPalace integration and recent findings.",
+                "Unrelated package indexing notes.",
+            ],
+            "metadatas": [
+                {
+                    "wing": "wing_codesight_9f9037166af3",
+                    "room": "recent-investigations",
+                    "source_file": "handoff.md",
+                    "filed_at": "2026-04-15T10:00:00Z",
+                },
+                {
+                    "wing": "wing_codesight_9f9037166af3",
+                    "room": "recent-investigations",
+                    "source_file": "notes.md",
+                    "filed_at": "2026-04-14T10:00:00Z",
+                },
+            ],
+        }
+        mock_closets = MagicMock()
+        mock_closets.query.side_effect = RuntimeError("closets unavailable")
+
+        with (
+            patch("mempalace.searcher.get_collection", return_value=mock_col),
+            patch("mempalace.searcher.get_closets_collection", return_value=mock_closets),
+        ):
+            result = search_memories(
+                "session handoff mempalace integration",
+                "/fake/path",
+                room="recent-investigations",
+            )
+
+        assert "error" not in result
+        assert result["search_mode"] == "filtered_get_fallback"
+        assert result["filters"]["room"] == "recent-investigations"
+        assert result["results"][0]["source_file"] == "handoff.md"
+        assert result["results"][0]["room"] == "recent-investigations"
+
     def test_search_memories_filters_in_result(self, palace_path, seeded_collection):
         result = search_memories("test", palace_path, wing="project", room="backend")
         assert result["filters"]["wing"] == "project"
