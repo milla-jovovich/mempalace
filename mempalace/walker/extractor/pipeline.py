@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from mempalace.knowledge_graph import KnowledgeGraph
 from mempalace.walker.extractor.gliner_ner import GlinerNER
