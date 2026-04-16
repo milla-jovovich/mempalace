@@ -6,7 +6,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
-## [Unreleased] — v3.3.0 (on develop)
+## [3.3.1] — 2026-04-16
+
+### New Features
+
+**Multi-language entity detection** — lexical patterns (person verbs, pronouns, dialogue markers, project verbs, stopwords, candidate character classes) now live in the optional `entity` section of each locale JSON under `mempalace/i18n/<lang>.json`. Every public function in `entity_detector` accepts a `languages=` tuple and unions patterns across enabled locales. Default stays `("en",)` so existing English-only callers are unchanged. (#911)
+
+- **Five new fully-supported locales** with CLI strings, AAAK compression instructions, and entity-detection patterns:
+  - Brazilian Portuguese `pt-br` (#156)
+  - Russian `ru` (#760)
+  - Italian `it` (#907)
+  - Hindi `hi` (#773)
+  - Indonesian `id` (#778)
+- **`MempalaceConfig.entity_languages`** — persistent palace-level language selection; `MEMPALACE_ENTITY_LANGUAGES` env override; `mempalace init --lang en,pt-br` flag that saves to `~/.mempalace/config.json` (#911)
+- **Per-language `candidate_pattern`** — non-Latin scripts register their own character class, so names like `João`, `Инна`, `राज` are no longer silently dropped by the ASCII-only default (#911)
+- **VSCode devcontainer** matching the CI environment (#881)
+- `created_at` timestamps in search results *(landed in 3.3.0-era code but not previously documented)*
+
+### Bug Fixes
+
+**i18n / Unicode**
+
+- Script-aware word boundaries for combining-mark scripts — Python's `\b` fails on Devanagari vowel signs (`ा ी ु`), Arabic, Hebrew, Thai, Tamil, Khmer etc., truncating names like `अनीता` → `अनीत` and making person-verb patterns never fire. Locales now declare an optional `boundary_chars` field and the i18n loader expands `\b` into a script-aware lookaround boundary (#932)
+- Case-insensitive BCP 47 language code resolution — `--lang PT-BR`, `zh-cn`, `Pt-Br` previously fell through to English silently; now resolve to the canonical locale file via lowercase matching, with the entity-pattern cache keyed on the canonical form so casing variations share one cache entry (#928)
+- Wire i18n candidate patterns into `miner._extract_entities_for_metadata()`, `palace.build_closet_lines()`, and `entity_registry.extract_unknown_candidates()` — three code paths that still hardcoded ASCII-only `[A-Z][a-z]{2,}` and silently missed Cyrillic, accented Latin, and non-Latin entity metadata tags (#931)
+- Explicit `encoding="utf-8"` on `Path.read_text()` calls across entity_registry, instructions_cli, split_mega_files, and onboarding tests — prevents Windows GBK (and other non-UTF-8) locales from corrupting UTF-8 files (#946, #776)
+- `ko.json` `status_drawers` used `{drawers}` instead of `{count}`, showing the raw template string instead of the number (#758)
+- Move `test_i18n.py` from inside the installed package into `tests/` so pytest actually collects it; remove the `sys.path.insert` hack (#758)
+- `Dialect.from_config()` defaulted to `current_lang()` (module-global) when config had no `lang` key — replaced with explicit `"en"` fallback for determinism (#758)
+
+**Other**
+
+- Guard `KnowledgeGraph.close()` and `query_relationship`/`timeline`/`stats` methods with the instance lock to prevent concurrent-access corruption (#887, #884)
+- Replace invalid `{"decision": "allow"}` with `{}` in hook responses — the string wasn't a valid decision value and triggered schema warnings (#885)
+- Restrict file permissions on sensitive palace data (previously landed on develop without a changelog entry; #814)
+- Allow `mempalace mine` to run in directories without a local `mempalace.yaml` and surface the missing-yaml warning on stderr (#604)
+- Security hook injection fix (#812)
+- Pin the Pages custom domain via a shipped `CNAME` in the deploy artifact (#877)
+- Version drift safeguard — sync pyproject + `version.py` + README badge in one place (#876)
+- Deploy docs workflow now runs on `develop` only, preventing accidental main-branch deploys (#845)
+
+### Improvements
+
+- Regex compilation optimization for entity extraction — pre-compile per-entity pattern sets once and cache by `(name, languages)` tuple, so multi-language callers don't thrash the cache (#880)
+- Knowledge-graph value sanitization now preserves natural punctuation (commas, colons, parentheses) that commonly appears in KG subject/object values (#873)
+
+### Documentation
+
+- Domain name and specific impostor sites called out in the scam-alert section (#869)
+- Tightened `SECURITY.md` with a real version-support policy and the GHPVR-only reporting channel (#810)
+- Fixed stale `pyproject.toml` URLs (#853)
+- v4 planning prep (#852)
+
+### Internal
+
+- `palace_graph` tunnel helper test coverage (#908)
+
+---
+
+## [3.3.0] — 2026-04-13
 
 ### New Features
 - Closet layer — a compact searchable index of pointers to verbatim drawers, enabling fast topical lookup without reading all content (#788)
