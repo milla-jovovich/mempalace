@@ -55,7 +55,7 @@ CONVO_EXTENSIONS = {
 
 MIN_CHUNK_SIZE = 30
 CHUNK_SIZE = 800  # chars per drawer — align with miner.py
-MAX_FILE_SIZE = 200 * 1024 * 1024  # 10 MB — skip files larger than this
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB — skip files larger than this
 
 
 def _register_file(collection, source_file: str, wing: str, agent: str):
