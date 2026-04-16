@@ -1118,10 +1118,17 @@ def tool_reconnect():
     Use after external scripts or CLI commands modify the palace database
     directly, which can leave the in-memory HNSW index stale.
     """
-    global _collection_cache, _palace_db_inode, _palace_db_mtime
+    global \
+        _collection_cache, \
+        _palace_db_inode, \
+        _palace_db_mtime, \
+        _metadata_cache, \
+        _metadata_cache_time
     _collection_cache = None
     _palace_db_inode = 0
     _palace_db_mtime = 0.0
+    _metadata_cache = None
+    _metadata_cache_time = 0
     try:
         col = _get_collection()
         if col is None:
