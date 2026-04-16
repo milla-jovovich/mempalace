@@ -359,11 +359,95 @@ def cmd_walker_status(args):
     return 0
 
 
+
+def _resolve_palace_and_kg(args):
+    from pathlib import Path
+    from mempalace.knowledge_graph import KnowledgeGraph
+
+    palace_path = args.palace or str(Path.home() / ".mempalace" / "palace")
+    kg_path = str(Path(palace_path) / "knowledge_graph.db")
+    return palace_path, KnowledgeGraph(kg_path)
+
+
+def cmd_walker_extract(args):
+    import asyncio
+    import logging
+
+    logging.basicConfig(level=logging.INFO)
+    from mempalace.dream import reextract as _reextract
+
+    palace_path, kg = _resolve_palace_and_kg(args)
+    try:
+        result = asyncio.run(
+            _reextract.run_job_a(
+                palace_path=palace_path,
+                kg=kg,
+                version=args.version,
+                wing=args.wing,
+                dry_run=args.dry_run,
+                qwen_url=args.qwen_url,
+                batch_size=args.batch_size,
+            )
+        )
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        print(f"Hint: start Qwen at {args.qwen_url} or pass --qwen-url <url>")
+        return 2
+
+    print(
+        f"Extracted: {result.drawers_processed} processed, "
+        f"{result.drawers_skipped} skipped"
+    )
+    print(
+        f"Triples: {result.triples_inserted} inserted, "
+        f"{result.triples_updated} updated"
+    )
+    print(f"Elapsed: {result.elapsed_secs:.1f}s ({result.batches} batches)")
+    return 0
+
+
+def cmd_dream_cycle(args):
+    import asyncio
+    import logging
+
+    logging.basicConfig(level=logging.INFO)
+    from mempalace.dream import reextract as _reextract
+
+    jobs = [j.strip() for j in args.jobs.split(",")]
+    if jobs != ["A"]:
+        print(f"Phase 1 only supports --jobs A; got {args.jobs}")
+        return 2
+
+    palace_path, kg = _resolve_palace_and_kg(args)
+    try:
+        result = asyncio.run(
+            _reextract.run_job_a(
+                palace_path=palace_path,
+                kg=kg,
+                version=args.version,
+                batch_size=args.batch_size,
+                wing=args.wing,
+                dry_run=args.dry_run,
+                qwen_url=args.qwen_url,
+            )
+        )
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        return 2
+
+    print(
+        f"Dream Job A: {result.drawers_processed} processed in "
+        f"{result.batches} batches, {result.elapsed_secs:.1f}s"
+    )
+    return 0
+
+
 def cmd_walker(args):
     """Dispatch walker sub-subcommands."""
     walker_dispatch = {
         "init": cmd_walker_init,
         "status": cmd_walker_status,
+        "extract": cmd_walker_extract,
     }
     return walker_dispatch[args.walker_command](args)
 
@@ -671,6 +755,25 @@ def main(argv=None):
     walker_sub = p_walker.add_subparsers(dest="walker_command")
     walker_sub.add_parser("init", help="Detect GPU and write walker_ready flag")
     walker_sub.add_parser("status", help="Show walker initialization status")
+    p_extract = walker_sub.add_parser(
+        "extract", help="Extract entities + triples from palace drawers"
+    )
+    p_extract.add_argument("--wing", default=None)
+    p_extract.add_argument("--concurrency", type=int, default=4)
+    p_extract.add_argument("--version", default="v1.0")
+    p_extract.add_argument("--gliner-threshold", type=float, default=0.4)
+    p_extract.add_argument("--dry-run", action="store_true")
+    p_extract.add_argument("--qwen-url", default="http://localhost:43100")
+    p_extract.add_argument("--batch-size", type=int, default=500)
+
+    # dream-cycle
+    p_dream = sub.add_parser("dream-cycle", help="Run Dream Cycle jobs")
+    p_dream.add_argument("--jobs", default="A")
+    p_dream.add_argument("--version", default="v1.0")
+    p_dream.add_argument("--batch-size", type=int, default=500)
+    p_dream.add_argument("--wing", default=None)
+    p_dream.add_argument("--dry-run", action="store_true")
+    p_dream.add_argument("--qwen-url", default="http://localhost:43100")
 
     args = parser.parse_args(argv)
 
@@ -712,6 +815,7 @@ def main(argv=None):
         "repair": cmd_repair,
         "migrate": cmd_migrate,
         "status": cmd_status,
+        "dream-cycle": cmd_dream_cycle,
     }
     return dispatch[args.command](args)
 
