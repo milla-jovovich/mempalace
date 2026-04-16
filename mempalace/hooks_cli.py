@@ -14,26 +14,25 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from .config import MempalaceConfig
+
 SAVE_INTERVAL = 15
 STATE_DIR = Path.home() / ".mempalace" / "hook_state"
 
 STOP_BLOCK_REASON = (
-    "AUTO-SAVE checkpoint (MemPalace). Save this session's key content:\n"
-    "1. mempalace_diary_write — AAAK-compressed session summary\n"
-    "2. mempalace_add_drawer — verbatim quotes, decisions, code snippets\n"
-    "3. mempalace_kg_add — entity relationships (optional)\n"
-    "Do NOT write to Claude Code's native auto-memory (.md files). "
-    "Continue conversation after saving."
+    "AUTO-SAVE checkpoint (MemPalace). First check whether MemPalace MCP tools are available in this session.\n"
+    "If tools like mempalace_diary_write, mempalace_add_drawer, or mempalace_kg_add are available, use them to save this session's key content.\n"
+    "If those MCP tools are NOT available, do not invent CLI substitutes and do not run shell commands like mempalace_diary_write or mempalace_add_drawer. Those are MCP tool names, not CLI commands.\n"
+    "In that case, briefly note that MemPalace auto-save is unavailable in this session and continue normally.\n"
+    "Do NOT write to Claude Code's native auto-memory (.md files)."
 )
 
 PRECOMPACT_BLOCK_REASON = (
-    "COMPACTION IMMINENT (MemPalace). Save ALL session content before context is lost:\n"
-    "1. mempalace_diary_write — thorough AAAK-compressed session summary\n"
-    "2. mempalace_add_drawer — ALL verbatim quotes, decisions, code, context\n"
-    "3. mempalace_kg_add — entity relationships (optional)\n"
-    "Be thorough \u2014 after compaction, detailed context will be lost. "
-    "Do NOT write to Claude Code's native auto-memory (.md files). "
-    "Save everything to MemPalace, then allow compaction to proceed."
+    "COMPACTION IMMINENT (MemPalace). First check whether MemPalace MCP tools are available in this session.\n"
+    "If tools like mempalace_diary_write, mempalace_add_drawer, or mempalace_kg_add are available, use them to save ALL important session content before context is lost.\n"
+    "If those MCP tools are NOT available, do not invent CLI substitutes and do not run shell commands like mempalace_diary_write or mempalace_add_drawer. Those are MCP tool names, not CLI commands.\n"
+    "In that case, briefly note that MemPalace auto-save is unavailable in this session, avoid fake saves, and let compaction proceed.\n"
+    "Do NOT write to Claude Code's native auto-memory (.md files)."
 )
 
 
@@ -92,6 +91,98 @@ def _log(message: str):
             f.write(f"[{timestamp}] {message}\n")
     except OSError:
         pass
+
+
+def _silent_save_enabled() -> bool:
+    """Whether hooks should save directly instead of blocking for MCP calls."""
+    try:
+        return MempalaceConfig().hook_silent_save
+    except Exception:
+        return True
+
+
+def _transcript_excerpt(transcript_path: str, max_chars: int = 6000) -> str:
+    """Return a normalized tail excerpt from the transcript for direct checkpointing."""
+    if not transcript_path:
+        return ""
+
+    try:
+        from .normalize import normalize
+
+        text = normalize(transcript_path)
+    except Exception:
+        try:
+            text = Path(transcript_path).expanduser().read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
+    text = text.strip()
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return "...\n" + text[-max_chars:]
+
+
+def _write_checkpoint_ack(exchange_count: int, hook_name: str, result: dict):
+    """Write a short ack file so clients can notice a silent save happened."""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        ack_file = STATE_DIR / "last_checkpoint"
+        payload = {
+            "ts": datetime.now().isoformat(),
+            "msgs": exchange_count,
+            "hook": hook_name,
+            "entry_id": result.get("entry_id"),
+        }
+        ack_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _silent_checkpoint(
+    session_id: str,
+    transcript_path: str,
+    exchange_count: int,
+    hook_name: str,
+    harness: str,
+) -> bool:
+    """Persist a lightweight diary checkpoint directly from the hook runtime."""
+    excerpt = _transcript_excerpt(transcript_path)
+    if not excerpt:
+        excerpt = "(No transcript excerpt available.)"
+
+    agent_name = harness.replace("-", "_")
+    topic = f"{agent_name}_autosave"
+
+    entry = (
+        f"Harness: {harness}\n"
+        f"Session: {session_id}\n"
+        f"Hook: {hook_name}\n"
+        f"Human messages: {exchange_count}\n"
+        f"Timestamp: {datetime.now().isoformat()}\n\n"
+        f"Transcript excerpt:\n{excerpt}"
+    )
+
+    try:
+        from .mcp_server import tool_diary_write
+
+        result = tool_diary_write(
+            agent_name=agent_name,
+            entry=entry,
+            topic=topic,
+        )
+    except Exception as e:
+        _log(f"silent checkpoint failed during {hook_name}: {e}")
+        return False
+
+    if result.get("success"):
+        _write_checkpoint_ack(exchange_count, hook_name, result)
+        _log(f"silent checkpoint saved during {hook_name}: {result.get('entry_id', 'unknown')}")
+        return True
+
+    _log(f"silent checkpoint failed during {hook_name}: {result}")
+    return False
 
 
 def _output(data: dict):
@@ -171,6 +262,12 @@ def hook_stop(data: dict, harness: str):
         # Optional: auto-ingest if MEMPAL_DIR is set
         _maybe_auto_ingest()
 
+        if _silent_save_enabled():
+            if _silent_checkpoint(session_id, transcript_path, exchange_count, "stop", harness):
+                _output({})
+                return
+            _log("silent save failed, falling back to legacy MCP block")
+
         _output({"decision": "block", "reason": STOP_BLOCK_REASON})
     else:
         _output({})
@@ -191,9 +288,11 @@ def hook_session_start(data: dict, harness: str):
 
 
 def hook_precompact(data: dict, harness: str):
-    """Precompact hook: always block with comprehensive save instruction."""
+    """Precompact hook: save directly when silent-save is enabled, else block for MCP."""
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
+    transcript_path = parsed["transcript_path"]
+    exchange_count = _count_human_messages(transcript_path)
 
     _log(f"PRE-COMPACT triggered for session {session_id}")
 
@@ -212,7 +311,13 @@ def hook_precompact(data: dict, harness: str):
         except OSError:
             pass
 
-    # Always block -- compaction = save everything
+    if _silent_save_enabled():
+        if _silent_checkpoint(session_id, transcript_path, exchange_count, "precompact", harness):
+            _output({})
+            return
+        _log("silent precompact save failed, falling back to legacy MCP block")
+
+    # Legacy fallback: block so Claude can attempt MCP-based persistence
     _output({"decision": "block", "reason": PRECOMPACT_BLOCK_REASON})
 
 
