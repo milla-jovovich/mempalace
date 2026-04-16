@@ -146,15 +146,13 @@ Neither has automatic consolidation. Claude Code has unreleased "Auto Dream" con
 
 | PR | Status | Description |
 |----|--------|-------------|
-| [#629](https://github.com/milla-jovovich/mempalace/pull/629) | dirty, lower priority | Batch writes, concurrent mining |
-| [#632](https://github.com/milla-jovovich/mempalace/pull/632) | dirty, lower priority | Repair, purge, --version |
 | [#659](https://github.com/milla-jovovich/mempalace/pull/659) | clean, waiting review | Diary wing parameter |
 | [#660](https://github.com/milla-jovovich/mempalace/pull/660) | clean, waiting review | L1 importance pre-filter |
 | [#661](https://github.com/milla-jovovich/mempalace/pull/661) | feedback addressed, waiting re-review | Graph cache with write-invalidation |
-| [#673](https://github.com/milla-jovovich/mempalace/pull/673) | needs semantic rebase against #863 | Deterministic hook saves |
+| [#673](https://github.com/milla-jovovich/mempalace/pull/673) | clean, rebased against #863 | Deterministic hook saves |
 | [#681](https://github.com/milla-jovovich/mempalace/pull/681) | clean, waiting review | Unicode checkmark → ASCII |
 
-Closed: #626, #633, #662 (superseded by BM25), #663 (upstream wrote #757), #738 (docs stale).
+Closed: #626, #633, #662 (superseded by BM25), #663 (upstream wrote #757), #738 (docs stale), #629 (superseded — upstream shipped batching + file locking), #632 (superseded — `--version`, `purge`, `repair` all shipped in v3.3.0).
 
 ## Setup
 

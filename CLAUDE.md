@@ -53,17 +53,17 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 ## Upstream PRs
 
-As of 2026-04-16: 5 merged, 7 open, 5 closed. PRs target `develop`.
+As of 2026-04-16: 5 merged, 5 open, 7 closed. PRs target `develop`.
 
 | PR | Status | Description |
 |----|--------|-------------|
-| #629 | open (dirty, lower priority) | Batch writes, concurrent mining |
-| #632 | open (dirty, lower priority) | Repair, purge, --version |
 | #659 | open (clean, waiting review) | Diary wing parameter |
 | #660 | open (clean, waiting review) | L1 importance pre-filter |
 | #661 | open (feedback addressed, waiting re-review) | Graph cache with write-invalidation |
 | #673 | open (clean, rebased against #863) | Deterministic hook saves |
 | #681 | open (clean, waiting review) | Unicode checkmark → ASCII (#535) |
+| #629 | **closed** | Superseded — upstream shipped batching + file locking |
+| #632 | **closed** | Superseded — `--version`, `purge`, `repair` all shipped in v3.3.0 |
 | #664 | **merged** | BLOB seq_id migration repair |
 | #682 | **merged** | --yes flag for init (#534) |
 | #683 | **merged** | Unicode sanitize_name (#637) |
