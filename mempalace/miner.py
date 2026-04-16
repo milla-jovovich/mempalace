@@ -48,6 +48,12 @@ READABLE_EXTENSIONS = {
     ".csv",
     ".sql",
     ".toml",
+    # C# / .NET
+    ".cs",
+    ".csproj",
+    ".sln",
+    ".razor",
+    ".cshtml",
 }
 
 SKIP_FILENAMES = {
