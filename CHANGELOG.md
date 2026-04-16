@@ -21,7 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`MempalaceConfig.entity_languages`** — persistent palace-level language selection; `MEMPALACE_ENTITY_LANGUAGES` env override; `mempalace init --lang en,pt-br` flag that saves to `~/.mempalace/config.json` (#911)
 - **Per-language `candidate_pattern`** — non-Latin scripts register their own character class, so names like `João`, `Инна`, `राज` are no longer silently dropped by the ASCII-only default (#911)
 - **VSCode devcontainer** matching the CI environment (#881)
-- `created_at` timestamps in search results *(landed in 3.3.0-era code but not previously documented)*
+- `MEMPAL_VERBOSE` env toggle — developers see diaries surfaced in chat while the default remains silent (#871)
+- `created_at` timestamps included in search results (#846)
 
 ### Bug Fixes
 
@@ -39,9 +40,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Guard `KnowledgeGraph.close()` and `query_relationship`/`timeline`/`stats` methods with the instance lock to prevent concurrent-access corruption (#887, #884)
 - Replace invalid `{"decision": "allow"}` with `{}` in hook responses — the string wasn't a valid decision value and triggered schema warnings (#885)
-- Restrict file permissions on sensitive palace data (previously landed on develop without a changelog entry; #814)
+- `entity_registry.research()` defaults to local-only — previously made outbound Wikipedia HTTPS requests without explicit user opt-in; callers now must pass `allow_network=True` (#811)
+- Precompact hook no longer blocks compaction when it fails or takes too long (#856, #858, #863)
+- Redirect stdout to stderr during MCP server import so library logging can't corrupt the JSON-RPC channel (#225, #864)
+- `mempalace init` auto-adds per-project files to `.gitignore` in git repositories so users don't accidentally commit `mempalace.yaml` / `entities.json` (#185, #866)
+- Searcher guards against empty ChromaDB query results that previously raised on edge-case corpora (#195, #865)
+- Return empty status instead of an error on a cold-start palace with no drawers yet (#830, #831)
+- Restrict file permissions on sensitive palace data (#814)
+- Slack transcript importer writes a provenance header and preserves speaker IDs (#815)
 - Allow `mempalace mine` to run in directories without a local `mempalace.yaml` and surface the missing-yaml warning on stderr (#604)
 - Security hook injection fix (#812)
+- Save hook auto-mines transcripts even when `MEMPAL_DIR` is unset (#840)
 - Pin the Pages custom domain via a shipped `CNAME` in the deploy artifact (#877)
 - Version drift safeguard — sync pyproject + `version.py` + README badge in one place (#876)
 - Deploy docs workflow now runs on `develop` only, preventing accidental main-branch deploys (#845)
@@ -53,6 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Documentation
 
+- Clarify that `mempalace init` requires a `<dir>` argument in CLI help text (#210, #862)
 - Domain name and specific impostor sites called out in the scam-alert section (#869)
 - Tightened `SECURITY.md` with a real version-support policy and the GHPVR-only reporting channel (#810)
 - Fixed stale `pyproject.toml` URLs (#853)
