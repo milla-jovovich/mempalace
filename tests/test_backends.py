@@ -3,10 +3,13 @@ import sqlite3
 import chromadb
 import pytest
 
+from mempalace.backends.base import GetResult, QueryResult
 from mempalace.backends.chroma import ChromaBackend, ChromaCollection, _fix_blob_seq_ids
 
 
 class _FakeCollection:
+    """Mimics enough of a chromadb Collection for adapter tests."""
+
     def __init__(self):
         self.calls = []
 
@@ -16,13 +19,25 @@ class _FakeCollection:
     def upsert(self, **kwargs):
         self.calls.append(("upsert", kwargs))
 
+    def update(self, **kwargs):
+        self.calls.append(("update", kwargs))
+
     def query(self, **kwargs):
         self.calls.append(("query", kwargs))
-        return {"kind": "query"}
+        return {
+            "ids": [["a", "b"]],
+            "documents": [["doc_a", "doc_b"]],
+            "metadatas": [[{"wing": "w"}, {"wing": "w"}]],
+            "distances": [[0.1, 0.2]],
+        }
 
     def get(self, **kwargs):
         self.calls.append(("get", kwargs))
-        return {"kind": "get"}
+        return {
+            "ids": ["a"],
+            "documents": ["doc_a"],
+            "metadatas": [{"wing": "w"}],
+        }
 
     def delete(self, **kwargs):
         self.calls.append(("delete", kwargs))
@@ -32,25 +47,71 @@ class _FakeCollection:
         return 7
 
 
-def test_chroma_collection_delegates_methods():
+def test_chroma_collection_forwards_writes_with_keyword_args():
     fake = _FakeCollection()
     collection = ChromaCollection(fake)
 
-    collection.add(documents=["d"], ids=["1"], metadatas=[{"wing": "w"}])
-    collection.upsert(documents=["u"], ids=["2"], metadatas=[{"room": "r"}])
-    assert collection.query(query_texts=["q"]) == {"kind": "query"}
-    assert collection.get(where={"wing": "w"}) == {"kind": "get"}
+    collection.add(ids=["1"], documents=["d"], metadatas=[{"wing": "w"}])
+    collection.upsert(ids=["2"], documents=["u"], metadatas=[{"room": "r"}])
+    collection.update(ids=["3"], metadatas=[{"room": "r2"}])
     collection.delete(ids=["1"])
     assert collection.count() == 7
 
-    assert fake.calls == [
-        ("add", {"documents": ["d"], "ids": ["1"], "metadatas": [{"wing": "w"}]}),
-        ("upsert", {"documents": ["u"], "ids": ["2"], "metadatas": [{"room": "r"}]}),
-        ("query", {"query_texts": ["q"]}),
-        ("get", {"where": {"wing": "w"}}),
-        ("delete", {"ids": ["1"]}),
-        ("count", {}),
-    ]
+    assert fake.calls[0] == (
+        "add",
+        {"ids": ["1"], "documents": ["d"], "metadatas": [{"wing": "w"}]},
+    )
+    assert fake.calls[1] == (
+        "upsert",
+        {"ids": ["2"], "documents": ["u"], "metadatas": [{"room": "r"}]},
+    )
+    # update only forwards kwargs the caller actually supplied.
+    assert fake.calls[2] == ("update", {"ids": ["3"], "metadatas": [{"room": "r2"}]})
+    assert fake.calls[3] == ("delete", {"ids": ["1"]})
+
+
+def test_chroma_collection_query_flattens_batch_shape():
+    fake = _FakeCollection()
+    collection = ChromaCollection(fake)
+
+    result = collection.query(query_texts=["hi"], n_results=2)
+
+    assert isinstance(result, QueryResult)
+    # Chroma's batch dimension ([[...]]) is collapsed into flat lists.
+    assert result.ids == ["a", "b"]
+    assert result.documents == ["doc_a", "doc_b"]
+    assert result.metadatas == [{"wing": "w"}, {"wing": "w"}]
+    assert result.distances == [0.1, 0.2]
+    # Dict-style access still works for compatibility with older helpers.
+    assert result["ids"] == ["a", "b"]
+    assert "distances" in result
+
+
+def test_chroma_collection_get_returns_get_result():
+    fake = _FakeCollection()
+    collection = ChromaCollection(fake)
+
+    result = collection.get(ids=["a"])
+
+    assert isinstance(result, GetResult)
+    assert result.ids == ["a"]
+    assert result.documents == ["doc_a"]
+    assert result.metadatas == [{"wing": "w"}]
+    assert result["metadatas"][0]["wing"] == "w"
+    # Dict-style .get falls back to the default for unknown keys only.
+    assert result.get("ids") == ["a"]
+    assert result.get("distances", "absent") == "absent"
+
+
+def test_chroma_collection_get_omits_none_kwargs():
+    fake = _FakeCollection()
+    collection = ChromaCollection(fake)
+
+    collection.get(ids=["a"])
+
+    # include always forwards; ids/where/limit/offset only when set.
+    _, forwarded = fake.calls[-1]
+    assert forwarded == {"ids": ["a"], "include": ["documents", "metadatas"]}
 
 
 def test_chroma_backend_create_false_raises_without_creating_directory(tmp_path):

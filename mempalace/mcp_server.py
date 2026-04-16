@@ -253,10 +253,10 @@ def _fetch_all_metadata(col, where=None):
         if where:
             kwargs["where"] = where
         batch = col.get(**kwargs)
-        if not batch["metadatas"]:
+        if not batch.metadatas:
             break
-        all_meta.extend(batch["metadatas"])
-        offset += len(batch["metadatas"])
+        all_meta.extend(batch.metadatas)
+        offset += len(batch.metadatas)
     return all_meta
 
 
@@ -475,22 +475,21 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
             include=["metadatas", "documents", "distances"],
         )
         duplicates = []
-        if results["ids"] and results["ids"][0]:
-            for i, drawer_id in enumerate(results["ids"][0]):
-                dist = results["distances"][0][i]
-                similarity = round(1 - dist, 3)
-                if similarity >= threshold:
-                    meta = results["metadatas"][0][i]
-                    doc = results["documents"][0][i]
-                    duplicates.append(
-                        {
-                            "id": drawer_id,
-                            "wing": meta.get("wing", "?"),
-                            "room": meta.get("room", "?"),
-                            "similarity": similarity,
-                            "content": doc[:200] + "..." if len(doc) > 200 else doc,
-                        }
-                    )
+        for i, drawer_id in enumerate(results.ids):
+            dist = results.distances[i]
+            similarity = round(1 - dist, 3)
+            if similarity >= threshold:
+                meta = results.metadatas[i]
+                doc = results.documents[i]
+                duplicates.append(
+                    {
+                        "id": drawer_id,
+                        "wing": meta.get("wing", "?"),
+                        "room": meta.get("room", "?"),
+                        "similarity": similarity,
+                        "content": doc[:200] + "..." if len(doc) > 200 else doc,
+                    }
+                )
         return {
             "is_duplicate": len(duplicates) > 0,
             "matches": duplicates,

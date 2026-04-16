@@ -71,9 +71,11 @@ mempalace/
 ├── knowledge_graph.py   # Temporal entity-relationship graph (SQLite)
 ├── palace.py            # Shared palace operations
 ├── palace_graph.py      # Room traversal + cross-wing tunnels
-├── backends/            # Pluggable storage backends (ChromaDB default)
-│   ├── base.py          # Abstract interface — implement this for new backends
-│   └── chroma.py        # ChromaDB implementation
+├── backends/            # Pluggable storage backends
+│   ├── base.py          # Abstract interface + QueryResult/GetResult dataclasses
+│   ├── chroma.py        # ChromaDB implementation (default)
+│   └── milvus.py        # Milvus Lite implementation — opt-in via [milvus] extra
+├── embeddings.py        # Local ONNX embedder (MiniLM-L6-v2, 384 dim)
 ├── dialect.py           # AAAK compression dialect
 ├── normalize.py         # Transcript format detection + normalization
 ├── entity_detector.py   # Auto-detect people/projects from content

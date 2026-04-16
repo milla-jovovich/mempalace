@@ -40,6 +40,15 @@ mempalace = "mempalace.cli:main"
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
 spellcheck = ["autocorrect>=2.0"]
+milvus = [
+    "pymilvus>=2.5.0",
+    "milvus-lite>=2.4.10; sys_platform != 'win32'",
+    "onnxruntime>=1.17.0",
+    "huggingface_hub>=0.20.0",
+    # milvus-lite<=2.5.1 still imports pkg_resources, which setuptools>=81
+    # removed. Pin setuptools until a newer milvus-lite drops the dep.
+    "setuptools<81",
+]
 
 [dependency-groups]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]

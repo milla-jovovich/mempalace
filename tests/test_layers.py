@@ -3,6 +3,8 @@
 import os
 from unittest.mock import MagicMock, patch
 
+from mempalace.backends.base import GetResult, QueryResult
+
 from mempalace.layers import Layer0, Layer1, Layer2, Layer3, MemoryStack
 
 
@@ -73,10 +75,11 @@ def test_layer0_default_path():
 def _mock_chromadb_for_layer(docs, metas, monkeypatch=None):
     """Return a mock collection whose get() returns docs/metas."""
     mock_col = MagicMock()
+    ids = [f"id_{i}" for i in range(len(docs))]
     # First batch returns data, second batch returns empty (end of pagination)
     mock_col.get.side_effect = [
-        {"documents": docs, "metadatas": metas},
-        {"documents": [], "metadatas": []},
+        GetResult(ids=ids, documents=list(docs), metadatas=list(metas)),
+        GetResult(),
     ]
     return mock_col
 
@@ -115,7 +118,7 @@ def test_layer1_generates_essential_story():
 
 def test_layer1_empty_palace():
     mock_col = MagicMock()
-    mock_col.get.return_value = {"documents": [], "metadatas": []}
+    mock_col.get.return_value = GetResult()
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
         patch("mempalace.layers._get_collection", return_value=mock_col),
@@ -205,7 +208,7 @@ def test_layer1_batch_exception_breaks():
     """If col.get raises on a batch, loop breaks gracefully."""
     mock_col = MagicMock()
     mock_col.get.side_effect = [
-        {"documents": ["doc1"], "metadatas": [{"room": "r"}]},
+        GetResult(ids=["d1"], documents=["doc1"], metadatas=[{"room": "r"}]),
         RuntimeError("batch error"),
     ]
     with (
@@ -232,10 +235,11 @@ def test_layer2_no_palace():
 
 def test_layer2_retrieve_with_wing():
     mock_col = MagicMock()
-    mock_col.get.return_value = {
-        "documents": ["Some memory about the project"],
-        "metadatas": [{"room": "backend", "source_file": "notes.txt"}],
-    }
+    mock_col.get.return_value = GetResult(
+        ids=["d1"],
+        documents=["Some memory about the project"],
+        metadatas=[{"room": "backend", "source_file": "notes.txt"}],
+    )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
         patch("mempalace.layers._get_collection", return_value=mock_col),
@@ -250,10 +254,11 @@ def test_layer2_retrieve_with_wing():
 
 def test_layer2_retrieve_with_room():
     mock_col = MagicMock()
-    mock_col.get.return_value = {
-        "documents": ["Backend architecture notes"],
-        "metadatas": [{"room": "architecture", "source_file": "arch.txt"}],
-    }
+    mock_col.get.return_value = GetResult(
+        ids=["d1"],
+        documents=["Backend architecture notes"],
+        metadatas=[{"room": "architecture", "source_file": "arch.txt"}],
+    )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
         patch("mempalace.layers._get_collection", return_value=mock_col),
@@ -267,10 +272,11 @@ def test_layer2_retrieve_with_room():
 
 def test_layer2_retrieve_wing_and_room():
     mock_col = MagicMock()
-    mock_col.get.return_value = {
-        "documents": ["Filtered result"],
-        "metadatas": [{"room": "backend", "source_file": "x.txt"}],
-    }
+    mock_col.get.return_value = GetResult(
+        ids=["d1"],
+        documents=["Filtered result"],
+        metadatas=[{"room": "backend", "source_file": "x.txt"}],
+    )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
         patch("mempalace.layers._get_collection", return_value=mock_col),
@@ -286,7 +292,7 @@ def test_layer2_retrieve_wing_and_room():
 
 def test_layer2_retrieve_empty():
     mock_col = MagicMock()
-    mock_col.get.return_value = {"documents": [], "metadatas": []}
+    mock_col.get.return_value = GetResult()
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
         patch("mempalace.layers._get_collection", return_value=mock_col),
@@ -300,7 +306,7 @@ def test_layer2_retrieve_empty():
 
 def test_layer2_retrieve_no_filter():
     mock_col = MagicMock()
-    mock_col.get.return_value = {"documents": [], "metadatas": []}
+    mock_col.get.return_value = GetResult()
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
         patch("mempalace.layers._get_collection", return_value=mock_col),
@@ -330,10 +336,11 @@ def test_layer2_retrieve_error():
 
 def test_layer2_truncates_long_snippets():
     mock_col = MagicMock()
-    mock_col.get.return_value = {
-        "documents": ["B" * 400],
-        "metadatas": [{"room": "r", "source_file": "s.txt"}],
-    }
+    mock_col.get.return_value = GetResult(
+        ids=["d1"],
+        documents=["B" * 400],
+        metadatas=[{"room": "r", "source_file": "s.txt"}],
+    )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
         patch("mempalace.layers._get_collection", return_value=mock_col),
@@ -349,11 +356,13 @@ def test_layer2_truncates_long_snippets():
 
 
 def _mock_query_results(docs, metas, dists):
-    return {
-        "documents": [docs],
-        "metadatas": [metas],
-        "distances": [dists],
-    }
+    ids = [f"qid_{i}" for i in range(len(docs))]
+    return QueryResult(
+        ids=ids,
+        documents=list(docs),
+        metadatas=list(metas),
+        distances=list(dists),
+    )
 
 
 def test_layer3_no_palace():

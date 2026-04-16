@@ -104,11 +104,11 @@ def dedup_source_group(col, drawer_ids, threshold=DEFAULT_THRESHOLD, dry_run=Tru
                 n_results=min(len(kept), 5),
                 include=["distances"],
             )
-            dists = results["distances"][0] if results["distances"] else []
+            dists = results.distances
             kept_ids_set = {k[0] for k in kept}
 
             is_dup = False
-            for rid, dist in zip(results["ids"][0], dists):
+            for rid, dist in zip(results.ids, dists):
                 if rid in kept_ids_set and dist < threshold:
                     is_dup = True
                     break
