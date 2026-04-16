@@ -1,4 +1,5 @@
 """Dream Job A — re-extract palace drawers not yet at `version`."""
+
 from __future__ import annotations
 
 import json
@@ -57,9 +58,13 @@ async def run_job_a(
             batch = drawers[i : i + batch_size]
             batches_run += 1
             stats = await extract_drawers(
-                drawers=batch, kg=kg, state=state,
-                gliner=gliner, qwen=qwen,
-                extractor_version=version, dry_run=dry_run,
+                drawers=batch,
+                kg=kg,
+                state=state,
+                gliner=gliner,
+                qwen=qwen,
+                extractor_version=version,
+                dry_run=dry_run,
             )
             totals.drawers_processed += stats.drawers_processed
             totals.drawers_skipped += stats.drawers_skipped
@@ -89,10 +94,9 @@ async def run_job_a(
     return result
 
 
-async def _load_drawers_from_palace(
-    palace_path: str, wing: str | None = None
-) -> list[dict]:
+async def _load_drawers_from_palace(palace_path: str, wing: str | None = None) -> list[dict]:
     from mempalace.backends.chroma import ChromaBackend
+
     backend = ChromaBackend()
     return list(backend.iter_drawers(palace_path, wing=wing))
 

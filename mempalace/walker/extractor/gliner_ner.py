@@ -1,4 +1,5 @@
 """GLiNER wrapper — batched entity extraction with GPU autodetect."""
+
 from __future__ import annotations
 
 import logging
@@ -9,8 +10,13 @@ from mempalace.walker.gpu_detect import HardwareTier, detect_hardware
 log = logging.getLogger(__name__)
 
 ENTITY_TYPES: list[str] = [
-    "person", "organization", "location",
-    "date", "project", "technology", "event",
+    "person",
+    "organization",
+    "location",
+    "date",
+    "project",
+    "technology",
+    "event",
 ]
 
 
@@ -28,6 +34,7 @@ class GlinerNER:
         device: str | None = None,
     ) -> None:
         from gliner import GLiNER
+
         self._device = device or GlinerNER._select_device()
         try:
             self._model = GLiNER.from_pretrained(model).to(self._device)
@@ -39,18 +46,11 @@ class GlinerNER:
             else:
                 raise
 
-    def extract_batch(
-        self, texts: list[str], threshold: float = 0.4
-    ) -> list[list[Entity]]:
+    def extract_batch(self, texts: list[str], threshold: float = 0.4) -> list[list[Entity]]:
         if not texts:
             return []
-        raw = self._model.batch_predict_entities(
-            texts, ENTITY_TYPES, threshold=threshold
-        )
-        return [
-            [Entity(r["text"], r["label"], r["score"]) for r in per_text]
-            for per_text in raw
-        ]
+        raw = self._model.batch_predict_entities(texts, ENTITY_TYPES, threshold=threshold)
+        return [[Entity(r["text"], r["label"], r["score"]) for r in per_text] for per_text in raw]
 
     @staticmethod
     def _select_device() -> str:

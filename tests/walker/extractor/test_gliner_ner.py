@@ -22,32 +22,35 @@ def test_entity_types_contains_core():
         assert t in ENTITY_TYPES
 
 
-@pytest.mark.parametrize("tier,expected", [
-    (HardwareTier.FULL, "cuda"),
-    (HardwareTier.REDUCED, "cuda"),
-    (HardwareTier.CPU_ONLY, "cpu"),
-])
+@pytest.mark.parametrize(
+    "tier,expected",
+    [
+        (HardwareTier.FULL, "cuda"),
+        (HardwareTier.REDUCED, "cuda"),
+        (HardwareTier.CPU_ONLY, "cpu"),
+    ],
+)
 def test_select_device_for_tier(monkeypatch, tier, expected):
     fake = WalkerHardware(tier=tier, device_name="x", vram_gb=0.0)
-    monkeypatch.setattr(
-        "mempalace.walker.extractor.gliner_ner.detect_hardware", lambda: fake
-    )
+    monkeypatch.setattr("mempalace.walker.extractor.gliner_ner.detect_hardware", lambda: fake)
     assert GlinerNER._select_device() == expected
 
 
 def test_select_device_fallback_on_error(monkeypatch):
-    def boom(): raise RuntimeError("no cuda")
-    monkeypatch.setattr(
-        "mempalace.walker.extractor.gliner_ner.detect_hardware", boom
-    )
+    def boom():
+        raise RuntimeError("no cuda")
+
+    monkeypatch.setattr("mempalace.walker.extractor.gliner_ner.detect_hardware", boom)
     assert GlinerNER._select_device() == "cpu"
 
 
 def test_extract_batch_maps_entities():
-    fake_predict = lambda texts, labels, threshold: [
-        [{"text": "Alice", "label": "person", "score": 0.9}],
-        [{"text": "DeepMind", "label": "organization", "score": 0.85}],
-    ]
+    def fake_predict(texts, labels, threshold):
+        return [
+            [{"text": "Alice", "label": "person", "score": 0.9}],
+            [{"text": "DeepMind", "label": "organization", "score": 0.85}],
+        ]
+
     ner = _fake_ner(fake_predict)
     out = ner.extract_batch(["a", "b"])
     assert len(out) == 2
@@ -64,6 +67,4 @@ def test_extract_batch_empty_input():
 def test_extract_batch_passes_threshold():
     ner = _fake_ner(lambda texts, labels, threshold: [[]])
     ner.extract_batch(["t"], threshold=0.6)
-    ner._model.batch_predict_entities.assert_called_with(
-        ["t"], ENTITY_TYPES, threshold=0.6
-    )
+    ner._model.batch_predict_entities.assert_called_with(["t"], ENTITY_TYPES, threshold=0.6)

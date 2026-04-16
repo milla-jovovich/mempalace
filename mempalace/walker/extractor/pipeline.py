@@ -1,4 +1,5 @@
 """Async orchestrator: GLiNER batch -> Qwen per-drawer -> upsert_triple -> mark_extracted."""
+
 from __future__ import annotations
 
 import asyncio
@@ -57,9 +58,7 @@ async def extract_drawers(
     texts = [d["text"] for d in unextracted]
 
     loop = asyncio.get_running_loop()
-    entities_per_drawer = await loop.run_in_executor(
-        None, gliner.extract_batch, texts
-    )
+    entities_per_drawer = await loop.run_in_executor(None, gliner.extract_batch, texts)
 
     stats_lock = asyncio.Lock()
     sem = asyncio.Semaphore(concurrency)
@@ -67,21 +66,33 @@ async def extract_drawers(
     async def process(drawer, entities):
         async with sem:
             await _process_single(
-                drawer, entities, kg, state, qwen,
-                extractor_version, dry_run, stats, stats_lock,
+                drawer,
+                entities,
+                kg,
+                state,
+                qwen,
+                extractor_version,
+                dry_run,
+                stats,
+                stats_lock,
             )
 
-    await asyncio.gather(*[
-        process(d, ents) for d, ents in zip(unextracted, entities_per_drawer)
-    ])
+    await asyncio.gather(*[process(d, ents) for d, ents in zip(unextracted, entities_per_drawer)])
 
     stats.elapsed_secs = time.monotonic() - start
     return stats
 
 
 async def _process_single(
-    drawer, entities, kg, state, qwen,
-    version, dry_run, stats, stats_lock,
+    drawer,
+    entities,
+    kg,
+    state,
+    qwen,
+    version,
+    dry_run,
+    stats,
+    stats_lock,
 ):
     drawer_id = drawer["id"]
     text = drawer["text"]
@@ -141,8 +152,10 @@ async def _process_single(
         async with stats_lock:
             stats.drawers_processed += 1
         state.mark_extracted(
-            drawer_id, version,
-            triple_count=len(triples), entity_count=entity_count,
+            drawer_id,
+            version,
+            triple_count=len(triples),
+            entity_count=entity_count,
         )
     else:
         log.warning("Drawer %s had upsert failures — not marking extracted", drawer_id)

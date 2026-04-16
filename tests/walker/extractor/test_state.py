@@ -1,5 +1,4 @@
 import threading
-import pytest
 from mempalace.knowledge_graph import KnowledgeGraph
 from mempalace.walker.extractor.state import ExtractionState
 
@@ -10,8 +9,11 @@ def test_table_created_with_correct_schema(tmp_path):
     cols = kg._conn().execute("PRAGMA table_info(extraction_state)").fetchall()
     names = [c[1] for c in cols]
     assert names == [
-        "drawer_id", "extractor_version", "extracted_at",
-        "triple_count", "entity_count",
+        "drawer_id",
+        "extractor_version",
+        "extracted_at",
+        "triple_count",
+        "entity_count",
     ]
     pk = [c for c in cols if c[5] == 1]
     assert len(pk) == 1
@@ -37,9 +39,11 @@ def test_mark_replaces_prior(tmp_path):
     state = ExtractionState(kg)
     state.mark_extracted("d1", "v1.0", 2, 3)
     state.mark_extracted("d1", "v1.0", 4, 6)
-    row = kg._conn().execute(
-        "SELECT triple_count, entity_count FROM extraction_state WHERE drawer_id='d1'"
-    ).fetchone()
+    row = (
+        kg._conn()
+        .execute("SELECT triple_count, entity_count FROM extraction_state WHERE drawer_id='d1'")
+        .fetchone()
+    )
     assert row[0] == 4 and row[1] == 6
 
 
@@ -89,6 +93,8 @@ def test_concurrent_writes_no_errors(tmp_path):
     for i in range(20):
         threads.append(threading.Thread(target=upsert_worker, args=(i,)))
         threads.append(threading.Thread(target=state_worker, args=(i,)))
-    for t in threads: t.start()
-    for t in threads: t.join()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
     assert errors == []

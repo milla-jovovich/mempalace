@@ -2,22 +2,26 @@ import json
 import pytest
 import httpx
 from mempalace.walker.extractor.qwen_rel import (
-    QwenRelExtractor, Triple, SYSTEM_PROMPT, _parse_triples,
+    QwenRelExtractor,
+    Triple,
+    SYSTEM_PROMPT,
+    _parse_triples,
 )
 from mempalace.walker.extractor.gliner_ner import Entity
 from mempalace.infra.circuit_breaker import CircuitBreaker, CircuitState
 
 
 def _ok_json(triples):
-    return httpx.Response(200, json={
-        "choices": [{"message": {"content": json.dumps(triples)}, "finish_reason": "stop"}]
-    })
+    return httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": json.dumps(triples)}, "finish_reason": "stop"}]},
+    )
 
 
 def _ok_text(content):
-    return httpx.Response(200, json={
-        "choices": [{"message": {"content": content}, "finish_reason": "stop"}]
-    })
+    return httpx.Response(
+        200, json={"choices": [{"message": {"content": content}, "finish_reason": "stop"}]}
+    )
 
 
 def _build_no_preflight(handler):
@@ -106,9 +110,10 @@ async def test_valid_json_parsed():
         return _ok_json([{"subject": "Alice", "predicate": "works_at", "object": "DeepMind"}])
 
     ex = _build_no_preflight(handler)
-    result = await ex.extract("Alice at DeepMind", [
-        Entity("Alice", "person", 0.9), Entity("DeepMind", "organization", 0.9)
-    ])
+    result = await ex.extract(
+        "Alice at DeepMind",
+        [Entity("Alice", "person", 0.9), Entity("DeepMind", "organization", 0.9)],
+    )
     assert len(result) == 1
     assert result[0].subject == "Alice"
 
@@ -162,15 +167,25 @@ async def test_preflight_passes_with_mock(monkeypatch):
     called = {"n": 0}
 
     class FakeSync:
-        def __init__(self, *a, **kw): pass
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
         def get(self, path):
             called["n"] += 1
             assert path == "/v1/models"
+
             class R:
                 status_code = 200
-                def raise_for_status(self): pass
+
+                def raise_for_status(self):
+                    pass
+
             return R()
 
     monkeypatch.setattr("httpx.Client", FakeSync)

@@ -1,6 +1,5 @@
 import json
 from unittest.mock import MagicMock, AsyncMock
-import pytest
 from mempalace.knowledge_graph import KnowledgeGraph
 from mempalace.walker.extractor.state import ExtractionState
 from mempalace.walker.extractor.gliner_ner import Entity
@@ -54,17 +53,20 @@ async def test_source_tag_and_drawer_id_written(tmp_path):
 
     await extract_drawers(
         drawers=[{"id": "d1", "text": "Alice works at DeepMind."}],
-        kg=kg, state=state, gliner=g, qwen=q,
+        kg=kg,
+        state=state,
+        gliner=g,
+        qwen=q,
     )
-    row = kg._conn().execute(
-        "SELECT source, source_drawer_ids FROM triples"
-    ).fetchone()
+    row = kg._conn().execute("SELECT source, source_drawer_ids FROM triples").fetchone()
     assert row[0] == "extractor_v1.0"
     assert json.loads(row[1]) == ["d1"]
 
-    row = kg._conn().execute(
-        "SELECT triple_count, entity_count FROM extraction_state WHERE drawer_id='d1'"
-    ).fetchone()
+    row = (
+        kg._conn()
+        .execute("SELECT triple_count, entity_count FROM extraction_state WHERE drawer_id='d1'")
+        .fetchone()
+    )
     assert row[0] == 1 and row[1] == 2
 
 
@@ -76,7 +78,10 @@ async def test_zero_entity_skips_qwen_marks_extracted(tmp_path):
 
     stats = await extract_drawers(
         drawers=[{"id": "d1", "text": "bland"}],
-        kg=kg, state=state, gliner=g, qwen=q,
+        kg=kg,
+        state=state,
+        gliner=g,
+        qwen=q,
     )
     q.extract.assert_not_called()
     assert state.is_extracted("d1", "v1.0")
@@ -93,7 +98,10 @@ async def test_already_extracted_skipped(tmp_path):
 
     stats = await extract_drawers(
         drawers=[{"id": "d1", "text": "x"}],
-        kg=kg, state=state, gliner=g, qwen=q,
+        kg=kg,
+        state=state,
+        gliner=g,
+        qwen=q,
     )
     assert stats.drawers_skipped == 1
     g.extract_batch.assert_not_called()
@@ -109,14 +117,14 @@ async def test_idempotent_run_twice(tmp_path):
 
     for _ in range(2):
         await extract_drawers(
-            drawers=[drawer], kg=kg, state=state,
+            drawers=[drawer],
+            kg=kg,
+            state=state,
             gliner=_mock_gliner([entities]),
             qwen=_mock_qwen([triples]),
         )
 
-    live = kg._conn().execute(
-        "SELECT COUNT(*) FROM triples WHERE valid_to IS NULL"
-    ).fetchone()[0]
+    live = kg._conn().execute("SELECT COUNT(*) FROM triples WHERE valid_to IS NULL").fetchone()[0]
     assert live == 1
 
 
@@ -128,7 +136,11 @@ async def test_dry_run_prints_and_does_not_write(tmp_path, capsys):
 
     stats = await extract_drawers(
         drawers=[{"id": "d1", "text": "Alice."}],
-        kg=kg, state=state, gliner=g, qwen=q, dry_run=True,
+        kg=kg,
+        state=state,
+        gliner=g,
+        qwen=q,
+        dry_run=True,
     )
     out = capsys.readouterr().out
     assert "[DRY]" in out and "d1" in out and "Alice" in out
@@ -145,7 +157,10 @@ async def test_custom_version_propagates(tmp_path):
 
     await extract_drawers(
         drawers=[{"id": "d1", "text": "Alice."}],
-        kg=kg, state=state, gliner=g, qwen=q,
+        kg=kg,
+        state=state,
+        gliner=g,
+        qwen=q,
         extractor_version="v2.5",
     )
     source = kg._conn().execute("SELECT source FROM triples").fetchone()[0]

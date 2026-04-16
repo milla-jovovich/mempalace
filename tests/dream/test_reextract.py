@@ -25,25 +25,33 @@ async def test_processes_unextracted(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "mempalace.dream.reextract._load_drawers_from_palace",
-        AsyncMock(return_value=[
-            {"id": "d1", "text": "Alice."},
-            {"id": "d2", "text": "Bob."},
-        ]),
+        AsyncMock(
+            return_value=[
+                {"id": "d1", "text": "Alice."},
+                {"id": "d2", "text": "Bob."},
+            ]
+        ),
     )
-    gliner = _mock_gliner([
-        [Entity("Alice", "person", 0.9)],
-        [Entity("Bob", "person", 0.9)],
-    ])
-    qwen = _mock_qwen([
-        [Triple("Alice", "is_a", "person")],
-        [Triple("Bob", "is_a", "person")],
-    ])
+    gliner = _mock_gliner(
+        [
+            [Entity("Alice", "person", 0.9)],
+            [Entity("Bob", "person", 0.9)],
+        ]
+    )
+    qwen = _mock_qwen(
+        [
+            [Triple("Alice", "is_a", "person")],
+            [Triple("Bob", "is_a", "person")],
+        ]
+    )
     monkeypatch.setattr("mempalace.dream.reextract._build_gliner", lambda: gliner)
     monkeypatch.setattr("mempalace.dream.reextract._build_qwen", lambda url: qwen)
 
     result = await run_job_a(
         palace_path=str(tmp_path / "palace"),
-        kg=kg, version="v1.0", batch_size=500,
+        kg=kg,
+        version="v1.0",
+        batch_size=500,
     )
     assert isinstance(result, JobAResult)
     assert result.drawers_processed == 2
@@ -70,7 +78,9 @@ async def test_only_processes_stale_version(tmp_path, monkeypatch):
     )
 
     result = await run_job_a(
-        palace_path=str(tmp_path / "palace"), kg=kg, version="v2.0",
+        palace_path=str(tmp_path / "palace"),
+        kg=kg,
+        version="v2.0",
     )
     assert result.drawers_processed == 1  # re-processed at v2.0
 
@@ -90,8 +100,10 @@ async def test_batches(tmp_path, monkeypatch):
     monkeypatch.setattr("mempalace.dream.reextract._build_qwen", lambda url: _mock_qwen([]))
 
     result = await run_job_a(
-        palace_path=str(tmp_path / "palace"), kg=kg,
-        version="v1.0", batch_size=500,
+        palace_path=str(tmp_path / "palace"),
+        kg=kg,
+        version="v1.0",
+        batch_size=500,
     )
     assert result.drawers_processed == 501
     assert result.batches == 2
@@ -113,7 +125,10 @@ async def test_dry_run_propagates(tmp_path, monkeypatch):
     )
 
     await run_job_a(
-        palace_path=str(tmp_path / "palace"), kg=kg, version="v1.0", dry_run=True,
+        palace_path=str(tmp_path / "palace"),
+        kg=kg,
+        version="v1.0",
+        dry_run=True,
     )
     assert kg._conn().execute("SELECT COUNT(*) FROM triples").fetchone()[0] == 0
 
@@ -140,17 +155,21 @@ async def test_verbatim_invariant_real_backend(tmp_path, monkeypatch):
     kg = KnowledgeGraph(str(palace_path / "knowledge_graph.db"))
     monkeypatch.setattr(
         "mempalace.dream.reextract._build_gliner",
-        lambda: _mock_gliner([
-            [Entity("Alice", "person", 0.9)],
-            [Entity("Bob", "person", 0.9)],
-        ]),
+        lambda: _mock_gliner(
+            [
+                [Entity("Alice", "person", 0.9)],
+                [Entity("Bob", "person", 0.9)],
+            ]
+        ),
     )
     monkeypatch.setattr(
         "mempalace.dream.reextract._build_qwen",
-        lambda url: _mock_qwen([
-            [Triple("Alice", "is_a", "person")],
-            [Triple("Bob", "is_a", "person")],
-        ]),
+        lambda url: _mock_qwen(
+            [
+                [Triple("Alice", "is_a", "person")],
+                [Triple("Bob", "is_a", "person")],
+            ]
+        ),
     )
 
     await run_job_a(palace_path=str(palace_path), kg=kg, version="v1.0")

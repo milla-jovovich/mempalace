@@ -2,6 +2,7 @@
 
 Uses CircuitBreaker.call_async() from Phase 0+Task 1b.
 """
+
 from __future__ import annotations
 
 import json

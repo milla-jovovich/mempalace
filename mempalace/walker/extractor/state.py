@@ -1,4 +1,5 @@
 """Tracks which drawers have been extracted per extractor_version."""
+
 from __future__ import annotations
 
 from mempalace.knowledge_graph import KnowledgeGraph
@@ -28,15 +29,22 @@ class ExtractionState:
             conn.commit()
 
     def is_extracted(self, drawer_id: str, version: str) -> bool:
-        row = self._kg._conn().execute(
-            "SELECT 1 FROM extraction_state WHERE drawer_id=? AND extractor_version=?",
-            (drawer_id, version),
-        ).fetchone()
+        row = (
+            self._kg._conn()
+            .execute(
+                "SELECT 1 FROM extraction_state WHERE drawer_id=? AND extractor_version=?",
+                (drawer_id, version),
+            )
+            .fetchone()
+        )
         return row is not None
 
     def mark_extracted(
-        self, drawer_id: str, version: str,
-        triple_count: int, entity_count: int,
+        self,
+        drawer_id: str,
+        version: str,
+        triple_count: int,
+        entity_count: int,
     ) -> None:
         with self._kg._write_lock:
             conn = self._kg._conn()
@@ -62,8 +70,12 @@ class ExtractionState:
         return [i for i in all_ids if i not in extracted]
 
     def max_extracted_at(self, version: str) -> str | None:
-        row = self._kg._conn().execute(
-            "SELECT MAX(extracted_at) FROM extraction_state WHERE extractor_version=?",
-            (version,),
-        ).fetchone()
+        row = (
+            self._kg._conn()
+            .execute(
+                "SELECT MAX(extracted_at) FROM extraction_state WHERE extractor_version=?",
+                (version,),
+            )
+            .fetchone()
+        )
         return row[0] if row and row[0] else None
