@@ -20,7 +20,7 @@ JP's fork of [milla-jovovich/mempalace](https://github.com/milla-jovovich/mempal
 
 ```bash
 source venv/bin/activate
-python -m pytest tests/ -x -q           # run tests (858 expected)
+python -m pytest tests/ -q              # ~900 tests (benchmarks deselected)
 mempalace status                         # check palace state
 mempalace search "query"                 # test search
 python -m mempalace.mcp_server           # run MCP server standalone
@@ -57,13 +57,13 @@ As of 2026-04-16: 5 merged, 7 open, 5 closed. PRs target `develop`.
 
 | PR | Status | Description |
 |----|--------|-------------|
-| #629 | open (needs rework) | Batch writes, concurrent mining |
-| #632 | open (needs rework) | Repair, purge, --version |
-| #659 | open (rebase needed) | Diary wing parameter |
-| #660 | open (rebase needed) | L1 importance pre-filter |
-| #661 | open (rebase needed) | Graph cache with write-invalidation |
-| #673 | open (needs rework) | Deterministic hook saves |
-| #681 | open (rebase needed) | Unicode checkmark → ASCII (#535) |
+| #629 | open (dirty, lower priority) | Batch writes, concurrent mining |
+| #632 | open (dirty, lower priority) | Repair, purge, --version |
+| #659 | open (clean, waiting review) | Diary wing parameter |
+| #660 | open (clean, waiting review) | L1 importance pre-filter |
+| #661 | open (feedback addressed, waiting re-review) | Graph cache with write-invalidation |
+| #673 | open (clean, rebased against #863) | Deterministic hook saves |
+| #681 | open (clean, waiting review) | Unicode checkmark → ASCII (#535) |
 | #664 | **merged** | BLOB seq_id migration repair |
 | #682 | **merged** | --yes flag for init (#534) |
 | #683 | **merged** | Unicode sanitize_name (#637) |
