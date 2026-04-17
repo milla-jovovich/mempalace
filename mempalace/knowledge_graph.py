@@ -35,7 +35,6 @@ Usage:
     kg.invalidate("Max", "has_issue", "sports_injury", ended="2026-02-15")
 """
 
-import atexit
 import functools
 import hashlib
 import json
@@ -109,7 +108,6 @@ class KnowledgeGraph:
         self._connection = None
         self._lock = threading.Lock()
         self._init_db()
-        atexit.register(self.close)
 
     def _init_db(self):
         conn = self._conn()

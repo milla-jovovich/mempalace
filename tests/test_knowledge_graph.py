@@ -286,3 +286,27 @@ class TestMultiProcessLocking:
                 f"Expected {expected_triples} triples, got {stats['triples']}"
             )
             kg.close()
+
+
+class TestGarbageCollection:
+    def test_instance_is_garbage_collected_after_close(self):
+        """Regression: atexit.register(self.close) previously held a strong
+        reference to every KnowledgeGraph instance, leaking short-lived ones
+        (e.g. fact_checker) until process exit. Verify that a dropped,
+        closed instance is reclaimable by the GC.
+        """
+        import gc
+        import weakref
+
+        with tempfile.TemporaryDirectory(prefix="mempalace_gc_") as tmp:
+            db_path = os.path.join(tmp, "gc.sqlite3")
+            kg = KnowledgeGraph(db_path=db_path)
+            kg.add_triple("alice", "knows", "bob")
+            ref = weakref.ref(kg)
+            kg.close()
+            del kg
+            gc.collect()
+            assert ref() is None, (
+                "KnowledgeGraph was retained after close() — something "
+                "(likely atexit) is still holding a strong reference."
+            )

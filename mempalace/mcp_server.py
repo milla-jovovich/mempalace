@@ -102,6 +102,14 @@ if _args.palace:
 else:
     _kg = KnowledgeGraph()
 
+# Clean WAL checkpoint on shutdown for the long-lived KG. Registered at
+# module level (not in KnowledgeGraph.__init__) so it only applies to the
+# singleton owned by this process — not to any short-lived KG instances —
+# and therefore doesn't retain those instances via the atexit registry.
+import atexit as _atexit  # noqa: E402
+
+_atexit.register(_kg.close)
+
 
 _client_cache = None
 _collection_cache = None
