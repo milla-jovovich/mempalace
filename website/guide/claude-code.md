@@ -5,7 +5,7 @@ The recommended way to use MemPalace with Claude Code — native marketplace ins
 ## Installation
 
 ```bash
-claude plugin marketplace add milla-jovovich/mempalace
+claude plugin marketplace add MemPalace/mempalace
 claude plugin install --scope user mempalace
 ```
 

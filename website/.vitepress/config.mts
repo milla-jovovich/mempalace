@@ -9,7 +9,7 @@ function normalizeBase(base?: string): string {
   return base.endsWith('/') ? base : `${base}/`
 }
 
-const docsBase = normalizeBase(process.env.DOCS_BASE || '/mempalace/')
+const docsBase = normalizeBase(process.env.DOCS_BASE || '/')
 const editBranch = process.env.DOCS_EDIT_BRANCH || 'main'
 
 export default withMermaid(
@@ -22,10 +22,12 @@ export default withMermaid(
       ['link', { rel: 'icon', href: `${docsBase}mempalace_logo.png` }],
       ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
       ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
-      ['link', { href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap', rel: 'stylesheet' }],
+      ['link', { href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400&family=Geist:wght@300;400;500;600&display=swap', rel: 'stylesheet' }],
       ['meta', { property: 'og:title', content: 'MemPalace — AI Memory System' }],
       ['meta', { property: 'og:description', content: '96.6% LongMemEval recall. Zero API calls. Local, free, open source.' }],
       ['meta', { property: 'og:image', content: `${docsBase}mempalace_logo.png` }],
+      ['script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-PPQE4Z7P1K' }],
+      ['script', {}, `window.dataLayer = window.dataLayer || [];\nfunction gtag(){dataLayer.push(arguments);}\ngtag('js', new Date());\ngtag('config', 'G-PPQE4Z7P1K');`],
     ],
 
     themeConfig: {
@@ -86,7 +88,7 @@ export default withMermaid(
       },
 
       socialLinks: [
-        { icon: 'github', link: 'https://github.com/milla-jovovich/mempalace' },
+        { icon: 'github', link: 'https://github.com/MemPalace/mempalace' },
         { icon: 'discord', link: 'https://discord.com/invite/ycTQQCu6kn' },
       ],
 
@@ -100,7 +102,7 @@ export default withMermaid(
       },
 
       editLink: {
-        pattern: `https://github.com/milla-jovovich/mempalace/edit/${editBranch}/website/:path`,
+        pattern: `https://github.com/MemPalace/mempalace/edit/${editBranch}/website/:path`,
         text: 'Edit this page on GitHub',
       },
     },

@@ -87,8 +87,19 @@ def _stream_export_tree(
         return {"wings": 0, "rooms": 0, "drawers": 0, "wing_rows": []}
 
     os.makedirs(output_dir, exist_ok=True)
-    opened_rooms = set()
-    wing_stats = defaultdict(lambda: defaultdict(int))
+
+    try:
+        os.chmod(output_dir, 0o700)
+    except (OSError, NotImplementedError):
+        pass
+
+    # Track which room files have been opened (so we can append vs overwrite)
+    opened_rooms: set[tuple[str, str]] = set()
+    # Track which wing directories have been created and chmoded
+    created_wing_dirs: set[str] = set()
+    # Track stats per wing: {wing: {room: count}}
+    wing_stats: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+      
     total_drawers = 0
     where = {"wing": wing} if wing else None
 
@@ -111,7 +122,13 @@ def _stream_export_tree(
         for wing_name, rooms in batch_grouped.items():
             safe_wing = _safe_path_component(wing_name)
             wing_dir = os.path.join(output_dir, safe_wing)
-            os.makedirs(wing_dir, exist_ok=True)
+            if wing_dir not in created_wing_dirs:
+                os.makedirs(wing_dir, exist_ok=True)
+                try:
+                    os.chmod(wing_dir, 0o700)
+                except (OSError, NotImplementedError):
+                    pass
+                created_wing_dirs.add(wing_dir)
 
             for room_name, drawers in rooms.items():
                 safe_room = _safe_path_component(room_name)
