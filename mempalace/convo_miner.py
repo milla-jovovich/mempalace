@@ -299,7 +299,9 @@ def scan_convos(convo_dir: str) -> list:
 # =============================================================================
 
 
-def _file_chunks_locked(collection, source_file, chunks, wing, room, agent, extract_mode):
+def _file_chunks_locked(
+    collection, source_file, chunks, wing, room, agent, extract_mode, content_hash=""
+):
     """Lock the source file, purge stale drawers, and upsert fresh chunks.
 
     Combines the per-file serialization that prevents concurrent agents from
@@ -346,6 +348,7 @@ def _file_chunks_locked(collection, source_file, chunks, wing, room, agent, extr
                             "ingest_mode": "convos",
                             "extract_mode": extract_mode,
                             "normalize_version": NORMALIZE_VERSION,
+                            "content_hash": content_hash,
                         }
                     ],
                 )
@@ -356,7 +359,7 @@ def _file_chunks_locked(collection, source_file, chunks, wing, room, agent, extr
     return drawers_added, room_counts_delta, False
 
 
-def mine_convos(
+def mine_convos(  # noqa: C901
     convo_dir: str,
     palace_path: str,
     wing: str = None,
@@ -364,6 +367,7 @@ def mine_convos(
     limit: int = 0,
     dry_run: bool = False,
     extract_mode: str = "exchange",
+    filepath_filter: str = None,
 ):
     """Mine a directory of conversation files into the palace.
 
@@ -377,6 +381,8 @@ def mine_convos(
         wing = convo_path.name.lower().replace(" ", "_").replace("-", "_")
 
     files = scan_convos(convo_dir)
+    if filepath_filter:
+        files = [f for f in files if str(f) == filepath_filter]
     if limit > 0:
         files = files[:limit]
 
@@ -403,6 +409,12 @@ def mine_convos(
         # Skip if already filed
         if not dry_run and file_already_mined(collection, source_file):
             files_skipped += 1
+            continue
+
+        # Read raw content for hashing (before normalize transforms it)
+        try:
+            raw_content = filepath.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
             continue
 
         # Normalize format
@@ -459,10 +471,19 @@ def mine_convos(
         if extract_mode != "general":
             room_counts[room] += 1
 
+        # Hash raw content so sync can compare without normalize
+        file_hash = hashlib.md5(raw_content.encode(), usedforsecurity=False).hexdigest()
         # Lock + purge stale + file fresh chunks. Lock serializes concurrent
         # agents; purge removes pre-v2 drawers so the schema bump applies.
         drawers_added, room_delta, skipped = _file_chunks_locked(
-            collection, source_file, chunks, wing, room, agent, extract_mode
+            collection,
+            source_file,
+            chunks,
+            wing,
+            room,
+            agent,
+            extract_mode,
+            content_hash=file_hash,
         )
         if skipped:
             files_skipped += 1

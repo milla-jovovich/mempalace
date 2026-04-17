@@ -119,6 +119,10 @@ def cmd_mine(args):
     for raw in args.include_ignored or []:
         include_ignored.extend(part.strip() for part in raw.split(",") if part.strip())
 
+    # --force: delete existing drawers for this directory before re-mining
+    if getattr(args, "force", False) and not args.dry_run:
+        _force_clean(palace_path, args.dir)
+
     if args.mode == "convos":
         from .convo_miner import mine_convos
 
@@ -144,6 +148,13 @@ def cmd_mine(args):
             respect_gitignore=not args.no_gitignore,
             include_ignored=include_ignored,
         )
+
+
+def _force_clean(palace_path: str, source_dir: str):
+    """Delete all drawers from files under source_dir — used by --force re-mine."""
+    from .sync import force_clean
+
+    force_clean(palace_path=palace_path, source_dir=source_dir)
 
 
 def cmd_search(args):
@@ -271,10 +282,14 @@ def cmd_repair(args):
     offset = 0
     while offset < total:
         batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        if not batch["ids"]:
+            break
         all_ids.extend(batch["ids"])
         all_docs.extend(batch["documents"])
         all_metas.extend(batch["metadatas"])
-        offset += batch_size
+        offset += len(batch["ids"])
+        if offset % 5000 == 0 or offset >= total:
+            print(f"  Read {offset}/{total}")
     print(f"  Extracted {len(all_ids)} drawers")
 
     # Backup and rebuild
@@ -309,18 +324,21 @@ def cmd_repair(args):
     print(f"\n{'=' * 55}\n")
 
 
-def cmd_hook(args):
-    """Run hook logic: reads JSON from stdin, outputs JSON to stdout."""
-    from .hooks_cli import run_hook
+def cmd_sync(args):
+    """Sync palace with source files — thin CLI wrapper around `sync.sync_palace`."""
+    from .sync import sync_palace
 
-    run_hook(hook_name=args.hook, harness=args.harness)
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
-
-def cmd_instructions(args):
-    """Output skill instructions to stdout."""
-    from .instructions_cli import run_instructions
-
-    run_instructions(name=args.name)
+    try:
+        sync_palace(
+            palace_path=palace_path,
+            source_dir=args.dir,
+            clean=args.clean,
+            dry_run=args.dry_run,
+        )
+    except FileNotFoundError:
+        sys.exit(1)
 
 
 def cmd_mcp(args):
@@ -342,6 +360,20 @@ def cmd_mcp(args):
         print("\nOptional custom palace:")
         print(f"  claude mcp add mempalace -- {base_server_cmd} --palace /path/to/palace")
         print(f"  {base_server_cmd} --palace /path/to/palace")
+
+
+def cmd_hook(args):
+    """Run hook logic: reads JSON from stdin, outputs JSON to stdout."""
+    from .hooks_cli import run_hook
+
+    run_hook(hook_name=args.hook, harness=args.harness)
+
+
+def cmd_instructions(args):
+    """Output skill instructions to stdout."""
+    from .instructions_cli import run_instructions
+
+    run_instructions(name=args.name)
 
 
 def cmd_compress(args):
@@ -541,6 +573,11 @@ def main():
         "--dry-run", action="store_true", help="Show what would be filed without filing"
     )
     p_mine.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-mine files even if already filed (deletes old drawers first)",
+    )
+    p_mine.add_argument(
         "--extract",
         choices=["exchange", "general"],
         default="exchange",
@@ -593,6 +630,27 @@ def main():
         help="Only split files containing at least N sessions (default: 2)",
     )
 
+    # sync
+    p_sync = sub.add_parser(
+        "sync",
+        help="Detect changed source files and re-mine stale drawers",
+    )
+    p_sync.add_argument(
+        "--dir",
+        default=None,
+        help="Only sync files under this directory (default: all source files)",
+    )
+    p_sync.add_argument(
+        "--clean",
+        action="store_true",
+        help="Also delete drawers for source files that no longer exist",
+    )
+    p_sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would change without modifying the palace",
+    )
+
     # hook
     p_hook = sub.add_parser(
         "hook",
@@ -603,14 +661,12 @@ def main():
     p_hook_run.add_argument(
         "--hook",
         required=True,
-        choices=["session-start", "stop", "precompact"],
-        help="Hook name to run",
+        help="Hook name to run (e.g. stop, precompact)",
     )
     p_hook_run.add_argument(
         "--harness",
-        required=True,
-        choices=["claude-code", "codex"],
-        help="Harness type (determines stdin JSON format)",
+        default="claude-code",
+        help="AI harness calling the hook (default: claude-code)",
     )
 
     # instructions
@@ -619,7 +675,7 @@ def main():
         help="Output skill instructions to stdout",
     )
     instructions_sub = p_instructions.add_subparsers(dest="instructions_name")
-    for instr_name in ["init", "search", "mine", "help", "status"]:
+    for instr_name in ["init", "search", "mine", "help", "status", "sync"]:
         instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
 
     # repair
@@ -657,7 +713,6 @@ def main():
         parser.print_help()
         return
 
-    # Handle two-level subcommands
     if args.command == "hook":
         if not getattr(args, "hook_action", None):
             p_hook.print_help()
@@ -677,6 +732,7 @@ def main():
     dispatch = {
         "init": cmd_init,
         "mine": cmd_mine,
+        "sync": cmd_sync,
         "split": cmd_split,
         "search": cmd_search,
         "mcp": cmd_mcp,

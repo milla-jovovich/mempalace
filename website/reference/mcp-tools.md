@@ -379,3 +379,14 @@ Force a reconnect to the palace database. Use this after external scripts or CLI
 **Parameters:** None
 
 **Returns:** `{ success, palace_path }`
+
+---
+
+### `mempalace_sync_status`
+
+Check palace freshness — are source files still current or have they changed since last mine? Returns stale/fresh/missing counts and re-mine commands. Call this to know if the palace memories are up to date before trusting search results.
+
+**Parameters:**
+- `directory` (string, optional): Only check files under this directory
+
+**Returns:** `{ fresh, stale, missing, no_hash, total_source_files, re_mine_commands }`
