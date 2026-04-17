@@ -57,7 +57,7 @@ from .config import (  # noqa: E402
     sanitize_content,
 )
 from .version import __version__  # noqa: E402
-from .backends.chroma import ChromaBackend, ChromaCollection, get_embedding_function  # noqa: E402
+from .backends.chroma import ChromaBackend, ChromaCollection, _ef_kwargs  # noqa: E402
 from .query_sanitizer import sanitize_query  # noqa: E402
 from .searcher import search_memories  # noqa: E402
 from .palace_graph import (  # noqa: E402
@@ -216,28 +216,34 @@ def _get_collection(create=False):
     global _collection_cache, _metadata_cache, _metadata_cache_time
     try:
         client = _get_client()
-        ef = get_embedding_function()
+        # Spread ``_ef_kwargs()`` so ``embedding_function`` is only present
+        # when ``EMBEDDING_PROVIDER=ollama``; on the default path the kwarg is
+        # omitted entirely and ChromaDB falls back to its bundled EF.
+        ef_kwargs = _ef_kwargs()
         if create:
             _collection_cache = ChromaCollection(
                 client.get_or_create_collection(
                     _config.collection_name,
                     metadata={"hnsw:space": "cosine"},
-                    embedding_function=ef,  # type: ignore[arg-type]
+                    **ef_kwargs,
                 )
             )
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
             _collection_cache = ChromaCollection(
-                client.get_collection(
-                    _config.collection_name,
-                    embedding_function=ef,  # type: ignore[arg-type]
-                )
+                client.get_collection(_config.collection_name, **ef_kwargs)
             )
             _metadata_cache = None
             _metadata_cache_time = 0
         return _collection_cache
     except Exception:
+        # Log at debug so embedding-provider misconfigurations (bad
+        # OLLAMA_EMBED_TIMEOUT, missing chromadb OllamaEmbeddingFunction on
+        # older installs, unreachable server, ...) are diagnosable instead of
+        # silently surfacing as generic "no palace" later. Kept broad on
+        # purpose so palace-not-found stays non-fatal.
+        logger.debug("_get_collection failed", exc_info=True)
         return None
 
 

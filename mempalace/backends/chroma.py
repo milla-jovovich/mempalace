@@ -3,12 +3,31 @@
 import logging
 import os
 import sqlite3
+from typing import Any, Dict
 
 import chromadb
 
 from .base import BaseCollection
 
 logger = logging.getLogger(__name__)
+
+
+_DEFAULT_OLLAMA_URL = "http://localhost:11434"
+_DEFAULT_OLLAMA_MODEL = "nomic-embed-text"
+_DEFAULT_OLLAMA_TIMEOUT = 60
+
+
+def _parse_timeout(raw):
+    """Parse OLLAMA_EMBED_TIMEOUT env with a clear error on non-integers."""
+    if raw is None or str(raw).strip() == "":
+        return _DEFAULT_OLLAMA_TIMEOUT
+    try:
+        return int(str(raw).strip())
+    except ValueError as exc:
+        raise ValueError(
+            f"OLLAMA_EMBED_TIMEOUT must be an integer number of seconds, "
+            f"got {raw!r}"
+        ) from exc
 
 
 def get_embedding_function():
@@ -24,16 +43,29 @@ def get_embedding_function():
     Returning ``None`` keeps ChromaDB's ``DefaultEmbeddingFunction`` (ONNX
     MiniLM, 384 dims, CPU) for backward compatibility with existing palaces.
     """
-    provider = os.environ.get("EMBEDDING_PROVIDER", "").lower()
+    provider = os.environ.get("EMBEDDING_PROVIDER", "").strip().lower()
     if provider != "ollama":
         return None
     from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 
     return OllamaEmbeddingFunction(
-        url=os.environ.get("OLLAMA_URL") or "http://localhost:11434",
-        model_name=os.environ.get("OLLAMA_EMBED_MODEL") or "nomic-embed-text",
-        timeout=int(os.environ.get("OLLAMA_EMBED_TIMEOUT") or "60"),
+        url=(os.environ.get("OLLAMA_URL") or _DEFAULT_OLLAMA_URL).strip(),
+        model_name=(os.environ.get("OLLAMA_EMBED_MODEL") or _DEFAULT_OLLAMA_MODEL).strip(),
+        timeout=_parse_timeout(os.environ.get("OLLAMA_EMBED_TIMEOUT")),
     )
+
+
+def _ef_kwargs() -> Dict[str, Any]:
+    """Return ``{"embedding_function": ef}`` when an EF is configured, else ``{}``.
+
+    Spreading this dict into ChromaDB's ``get_or_create_collection`` / ``get_collection``
+    / ``create_collection`` calls keeps the default-embedding-function path completely
+    untouched (no ``embedding_function=None`` kwarg is passed) and keeps the Ollama
+    path explicit, eliminating both the typing mismatch and any risk of passing
+    ``None`` into a positional that older chromadb releases may reject.
+    """
+    ef = get_embedding_function()
+    return {"embedding_function": ef} if ef is not None else {}
 
 
 def _fix_blob_seq_ids(palace_path: str):
@@ -149,17 +181,15 @@ class ChromaBackend:
                 pass
 
         client = self._client(palace_path)
-        ef = get_embedding_function()
+        ef_kwargs = _ef_kwargs()
         if create:
             collection = client.get_or_create_collection(
                 collection_name,
                 metadata={"hnsw:space": "cosine"},
-                embedding_function=ef,
+                **ef_kwargs,
             )
         else:
-            collection = client.get_collection(
-                collection_name, embedding_function=ef
-            )
+            collection = client.get_collection(collection_name, **ef_kwargs)
         return ChromaCollection(collection)
 
     def get_or_create_collection(
@@ -179,6 +209,6 @@ class ChromaBackend:
         collection = self._client(palace_path).create_collection(
             collection_name,
             metadata={"hnsw:space": hnsw_space},
-            embedding_function=get_embedding_function(),
+            **_ef_kwargs(),
         )
         return ChromaCollection(collection)
