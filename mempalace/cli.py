@@ -162,6 +162,14 @@ def cmd_search(args):
         sys.exit(1)
 
 
+def cmd_brief(args):
+    from .searcher import brief
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    result = brief(palace_path=palace_path, wing=args.wing, room=args.room)
+    print(result)
+
+
 def cmd_wakeup(args):
     """Show L0 (identity) + L1 (essential story) — the wake-up context."""
     from .layers import MemoryStack
@@ -554,6 +562,11 @@ def main():
     p_search.add_argument("--room", default=None, help="Limit to one room")
     p_search.add_argument("--results", type=int, default=5, help="Number of results")
 
+    p_brief = sub.add_parser("brief", help="Condensed overview of a wing or room")
+    p_brief.add_argument("--wing", default=None, help="Wing to summarize")
+    p_brief.add_argument("--room", default=None, help="Room to summarize")
+    p_brief.add_argument("--palace", default=None, help="Palace path")
+
     # compress
     p_compress = sub.add_parser(
         "compress", help="Compress drawers using AAAK Dialect (~30x reduction)"
@@ -679,6 +692,7 @@ def main():
         "mine": cmd_mine,
         "split": cmd_split,
         "search": cmd_search,
+        "brief": cmd_brief,
         "mcp": cmd_mcp,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
