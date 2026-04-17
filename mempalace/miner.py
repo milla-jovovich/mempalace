@@ -295,6 +295,155 @@ def load_config(project_dir: str) -> dict:
 
 
 # =============================================================================
+# PATH-LEVEL MINING CONTROL — ignore, describe, or full
+# =============================================================================
+
+VALID_PATH_LEVELS = {"ignore", "describe", "full"}
+
+
+def _compile_path_rules(paths_config: dict) -> list:
+    """Pre-compile path rules from mempalace.yaml ``paths:`` section.
+
+    Each entry is ``(pattern, level, description, room_override)``.
+    Entries with ``level: full`` are skipped (that's the default behavior).
+    """
+    compiled = []
+    if not paths_config:
+        return compiled
+    for pattern, conf in paths_config.items():
+        if not isinstance(conf, dict):
+            continue
+        level = conf.get("level", "full")
+        if level not in VALID_PATH_LEVELS or level == "full":
+            continue
+        description = conf.get("description", "")
+        if level == "describe" and not description:
+            continue
+        room = conf.get("room")
+        compiled.append((pattern, level, description, room))
+    return compiled
+
+
+def _match_path(relative: str, pattern: str) -> bool:
+    """Check if a relative path matches a glob pattern."""
+    if fnmatch.fnmatch(relative, pattern):
+        return True
+    if fnmatch.fnmatch(relative, f"{pattern}/**"):
+        return True
+    if relative.startswith(pattern.rstrip("/") + "/"):
+        return True
+    return False
+
+
+def match_path_rule(
+    filepath: Path, compiled_rules: list, project_path: Path
+) -> tuple:
+    """Check if a file matches a path-level rule.
+
+    Returns ``(level, description, room_override)`` if matched,
+    ``(None, None, None)`` otherwise.
+    """
+    if not compiled_rules:
+        return None, None, None
+
+    relative = str(filepath.relative_to(project_path)).replace("\\", "/")
+
+    for pattern, level, description, room in compiled_rules:
+        if _match_path(relative, pattern):
+            return level, description, room
+    return None, None, None
+
+
+# Keep backward-compatible aliases used by tests
+def _compile_path_descriptions(paths_config: dict, project_path: Path = None) -> list:
+    """Backward-compatible wrapper — returns only describe-level rules."""
+    all_rules = _compile_path_rules(paths_config)
+    return [(p, d, r) for p, lvl, d, r in all_rules if lvl == "describe"]
+
+
+def match_path_description(
+    filepath: Path, compiled_descriptions: list, project_path: Path
+) -> tuple:
+    """Backward-compatible wrapper — checks describe patterns only."""
+    if not compiled_descriptions:
+        return None, None
+    relative = str(filepath.relative_to(project_path)).replace("\\", "/")
+    for pattern, description, room in compiled_descriptions:
+        if _match_path(relative, pattern):
+            return description, room
+    return None, None
+
+
+def process_described_file(
+    filepath: Path,
+    project_path: Path,
+    collection,
+    wing: str,
+    description: str,
+    room: str,
+    agent: str,
+    dry_run: bool,
+    closets_col=None,
+) -> tuple:
+    """File a single description drawer for a path-described file."""
+    source_file = str(filepath)
+
+    if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
+        return 0, room
+
+    content = f"[Path description] {filepath.relative_to(project_path)}: {description}"
+
+    if dry_run:
+        print(f"    [DRY RUN] {filepath.name} → room:{room} (described)")
+        return 1, room
+
+    with mine_lock(source_file):
+        if file_already_mined(collection, source_file, check_mtime=True):
+            return 0, room
+
+        try:
+            collection.delete(where={"source_file": source_file})
+        except Exception:
+            pass
+
+        drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + '_desc').encode()).hexdigest()[:24]}"
+        metadata = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file,
+            "chunk_index": 0,
+            "added_by": agent,
+            "filed_at": datetime.now().isoformat(),
+            "normalize_version": NORMALIZE_VERSION,
+            "mining_level": "describe",
+        }
+        try:
+            metadata["source_mtime"] = os.path.getmtime(source_file)
+        except OSError:
+            pass
+        collection.upsert(documents=[content], ids=[drawer_id], metadatas=[metadata])
+
+        if closets_col:
+            closet_line = f"{description}|{filepath.name}|→{drawer_id}"
+            closet_id = f"closet_{wing}_{room}_{hashlib.sha256(source_file.encode()).hexdigest()[:24]}_0"
+            closet_meta = {
+                "wing": wing,
+                "room": room,
+                "source_file": source_file,
+                "drawer_count": 1,
+                "filed_at": datetime.now().isoformat(),
+                "normalize_version": NORMALIZE_VERSION,
+                "mining_level": "describe",
+            }
+            purge_file_closets(closets_col, source_file)
+            closets_col.upsert(
+                documents=[closet_line], ids=[closet_id], metadatas=[closet_meta]
+            )
+
+    return 1, room
+
+
+# =============================================================================
 # FILE ROUTING — which room does this file belong to?
 # =============================================================================
 
@@ -759,6 +908,7 @@ def mine(
 
     wing = wing_override or config["wing"]
     rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
+    path_rules = _compile_path_rules(config.get("paths", {}))
 
     files = scan_project(
         project_dir,
@@ -781,6 +931,15 @@ def mine(
         print("  .gitignore: DISABLED")
     if include_ignored:
         print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
+    if path_rules:
+        n_ignore = sum(1 for _, lvl, _, _ in path_rules if lvl == "ignore")
+        n_describe = sum(1 for _, lvl, _, _ in path_rules if lvl == "describe")
+        parts = []
+        if n_ignore:
+            parts.append(f"{n_ignore} ignore")
+        if n_describe:
+            parts.append(f"{n_describe} describe")
+        print(f"  Path rules: {', '.join(parts)}")
     print(f"{'─' * 55}\n")
 
     if not dry_run:
@@ -794,17 +953,42 @@ def mine(
     files_skipped = 0
     room_counts = defaultdict(int)
 
+    files_ignored_by_rule = 0
     for i, filepath in enumerate(files, 1):
-        drawers, room = process_file(
-            filepath=filepath,
-            project_path=project_path,
-            collection=collection,
-            wing=wing,
-            rooms=rooms,
-            agent=agent,
-            dry_run=dry_run,
-            closets_col=closets_col,
+        rule_level, rule_desc, rule_room = match_path_rule(
+            filepath, path_rules, project_path
         )
+        if rule_level == "ignore":
+            files_ignored_by_rule += 1
+            if dry_run:
+                print(f"    [DRY RUN] {filepath.name} → IGNORED by path rule")
+            continue
+        elif rule_level == "describe":
+            resolved_room = rule_room or detect_room(
+                filepath, "", rooms, project_path
+            )
+            drawers, room = process_described_file(
+                filepath=filepath,
+                project_path=project_path,
+                collection=collection,
+                wing=wing,
+                description=rule_desc,
+                room=resolved_room,
+                agent=agent,
+                dry_run=dry_run,
+                closets_col=closets_col,
+            )
+        else:
+            drawers, room = process_file(
+                filepath=filepath,
+                project_path=project_path,
+                collection=collection,
+                wing=wing,
+                rooms=rooms,
+                agent=agent,
+                dry_run=dry_run,
+                closets_col=closets_col,
+            )
         if drawers == 0 and not dry_run:
             files_skipped += 1
         else:
@@ -815,8 +999,10 @@ def mine(
 
     print(f"\n{'=' * 55}")
     print("  Done.")
-    print(f"  Files processed: {len(files) - files_skipped}")
+    print(f"  Files processed: {len(files) - files_skipped - files_ignored_by_rule}")
     print(f"  Files skipped (already filed): {files_skipped}")
+    if files_ignored_by_rule:
+        print(f"  Files ignored (path rules): {files_ignored_by_rule}")
     print(f"  Drawers filed: {total_drawers}")
     print("\n  By room:")
     for room, count in sorted(room_counts.items(), key=lambda x: x[1], reverse=True):
