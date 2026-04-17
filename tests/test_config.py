@@ -284,3 +284,48 @@ def test_iso_date_rejects_non_string():
 def test_iso_date_error_names_field():
     with pytest.raises(ValueError, match="valid_from"):
         sanitize_iso_date("yesterday", "valid_from")
+
+
+# ── cfg.lang resolution ────────────────────────────────────────────────
+
+
+def test_lang_defaults_to_english():
+    cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+    assert cfg.lang == "en"
+
+
+def test_lang_reads_config_file():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"lang": "ja"}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.lang == "ja"
+
+
+def test_lang_env_var_overrides_file():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"lang": "ja"}, f)
+    os.environ["MEMPALACE_LANG"] = "ru"
+    try:
+        cfg = MempalaceConfig(config_dir=tmpdir)
+        assert cfg.lang == "ru"
+    finally:
+        del os.environ["MEMPALACE_LANG"]
+
+
+def test_lang_falls_back_to_entity_languages_first_entry():
+    """Without explicit lang, use entity_languages[0] so existing configs keep working."""
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"entity_languages": ["ko", "en"]}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.lang == "ko"
+
+
+def test_lang_strips_whitespace():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"lang": "  fr  "}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.lang == "fr"
