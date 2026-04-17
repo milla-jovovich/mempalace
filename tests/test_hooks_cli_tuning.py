@@ -4,6 +4,11 @@ Covers ``MEMPAL_SAVE_INTERVAL`` and ``MEMPAL_STOP_HOOK_DISABLE`` added on
 top of the existing stop-hook behavior.
 """
 
+import contextlib
+import io
+import json
+from unittest.mock import patch
+
 import pytest
 
 from mempalace import hooks_cli
@@ -83,3 +88,150 @@ def test_disabled_falsy_variants(clean_env, raw):
 def test_module_still_exports_save_interval_constant():
     """Existing code / tests that read ``hooks_cli.SAVE_INTERVAL`` keep working."""
     assert hooks_cli.SAVE_INTERVAL == hooks_cli.DEFAULT_SAVE_INTERVAL == 15
+
+
+# ---------------------------------------------------------------------------
+# Integration: hook_stop honors env vars at runtime
+# ---------------------------------------------------------------------------
+
+
+def _run_hook_stop(data, state_dir):
+    """Execute ``hook_stop`` and capture its JSON stdout."""
+    buf = io.StringIO()
+    patches = [
+        patch(
+            "mempalace.hooks_cli._output",
+            side_effect=lambda d: buf.write(json.dumps(d)),
+        ),
+        patch("mempalace.hooks_cli.STATE_DIR", state_dir),
+    ]
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        hooks_cli.hook_stop(data, "claude-code")
+    return json.loads(buf.getvalue())
+
+
+def _write_transcript(path, n):
+    with open(path, "w", encoding="utf-8") as f:
+        for i in range(n):
+            f.write(json.dumps({"message": {"role": "user", "content": f"msg {i}"}}) + "\n")
+
+
+def test_hook_stop_honors_custom_save_interval(clean_env, tmp_path):
+    """MEMPAL_SAVE_INTERVAL=3 must trigger block at 3 messages, not the 15 default."""
+    clean_env.setenv("MEMPAL_SAVE_INTERVAL", "3")
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(transcript, 3)  # exactly at the override
+
+    result = _run_hook_stop(
+        {
+            "session_id": "integration-interval",
+            "stop_hook_active": False,
+            "transcript_path": str(transcript),
+        },
+        state_dir=tmp_path,
+    )
+
+    assert result["decision"] == "block"
+    assert result["reason"] == hooks_cli.STOP_BLOCK_REASON
+
+
+def test_hook_stop_custom_interval_passthrough_below_threshold(clean_env, tmp_path):
+    """MEMPAL_SAVE_INTERVAL=10 must pass through when below the overridden cap."""
+    clean_env.setenv("MEMPAL_SAVE_INTERVAL", "10")
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(transcript, 9)  # one short of the override
+
+    result = _run_hook_stop(
+        {
+            "session_id": "integration-passthrough",
+            "stop_hook_active": False,
+            "transcript_path": str(transcript),
+        },
+        state_dir=tmp_path,
+    )
+
+    assert result == {}
+
+
+def test_hook_stop_disable_passes_through(clean_env, tmp_path):
+    """MEMPAL_STOP_HOOK_DISABLE=1 must never block, even above the interval."""
+    clean_env.setenv("MEMPAL_STOP_HOOK_DISABLE", "1")
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(transcript, hooks_cli.DEFAULT_SAVE_INTERVAL * 3)  # well above
+
+    result = _run_hook_stop(
+        {
+            "session_id": "integration-disabled",
+            "stop_hook_active": False,
+            "transcript_path": str(transcript),
+        },
+        state_dir=tmp_path,
+    )
+
+    assert result == {}
+
+
+def test_hook_stop_disable_still_tracks_state(clean_env, tmp_path):
+    """Disabled hook must advance the last-save watermark.
+
+    Otherwise, toggling ``MEMPAL_STOP_HOOK_DISABLE`` off mid-session would
+    make ``since_last`` include every message accumulated while disabled,
+    causing an immediate retroactive block.
+    """
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(transcript, 100)
+
+    # Disabled phase — accumulate 100 messages but must not block
+    clean_env.setenv("MEMPAL_STOP_HOOK_DISABLE", "1")
+    result = _run_hook_stop(
+        {
+            "session_id": "integration-state",
+            "stop_hook_active": False,
+            "transcript_path": str(transcript),
+        },
+        state_dir=tmp_path,
+    )
+    assert result == {}
+
+    last_save_file = tmp_path / "integration-state_last_save"
+    assert last_save_file.is_file()
+    assert int(last_save_file.read_text().strip()) == 100
+
+    # Re-enable: since the watermark advanced, a single new message must NOT
+    # trigger a block (since_last == 0 on the next tick, not 100).
+    clean_env.delenv("MEMPAL_STOP_HOOK_DISABLE")
+    # One more human message after re-enabling
+    with open(transcript, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"message": {"role": "user", "content": "resumed"}}) + "\n")
+
+    result = _run_hook_stop(
+        {
+            "session_id": "integration-state",
+            "stop_hook_active": False,
+            "transcript_path": str(transcript),
+        },
+        state_dir=tmp_path,
+    )
+    # 101 total, last_save=100, since_last=1, interval=15 → passthrough
+    assert result == {}
+
+
+def test_hook_stop_passthrough_when_active_skips_state_update(clean_env, tmp_path):
+    """stop_hook_active short-circuit must not touch state (infinite-loop guard)."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(transcript, 20)
+
+    result = _run_hook_stop(
+        {
+            "session_id": "integration-active",
+            "stop_hook_active": True,
+            "transcript_path": str(transcript),
+        },
+        state_dir=tmp_path,
+    )
+
+    assert result == {}
+    # state file must not have been created by a short-circuited call
+    assert not (tmp_path / "integration-active_last_save").exists()

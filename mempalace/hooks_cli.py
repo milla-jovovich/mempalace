@@ -22,8 +22,13 @@ def _get_save_interval() -> int:
 
     Reads ``MEMPAL_SAVE_INTERVAL`` from the environment on every hook
     invocation so users can re-tune the cadence without reinstalling.
-    Invalid / non-positive values silently fall back to the default so a
-    typo can never make the hook block on every single turn.
+
+    - Missing or non-integer values silently fall back to the default.
+    - Parsed values less than 1 are clamped to 1, which causes the hook
+      to block on every turn. That is intentional — it lets users opt
+      into "save on every stop" without inventing a separate flag — but
+      accidental values like ``0`` or ``-5`` will hit it, so prefer
+      ``MEMPAL_STOP_HOOK_DISABLE`` to turn the nag off entirely.
     """
     raw = os.environ.get("MEMPAL_SAVE_INTERVAL", "").strip()
     if not raw:
@@ -245,6 +250,8 @@ def hook_stop(data: dict, harness: str):
 
     Respects two env vars:
       - ``MEMPAL_STOP_HOOK_DISABLE=1`` — pass through without blocking.
+        State tracking still runs so toggling the flag off mid-session
+        does not trigger an immediate retroactive block.
       - ``MEMPAL_SAVE_INTERVAL=N``     — override the 15-message default.
     """
     parsed = _parse_harness_input(data, harness)
@@ -257,12 +264,8 @@ def hook_stop(data: dict, harness: str):
         _output({})
         return
 
-    # Fully disabled via env var — pass through.
-    if _stop_hook_disabled():
-        _output({})
-        return
-
     save_interval = _get_save_interval()
+    disabled = _stop_hook_disabled()
 
     # Count human messages
     exchange_count = _count_human_messages(transcript_path)
@@ -281,8 +284,21 @@ def hook_stop(data: dict, harness: str):
 
     _log(
         f"Session {session_id}: {exchange_count} exchanges, "
-        f"{since_last} since last save (interval={save_interval})"
+        f"{since_last} since last save "
+        f"(interval={save_interval}, disabled={disabled})"
     )
+
+    # When disabled, advance the last-save watermark so toggling the
+    # flag off mid-session doesn't trigger an immediate block covering
+    # the whole gap. The cadence stays aligned with current activity.
+    if disabled:
+        if exchange_count > 0 and exchange_count != last_save:
+            try:
+                last_save_file.write_text(str(exchange_count), encoding="utf-8")
+            except OSError:
+                pass
+        _output({})
+        return
 
     if since_last >= save_interval and exchange_count > 0:
         # Update last save point
