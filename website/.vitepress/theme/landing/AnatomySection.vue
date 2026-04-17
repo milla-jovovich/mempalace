@@ -57,18 +57,24 @@
         <p>Inside a room, closets group related drawers by topic or thread. Open one closet and you see every drawer on that subject together — no need to walk the whole room.</p>
         <div class="diagram">
           <svg viewBox="0 0 200 80" fill="none" stroke="currentColor" stroke-width="1" style="color:var(--prism);">
-            <rect x="10"  y="14" width="54" height="52" />
-            <rect x="73"  y="14" width="54" height="52" />
-            <rect x="136" y="14" width="54" height="52" />
-            <line x1="37"  y1="14" x2="37"  y2="66" opacity="0.5"/>
-            <line x1="100" y1="14" x2="100" y2="66" opacity="0.5"/>
-            <line x1="163" y1="14" x2="163" y2="66" opacity="0.5"/>
-            <circle cx="33"  cy="40" r="1.2" fill="currentColor"/>
-            <circle cx="41"  cy="40" r="1.2" fill="currentColor"/>
-            <circle cx="96"  cy="40" r="1.2" fill="currentColor"/>
-            <circle cx="104" cy="40" r="1.2" fill="currentColor"/>
-            <circle cx="159" cy="40" r="1.2" fill="currentColor"/>
-            <circle cx="167" cy="40" r="1.2" fill="currentColor"/>
+            <g class="closet">
+              <rect x="10" y="14" width="54" height="52" />
+              <line x1="37" y1="14" x2="37" y2="66" opacity="0.5"/>
+              <circle cx="33" cy="40" r="1.2" fill="currentColor"/>
+              <circle cx="41" cy="40" r="1.2" fill="currentColor"/>
+            </g>
+            <g class="closet">
+              <rect x="73" y="14" width="54" height="52" />
+              <line x1="100" y1="14" x2="100" y2="66" opacity="0.5"/>
+              <circle cx="96" cy="40" r="1.2" fill="currentColor"/>
+              <circle cx="104" cy="40" r="1.2" fill="currentColor"/>
+            </g>
+            <g class="closet">
+              <rect x="136" y="14" width="54" height="52" />
+              <line x1="163" y1="14" x2="163" y2="66" opacity="0.5"/>
+              <circle cx="159" cy="40" r="1.2" fill="currentColor"/>
+              <circle cx="167" cy="40" r="1.2" fill="currentColor"/>
+            </g>
           </svg>
         </div>
       </article>

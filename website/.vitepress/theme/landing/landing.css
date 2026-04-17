@@ -1174,3 +1174,148 @@ body.mempalace-active { overflow-x: hidden; }
     transition-duration: 0.001s !important;
   }
 }
+
+/* ================================================================
+   ICON ANIMATIONS — Anatomy diagrams + Mechanics icons
+   ================================================================ */
+.mempalace-landing .anatomy-diagram .stratum .diagram svg rect,
+.mempalace-landing .anatomy-diagram .stratum .diagram svg circle,
+.mempalace-landing .mech .icon svg * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Wing — only the outer wing outline pulses brighter */
+.mempalace-landing .stratum:nth-child(1) .diagram svg rect[opacity] {
+  animation: mpl-wing-light 3.6s ease-in-out infinite;
+}
+@keyframes mpl-wing-light {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
+/* Room — four rooms light up in sequence */
+.mempalace-landing .stratum:nth-child(2) .diagram svg rect {
+  fill: var(--prism);
+  fill-opacity: 0;
+  animation: mpl-room-light 4.5s ease-in-out infinite;
+}
+.mempalace-landing .stratum:nth-child(2) .diagram svg rect:nth-of-type(2) { animation-delay: 0.25s; }
+.mempalace-landing .stratum:nth-child(2) .diagram svg rect:nth-of-type(3) { animation-delay: 0.5s; }
+.mempalace-landing .stratum:nth-child(2) .diagram svg rect:nth-of-type(4) { animation-delay: 0.75s; }
+@keyframes mpl-room-light {
+  0%, 40%, 100% { fill-opacity: 0; }
+  10%, 30%      { fill-opacity: 0.4; }
+}
+
+/* Closet — three closets do a gentle vertical wave, staggered 180ms apart */
+.mempalace-landing .stratum:nth-child(3) .diagram svg .closet {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mpl-closet-wave 3.6s ease-in-out infinite;
+}
+.mempalace-landing .stratum:nth-child(3) .diagram svg .closet:nth-of-type(2) { animation-delay: 0.18s; }
+.mempalace-landing .stratum:nth-child(3) .diagram svg .closet:nth-of-type(3) { animation-delay: 0.36s; }
+@keyframes mpl-closet-wave {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+.mempalace-landing .stratum:nth-child(3) .diagram svg circle {
+  fill: currentColor;
+}
+
+/* Drawer — drawers slide out rhythmically; handles pulse */
+.mempalace-landing .stratum:nth-child(4) .diagram svg rect {
+  animation: mpl-drawer-slide 4.2s ease-in-out infinite;
+}
+.mempalace-landing .stratum:nth-child(4) .diagram svg rect:nth-of-type(2) { animation-delay: 0.3s; }
+.mempalace-landing .stratum:nth-child(4) .diagram svg rect:nth-of-type(3) { animation-delay: 0.6s; }
+@keyframes mpl-drawer-slide {
+  0%, 100%   { transform: translateX(0); }
+  25%, 40%   { transform: translateX(10px); }
+}
+.mempalace-landing .stratum:nth-child(4) .diagram svg circle {
+  fill: currentColor;
+  animation: mpl-dot-pulse 2.2s ease-in-out infinite;
+}
+.mempalace-landing .stratum:nth-child(4) .diagram svg circle:nth-of-type(2) { animation-delay: 0.18s; }
+.mempalace-landing .stratum:nth-child(4) .diagram svg circle:nth-of-type(3) { animation-delay: 0.36s; }
+
+/* Mechanics #1 — data bars pulse like activity; status LED breathes */
+.mempalace-landing .mech:nth-child(1) .icon svg .mech-bars path {
+  stroke-opacity: 0.35;
+  animation: mpl-bar-pulse 2.4s ease-in-out infinite;
+}
+.mempalace-landing .mech:nth-child(1) .icon svg .mech-bars path:nth-of-type(2) {
+  animation-delay: 0.45s;
+}
+@keyframes mpl-bar-pulse {
+  0%, 100% { stroke-opacity: 0.35; }
+  50%      { stroke-opacity: 1; }
+}
+.mempalace-landing .mech:nth-child(1) .icon svg .mech-led {
+  animation: mpl-led-blink 1.8s ease-in-out infinite;
+}
+@keyframes mpl-led-blink {
+  0%, 100% { opacity: 0.2; }
+  50%      { opacity: 1; }
+}
+
+/* Mechanics #2 — ring breathes, slash pulses */
+.mempalace-landing .mech:nth-child(2) .icon svg .mech-ring {
+  animation: mpl-ring-breathe 4s ease-in-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+@keyframes mpl-ring-breathe {
+  0%, 100% { transform: scale(1);    stroke-opacity: 0.85; }
+  50%      { transform: scale(1.05); stroke-opacity: 1; }
+}
+.mempalace-landing .mech:nth-child(2) .icon svg .mech-slash {
+  stroke-opacity: 0.55;
+  animation: mpl-slash-pulse 2.6s ease-in-out infinite;
+}
+@keyframes mpl-slash-pulse {
+  0%, 100% { stroke-opacity: 0.45; }
+  50%      { stroke-opacity: 1; }
+}
+
+/* Mechanics #3 — gear rotates; house stays still */
+.mempalace-landing .mech:nth-child(3) .icon svg .mech-gear {
+  animation: mpl-gear-spin 12s linear infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+@keyframes mpl-gear-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Mechanics #4 — nodes pulse in sequence, edges shimmer */
+.mempalace-landing .mech:nth-child(4) .icon svg .mech-nodes circle {
+  transform-origin: center;
+  transform-box: fill-box;
+  stroke-opacity: 0.7;
+  animation: mpl-graph-node 3.2s ease-in-out infinite;
+}
+.mempalace-landing .mech:nth-child(4) .icon svg .mech-nodes circle:nth-of-type(2) { animation-delay: 0.3s; }
+.mempalace-landing .mech:nth-child(4) .icon svg .mech-nodes circle:nth-of-type(3) { animation-delay: 0.6s; }
+.mempalace-landing .mech:nth-child(4) .icon svg .mech-nodes circle:nth-of-type(4) { animation-delay: 0.9s; }
+.mempalace-landing .mech:nth-child(4) .icon svg .mech-nodes circle:nth-of-type(5) { animation-delay: 1.2s; }
+@keyframes mpl-graph-node {
+  0%, 100% { transform: scale(1);   stroke-opacity: 0.55; }
+  50%      { transform: scale(1.35); stroke-opacity: 1; }
+}
+.mempalace-landing .mech:nth-child(4) .icon svg .mech-edges {
+  animation: mpl-edge-shimmer 3.2s ease-in-out infinite;
+}
+@keyframes mpl-edge-shimmer {
+  0%, 100% { stroke-opacity: 0.35; }
+  50%      { stroke-opacity: 0.9; }
+}
+
+/* Hover: mechanics icons react with extra glow */
+.mempalace-landing .mech:hover .icon svg {
+  filter: drop-shadow(0 0 8px rgba(74,163,255,0.4));
+  transition: filter 0.3s ease;
+}
