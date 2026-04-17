@@ -14,7 +14,45 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-SAVE_INTERVAL = 15
+DEFAULT_SAVE_INTERVAL = 15
+
+
+def _get_save_interval() -> int:
+    """Return the configured save interval, clamped to a sane minimum.
+
+    Reads ``MEMPAL_SAVE_INTERVAL`` from the environment on every hook
+    invocation so users can re-tune the cadence without reinstalling.
+    Invalid / non-positive values silently fall back to the default so a
+    typo can never make the hook block on every single turn.
+    """
+    raw = os.environ.get("MEMPAL_SAVE_INTERVAL", "").strip()
+    if not raw:
+        return DEFAULT_SAVE_INTERVAL
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_SAVE_INTERVAL
+    return max(1, value)
+
+
+def _stop_hook_disabled() -> bool:
+    """True when ``MEMPAL_STOP_HOOK_DISABLE`` is set to a truthy value.
+
+    Lets users opt out of the auto-save nag entirely (e.g. on machines
+    where MemPalace MCP tools are not registered in the session) without
+    having to uninstall the plugin.
+    """
+    return os.environ.get("MEMPAL_STOP_HOOK_DISABLE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+# Backwards-compatible module-level constant (re-exported for tests that
+# assert the default value; runtime always calls _get_save_interval()).
+SAVE_INTERVAL = DEFAULT_SAVE_INTERVAL
 STATE_DIR = Path.home() / ".mempalace" / "hook_state"
 
 STOP_BLOCK_REASON = (
@@ -203,7 +241,12 @@ def _parse_harness_input(data: dict, harness: str) -> dict:
 
 
 def hook_stop(data: dict, harness: str):
-    """Stop hook: block every N messages for auto-save."""
+    """Stop hook: block every N messages for auto-save.
+
+    Respects two env vars:
+      - ``MEMPAL_STOP_HOOK_DISABLE=1`` — pass through without blocking.
+      - ``MEMPAL_SAVE_INTERVAL=N``     — override the 15-message default.
+    """
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
     stop_hook_active = parsed["stop_hook_active"]
@@ -213,6 +256,13 @@ def hook_stop(data: dict, harness: str):
     if str(stop_hook_active).lower() in ("true", "1", "yes"):
         _output({})
         return
+
+    # Fully disabled via env var — pass through.
+    if _stop_hook_disabled():
+        _output({})
+        return
+
+    save_interval = _get_save_interval()
 
     # Count human messages
     exchange_count = _count_human_messages(transcript_path)
@@ -229,9 +279,12 @@ def hook_stop(data: dict, harness: str):
 
     since_last = exchange_count - last_save
 
-    _log(f"Session {session_id}: {exchange_count} exchanges, {since_last} since last save")
+    _log(
+        f"Session {session_id}: {exchange_count} exchanges, "
+        f"{since_last} since last save (interval={save_interval})"
+    )
 
-    if since_last >= SAVE_INTERVAL and exchange_count > 0:
+    if since_last >= save_interval and exchange_count > 0:
         # Update last save point
         try:
             last_save_file.write_text(str(exchange_count), encoding="utf-8")
