@@ -11,6 +11,31 @@ from .base import BaseCollection
 logger = logging.getLogger(__name__)
 
 
+def get_embedding_function():
+    """Return an embedding function based on env, or ``None`` for Chroma's default.
+
+    Set ``EMBEDDING_PROVIDER=ollama`` to route embeddings through a local
+    Ollama server (GPU-accelerated). Tunables:
+
+    - ``OLLAMA_URL`` (default ``http://localhost:11434``) - base URL
+    - ``OLLAMA_EMBED_MODEL`` (default ``nomic-embed-text``)
+    - ``OLLAMA_EMBED_TIMEOUT`` seconds (default ``60``)
+
+    Returning ``None`` keeps ChromaDB's ``DefaultEmbeddingFunction`` (ONNX
+    MiniLM, 384 dims, CPU) for backward compatibility with existing palaces.
+    """
+    provider = os.environ.get("EMBEDDING_PROVIDER", "").lower()
+    if provider != "ollama":
+        return None
+    from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
+
+    return OllamaEmbeddingFunction(
+        url=os.environ.get("OLLAMA_URL") or "http://localhost:11434",
+        model_name=os.environ.get("OLLAMA_EMBED_MODEL") or "nomic-embed-text",
+        timeout=int(os.environ.get("OLLAMA_EMBED_TIMEOUT") or "60"),
+    )
+
+
 def _fix_blob_seq_ids(palace_path: str):
     """Fix ChromaDB 0.6.x -> 1.5.x migration bug: BLOB seq_ids -> INTEGER.
 
@@ -124,12 +149,17 @@ class ChromaBackend:
                 pass
 
         client = self._client(palace_path)
+        ef = get_embedding_function()
         if create:
             collection = client.get_or_create_collection(
-                collection_name, metadata={"hnsw:space": "cosine"}
+                collection_name,
+                metadata={"hnsw:space": "cosine"},
+                embedding_function=ef,
             )
         else:
-            collection = client.get_collection(collection_name)
+            collection = client.get_collection(
+                collection_name, embedding_function=ef
+            )
         return ChromaCollection(collection)
 
     def get_or_create_collection(
@@ -147,6 +177,8 @@ class ChromaBackend:
     ) -> "ChromaCollection":
         """Create (not get-or-create) *collection_name* with cosine HNSW space."""
         collection = self._client(palace_path).create_collection(
-            collection_name, metadata={"hnsw:space": hnsw_space}
+            collection_name,
+            metadata={"hnsw:space": hnsw_space},
+            embedding_function=get_embedding_function(),
         )
         return ChromaCollection(collection)

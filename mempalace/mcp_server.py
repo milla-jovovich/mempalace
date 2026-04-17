@@ -57,7 +57,7 @@ from .config import (  # noqa: E402
     sanitize_content,
 )
 from .version import __version__  # noqa: E402
-from .backends.chroma import ChromaBackend, ChromaCollection  # noqa: E402
+from .backends.chroma import ChromaBackend, ChromaCollection, get_embedding_function  # noqa: E402
 from .query_sanitizer import sanitize_query  # noqa: E402
 from .searcher import search_memories  # noqa: E402
 from .palace_graph import (  # noqa: E402
@@ -216,16 +216,24 @@ def _get_collection(create=False):
     global _collection_cache, _metadata_cache, _metadata_cache_time
     try:
         client = _get_client()
+        ef = get_embedding_function()
         if create:
             _collection_cache = ChromaCollection(
                 client.get_or_create_collection(
-                    _config.collection_name, metadata={"hnsw:space": "cosine"}
+                    _config.collection_name,
+                    metadata={"hnsw:space": "cosine"},
+                    embedding_function=ef,  # type: ignore[arg-type]
                 )
             )
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
-            _collection_cache = ChromaCollection(client.get_collection(_config.collection_name))
+            _collection_cache = ChromaCollection(
+                client.get_collection(
+                    _config.collection_name,
+                    embedding_function=ef,  # type: ignore[arg-type]
+                )
+            )
             _metadata_cache = None
             _metadata_cache_time = 0
         return _collection_cache
