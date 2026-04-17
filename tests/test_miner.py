@@ -6,7 +6,16 @@ from pathlib import Path
 import chromadb
 import yaml
 
-from mempalace.miner import load_config, mine, scan_project, status
+from mempalace.miner import (
+    _compile_path_descriptions,
+    _compile_path_rules,
+    load_config,
+    match_path_description,
+    match_path_rule,
+    mine,
+    scan_project,
+    status,
+)
 from mempalace.palace import NORMALIZE_VERSION, file_already_mined
 
 
@@ -416,3 +425,212 @@ def test_add_drawer_stamps_normalize_version(tmp_path):
         assert meta["normalize_version"] == NORMALIZE_VERSION
     finally:
         del col, client
+
+
+def test_match_path_description_glob():
+    """Path descriptions match files via glob patterns."""
+    project = Path("/fake/project")
+    paths_config = {
+        "data/results/*.json": {
+            "level": "describe",
+            "description": "Experiment result JSONs",
+        },
+        "tests/": {
+            "level": "describe",
+            "description": "Test suite",
+            "room": "testing",
+        },
+    }
+    compiled = _compile_path_descriptions(paths_config, project)
+
+    desc, room = match_path_description(
+        project / "data" / "results" / "metrics.json", compiled, project
+    )
+    assert desc == "Experiment result JSONs"
+    assert room is None
+
+    desc, room = match_path_description(
+        project / "tests" / "test_miner.py", compiled, project
+    )
+    assert desc == "Test suite"
+    assert room == "testing"
+
+    desc, room = match_path_description(
+        project / "src" / "app.py", compiled, project
+    )
+    assert desc is None
+    assert room is None
+
+
+def test_match_path_description_skips_non_describe_levels():
+    """Paths with level != 'describe' are ignored."""
+    project = Path("/fake/project")
+    paths_config = {
+        "src/": {"level": "full", "description": "Should not match"},
+        "data/": {"level": "describe", "description": "Data directory"},
+    }
+    compiled = _compile_path_descriptions(paths_config, project)
+    assert len(compiled) == 1
+
+    desc, _ = match_path_description(project / "src" / "app.py", compiled, project)
+    assert desc is None
+
+    desc, _ = match_path_description(project / "data" / "file.csv", compiled, project)
+    assert desc == "Data directory"
+
+
+def test_mine_with_path_descriptions():
+    """Described paths produce exactly one drawer with mining_level metadata."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(
+            project_root / "src" / "app.py",
+            "def main():\n    print('hello')\n" * 20,
+        )
+        write_file(
+            project_root / "data" / "results" / "big_output.json",
+            '{"values": [1,2,3]}\n' * 100,
+        )
+        with open(project_root / "mempalace.yaml", "w") as f:
+            yaml.dump(
+                {
+                    "wing": "test_project",
+                    "rooms": [
+                        {"name": "general", "description": "General"},
+                    ],
+                    "paths": {
+                        "data/results/*.json": {
+                            "level": "describe",
+                            "description": "Experiment result JSONs from Phase 2",
+                        },
+                    },
+                },
+                f,
+            )
+
+        palace_path = project_root / "palace"
+        mine(str(project_root), str(palace_path))
+
+        client = chromadb.PersistentClient(path=str(palace_path))
+        col = client.get_collection("mempalace_drawers")
+
+        results = col.get(
+            where={"source_file": str(project_root / "data" / "results" / "big_output.json")},
+            include=["metadatas", "documents"],
+        )
+        assert len(results["ids"]) == 1, f"Expected 1 drawer, got {len(results['ids'])}"
+        assert results["metadatas"][0]["mining_level"] == "describe"
+        assert "Experiment result JSONs" in results["documents"][0]
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_match_path_rule_ignore():
+    """level: ignore matched files are flagged for skipping."""
+    project = Path("/fake/project")
+    paths_config = {
+        "**/*.log": {"level": "ignore"},
+        "pnpm-lock.yaml": {"level": "ignore"},
+        "data/results/*.json": {
+            "level": "describe",
+            "description": "Experiment results",
+        },
+    }
+    rules = _compile_path_rules(paths_config)
+    assert len(rules) == 3
+
+    level, desc, room = match_path_rule(
+        project / "logs" / "train.log", rules, project
+    )
+    assert level == "ignore"
+
+    level, desc, room = match_path_rule(
+        project / "pnpm-lock.yaml", rules, project
+    )
+    assert level == "ignore"
+
+    level, desc, room = match_path_rule(
+        project / "data" / "results" / "out.json", rules, project
+    )
+    assert level == "describe"
+    assert desc == "Experiment results"
+
+    level, desc, room = match_path_rule(
+        project / "src" / "app.py", rules, project
+    )
+    assert level is None
+
+
+def test_compile_path_rules_skips_full_and_invalid():
+    """level: full and malformed entries are not compiled."""
+    paths_config = {
+        "src/": {"level": "full"},
+        "data/": {"level": "describe", "description": "Data"},
+        "bad_entry": "not a dict",
+        "no_desc/": {"level": "describe"},
+    }
+    rules = _compile_path_rules(paths_config)
+    assert len(rules) == 1
+    assert rules[0][1] == "describe"
+
+
+def test_mine_with_ignore_produces_no_drawers():
+    """Files matching level: ignore produce zero drawers."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+
+        write_file(
+            project_root / "src" / "app.py",
+            "def main():\n    print('hello')\n" * 20,
+        )
+        write_file(
+            project_root / "data" / "huge.log",
+            "2026-04-07 INFO training step 1\n" * 200,
+        )
+        write_file(
+            project_root / "pnpm-lock.yaml",
+            "lockfileVersion: 5\npackages:\n  foo: 1.0\n" * 100,
+        )
+        with open(project_root / "mempalace.yaml", "w") as f:
+            yaml.dump(
+                {
+                    "wing": "test_project",
+                    "rooms": [
+                        {"name": "general", "description": "General"},
+                    ],
+                    "paths": {
+                        "**/*.log": {"level": "ignore"},
+                        "pnpm-lock.yaml": {"level": "ignore"},
+                    },
+                },
+                f,
+            )
+
+        palace_path = project_root / "palace"
+        mine(str(project_root), str(palace_path))
+
+        client = chromadb.PersistentClient(path=str(palace_path))
+        col = client.get_collection("mempalace_drawers")
+
+        log_results = col.get(
+            where={"source_file": str(project_root / "data" / "huge.log")},
+            include=["metadatas"],
+        )
+        assert len(log_results["ids"]) == 0, "Log file should have been ignored"
+
+        lock_results = col.get(
+            where={"source_file": str(project_root / "pnpm-lock.yaml")},
+            include=["metadatas"],
+        )
+        assert len(lock_results["ids"]) == 0, "Lock file should have been ignored"
+
+        app_results = col.get(
+            where={"source_file": str(project_root / "src" / "app.py")},
+            include=["metadatas"],
+        )
+        assert len(app_results["ids"]) > 0, "app.py should have been mined normally"
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
