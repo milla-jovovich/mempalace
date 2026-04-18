@@ -847,10 +847,16 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
+    # Count by wing and room. Paginate col.get() to stay under SQLite's
+    # SQLITE_MAX_VARIABLE_NUMBER (default 32766). A single col.get(limit=total)
+    # raises `too many SQL variables` once a palace exceeds that many drawers.
     total = col.count()
-    r = col.get(limit=total, include=["metadatas"]) if total else {"metadatas": []}
-    metas = r["metadatas"]
+    metas: list = []
+    if total:
+        BATCH = 10000
+        for offset in range(0, total, BATCH):
+            r = col.get(limit=BATCH, offset=offset, include=["metadatas"])
+            metas.extend(r.get("metadatas", []) or [])
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:
