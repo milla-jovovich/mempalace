@@ -74,6 +74,10 @@ What this fork adds beyond upstream v3.3.0.
 |---|---|---|
 | **Reliability** | Epsilon mtime comparison (`abs() < 0.01` vs `==`) prevents re-mining | `palace.py`, `miner.py` |
 | **Reliability** | Stale HNSW mtime detection + `mempalace_reconnect` MCP tool | `mcp_server.py` |
+| **Reliability** | Guard ChromaDB 1.5.x metadata-mismatch segfault — `try get → fallback create` instead of `get_or_create_collection(metadata=…)` | `backends/chroma.py`, `mcp_server.py` |
+| **Reliability** | Skip `_fix_blob_seq_ids` sqlite open after first successful migration via `.blob_seq_ids_migrated` marker — opening sqlite3 against a live ChromaDB 1.5.x file corrupts the next PersistentClient | `backends/chroma.py` |
+| **Reliability** | `quarantine_stale_hnsw()` helper — renames HNSW segments whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidesteps read-path SIGSEGV from dangling neighbor pointers (same failure mode as neo-cortex-mcp#2) | `backends/chroma.py` |
+| **Reliability** | Guard `meta or {}` in CLI search print path — upstream `searcher.py:273` raises `AttributeError` on `None` metadata mid-render | `searcher.py` |
 | **Performance** | `bulk_check_mined()` — paginated pre-fetch for concurrent mining | `palace.py`, `miner.py` |
 | **Performance** | Graph cache — 60s TTL, invalidated on writes | `palace_graph.py` |
 | **Performance** | L1 importance pre-filter — `importance >= 3` first, full scan fallback | `layers.py` |
