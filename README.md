@@ -199,7 +199,7 @@ Claude Code has two complementary memory layers, used in tandem:
 | Layer | Storage | Size | Consolidation | Purpose |
 |---|---|---|---|---|
 | **Auto-memory** | `~/.claude/projects/*/memory/*.md` | ~dozens of files | None (manual writes) | Preferences, feedback, context |
-| **MemPalace** | `~/.mempalace/palace/` (ChromaDB) | 134K+ drawers | None (write-only archive) | Verbatim conversations, tool output, code |
+| **MemPalace** | `~/.mempalace/palace/` (ChromaDB) | 137K+ drawers | None (write-only archive) | Verbatim conversations, tool output, code |
 
 Neither has automatic consolidation. Claude Code has unreleased "Auto Dream" consolidation code behind a disabled feature flag ([#38461](https://github.com/anthropics/claude-code/issues/38461)) — if it ships, it covers only the lightweight layer. MemPalace decay (P2) and feedback (P3) remain the right priorities for the verbatim archive.
 
@@ -208,10 +208,12 @@ Neither has automatic consolidation. Claude Code has unreleased "Auto Dream" con
 | PR | Status | Description |
 |---|---|---|
 | [#659](https://github.com/milla-jovovich/mempalace/pull/659) | clean, waiting review | Diary wing parameter |
-| [#660](https://github.com/milla-jovovich/mempalace/pull/660) | clean, waiting review | L1 importance pre-filter |
-| [#661](https://github.com/milla-jovovich/mempalace/pull/661) | feedback addressed, waiting re-review | Graph cache with write-invalidation |
-| [#673](https://github.com/milla-jovovich/mempalace/pull/673) | clean, rebased against #863 | Deterministic hook saves |
+| [#660](https://github.com/milla-jovovich/mempalace/pull/660) | `MERGEABLE`, waiting review | L1 importance pre-filter |
+| [#661](https://github.com/milla-jovovich/mempalace/pull/661) | feedback addressed (threading.Lock in 8adf35a), waiting `@bensig` re-review | Graph cache with write-invalidation |
+| [#673](https://github.com/milla-jovovich/mempalace/pull/673) | APPROVED by external reviewer on 2026-04-12, waiting maintainer merge | Deterministic hook saves (broader than upstream's narrower #966) |
 | [#681](https://github.com/milla-jovovich/mempalace/pull/681) | clean, waiting review | Unicode checkmark → ASCII |
+| [#999](https://github.com/milla-jovovich/mempalace/pull/999) | `MERGEABLE`, Copilot review addressed + tests added | `None`-metadata guards on `searcher.py` + `miner.status()` |
+| [#1000](https://github.com/milla-jovovich/mempalace/pull/1000) | `MERGEABLE`, closes #823, Copilot nit addressed | `quarantine_stale_hnsw()` for HNSW/sqlite drift crashes |
 
 Closed: #626, #633, #662 (superseded by BM25), #663 (upstream wrote #757), #738 (docs stale), #629 (superseded — upstream shipped batching + file locking), #632 (superseded — `--version`, `purge`, `repair` all shipped in v3.3.0).
 

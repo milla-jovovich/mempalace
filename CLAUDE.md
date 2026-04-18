@@ -28,7 +28,7 @@ python -m mempalace.mcp_server           # run MCP server standalone
 
 Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
-## Fork Changes (still ahead of upstream after v3.3.0 merge)
+## Fork Changes (still ahead of upstream after v3.3.1 merge)
 
 1. **fix: epsilon mtime comparison** — `palace.py` uses `abs() < 0.01` instead of `==` for float mtime dedup
 2. **feat: bulk_check_mined()** — paginated pre-fetch of all source_file/mtime pairs for concurrent mining
@@ -40,12 +40,22 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 8. **perf: L1 importance pre-filter** — `_fetch_drawers()` tries `importance >= 3` first, falls back to full scan only if < 15 results
 9. **fix: MCP stale HNSW index** — `_get_client()` detects external writes via mtime (not just inode), `mempalace_reconnect` MCP tool
 10. **fix: diary wing assignment** — `tool_diary_write()` accepts optional `wing` param, stop hook derives project wing from transcript path
+11. **fix: None-metadata guards** — `searcher.py` (CLI + API paths) and `miner.status()` no longer crash with `AttributeError: 'NoneType' object has no attribute 'get'` when ChromaDB returns `None` metadata entries
+12. **fix: `.blob_seq_ids_migrated` marker** — skip Python `sqlite3.connect()` against a live ChromaDB 1.5.x DB after first successful migration; opening the sqlite file from Python corrupts the next `PersistentClient` call
+13. **feat: `quarantine_stale_hnsw()`** — rename HNSW segment dirs whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidestepping the read-path SIGSEGV from dangling neighbor pointers (same failure mode as neo-cortex-mcp#2, mempalace#823)
 
 ### Merged into upstream v3.3.0
 
 - BLOB seq_id migration repair (#664), --yes flag (#682), Unicode sanitize_name (#683), VAR_KEYWORD kwargs (#684), MCP tools/export (via #667)
 
-### Superseded by upstream v3.3.0
+### Pulled in from upstream v3.3.1 (merged 2026-04-18)
+
+- Multi-language entity detection (Portuguese, Russian, Italian, Hindi, Indonesian, Chinese); BCP-47 case-insensitive locales; script-aware word boundaries for Devanagari/Arabic/Hebrew/Thai
+- UTF-8 encoding on `Path.read_text()` (#946) — fixes Windows GBK/non-UTF-8 locales
+- Non-blocking precompact hook (#863) — replaces our fork's blocking precompact
+- Basic `silent_save` honoring in stop hook (#966) — narrower than our fork's deterministic-save architecture, so we keep #673's version
+
+### Superseded by upstream
 
 - Hybrid keyword fallback (#662) — upstream shipped Okapi-BM25
 - Batch ChromaDB writes (#629 partial) — upstream has file-level locking
@@ -53,15 +63,17 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 ## Upstream PRs
 
-As of 2026-04-16: 5 merged, 5 open, 7 closed. PRs target `develop`.
+As of 2026-04-18: 5 merged, 7 open, 7 closed. PRs target `develop`.
 
 | PR | Status | Description |
 |----|--------|-------------|
-| #659 | open (clean, waiting review) | Diary wing parameter |
-| #660 | open (clean, waiting review) | L1 importance pre-filter |
-| #661 | open (feedback addressed, waiting re-review) | Graph cache with write-invalidation |
-| #673 | open (clean, rebased against #863) | Deterministic hook saves |
+| #659 | open (`MERGEABLE`, waiting review) | Diary wing parameter |
+| #660 | open (`MERGEABLE`, waiting review) | L1 importance pre-filter |
+| #661 | open (feedback addressed, waiting `@bensig` re-review) | Graph cache with write-invalidation |
+| #673 | open (APPROVED externally 2026-04-12, waiting maintainer merge) | Deterministic hook saves (broader than upstream's #966) |
 | #681 | open (clean, waiting review) | Unicode checkmark → ASCII (#535) |
+| #999 | open (`MERGEABLE`, Copilot addressed + tests added) | `None`-metadata guards in `searcher.py` + `miner.status()` |
+| #1000 | open (`MERGEABLE`, closes #823, Copilot addressed) | `quarantine_stale_hnsw()` for HNSW/sqlite drift |
 | #629 | **closed** | Superseded — upstream shipped batching + file locking |
 | #632 | **closed** | Superseded — `--version`, `purge`, `repair` all shipped in v3.3.0 |
 | #664 | **merged** | BLOB seq_id migration repair |
