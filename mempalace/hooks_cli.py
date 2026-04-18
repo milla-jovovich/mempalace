@@ -504,6 +504,8 @@ def hook_stop(data: dict, harness: str):
                     tag = ""
                 _output(
                     {
+                        "continue": True,
+                        "suppressOutput": False,
                         "systemMessage": f"\u2726 {count} memories woven into the palace{tag}",
                     }
                 )
