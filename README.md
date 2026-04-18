@@ -116,22 +116,22 @@ The three that matter most if you only read one section:
 
 ### Still ahead of upstream
 
-| Area | Change | Files |
-|---|---|---|
-| **Reliability** | Epsilon mtime comparison (`abs() < 0.01` vs `==`) prevents re-mining | `palace.py`, `miner.py` |
-| **Reliability** | Stale HNSW mtime detection + `mempalace_reconnect` MCP tool | `mcp_server.py` |
-| **Reliability** | Guard ChromaDB 1.5.x metadata-mismatch segfault — `try get → fallback create` instead of `get_or_create_collection(metadata=…)` | `backends/chroma.py`, `mcp_server.py` |
-| **Reliability** | Skip `_fix_blob_seq_ids` sqlite open after first successful migration via `.blob_seq_ids_migrated` marker — opening sqlite3 against a live ChromaDB 1.5.x file corrupts the next PersistentClient | `backends/chroma.py` |
-| **Reliability** | `quarantine_stale_hnsw()` helper — renames HNSW segments whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidesteps read-path SIGSEGV from dangling neighbor pointers (same failure mode as neo-cortex-mcp#2) | `backends/chroma.py` |
-| **Reliability** | `meta or {}` None-metadata guards across 8 read-path loops — ChromaDB's `query()`/`get()` return `None` entries for drawers with no stored metadata, which crashed `searcher.py` (CLI + API + closet-boost), `miner.status()`, and 4 MCP handlers (`tool_status`, `tool_list_wings`, `tool_list_rooms`, `tool_get_taxonomy`) with `AttributeError` mid-tally | `searcher.py`, `miner.py`, `mcp_server.py` |
-| **Performance** | `bulk_check_mined()` — paginated pre-fetch for concurrent mining | `palace.py`, `miner.py` |
-| **Performance** | Graph cache — 60s TTL, invalidated on writes | `palace_graph.py` |
-| **Performance** | L1 importance pre-filter — `importance >= 3` first, full scan fallback | `layers.py` |
-| **Search** | `max_distance` parameter (cosine distance threshold, default 1.5) | `mcp_server.py`, `searcher.py` |
-| **Search** | Warnings + sqlite BM25 top-up when vector underdelivers — `search_memories` returns `warnings: [...]` and `available_in_scope: N` so callers see why recall was partial; fallback hits tagged `matched_via: "sqlite_bm25_fallback"`. The palace never silently returns fewer results than the scope contains (sibling of #951, addresses read-side of #823) | `searcher.py` |
-| **Hooks** | Silent save mode — direct Python API, deterministic, zero data loss | `hooks_cli.py` |
-| **Hooks** | Tool output mining — per-tool formatting strategies in `normalize.py` | `normalize.py` |
-| **Features** | Diary wing routing — derive project wing from transcript path | `hooks_cli.py`, `mcp_server.py` |
+Status legend: a PR number means there's an open upstream PR for the change; **PR pending** means the fork has the change but no PR has been filed yet; **fork-only** means the fork keeps it intentionally but isn't pitching it upstream.
+
+| Area | Change | Status | Files |
+|---|---|---|---|
+| **Reliability** | Epsilon mtime comparison (`abs() < 0.01` vs `==`) prevents re-mining | PR pending (verify vs current `develop` first) | `palace.py`, `miner.py` |
+| **Reliability** | Skip `_fix_blob_seq_ids` sqlite open after first successful migration via `.blob_seq_ids_migrated` marker — opening sqlite3 against a live ChromaDB 1.5.x file corrupts the next PersistentClient | fork-only (narrow chromadb 1.5.x debugging path) | `backends/chroma.py` |
+| **Reliability** | `quarantine_stale_hnsw()` helper — renames HNSW segments whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidesteps read-path SIGSEGV from dangling neighbor pointers (same failure mode as neo-cortex-mcp#2) | [#1000](https://github.com/milla-jovovich/mempalace/pull/1000) · closes #823 | `backends/chroma.py` |
+| **Reliability** | `meta or {}` None-metadata guards across 8 read-path loops — ChromaDB's `query()`/`get()` return `None` entries for drawers with no stored metadata, which crashed `searcher.py` (CLI + API + closet-boost), `miner.status()`, and 4 MCP handlers (`tool_status`, `tool_list_wings`, `tool_list_rooms`, `tool_get_taxonomy`) with `AttributeError` mid-tally | [#999](https://github.com/milla-jovovich/mempalace/pull/999) | `searcher.py`, `miner.py`, `mcp_server.py` |
+| **Performance** | `bulk_check_mined()` — paginated pre-fetch for concurrent mining | fork-only (complementary to upstream's file-locking in [#784](https://github.com/milla-jovovich/mempalace/pull/784)) | `palace.py`, `miner.py` |
+| **Performance** | Graph cache — 60s TTL, invalidated on writes | [#661](https://github.com/milla-jovovich/mempalace/pull/661) | `palace_graph.py` |
+| **Performance** | L1 importance pre-filter — `importance >= 3` first, full scan fallback | [#660](https://github.com/milla-jovovich/mempalace/pull/660) | `layers.py` |
+| **Search** | `max_distance` parameter (cosine distance threshold, default 1.5) | PR pending | `mcp_server.py`, `searcher.py` |
+| **Search** | Warnings + sqlite BM25 top-up when vector underdelivers — `search_memories` returns `warnings: [...]` and `available_in_scope: N` so callers see why recall was partial; fallback hits tagged `matched_via: "sqlite_bm25_fallback"`. The palace never silently returns fewer results than the scope contains (sibling of #951, addresses read-side of #823) | [#1005](https://github.com/milla-jovovich/mempalace/pull/1005) | `searcher.py` |
+| **Hooks** | Silent save mode — direct Python API, deterministic, zero data loss | [#673](https://github.com/milla-jovovich/mempalace/pull/673) · APPROVED externally 2026-04-12 | `hooks_cli.py` |
+| **Hooks** | Tool output mining — per-tool formatting strategies in `normalize.py` | PR pending | `normalize.py` |
+| **Features** | Diary wing routing — derive project wing from transcript path | [#659](https://github.com/milla-jovovich/mempalace/pull/659) | `hooks_cli.py`, `mcp_server.py` |
 
 ### Merged upstream (in v3.3.0)
 
@@ -155,6 +155,7 @@ The three that matter most if you only read one section:
 - Hybrid keyword fallback (`$contains`) — upstream shipped Okapi-BM25 (60/40 blend) via [#789](https://github.com/milla-jovovich/mempalace/pull/789)
 - Batch ChromaDB writes — upstream has file-level locking for concurrent agents via [#784](https://github.com/milla-jovovich/mempalace/pull/784)
 - Inline transcript mining in hooks — upstream uses `mempalace mine` in background
+- Stale HNSW mtime detection — upstream took a different approach in [#757](https://github.com/milla-jovovich/mempalace/pull/757); fork's broader inode+mtime detection and `mempalace_reconnect` MCP tool stay as fork-local convenience
 
 ## Planned work
 
