@@ -188,6 +188,13 @@ class TestHandleRequest:
         resp = handle_request({"method": None, "id": 99, "params": {}})
         assert resp["error"]["code"] == -32601
 
+    @pytest.mark.parametrize("payload", [None, [], "plain", 42, True])
+    def test_handle_request_invalid_payload_returns_jsonrpc_error(self, payload):
+        from mempalace.mcp_server import handle_request
+
+        resp = handle_request(payload)
+        assert resp == {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}}
+
     def test_tools_call_dispatches(self, monkeypatch, config, palace_path, seeded_kg):
         _patch_mcp_server(monkeypatch, config, seeded_kg)
         from mempalace.mcp_server import handle_request
