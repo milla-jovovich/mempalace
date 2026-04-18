@@ -989,6 +989,7 @@ def status(palace_path: str):
         if not r["metadatas"]:
             break
         for m in r["metadatas"]:
+            m = m or {}
             wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
         offset += len(r["metadatas"])
 
