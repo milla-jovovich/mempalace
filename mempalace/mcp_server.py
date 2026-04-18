@@ -214,18 +214,30 @@ def _get_client():
 def _get_collection(create=False):
     """Return the ChromaDB collection, caching the client between calls."""
     global _collection_cache, _metadata_cache, _metadata_cache_time
+    from .embedding import get_embedding_function, new_palace_model, resolve_model_from_metadata
+
     try:
         client = _get_client()
         if create:
+            model = new_palace_model(_config)
+            ef = get_embedding_function(model)
             _collection_cache = ChromaCollection(
                 client.get_or_create_collection(
-                    _config.collection_name, metadata={"hnsw:space": "cosine"}
+                    _config.collection_name,
+                    metadata={"hnsw:space": "cosine", "embedding_model": model},
+                    embedding_function=ef,
                 )
             )
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
-            _collection_cache = ChromaCollection(client.get_collection(_config.collection_name))
+            # Read metadata to resolve model, then open with correct EF
+            raw_col = client.get_collection(_config.collection_name)
+            model = resolve_model_from_metadata(raw_col.metadata)
+            ef = get_embedding_function(model)
+            _collection_cache = ChromaCollection(
+                client.get_collection(_config.collection_name, embedding_function=ef)
+            )
             _metadata_cache = None
             _metadata_cache_time = 0
         return _collection_cache
@@ -312,6 +324,15 @@ def tool_status():
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
     }
+    # Report which embedding model this palace uses
+    from .embedding import resolve_model_from_metadata
+
+    try:
+        raw_client = _get_client()
+        raw_col = raw_client.get_collection(_config.collection_name)
+        result["embedding_model"] = resolve_model_from_metadata(raw_col.metadata)
+    except Exception:
+        result["embedding_model"] = "unknown"
     try:
         all_meta = _get_cached_metadata(col)
         for m in all_meta:

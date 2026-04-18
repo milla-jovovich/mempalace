@@ -226,19 +226,36 @@ def test_rebuild_index_success(mock_backend_cls, mock_shutil, tmp_path):
         "metadatas": [{"wing": "a"}, {"wing": "b"}],
     }
 
+    # Fake raw collection metadata for embedding model resolution
+    mock_raw_col = MagicMock()
+    mock_raw_col.metadata = {"hnsw:space": "cosine", "embedding_model": "test-model"}
+
     mock_new_col = MagicMock()
     mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
     mock_backend.create_collection.return_value = mock_new_col
+    mock_raw_client = MagicMock()
+    mock_raw_client.get_collection.return_value = mock_raw_col
+    mock_backend._client.return_value = mock_raw_client
 
-    repair.rebuild_index(palace_path=str(tmp_path))
+    mock_ef = MagicMock()
+    with (
+        patch("mempalace.embedding.get_embedding_function", return_value=mock_ef),
+        patch("mempalace.embedding.resolve_model_from_metadata", return_value="test-model"),
+    ):
+        repair.rebuild_index(palace_path=str(tmp_path))
 
     # Verify: backed up sqlite only (not copytree)
     mock_shutil.copy2.assert_called_once()
     assert "chroma.sqlite3" in str(mock_shutil.copy2.call_args)
 
-    # Verify: deleted and recreated (cosine is the backend default)
+    # Verify: deleted and recreated with embedding config
     mock_backend.delete_collection.assert_called_once_with(str(tmp_path), "mempalace_drawers")
-    mock_backend.create_collection.assert_called_once_with(str(tmp_path), "mempalace_drawers")
+    mock_backend.create_collection.assert_called_once_with(
+        str(tmp_path),
+        "mempalace_drawers",
+        embedding_function=mock_ef,
+        embedding_model_name="test-model",
+    )
 
     # Verify: used upsert not add
     mock_new_col.upsert.assert_called_once()

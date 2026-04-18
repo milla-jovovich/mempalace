@@ -54,12 +54,51 @@ def get_collection(
     palace_path: str,
     collection_name: str = "mempalace_drawers",
     create: bool = True,
+    config=None,
 ):
-    """Get the palace collection through the backend layer."""
+    """Get the palace collection through the backend layer.
+
+    Resolves the correct embedding model:
+    - On create: uses new_palace_model(config) (mpnet by default)
+    - On read: reads model from collection metadata, falls back to MiniLM
+    """
+    from .embedding import (
+        get_embedding_function,
+        new_palace_model,
+        resolve_model_from_metadata,
+    )
+
+    if create:
+        model = new_palace_model(config)
+        ef = get_embedding_function(model)
+        return _DEFAULT_BACKEND.get_collection(
+            palace_path,
+            collection_name=collection_name,
+            create=True,
+            embedding_function=ef,
+            embedding_model_name=model,
+        )
+
+    # For existing palaces: read metadata to determine model.
+    # Check path existence first — _client() would create the directory
+    # as a side effect of PersistentClient(), which breaks callers that
+    # expect FileNotFoundError for missing palaces (e.g. status()).
+    if not os.path.isdir(palace_path):
+        raise FileNotFoundError(palace_path)
+
+    try:
+        raw_client = _DEFAULT_BACKEND._client(palace_path)
+        raw_col = raw_client.get_collection(collection_name)
+        model = resolve_model_from_metadata(raw_col.metadata)
+    except Exception:
+        model = resolve_model_from_metadata(None)
+
+    ef = get_embedding_function(model)
     return _DEFAULT_BACKEND.get_collection(
         palace_path,
         collection_name=collection_name,
-        create=create,
+        create=False,
+        embedding_function=ef,
     )
 
 

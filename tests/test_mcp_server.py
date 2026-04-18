@@ -291,6 +291,15 @@ class TestReadTools:
         result = tool_status()
         assert "error" in result
 
+    def test_status_reports_embedding_model(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_status
+
+        result = tool_status()
+        assert "embedding_model" in result
+
 
 # ── Search Tool ─────────────────────────────────────────────────────────
 
@@ -444,9 +453,9 @@ class TestWriteTools:
 
         assert result1["success"] is True
         assert result2["success"] is True
-        assert (
-            result1["drawer_id"] != result2["drawer_id"]
-        ), "Documents with shared header but different content must have distinct drawer IDs"
+        assert result1["drawer_id"] != result2["drawer_id"], (
+            "Documents with shared header but different content must have distinct drawer IDs"
+        )
 
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)

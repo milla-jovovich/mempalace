@@ -4,6 +4,7 @@ import chromadb
 import pytest
 
 from mempalace.backends.chroma import ChromaBackend, ChromaCollection, _fix_blob_seq_ids
+from mempalace.embedding import DEFAULT_MODEL, get_embedding_function
 
 
 class _FakeCollection:
@@ -140,3 +141,56 @@ def test_fix_blob_seq_ids_noop_without_blobs(tmp_path):
 def test_fix_blob_seq_ids_noop_without_database(tmp_path):
     """No error when palace has no chroma.sqlite3."""
     _fix_blob_seq_ids(str(tmp_path))  # should not raise
+
+
+def test_chroma_backend_stamps_embedding_model_on_create(tmp_path):
+    palace_path = tmp_path / "palace"
+    ef = get_embedding_function(DEFAULT_MODEL)
+
+    ChromaBackend().get_collection(
+        str(palace_path),
+        collection_name="mempalace_drawers",
+        create=True,
+        embedding_function=ef,
+        embedding_model_name=DEFAULT_MODEL,
+    )
+
+    # Verify model name was stamped in collection metadata
+    client = chromadb.PersistentClient(path=str(palace_path))
+    col = client.get_collection("mempalace_drawers")
+    assert col.metadata.get("embedding_model") == DEFAULT_MODEL
+
+
+def test_chroma_backend_passes_embedding_function_on_get(tmp_path):
+    palace_path = tmp_path / "palace"
+    ef = get_embedding_function(DEFAULT_MODEL)
+
+    # Create first
+    ChromaBackend().get_collection(
+        str(palace_path),
+        collection_name="mempalace_drawers",
+        create=True,
+        embedding_function=ef,
+        embedding_model_name=DEFAULT_MODEL,
+    )
+
+    # Get with embedding function — should not raise
+    col = ChromaBackend().get_collection(
+        str(palace_path),
+        collection_name="mempalace_drawers",
+        create=False,
+        embedding_function=ef,
+    )
+    assert col.count() == 0
+
+
+def test_chroma_backend_works_without_embedding_function(tmp_path):
+    """Backwards compatibility — no embedding_function still works."""
+    palace_path = tmp_path / "palace"
+
+    col = ChromaBackend().get_collection(
+        str(palace_path),
+        collection_name="mempalace_drawers",
+        create=True,
+    )
+    assert col.count() == 0
