@@ -43,6 +43,8 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 11. **fix: `.blob_seq_ids_migrated` marker** — skip Python `sqlite3.connect()` against a live ChromaDB 1.5.x DB after first successful migration; opening the sqlite file from Python corrupts the next `PersistentClient` call
 12. **feat: `quarantine_stale_hnsw()`** — rename HNSW segment dirs whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidestepping the read-path SIGSEGV from dangling neighbor pointers (same failure mode as neo-cortex-mcp#2, mempalace#823)
 13. **feat: search warnings + sqlite BM25 top-up** — `search_memories()` returns `warnings: [...]` and `available_in_scope: N` whenever the vector path underdelivers (sparse HNSW after repair, `#951` filter-planner failure, drift). Fallback promotes BM25-ranked sqlite candidates tagged `matched_via: "sqlite_bm25_fallback"`. Closes the "silent 0-hit when data is in sqlite" failure mode. CLI `search()` delegates to `search_memories()` so both paths share the fallback.
+14. **fix: stop_hook_active guard** — guard only applies in block mode; silent mode skips it so Claude Code 2.1.114's plugin dispatch (which sets `stop_hook_active:true` on every fire after the first) doesn't suppress subsequent auto-saves
+15. **fix: `_output()` stdout routing** — uses `sys.modules.get()` to find an already-loaded `mcp_server` and reuse its `_REAL_STDOUT_FD`; otherwise writes directly to fd 1. Avoids importing `mcp_server` cold (which would trigger its stdout→stderr redirect as a side effect). Write-all loop handles partial `os.write()` returns.
 
 ### Merged into upstream (post-v3.3.1)
 
@@ -67,7 +69,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 ## Upstream PRs
 
-As of 2026-04-18: 6 merged, 7 open, 7 closed. PRs target `develop`.
+As of 2026-04-18: 6 merged, 8 open, 7 closed. PRs target `develop`.
 
 | PR | Status | Description |
 |----|--------|-------------|
@@ -79,6 +81,7 @@ As of 2026-04-18: 6 merged, 7 open, 7 closed. PRs target `develop`.
 | #999 | **merged** 2026-04-18 | `None`-metadata guards in `searcher.py`, `miner.status()`, and 4 `mcp_server.py` handlers |
 | #1000 | open (`MERGEABLE`, closes #823, Copilot addressed, rebased onto #995) | `quarantine_stale_hnsw()` for HNSW/sqlite drift |
 | #1005 | open (`MERGEABLE`, Copilot addressed) | Warnings + sqlite BM25 top-up when vector underdelivers (never silent miss) |
+| #1021 | open (Copilot review addressed — 5 points, waiting review) | Hook stdout routing + silent_save guard fixes for Claude Code 2.1.114 |
 | #629 | **closed** | Superseded — upstream shipped batching + file locking |
 | #632 | **closed** | Superseded — `--version`, `purge`, `repair` all shipped in v3.3.0 |
 | #664 | **merged** | BLOB seq_id migration repair |
