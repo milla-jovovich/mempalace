@@ -166,24 +166,35 @@ def _log(message: str):
 
 
 def _output(data: dict):
-    """Print JSON to the real stdout, even if mcp_server has hijacked sys.stdout.
+    """Print JSON to stdout without importing modules that may redirect streams.
 
-    mempalace.mcp_server redirects stdout → stderr at module import (fd and
-    sys-level) to protect the MCP stdio protocol from ChromaDB's C-level
-    prints. Silent-save imports it transitively via _save_diary_direct, so
-    sys.stdout is stderr by the time we get here. Claude Code reads hook
-    output from fd 1, so we write there directly using the saved fd.
+    If mempalace.mcp_server is already loaded, reuse its saved real stdout fd.
+    Otherwise, write directly to fd 1 so hook responses still go to stdout even
+    if sys.stdout has been redirected elsewhere.
     """
-    payload = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    payload = (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+    real_stdout_fd: int | None = None
+    mcp_mod = sys.modules.get("mempalace.mcp_server") or sys.modules.get(
+        f"{__package__}.mcp_server" if __package__ else "mcp_server"
+    )
+    if mcp_mod is not None:
+        real_stdout_fd = getattr(mcp_mod, "_REAL_STDOUT_FD", None)
+
+    fd = real_stdout_fd if real_stdout_fd is not None else 1
+    offset = 0
     try:
-        from .mcp_server import _REAL_STDOUT_FD
-        if _REAL_STDOUT_FD is not None:
-            os.write(_REAL_STDOUT_FD, payload.encode("utf-8"))
-            return
-    except Exception:
+        while offset < len(payload):
+            try:
+                offset += os.write(fd, payload[offset:])
+            except InterruptedError:
+                continue
+        return
+    except OSError:
         pass
-    sys.stdout.write(payload)
-    sys.stdout.flush()
+
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
 
 
 def _desktop_toast(body: str, title: str = "MemPalace"):
@@ -443,11 +454,16 @@ def hook_stop(data: dict, harness: str):
     # no loop to prevent — and Claude Code's plugin dispatch sets this flag on every
     # fire after the first, which would otherwise suppress all subsequent auto-saves.
     if str(stop_hook_active).lower() in ("true", "1", "yes"):
+        silent_guard = False
         try:
             from .config import MempalaceConfig
-            silent_guard = MempalaceConfig().hook_silent_save
-        except Exception:
-            silent_guard = True
+        except ImportError as exc:
+            _log(f"WARNING: could not import MempalaceConfig for stop guard: {exc}; preserving block-mode guard")
+        else:
+            try:
+                silent_guard = MempalaceConfig().hook_silent_save
+            except AttributeError as exc:
+                _log(f"WARNING: could not read hook_silent_save: {exc}; preserving block-mode guard")
         if not silent_guard:
             _output({})
             return

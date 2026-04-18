@@ -280,6 +280,66 @@ def test_precompact_allows(tmp_path):
 # --- _log ---
 
 
+def test_output_writes_to_real_stdout_fd_when_mcp_server_loaded():
+    """_output() must reach fd 1 even when mcp_server has redirected sys.stdout."""
+    import types
+
+    fake_module = types.ModuleType("mempalace.mcp_server")
+
+    read_fd, write_fd = os.pipe()
+    try:
+        fake_module._REAL_STDOUT_FD = write_fd
+        with patch.dict("sys.modules", {"mempalace.mcp_server": fake_module}):
+            from mempalace.hooks_cli import _output
+
+            _output({"systemMessage": "test"})
+
+        os.close(write_fd)
+        written = b""
+        while True:
+            chunk = os.read(read_fd, 4096)
+            if not chunk:
+                break
+            written += chunk
+    finally:
+        os.close(read_fd)
+
+    data = json.loads(written.decode())
+    assert data["systemMessage"] == "test"
+
+
+def test_output_falls_back_to_fd1_when_mcp_server_absent():
+    """_output() writes to fd 1 directly when mcp_server is not loaded."""
+    read_fd, write_fd = os.pipe()
+    try:
+        orig_fd1 = os.dup(1)
+        os.dup2(write_fd, 1)
+        os.close(write_fd)
+        try:
+            modules_without_mcp = {k: v for k, v in __import__("sys").modules.items()
+                                    if "mcp_server" not in k}
+            with patch.dict("sys.modules", modules_without_mcp, clear=True):
+                from mempalace.hooks_cli import _output
+                _output({"continue": True})
+        finally:
+            os.dup2(orig_fd1, 1)
+            os.close(orig_fd1)
+    except Exception:
+        os.close(read_fd)
+        raise
+
+    written = b""
+    while True:
+        chunk = os.read(read_fd, 4096)
+        if not chunk:
+            break
+        written += chunk
+    os.close(read_fd)
+
+    data = json.loads(written.decode())
+    assert data["continue"] is True
+
+
 def test_log_writes_to_hook_log(tmp_path):
     with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
         _log("test message")
