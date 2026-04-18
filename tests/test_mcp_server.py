@@ -146,6 +146,20 @@ class TestHandleRequest:
         )
         assert resp["error"]["code"] == -32601
 
+    def test_tools_call_missing_params(self):
+        from mempalace.mcp_server import handle_request
+
+        for bad_params in [None, {}, {"arguments": {}}]:
+            resp = handle_request(
+                {
+                    "method": "tools/call",
+                    "id": 15,
+                    "params": bad_params,
+                }
+            )
+            assert resp["error"]["code"] == -32602
+            assert "Invalid params" in resp["error"]["message"]
+
     def test_unknown_method(self):
         from mempalace.mcp_server import handle_request
 

@@ -1604,6 +1604,12 @@ def handle_request(request):
             },
         }
     elif method == "tools/call":
+        if not isinstance(params, dict) or "name" not in params:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32602, "message": "Invalid params: 'name' is required for tools/call"},
+            }
         tool_name = params.get("name")
         tool_args = params.get("arguments") or {}
         if tool_name not in TOOLS:
