@@ -330,9 +330,24 @@ def _collect_claude_messages(items) -> list:
 
 
 def _try_chatgpt_json(data) -> Optional[str]:
-    """ChatGPT conversations.json with mapping tree."""
+    """ChatGPT conversations.json — handles single convo (dict) and list of convos (list)."""
+    if isinstance(data, list):
+        transcripts = []
+        for item in data:
+            if isinstance(item, dict) and "mapping" in item:
+                result = _try_chatgpt_single(item)
+                if result:
+                    transcripts.append(result)
+        if transcripts:
+            return "\n\n---\n\n".join(transcripts)
+        return None
     if not isinstance(data, dict) or "mapping" not in data:
         return None
+    return _try_chatgpt_single(data)
+
+
+def _try_chatgpt_single(data) -> Optional[str]:
+    """Parse a single ChatGPT conversation object with mapping tree."""
     mapping = data["mapping"]
     messages = []
     # Find root: prefer node with parent=None AND no message (synthetic root)
