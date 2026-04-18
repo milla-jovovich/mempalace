@@ -422,10 +422,19 @@ def hook_stop(data: dict, harness: str):
     stop_hook_active = parsed["stop_hook_active"]
     transcript_path = parsed["transcript_path"]
 
-    # If already in a save cycle, let through (infinite-loop prevention)
+    # If already in a block-mode save cycle, let through (infinite-loop prevention).
+    # Silent mode saves directly without returning {"decision":"block"}, so there's
+    # no loop to prevent — and Claude Code's plugin dispatch sets this flag on every
+    # fire after the first, which would otherwise suppress all subsequent auto-saves.
     if str(stop_hook_active).lower() in ("true", "1", "yes"):
-        _output({})
-        return
+        try:
+            from .config import MempalaceConfig
+            silent_guard = MempalaceConfig().hook_silent_save
+        except Exception:
+            silent_guard = True
+        if not silent_guard:
+            _output({})
+            return
 
     # Count human messages
     exchange_count = _count_human_messages(transcript_path)
