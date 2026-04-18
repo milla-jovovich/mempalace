@@ -10,7 +10,7 @@
 
 Fork of [MemPalace v3.3.1](https://github.com/milla-jovovich/mempalace/releases/tag/v3.3.1). Running in production since 2026-04-09 — currently 137,949 drawers across 68 rooms in 22 wings, 8 open PRs upstream. See upstream README for full feature docs.
 
-What this fork adds that you won't get from upstream: a **deterministic silent-save hook architecture** (zero data loss, `systemMessage` notification), **ChromaDB 1.5.x hardening** (`quarantine_stale_hnsw` drift recovery, segfault-trigger guards, 8-site `None`-metadata safety), and **search that never silently misses** (`search_memories` returns warnings + sqlite BM25 top-up + `available_in_scope` so callers can see what they aren't getting). Full list below.
+What this fork adds that you won't get from upstream yet: a **deterministic silent-save hook architecture** (zero data loss, `systemMessage` notification), **ChromaDB 1.5.x hardening** (`quarantine_stale_hnsw` drift recovery, segfault-trigger guards, 8-site `None`-metadata safety), and **search that never silently misses** (`search_memories` returns warnings + sqlite BM25 top-up + `available_in_scope` so callers can see what they aren't getting). Full list below.
 
 **Status at a glance:** active as of 2026-04-18 · [Discussion #1017](https://github.com/MemPalace/mempalace/discussions/1017) introduces the fork upstream · 998 tests pass on `main` · [Open upstream PRs](#open-upstream-prs) (8) are the contribution pipeline · [Issues on this repo](https://github.com/jphein/mempalace/issues) for fork-specific feedback.
 
