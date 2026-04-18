@@ -27,7 +27,6 @@ We surveyed the memory-system landscape in April 2026 and found no verbatim-firs
 | Letta | No — tiered summarization | Yes | No | |
 | engram | Structured fields, not raw | Yes | Yes | Go + SQLite FTS5. |
 | CaviraOSS OpenMemory | No — temporal graph | Yes | Yes | SQL-native. |
-| [Mintlify](https://www.mintlify.com/) | No — summarized for chat | No (cloud) | Yes | Docs platform pitched as "self-updating knowledge management"; aimed at team docs, not personal conversation memory. |
 
 **Verbatim storage is the differentiator.** For recovering exact commands, error messages, code snippets, and what someone actually said, you need the original text. Everything else — hierarchy, tags, knowledge graphs, decay — is enrichment *layered on top of* a faithful archive. If any of those layers fails or needs rebuilding, the underlying truth is still there.
 
@@ -185,6 +184,12 @@ P1's cwd-derived wings are relevant here: once wings are derived from unambiguou
 Knowledge lives across 7+ layers: global CLAUDE.md, project CLAUDE.md, auto-memory (14 files), docs/, superpowers specs, code comments, MemPalace. The auto-loaded layers go stale and actively mislead Claude. Ironically, MemPalace is the only layer that *can't* go stale (verbatim + timestamped) but it's the only one that's never auto-loaded.
 
 **Fix before any fork feature work:** audit every auto-loaded layer, date-stamp facts that can change, reduce duplication (one home per fact). Planned `/verify-docs` slash command pattern-matches version strings, file paths, PR numbers, URLs, and verifies against current state — then integrates into `/housekeep`. Cleaning stale docs prevents more wrong assumptions than any amount of auto-querying.
+
+### Looking for solutions — context feeding + docs updating
+
+Tools and patterns we're evaluating for the two open problems above. Not competitors to MemPalace (it's the verbatim archive, they're the delivery and freshness layers) — more like cooperating pieces.
+
+- [**Mintlify**](https://www.mintlify.com/) — docs platform pitched as "self-updating knowledge management," with MCP and `llms.txt` support for AI-consumable docs. Useful reference for the stale-docs problem: their agent-driven update model is one approach to keeping auto-loaded context fresh. Cloud-hosted, so not a drop-in for local palaces, but the surface area (what they expose to AI, how they structure agent-readable docs) is worth studying.
 
 ### Two-layer memory architecture
 
