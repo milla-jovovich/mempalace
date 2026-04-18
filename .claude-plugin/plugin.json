@@ -9,7 +9,7 @@
   "commands": [],
   "mcpServers": {
     "mempalace": {
-      "command": "python3",
+      "command": "${CLAUDE_PLUGIN_ROOT}/venv/bin/python",
       "args": [
         "-m",
         "mempalace.mcp_server"
