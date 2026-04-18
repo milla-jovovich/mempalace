@@ -8,7 +8,7 @@
 
 ---
 
-Fork of [MemPalace v3.3.1](https://github.com/milla-jovovich/mempalace/releases/tag/v3.3.1). Running in production since 2026-04-09 — currently 137,949 drawers across 68 rooms in 22 wings, 8 open PRs upstream. See upstream README for full feature docs.
+Fork of [MemPalace v3.3.1](https://github.com/milla-jovovich/mempalace/releases/tag/v3.3.1). Running in production since 2026-04-09 — currently 137,949 drawers across 68 rooms in 22 wings, 7 open PRs upstream (#999 merged 2026-04-18). See upstream README for full feature docs.
 
 What this fork adds that you won't get from upstream yet: a **deterministic silent-save hook architecture** (zero data loss, `systemMessage` notification), **ChromaDB 1.5.x hardening** (`quarantine_stale_hnsw` drift recovery, segfault-trigger guards, 8-site `None`-metadata safety), and **search that never silently misses** (`search_memories` returns warnings + sqlite BM25 top-up + `available_in_scope` so callers can see what they aren't getting). Full list below.
 
@@ -111,7 +111,7 @@ What this fork adds beyond upstream v3.3.1.
 The three that matter most if you only read one section:
 
 - **Silent-save hook architecture** — the stop hook writes to the palace directly via the Python API, advances the save marker only after a confirmed write, and surfaces a `systemMessage` line in the terminal. Deterministic, zero data loss, no dependency on the AI acting on a `block` prompt. ([#673](https://github.com/milla-jovovich/mempalace/pull/673), APPROVED externally.)
-- **ChromaDB 1.5.x hardening** — `quarantine_stale_hnsw()` recovers a palace whose HNSW has drifted from sqlite before it segfaults the Rust graph-walk ([#1000](https://github.com/milla-jovovich/mempalace/pull/1000), closes #823). Plus `None`-metadata guards across 8 read-path loops (searcher.py, miner.status, four mcp_server handlers) that upstream's current code still raises `AttributeError` on ([#999](https://github.com/milla-jovovich/mempalace/pull/999)).
+- **ChromaDB 1.5.x hardening** — `quarantine_stale_hnsw()` recovers a palace whose HNSW has drifted from sqlite before it segfaults the Rust graph-walk ([#1000](https://github.com/milla-jovovich/mempalace/pull/1000), closes #823). `None`-metadata guards across 8 read-path loops landed upstream in [#999](https://github.com/milla-jovovich/mempalace/pull/999) (merged 2026-04-18).
 - **Search that never silently misses** — `search_memories` returns `warnings: [...]`, `available_in_scope: N`, and a sqlite+BM25 fallback when vector underdelivers. The palace will tell you *why* it returned fewer results than the scope holds, instead of just returning them ([#1005](https://github.com/milla-jovovich/mempalace/pull/1005)).
 
 ### Still ahead of upstream
@@ -123,7 +123,6 @@ Status legend: a PR number means there's an open upstream PR for the change; **P
 | **Reliability** | Epsilon mtime comparison (`abs() < 0.01` vs `==`) prevents re-mining | PR pending (verify vs current `develop` first) | `palace.py`, `miner.py` |
 | **Reliability** | Skip `_fix_blob_seq_ids` sqlite open after first successful migration via `.blob_seq_ids_migrated` marker — opening sqlite3 against a live ChromaDB 1.5.x file corrupts the next PersistentClient | fork-only (narrow chromadb 1.5.x debugging path) | `backends/chroma.py` |
 | **Reliability** | `quarantine_stale_hnsw()` helper — renames HNSW segments whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidesteps read-path SIGSEGV from dangling neighbor pointers (same failure mode as neo-cortex-mcp#2) | [#1000](https://github.com/milla-jovovich/mempalace/pull/1000) · closes #823 | `backends/chroma.py` |
-| **Reliability** | `meta or {}` None-metadata guards across 8 read-path loops — ChromaDB's `query()`/`get()` return `None` entries for drawers with no stored metadata, which crashed `searcher.py` (CLI + API + closet-boost), `miner.status()`, and 4 MCP handlers (`tool_status`, `tool_list_wings`, `tool_list_rooms`, `tool_get_taxonomy`) with `AttributeError` mid-tally | [#999](https://github.com/milla-jovovich/mempalace/pull/999) | `searcher.py`, `miner.py`, `mcp_server.py` |
 | **Performance** | `bulk_check_mined()` — paginated pre-fetch for concurrent mining | fork-only (complementary to upstream's file-locking in [#784](https://github.com/milla-jovovich/mempalace/pull/784)) | `palace.py`, `miner.py` |
 | **Performance** | Graph cache — 60s TTL, invalidated on writes | [#661](https://github.com/milla-jovovich/mempalace/pull/661) | `palace_graph.py` |
 | **Performance** | L1 importance pre-filter — `importance >= 3` first, full scan fallback | [#660](https://github.com/milla-jovovich/mempalace/pull/660) | `layers.py` |
@@ -132,6 +131,10 @@ Status legend: a PR number means there's an open upstream PR for the change; **P
 | **Hooks** | Silent save mode — direct Python API, deterministic, zero data loss | [#673](https://github.com/milla-jovovich/mempalace/pull/673) · APPROVED externally 2026-04-12 | `hooks_cli.py` |
 | **Hooks** | Tool output mining — per-tool formatting strategies in `normalize.py` | PR pending | `normalize.py` |
 | **Features** | Diary wing routing — derive project wing from transcript path | [#659](https://github.com/milla-jovovich/mempalace/pull/659) | `hooks_cli.py`, `mcp_server.py` |
+
+### Merged upstream (post-v3.3.1)
+
+- `None`-metadata guards across 8 read-path loops — `searcher.py` (CLI + API + closet-boost), `miner.status()`, and 4 MCP handlers ([#999](https://github.com/milla-jovovich/mempalace/pull/999), merged 2026-04-18)
 
 ### Merged upstream (in v3.3.0)
 
@@ -249,7 +252,6 @@ Tools and patterns we're evaluating for the two open problems above. Not competi
 | [#661](https://github.com/milla-jovovich/mempalace/pull/661) | feedback addressed (threading.Lock in 8adf35a), waiting `@bensig` re-review | Graph cache with write-invalidation |
 | [#673](https://github.com/milla-jovovich/mempalace/pull/673) | APPROVED by external reviewer on 2026-04-12, waiting maintainer merge | Deterministic hook saves (broader than upstream's narrower #966) |
 | [#681](https://github.com/milla-jovovich/mempalace/pull/681) | clean, waiting review | Unicode checkmark → ASCII |
-| [#999](https://github.com/milla-jovovich/mempalace/pull/999) | `MERGEABLE`, Copilot review addressed, 8 sites covered, architectural layer note posted | `None`-metadata guards on `searcher.py`, `miner.status()`, and 4 `mcp_server.py` handlers |
 | [#1000](https://github.com/milla-jovovich/mempalace/pull/1000) | `MERGEABLE`, closes #823, Copilot nit addressed, rebased onto #995's new backend surface | `quarantine_stale_hnsw()` for HNSW/sqlite drift crashes |
 | [#1005](https://github.com/milla-jovovich/mempalace/pull/1005) | `MERGEABLE`, Copilot review addressed (authoritative scope count via paginated `col.get`, gate "run repair" on vector underdelivery, restore palace path in CLI error) | Warnings + sqlite BM25 top-up — never silently return fewer results than scope contains |
 

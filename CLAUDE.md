@@ -40,10 +40,13 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 8. **perf: L1 importance pre-filter** — `_fetch_drawers()` tries `importance >= 3` first, falls back to full scan only if < 15 results
 9. **fix: MCP stale HNSW index** — `_get_client()` detects external writes via mtime (not just inode), `mempalace_reconnect` MCP tool
 10. **fix: diary wing assignment** — `tool_diary_write()` accepts optional `wing` param, stop hook derives project wing from transcript path
-11. **fix: None-metadata guards (8 sites)** — `searcher.py` (CLI + API + closet-boost), `miner.status()`, and 4 `mcp_server.py` handlers (`tool_status`, `tool_list_wings`, `tool_list_rooms`, `tool_get_taxonomy`) no longer crash/partial with `AttributeError: 'NoneType' object has no attribute 'get'` when ChromaDB returns `None` metadata entries. Whack-a-mole across 8 call sites; adapter-level consolidation (`ChromaCollection.get/query` coercing `None→{}`) proposed as follow-up on #999.
-12. **fix: `.blob_seq_ids_migrated` marker** — skip Python `sqlite3.connect()` against a live ChromaDB 1.5.x DB after first successful migration; opening the sqlite file from Python corrupts the next `PersistentClient` call
-13. **feat: `quarantine_stale_hnsw()`** — rename HNSW segment dirs whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidestepping the read-path SIGSEGV from dangling neighbor pointers (same failure mode as neo-cortex-mcp#2, mempalace#823)
-14. **feat: search warnings + sqlite BM25 top-up** — `search_memories()` returns `warnings: [...]` and `available_in_scope: N` whenever the vector path underdelivers (sparse HNSW after repair, `#951` filter-planner failure, drift). Fallback promotes BM25-ranked sqlite candidates tagged `matched_via: "sqlite_bm25_fallback"`. Closes the "silent 0-hit when data is in sqlite" failure mode. CLI `search()` delegates to `search_memories()` so both paths share the fallback.
+11. **fix: `.blob_seq_ids_migrated` marker** — skip Python `sqlite3.connect()` against a live ChromaDB 1.5.x DB after first successful migration; opening the sqlite file from Python corrupts the next `PersistentClient` call
+12. **feat: `quarantine_stale_hnsw()`** — rename HNSW segment dirs whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidestepping the read-path SIGSEGV from dangling neighbor pointers (same failure mode as neo-cortex-mcp#2, mempalace#823)
+13. **feat: search warnings + sqlite BM25 top-up** — `search_memories()` returns `warnings: [...]` and `available_in_scope: N` whenever the vector path underdelivers (sparse HNSW after repair, `#951` filter-planner failure, drift). Fallback promotes BM25-ranked sqlite candidates tagged `matched_via: "sqlite_bm25_fallback"`. Closes the "silent 0-hit when data is in sqlite" failure mode. CLI `search()` delegates to `search_memories()` so both paths share the fallback.
+
+### Merged into upstream (post-v3.3.1)
+
+- `None`-metadata guards across 8 read-path loops — searcher.py, miner.status, 4 mcp_server handlers (#999, merged 2026-04-18)
 
 ### Merged into upstream v3.3.0
 
@@ -64,7 +67,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 ## Upstream PRs
 
-As of 2026-04-18: 5 merged, 8 open, 7 closed. PRs target `develop`.
+As of 2026-04-18: 6 merged, 7 open, 7 closed. PRs target `develop`.
 
 | PR | Status | Description |
 |----|--------|-------------|
@@ -73,7 +76,7 @@ As of 2026-04-18: 5 merged, 8 open, 7 closed. PRs target `develop`.
 | #661 | open (feedback addressed, waiting `@bensig` re-review) | Graph cache with write-invalidation |
 | #673 | open (APPROVED externally 2026-04-12, waiting maintainer merge) | Deterministic hook saves (broader than upstream's #966) |
 | #681 | open (clean, waiting review) | Unicode checkmark → ASCII (#535) |
-| #999 | open (`MERGEABLE`, Copilot addressed + tests added, 8 sites covered) | `None`-metadata guards in `searcher.py`, `miner.status()`, and 4 `mcp_server.py` handlers |
+| #999 | **merged** 2026-04-18 | `None`-metadata guards in `searcher.py`, `miner.status()`, and 4 `mcp_server.py` handlers |
 | #1000 | open (`MERGEABLE`, closes #823, Copilot addressed, rebased onto #995) | `quarantine_stale_hnsw()` for HNSW/sqlite drift |
 | #1005 | open (`MERGEABLE`, Copilot addressed) | Warnings + sqlite BM25 top-up when vector underdelivers (never silent miss) |
 | #629 | **closed** | Superseded — upstream shipped batching + file locking |
