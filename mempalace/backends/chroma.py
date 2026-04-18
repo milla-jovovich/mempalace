@@ -11,6 +11,9 @@ from .base import BaseCollection
 logger = logging.getLogger(__name__)
 
 
+_BLOB_FIX_MARKER = ".blob_seq_ids_migrated"
+
+
 def _fix_blob_seq_ids(palace_path: str):
     """Fix ChromaDB 0.6.x -> 1.5.x migration bug: BLOB seq_ids -> INTEGER.
 
@@ -20,12 +23,21 @@ def _fix_blob_seq_ids(palace_path: str):
     type INTEGER) is not compatible with SQL type BLOB".
 
     Must run BEFORE PersistentClient is created (the compactor fires on init).
+
+    Opening a Python sqlite3 connection against a ChromaDB 1.5.x WAL-mode
+    database leaves state that segfaults the next PersistentClient call.
+    After the migration has run once successfully, a marker file is written
+    so subsequent opens skip the sqlite connection entirely.
     """
     db_path = os.path.join(palace_path, "chroma.sqlite3")
     if not os.path.isfile(db_path):
         return
+    marker = os.path.join(palace_path, _BLOB_FIX_MARKER)
+    if os.path.isfile(marker):
+        return
     try:
         with sqlite3.connect(db_path) as conn:
+            table_rows: dict = {}
             for table in ("embeddings", "max_seq_id"):
                 try:
                     rows = conn.execute(
@@ -33,12 +45,18 @@ def _fix_blob_seq_ids(palace_path: str):
                     ).fetchall()
                 except sqlite3.OperationalError:
                     continue
-                if not rows:
-                    continue
+                if rows:
+                    table_rows[table] = rows
+            for table, rows in table_rows.items():
                 updates = [(int.from_bytes(blob, byteorder="big"), rowid) for rowid, blob in rows]
                 conn.executemany(f"UPDATE {table} SET seq_id = ? WHERE rowid = ?", updates)
                 logger.info("Fixed %d BLOB seq_ids in %s", len(updates), table)
             conn.commit()
+        try:
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write("migrated\n")
+        except OSError:
+            pass
     except Exception:
         logger.exception("Could not fix BLOB seq_ids in %s", db_path)
 
@@ -125,9 +143,15 @@ class ChromaBackend:
 
         client = self._client(palace_path)
         if create:
-            collection = client.get_or_create_collection(
-                collection_name, metadata={"hnsw:space": "cosine"}
-            )
+            # ChromaDB 1.5.x segfaults when get_or_create_collection is called
+            # with metadata that differs from an existing collection's metadata.
+            # Fetch first; only pass hnsw:space when actually creating fresh.
+            try:
+                collection = client.get_collection(collection_name)
+            except Exception:
+                collection = client.create_collection(
+                    collection_name, metadata={"hnsw:space": "cosine"}
+                )
         else:
             collection = client.get_collection(collection_name)
         return ChromaCollection(collection)

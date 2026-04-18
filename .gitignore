@@ -33,6 +33,7 @@ coverage.xml
 # Virtual environments
 .venv/
 venv/
+.claude-plugin/venv
 
 # ChromaDB local data
 *.sqlite3-journal

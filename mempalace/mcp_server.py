@@ -202,11 +202,16 @@ def _get_collection(create=False):
     try:
         client = _get_client()
         if create:
-            _collection_cache = ChromaCollection(
-                client.get_or_create_collection(
+            # ChromaDB 1.5.x segfaults when get_or_create_collection is called
+            # with metadata that differs from an existing collection's metadata.
+            # Fetch first; only pass hnsw:space when actually creating fresh.
+            try:
+                raw_col = client.get_collection(_config.collection_name)
+            except Exception:
+                raw_col = client.create_collection(
                     _config.collection_name, metadata={"hnsw:space": "cosine"}
                 )
-            )
+            _collection_cache = ChromaCollection(raw_col)
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
