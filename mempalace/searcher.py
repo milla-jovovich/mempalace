@@ -30,18 +30,21 @@ class SearchError(Exception):
 _TOKEN_RE = re.compile(r"\w{2,}", re.UNICODE)
 
 
-def _first_or_empty(results: dict, key: str) -> list:
-    """Return the first inner list of a ChromaDB query result, or [].
+def _first_or_empty(results, key: str) -> list:
+    """Return the per-query slice of a backend query result, or [].
 
-    ChromaDB returns shapes like ``{"documents": [["a", "b"]], ...}`` for a
-    successful query, but ``{"documents": [], ...}`` (empty outer list) when
-    the collection is empty or the filter excludes everything. Indexing
-    ``[0]`` blindly raises IndexError in that case (issue #195).
+    The backend layer already collapses ChromaDB's nested batch shape into
+    flat lists (:class:`~mempalace.backends.base.QueryResult`), so this is
+    just a safe attribute/key fetch with an empty-list fallback. Kept as a
+    named helper because it documents the "one query, one slice" assumption
+    that the rest of the search pipeline relies on (issue #195).
     """
-    outer = results.get(key)
-    if not outer:
+    if results is None:
         return []
-    return outer[0] or []
+    if hasattr(results, key):
+        return getattr(results, key) or []
+    value = results.get(key) if hasattr(results, "get") else None
+    return value or []
 
 
 def _tokenize(text: str) -> list:
@@ -209,7 +212,7 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
         return {"text": matched_doc, "drawer_index": chunk_idx, "total_drawers": None}
 
     indexed_docs = []
-    for doc, meta in zip(neighbors.get("documents") or [], neighbors.get("metadatas") or []):
+    for doc, meta in zip(neighbors.documents or [], neighbors.metadatas or []):
         ci = meta.get("chunk_index")
         if isinstance(ci, int):
             indexed_docs.append((ci, doc))
@@ -224,8 +227,7 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
     total_drawers = None
     try:
         all_meta = drawers_col.get(where={"source_file": src}, include=["metadatas"])
-        ids = all_meta.get("ids") or []
-        total_drawers = len(ids) if ids else None
+        total_drawers = len(all_meta.ids) if all_meta.ids else None
     except Exception:
         pass
 

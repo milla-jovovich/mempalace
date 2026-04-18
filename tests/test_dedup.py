@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 
 from mempalace import dedup
+from mempalace.backends.base import GetResult, QueryResult
 
 
 # ── get_source_groups ─────────────────────────────────────────────────
@@ -110,15 +111,15 @@ def test_get_source_groups_missing_source_file():
 
 def test_dedup_source_group_all_unique():
     col = MagicMock()
-    col.get.return_value = {
-        "ids": ["d1", "d2"],
-        "documents": ["long document one content here", "different document two here"],
-        "metadatas": [{"wing": "a"}, {"wing": "a"}],
-    }
-    col.query.return_value = {
-        "ids": [["d1"]],
-        "distances": [[0.8]],  # far apart = unique
-    }
+    col.get.return_value = GetResult(
+        ids=["d1", "d2"],
+        documents=["long document one content here", "different document two here"],
+        metadatas=[{"wing": "a"}, {"wing": "a"}],
+    )
+    col.query.return_value = QueryResult(
+        ids=["d1"],
+        distances=[0.8],  # far apart = unique
+    )
     kept, deleted = dedup.dedup_source_group(col, ["d1", "d2"], threshold=0.15, dry_run=True)
     assert len(kept) == 2
     assert len(deleted) == 0
@@ -126,18 +127,18 @@ def test_dedup_source_group_all_unique():
 
 def test_dedup_source_group_with_duplicate():
     col = MagicMock()
-    col.get.return_value = {
-        "ids": ["d1", "d2"],
-        "documents": [
+    col.get.return_value = GetResult(
+        ids=["d1", "d2"],
+        documents=[
             "long document content that is fairly long",
             "long document content that is fairly long",
         ],
-        "metadatas": [{"wing": "a"}, {"wing": "a"}],
-    }
-    col.query.return_value = {
-        "ids": [["d1"]],
-        "distances": [[0.05]],  # very close = duplicate
-    }
+        metadatas=[{"wing": "a"}, {"wing": "a"}],
+    )
+    col.query.return_value = QueryResult(
+        ids=["d1"],
+        distances=[0.05],  # very close = duplicate
+    )
     kept, deleted = dedup.dedup_source_group(col, ["d1", "d2"], threshold=0.15, dry_run=True)
     assert len(kept) == 1
     assert len(deleted) == 1
@@ -145,51 +146,51 @@ def test_dedup_source_group_with_duplicate():
 
 def test_dedup_source_group_short_docs_deleted():
     col = MagicMock()
-    col.get.return_value = {
-        "ids": ["d1", "d2"],
-        "documents": ["long enough document to keep in the palace", "tiny"],
-        "metadatas": [{"wing": "a"}, {"wing": "a"}],
-    }
+    col.get.return_value = GetResult(
+        ids=["d1", "d2"],
+        documents=["long enough document to keep in the palace", "tiny"],
+        metadatas=[{"wing": "a"}, {"wing": "a"}],
+    )
     kept, deleted = dedup.dedup_source_group(col, ["d1", "d2"], threshold=0.15, dry_run=True)
     assert "d2" in deleted  # too short
 
 
 def test_dedup_source_group_empty_doc_deleted():
     col = MagicMock()
-    col.get.return_value = {
-        "ids": ["d1", "d2"],
-        "documents": ["real document content here that is long enough", None],
-        "metadatas": [{"wing": "a"}, {"wing": "a"}],
-    }
+    col.get.return_value = GetResult(
+        ids=["d1", "d2"],
+        documents=["real document content here that is long enough", None],
+        metadatas=[{"wing": "a"}, {"wing": "a"}],
+    )
     kept, deleted = dedup.dedup_source_group(col, ["d1", "d2"], threshold=0.15, dry_run=True)
     assert "d2" in deleted
 
 
 def test_dedup_source_group_live_deletes():
     col = MagicMock()
-    col.get.return_value = {
-        "ids": ["d1", "d2"],
-        "documents": ["long document content here enough", "long document content here enough"],
-        "metadatas": [{"wing": "a"}, {"wing": "a"}],
-    }
-    col.query.return_value = {
-        "ids": [["d1"]],
-        "distances": [[0.05]],
-    }
+    col.get.return_value = GetResult(
+        ids=["d1", "d2"],
+        documents=["long document content here enough", "long document content here enough"],
+        metadatas=[{"wing": "a"}, {"wing": "a"}],
+    )
+    col.query.return_value = QueryResult(
+        ids=["d1"],
+        distances=[0.05],
+    )
     kept, deleted = dedup.dedup_source_group(col, ["d1", "d2"], threshold=0.15, dry_run=False)
     col.delete.assert_called_once()
 
 
 def test_dedup_source_group_query_failure_keeps():
     col = MagicMock()
-    col.get.return_value = {
-        "ids": ["d1", "d2"],
-        "documents": [
+    col.get.return_value = GetResult(
+        ids=["d1", "d2"],
+        documents=[
             "long document one content here enough",
             "long document two content here enough",
         ],
-        "metadatas": [{"wing": "a"}, {"wing": "a"}],
-    }
+        metadatas=[{"wing": "a"}, {"wing": "a"}],
+    )
     col.query.side_effect = Exception("query failed")
     kept, deleted = dedup.dedup_source_group(col, ["d1", "d2"], threshold=0.15, dry_run=True)
     assert len(kept) == 2  # both kept on error

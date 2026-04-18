@@ -1,12 +1,21 @@
 """ChromaDB-backed MemPalace collection adapter."""
 
+from __future__ import annotations
+
 import logging
 import os
 import sqlite3
+from typing import Any, Dict, Iterable, List, Optional
 
 import chromadb
 
-from .base import BaseCollection
+from .base import (
+    DEFAULT_GET_INCLUDE,
+    DEFAULT_QUERY_INCLUDE,
+    BaseCollection,
+    GetResult,
+    QueryResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,31 +52,120 @@ def _fix_blob_seq_ids(palace_path: str):
         logger.exception("Could not fix BLOB seq_ids in %s", db_path)
 
 
+def _first_or_empty(raw: Dict[str, Any], key: str) -> List[Any]:
+    """Safely pull the single-query slice out of a Chroma batch response."""
+    outer = raw.get(key)
+    if not outer:
+        return []
+    inner = outer[0]
+    return inner if inner else []
+
+
 class ChromaCollection(BaseCollection):
     """Thin adapter over a ChromaDB collection."""
 
     def __init__(self, collection):
         self._collection = collection
 
-    def add(self, *, documents, ids, metadatas=None):
-        self._collection.add(documents=documents, ids=ids, metadatas=metadatas)
+    # -- writes -----------------------------------------------------------
 
-    def upsert(self, *, documents, ids, metadatas=None):
-        self._collection.upsert(documents=documents, ids=ids, metadatas=metadatas)
+    def add(
+        self,
+        *,
+        ids: List[str],
+        documents: List[str],
+        metadatas: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        self._collection.add(ids=ids, documents=documents, metadatas=metadatas)
 
-    def update(self, **kwargs):
+    def upsert(
+        self,
+        *,
+        ids: List[str],
+        documents: List[str],
+        metadatas: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        self._collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+
+    def update(
+        self,
+        *,
+        ids: List[str],
+        documents: Optional[List[str]] = None,
+        metadatas: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        kwargs: Dict[str, Any] = {"ids": ids}
+        if documents is not None:
+            kwargs["documents"] = documents
+        if metadatas is not None:
+            kwargs["metadatas"] = metadatas
         self._collection.update(**kwargs)
 
-    def query(self, **kwargs):
-        return self._collection.query(**kwargs)
+    # -- reads ------------------------------------------------------------
 
-    def get(self, **kwargs):
-        return self._collection.get(**kwargs)
+    def query(
+        self,
+        *,
+        query_texts: List[str],
+        n_results: int = 10,
+        where: Optional[Dict[str, Any]] = None,
+        include: Iterable[str] = DEFAULT_QUERY_INCLUDE,
+    ) -> QueryResult:
+        include_list = list(include)
+        kwargs: Dict[str, Any] = {
+            "query_texts": query_texts,
+            "n_results": n_results,
+            "include": include_list,
+        }
+        if where:
+            kwargs["where"] = where
+        raw = self._collection.query(**kwargs)
+        return QueryResult(
+            ids=_first_or_empty(raw, "ids"),
+            documents=_first_or_empty(raw, "documents"),
+            metadatas=_first_or_empty(raw, "metadatas"),
+            distances=_first_or_empty(raw, "distances"),
+        )
 
-    def delete(self, **kwargs):
+    def get(
+        self,
+        *,
+        ids: Optional[List[str]] = None,
+        where: Optional[Dict[str, Any]] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        include: Iterable[str] = DEFAULT_GET_INCLUDE,
+    ) -> GetResult:
+        kwargs: Dict[str, Any] = {"include": list(include)}
+        if ids is not None:
+            kwargs["ids"] = ids
+        if where is not None:
+            kwargs["where"] = where
+        if limit is not None:
+            kwargs["limit"] = limit
+        if offset is not None:
+            kwargs["offset"] = offset
+        raw = self._collection.get(**kwargs)
+        return GetResult(
+            ids=raw.get("ids") or [],
+            documents=raw.get("documents") or [],
+            metadatas=raw.get("metadatas") or [],
+        )
+
+    def delete(
+        self,
+        *,
+        ids: Optional[List[str]] = None,
+        where: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        kwargs: Dict[str, Any] = {}
+        if ids is not None:
+            kwargs["ids"] = ids
+        if where is not None:
+            kwargs["where"] = where
         self._collection.delete(**kwargs)
 
-    def count(self):
+    def count(self) -> int:
         return self._collection.count()
 
 

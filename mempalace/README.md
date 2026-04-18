@@ -24,17 +24,31 @@ The Python package that powers MemPalace. All modules, all logic.
 | `room_detector_local.py` | Maps folders to room names using 70+ patterns — no API |
 | `spellcheck.py` | Name-aware spellcheck — won't "correct" proper nouns in your entity registry |
 | `split_mega_files.py` | Splits concatenated transcript files into per-session files |
+| `embeddings.py` | Local ONNX embedder (MiniLM-L6-v2, 384 dim) — used by non-Chroma backends |
+| `backends/base.py` | Backend-agnostic `BaseCollection` contract + `QueryResult` / `GetResult` dataclasses |
+| `backends/chroma.py` | ChromaDB adapter (default) |
+| `backends/milvus.py` | Milvus Lite adapter — opt-in via `pip install 'mempalace[milvus]'` |
 
 ## Architecture
 
 ```
-User → CLI → miner/convo_miner → ChromaDB (palace)
-                                     ↕
-                              knowledge_graph (SQLite)
-                                     ↕
+User → CLI → miner/convo_miner → backends.BaseCollection → Chroma   (default)
+                                              │           → Milvus Lite (opt-in)
+                                              ↕
+                                       knowledge_graph (SQLite)
+                                              ↕
 User → MCP Server → searcher → results
                   → kg_query → entity facts
                   → diary    → agent journal
 ```
 
-The palace (ChromaDB) stores verbatim content. The knowledge graph (SQLite) stores structured relationships. The MCP server exposes both to any AI tool.
+The palace stores verbatim content through a small backend-agnostic
+contract (`backends/base.py` — typed `add` / `upsert` / `update` /
+`query` / `get` / `delete` / `count` plus `QueryResult` and `GetResult`
+dataclasses). Two implementations ship today: ChromaDB (default) and
+Milvus Lite (`pip install 'mempalace[milvus]'`). See
+[`docs/milvus-backend.md`](../docs/milvus-backend.md) for the opt-in
+story. Switch with `MEMPALACE_BACKEND=milvus`.
+
+The knowledge graph (SQLite) stores structured relationships. The MCP
+server exposes both to any AI tool.

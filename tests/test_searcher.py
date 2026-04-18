@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mempalace.backends.base import QueryResult
 from mempalace.searcher import SearchError, search, search_memories
 
 
@@ -62,12 +63,12 @@ class TestSearchMemories:
     def test_created_at_fallback_when_filed_at_missing(self):
         """created_at defaults to 'unknown' when filed_at is absent."""
         mock_col = MagicMock()
-        mock_col.query.return_value = {
-            "ids": [["drawer_no_date"]],
-            "documents": [["Some text without a date"]],
-            "metadatas": [[{"wing": "project", "room": "backend", "source_file": "x.py"}]],
-            "distances": [[0.1]],
-        }
+        mock_col.query.return_value = QueryResult(
+            ids=["drawer_no_date"],
+            documents=["Some text without a date"],
+            metadatas=[{"wing": "project", "room": "backend", "source_file": "x.py"}],
+            distances=[0.1],
+        )
 
         with patch("mempalace.searcher.get_collection", return_value=mock_col):
             result = search_memories("test", "/fake/path")
