@@ -740,7 +740,7 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
         if results["ids"] and results["ids"][0]:
             for i, drawer_id in enumerate(results["ids"][0]):
                 dist = results["distances"][0][i]
-                similarity = round(1 - dist, 3)
+                similarity = round(max(0.0, 1 - dist), 3)
                 if similarity >= threshold:
                     # Chroma 1.5.x can return None for partially-flushed rows;
                     # coerce to empty sentinels so downstream .get() is safe.
