@@ -30,9 +30,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/milla-jovovich/mempalace"
-Repository = "https://github.com/milla-jovovich/mempalace"
-"Bug Tracker" = "https://github.com/milla-jovovich/mempalace/issues"
+Homepage = "https://github.com/MemPalace/mempalace"
+Repository = "https://github.com/MemPalace/mempalace"
+"Bug Tracker" = "https://github.com/MemPalace/mempalace/issues"
 
 [project.scripts]
 mempalace = "mempalace.cli:main"

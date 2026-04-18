@@ -50,7 +50,7 @@ def _load_known_names_config(force_reload: bool = False):
 
     if _KNOWN_NAMES_PATH.exists():
         try:
-            _KNOWN_NAMES_CACHE = json.loads(_KNOWN_NAMES_PATH.read_text())
+            _KNOWN_NAMES_CACHE = json.loads(_KNOWN_NAMES_PATH.read_text(encoding="utf-8"))
             return _KNOWN_NAMES_CACHE
         except (json.JSONDecodeError, OSError):
             pass
@@ -184,7 +184,7 @@ def split_file(filepath, output_dir, dry_run=False):
     path = Path(filepath)
     max_size = 500 * 1024 * 1024  # 500 MB safety limit
     if path.stat().st_size > max_size:
-        print(f"  SKIP: {path.name} exceeds {max_size // (1024*1024)} MB limit")
+        print(f"  SKIP: {path.name} exceeds {max_size // (1024 * 1024)} MB limit")
         return []
     lines = path.read_text(errors="replace").splitlines(keepends=True)
 
@@ -273,7 +273,7 @@ def main():
     max_scan_size = 500 * 1024 * 1024  # 500 MB
     for f in files:
         if f.stat().st_size > max_scan_size:
-            print(f"  SKIP: {f.name} exceeds {max_scan_size // (1024*1024)} MB limit")
+            print(f"  SKIP: {f.name} exceeds {max_scan_size // (1024 * 1024)} MB limit")
             continue
         lines = f.read_text(errors="replace").splitlines(keepends=True)
         boundaries = find_session_boundaries(lines)

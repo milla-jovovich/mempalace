@@ -7,6 +7,7 @@ Consolidates collection access patterns used by both miners and the MCP server.
 import contextlib
 import hashlib
 import os
+import re
 
 from .backends.chroma import ChromaBackend
 
@@ -130,6 +131,35 @@ _ENTITY_STOPLIST = frozenset(
 )
 
 
+_CANDIDATE_RX_CACHE = None
+
+
+def _candidate_entity_words(text: str) -> list:
+    """Find entity candidate words using i18n-aware patterns.
+
+    Uses the same candidate_patterns as entity_detector (loaded from locale
+    JSON files via get_entity_patterns), so non-Latin names (Cyrillic,
+    accented Latin, etc.) are detected alongside ASCII names.
+    """
+    global _CANDIDATE_RX_CACHE
+    if _CANDIDATE_RX_CACHE is None:
+        from .config import MempalaceConfig
+        from .i18n import get_entity_patterns
+
+        patterns = get_entity_patterns(MempalaceConfig().entity_languages)
+        rxs = []
+        for pat in patterns["candidate_patterns"]:
+            try:
+                rxs.append(re.compile(pat))
+            except re.error:
+                continue
+        _CANDIDATE_RX_CACHE = rxs
+    words = []
+    for rx in _CANDIDATE_RX_CACHE:
+        words.extend(rx.findall(text))
+    return words
+
+
 def build_closet_lines(source_file, drawer_ids, content, wing, room):
     """Build compact closet pointer lines from drawer content.
 
@@ -144,9 +174,9 @@ def build_closet_lines(source_file, drawer_ids, content, wing, room):
     drawer_ref = ",".join(drawer_ids[:3])
     window = content[:CLOSET_EXTRACT_WINDOW]
 
-    # Extract proper nouns (capitalized words, 2+ occurrences). Filter out
-    # common sentence-starters that aren't real entities.
-    words = re.findall(r"\b[A-Z][a-z]{2,}\b", window)
+    # Extract proper nouns (2+ occurrences). Uses i18n-aware patterns so
+    # non-Latin names (Cyrillic, accented Latin, etc.) are also detected.
+    words = _candidate_entity_words(window)
     word_freq = {}
     for w in words:
         if w in _ENTITY_STOPLIST:
