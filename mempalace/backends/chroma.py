@@ -126,7 +126,7 @@ class ChromaBackend:
         client = self._client(palace_path)
         if create:
             collection = client.get_or_create_collection(
-                collection_name, metadata={"hnsw:space": "cosine"}
+                collection_name, metadata={"hnsw:space": "cosine", "hnsw:num_threads": "1"}
             )
         else:
             collection = client.get_collection(collection_name)
@@ -147,6 +147,6 @@ class ChromaBackend:
     ) -> "ChromaCollection":
         """Create (not get-or-create) *collection_name* with cosine HNSW space."""
         collection = self._client(palace_path).create_collection(
-            collection_name, metadata={"hnsw:space": hnsw_space}
+            collection_name, metadata={"hnsw:space": hnsw_space, "hnsw:num_threads": "1"}
         )
         return ChromaCollection(collection)
