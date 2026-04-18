@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/mempalace_logo.png" alt="MemPalace">
-</p>
-
 # MemPalace (jphein fork)
 
 **JP's production fork of [milla-jovovich/mempalace](https://github.com/milla-jovovich/mempalace)**
@@ -18,6 +14,33 @@ What this fork adds that you won't get from upstream: a **deterministic silent-s
 
 **Status at a glance:** active as of 2026-04-18 · [Discussion #1017](https://github.com/MemPalace/mempalace/discussions/1017) introduces the fork upstream · 998 tests pass on `main` · [Open upstream PRs](#open-upstream-prs) (8) are the contribution pipeline · [Issues on this repo](https://github.com/jphein/mempalace/issues) for fork-specific feedback.
 
+## What this looks like in practice
+
+A stop hook fires every 15 messages in Claude Code, writes directly to the palace via the Python API, and renders a terminal line so the user sees the save land:
+
+```json
+{
+  "systemMessage": "✦ 13 memories woven into the palace — investigate, description, symlihjnk"
+}
+```
+
+`search_memories` (via `mempalace_search` MCP tool) returns results with scope-authoritative context so callers can tell when the vector layer underdelivered:
+
+```json
+{
+  "query": "kiyo xhci usb crash fix razer",
+  "total_before_filter": 15,
+  "available_in_scope": 137949,
+  "warnings": [],
+  "results": [
+    {"wing": "projects", "room": "technical", "similarity": 0.859, "matched_via": "drawer", ...},
+    {"wing": "kiyo-xhci-fix", "room": "technical", "similarity": 0.852, "matched_via": "drawer", ...}
+  ]
+}
+```
+
+On a palace where the HNSW index has drifted and vector can't rank everything, the same call would return `warnings: ["vector search returned 0 of 5 requested; filled 5 from sqlite+BM25 keyword match"]` and hits tagged `"matched_via": "sqlite_bm25_fallback"` — the data is never silently hidden.
+
 ## Why this fork exists
 
 We surveyed the memory-system landscape in April 2026 and found no verbatim-first local system with MCP. Every alternative transforms content on write — extracted facts, knowledge graphs, tiered summaries — losing the original text.
@@ -25,12 +48,12 @@ We surveyed the memory-system landscape in April 2026 and found no verbatim-firs
 | System | Verbatim? | Local? | MCP? | Notes |
 |---|---|---|---|---|
 | **MemPalace** | Yes | Yes | Yes | What we have. 137,949 drawers as of 2026-04-18. |
-| Hindsight | No — LLM extracts facts | Yes (Docker) | Yes | Original text is lost. |
-| Mem0 / OpenMemory | No — extracts "memories" | Partial | Yes | Cloud-first. |
-| Cognee | No — knowledge graph | Yes | No | |
-| Letta | No — tiered summarization | Yes | No | |
-| engram | Structured fields, not raw | Yes | Yes | Go + SQLite FTS5. |
-| CaviraOSS OpenMemory | No — temporal graph | Yes | Yes | SQL-native. |
+| [Hindsight](https://github.com/vectorize-io/hindsight) | No — LLM extracts facts | Yes (Docker) | Yes | Three ops: retain / recall / reflect. Original text is lost. |
+| [Mem0](https://github.com/mem0ai/mem0) / [OpenMemory](https://github.com/mem0ai/mem0/tree/main/openmemory) | No — extracts "memories" | Partial | Yes | Cloud-first; OpenMemory is the local-mode sibling. |
+| [Cognee](https://github.com/topoteretes/cognee) | No — knowledge graph | Yes | Yes (added since we wrote this row) | "Knowledge Engine" via ECL pipeline. |
+| [Letta](https://github.com/letta-ai/letta) | No — tiered summarization | Yes | No | Formerly MemGPT. |
+| [engram](https://github.com/NickCirv/engram) | Structured fields, not raw | Yes | Yes | Go + SQLite FTS5. |
+| [CaviraOSS OpenMemory](https://github.com/CaviraOSS/OpenMemory) | No — temporal graph | Yes | Yes | SQL-native. |
 
 **Verbatim storage is the differentiator.** For recovering exact commands, error messages, code snippets, and what someone actually said, you need the original text. Everything else — hierarchy, tags, knowledge graphs, decay — is enrichment *layered on top of* a faithful archive. If any of those layers fails or needs rebuilding, the underlying truth is still there.
 
@@ -83,6 +106,14 @@ Neither has automatic consolidation. Claude Code has unreleased "Auto Dream" con
 
 What this fork adds beyond upstream v3.3.1.
 
+### Headlines
+
+The three that matter most if you only read one section:
+
+- **Silent-save hook architecture** — the stop hook writes to the palace directly via the Python API, advances the save marker only after a confirmed write, and surfaces a `systemMessage` line in the terminal. Deterministic, zero data loss, no dependency on the AI acting on a `block` prompt. ([#673](https://github.com/milla-jovovich/mempalace/pull/673), APPROVED externally.)
+- **ChromaDB 1.5.x hardening** — `quarantine_stale_hnsw()` recovers a palace whose HNSW has drifted from sqlite before it segfaults the Rust graph-walk ([#1000](https://github.com/milla-jovovich/mempalace/pull/1000), closes #823). Plus `None`-metadata guards across 8 read-path loops (searcher.py, miner.status, four mcp_server handlers) that upstream's current code still raises `AttributeError` on ([#999](https://github.com/milla-jovovich/mempalace/pull/999)).
+- **Search that never silently misses** — `search_memories` returns `warnings: [...]`, `available_in_scope: N`, and a sqlite+BM25 fallback when vector underdelivers. The palace will tell you *why* it returned fewer results than the scope holds, instead of just returning them ([#1005](https://github.com/milla-jovovich/mempalace/pull/1005)).
+
 ### Still ahead of upstream
 
 | Area | Change | Files |
@@ -125,7 +156,7 @@ What this fork adds beyond upstream v3.3.1.
 - Batch ChromaDB writes — upstream has file-level locking for concurrent agents via [#784](https://github.com/milla-jovovich/mempalace/pull/784)
 - Inline transcript mining in hooks — upstream uses `mempalace mine` in background
 
-## Roadmap
+## Planned work
 
 Ordered by impact. Informed by competitive research ([Karta](https://github.com/rohithzr/karta), Hindsight, [engram](https://github.com/NickCirv/engram), [context-engine](https://github.com/Emmimal/context-engine), CaviraOSS) and our own usage patterns — see [Sources](#sources) at the bottom for the full reference list. Each item is evaluated against the three principles above.
 
@@ -264,11 +295,9 @@ Articles and surveys that shaped the fork's direction, competitive framing, and 
 - [**engram**](https://github.com/NickCirv/engram) — Go + SQLite FTS5 parallel index; file-read interception prototype referenced in [discussion #798](https://github.com/MemPalace/mempalace/discussions/798). Cited in deprioritized FTS5 item and the auto-surfacing open problem.
 - [**context-engine**](https://github.com/Emmimal/context-engine) — ~200-line exponential decay implementation that ports directly into P2. Author Emmimal P Alexander's [context-engineering writeup](https://towardsdatascience.com/rag-isnt-enough-i-built-the-missing-context-layer-that-makes-llm-systems-work/) (*Towards Data Science*) frames the five components of the "missing context layer" — hybrid retrieval, re-ranking, memory decay, compression, token-budget enforcement — and informs our framing of the auto-surfacing open problem.
 
-### Systems mentioned without captured primary URLs
+### Verification note
 
-The comparison table names several systems whose primary repos we did not record when writing it. Anyone sourcing from this README should cite their upstream directly:
-
-- Hindsight, Mem0 / OpenMemory, Cognee, Letta, CaviraOSS OpenMemory, Zep / Graphiti, TagMem.
+Columns in the comparison table were filled in on 2026-04-14–18 by reading each project's README and, where unclear, a recent issue or PR on the same repo. Feature status on any of these projects will drift — cite them upstream before treating rows here as current. [TagMem](https://codingwithcody.com/2026/04/13/mempalace-digital-castles-on-sand/) is deliberately omitted; we could not find a public repo for it at the time of writing.
 
 ## License
 
