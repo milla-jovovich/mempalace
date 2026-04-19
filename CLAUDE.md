@@ -49,6 +49,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 17. **fix: `_get_client()` get-then-create guard** — `get_or_create_collection` segfaults ChromaDB 1.5.x when existing collection metadata differs; fork tries `get_collection` first, falls back to `create_collection` only on `InvalidCollectionException`.
 18. **perf: `miner.status()` paginated `col.get()`** — upstream's single `col.get(limit=total)` hits SQLite's max-variable limit on palaces with many thousands of drawers; fork paginates in 10 K-drawer batches.
 19. **feat: configurable chunking parameters** — `chunk_size` (800), `chunk_overlap` (100), `min_chunk_size` (50) written to `config.json` and exposed via `MempalaceConfig` properties.
+20. **fix: PID file guard prevents stacking mine processes** — `_mine_already_running()` checks `hook_state/mine.pid` via `os.kill(pid, 0)`; both `_ingest_transcript` and `_maybe_auto_ingest` bail if a mine is already running. Observed without fix: 4 concurrent mines at ~770% CPU.
 
 ### Merged into upstream (post-v3.3.1)
 
