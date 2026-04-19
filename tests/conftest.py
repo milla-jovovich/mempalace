@@ -100,8 +100,8 @@ def config(tmp_dir, palace_path):
 @pytest.fixture
 def collection(palace_path):
     """A ChromaDB collection pre-seeded in the temp palace."""
-    client = get_client(palace_path)
-    col = get_palace_collection(palace_path, create=True)
+    client = chromadb.PersistentClient(path=palace_path)
+    col = client.get_or_create_collection("mempalace_drawers", metadata={"hnsw:space": "cosine"})
     yield col
     client.delete_collection("mempalace_drawers")
     del client
@@ -169,7 +169,9 @@ def seeded_collection(collection):
 def kg(tmp_dir):
     """An isolated KnowledgeGraph using a temp SQLite file."""
     db_path = os.path.join(tmp_dir, "test_kg.sqlite3")
-    return KnowledgeGraph(db_path=db_path)
+    graph = KnowledgeGraph(db_path=db_path)
+    yield graph
+    graph.close()
 
 
 @pytest.fixture
