@@ -136,7 +136,7 @@ Creates a backup at `<palace_path>.backup` before rebuilding.
 
 ## `mempalace mcp`
 
-Helper command that outputs setup syntax (like `claude mcp add...`) to connect MemPalace to your AI client, automatically handling paths.
+Helper command that outputs setup syntax (like `claude mcp add...` or `codex mcp add...`) to connect MemPalace to your AI client, automatically handling paths.
 
 ```bash
 mempalace mcp

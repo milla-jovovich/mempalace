@@ -88,5 +88,5 @@ It calls `mempalace_search` automatically, gets verbatim results, and answers yo
 ## Next Steps
 
 - [Mining Your Data](/guide/mining) — deep dive into mining modes
-- [MCP Integration](/guide/mcp-integration) — connect to Claude, ChatGPT, Cursor, Gemini
+- [MCP Integration](/guide/mcp-integration) — connect to Claude, Codex, ChatGPT, Cursor, Gemini
 - [The Palace](/concepts/the-palace) — understand wings, rooms, halls, and tunnels
