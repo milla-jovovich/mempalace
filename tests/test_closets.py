@@ -39,6 +39,7 @@ from mempalace.miner import (
 )
 from mempalace.palace import (
     CLOSET_CHAR_LIMIT,
+    _closet_cfg,
     build_closet_lines,
     get_closets_collection,
     get_collection,
@@ -145,6 +146,98 @@ class TestMineLock:
 
 
 # ── build_closet_lines ─────────────────────────────────────────────────
+
+
+class _RecordingCollection:
+    """Minimal stub matching the subset of the chroma collection API that
+    ``upsert_closet_lines`` needs. Used to verify packing behavior without
+    spinning up a real chroma instance."""
+
+    def __init__(self):
+        self.upserts = []
+
+    def upsert(self, documents, ids, metadatas):
+        self.upserts.append({"documents": list(documents), "ids": list(ids), "metadatas": list(metadatas)})
+
+
+class TestClosetCfgResolution:
+    """The ``_closet_cfg()`` accessor is the runtime bridge between
+    MempalaceConfig and the write path. Regressions here silently break the
+    whole Phase-1 config surface, so guard the invariants explicitly."""
+
+    def test_returns_all_default_keys(self):
+        c = _closet_cfg()
+        for key in (
+            "enabled",
+            "char_limit",
+            "extract_window",
+            "rank_boosts",
+            "distance_cap",
+            "max_hydration_chars",
+            "fallback_min_lines",
+        ):
+            assert key in c, f"missing key {key!r} in closet cfg dict"
+
+    def test_env_override_reaches_accessor(self):
+        os.environ["MEMPALACE_CLOSET_CHAR_LIMIT"] = "111"
+        try:
+            assert int(_closet_cfg()["char_limit"]) == 111
+        finally:
+            del os.environ["MEMPALACE_CLOSET_CHAR_LIMIT"]
+
+
+class TestUpsertClosetLinesHonoursConfig:
+    """Commit-2 regression guard: ``upsert_closet_lines`` must pack against
+    the config-provided char_limit, not the module constant. Without this,
+    Phase-1 would ship a silent no-op — env overrides would be ignored."""
+
+    def test_tight_char_limit_produces_more_closets(self):
+        col = _RecordingCollection()
+        # 10 lines, each ~40 chars. With default 1500 they pack into one
+        # closet; with 50 they must split across at least a few.
+        lines = [f"topic{i}|Entity|\u2192drawer_a,drawer_b" for i in range(10)]
+        os.environ["MEMPALACE_CLOSET_CHAR_LIMIT"] = "50"
+        try:
+            n = upsert_closet_lines(col, "closet_x", lines, metadata={"wing": "w"})
+        finally:
+            del os.environ["MEMPALACE_CLOSET_CHAR_LIMIT"]
+        assert n >= 2, f"expected packing to split across \u2265 2 closets at char_limit=50, got {n}"
+        # IDs are deterministic _NN suffixed.
+        all_ids = [i for u in col.upserts for i in u["ids"]]
+        assert all_ids[0].endswith("_01")
+        assert all_ids[-1] == f"closet_x_{n:02d}"
+
+    def test_default_char_limit_packs_into_single_closet(self):
+        col = _RecordingCollection()
+        lines = [f"topic{i}|E|\u2192d" for i in range(5)]
+        n = upsert_closet_lines(col, "closet_y", lines, metadata={})
+        assert n == 1, f"expected 1 closet under default char_limit, got {n}"
+
+
+class TestBuildClosetLinesHonoursWindow:
+    """Commit-2 regression guard: ``build_closet_lines`` must slice content
+    at the config-provided extract_window, not the module constant."""
+
+    def test_extract_window_env_shrinks_scan(self):
+        # Header is at position ~5100, past a shrunk 1000-char window.
+        prefix = "x" * 5000
+        content = prefix + "\n\n# UniqueHeaderMarker\n"
+        os.environ["MEMPALACE_CLOSET_EXTRACT_WINDOW"] = "1000"
+        try:
+            lines = build_closet_lines("/p/s.md", ["d1"], content, "w", "r")
+        finally:
+            del os.environ["MEMPALACE_CLOSET_EXTRACT_WINDOW"]
+        joined = "\n".join(lines)
+        assert "uniqueheadermarker" not in joined.lower(), (
+            "header outside the shrunk window should NOT appear in closet lines"
+        )
+
+    def test_extract_window_default_sees_header(self):
+        prefix = "x" * 100
+        content = prefix + "\n\n# HeaderInsideDefaultWindow\n"
+        lines = build_closet_lines("/p/s.md", ["d1"], content, "w", "r")
+        joined = "\n".join(lines).lower()
+        assert "headerinsidedefaultwindow" in joined
 
 
 class TestBuildClosetLines:

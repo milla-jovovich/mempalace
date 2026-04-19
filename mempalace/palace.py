@@ -68,8 +68,34 @@ def get_closets_collection(palace_path: str, create: bool = True):
     return get_collection(palace_path, collection_name="mempalace_closets", create=create)
 
 
+# Module-level fallbacks. Runtime code reads via ``_closet_cfg()`` which
+# pulls from ``MempalaceConfig().closets`` (env > config.json > defaults);
+# these constants are the default when config resolution fails for any
+# reason, and remain as a stable import surface for tests / external
+# tooling that predate the config block.
 CLOSET_CHAR_LIMIT = 1500  # fill closet until ~1500 chars, then start a new one
 CLOSET_EXTRACT_WINDOW = 5000  # how many chars of source content to scan for entities/topics
+
+
+def _closet_cfg():
+    """Resolve closet tunables through MempalaceConfig.
+
+    Swallows every exception and returns a dict keyed identically to
+    ``DEFAULT_CLOSETS`` using the module-level fallback constants. This is
+    deliberately permissive: a missing / malformed config must NEVER break
+    the write path. Call sites treat the returned dict as authoritative.
+    """
+    try:
+        from .config import MempalaceConfig
+
+        return MempalaceConfig().closets
+    except Exception:
+        from .config import DEFAULT_CLOSETS
+
+        merged = dict(DEFAULT_CLOSETS)
+        merged["char_limit"] = CLOSET_CHAR_LIMIT
+        merged["extract_window"] = CLOSET_EXTRACT_WINDOW
+        return merged
 
 # Common capitalized words that look like proper nouns but are usually
 # sentence-starters or filler. Filtered out of entity extraction.
@@ -172,7 +198,8 @@ def build_closet_lines(source_file, drawer_ids, content, wing, room):
     from pathlib import Path
 
     drawer_ref = ",".join(drawer_ids[:3])
-    window = content[:CLOSET_EXTRACT_WINDOW]
+    cfg = _closet_cfg()
+    window = content[: int(cfg.get("extract_window", CLOSET_EXTRACT_WINDOW))]
 
     # Extract proper nouns (2+ occurrences). Uses i18n-aware patterns so
     # non-Latin names (Cyrillic, accented Latin, etc.) are also detected.
@@ -245,6 +272,7 @@ def upsert_closet_lines(closets_col, closet_id_base, lines, metadata):
     current_lines: list = []
     current_chars = 0
     closets_written = 0
+    char_limit = int(_closet_cfg().get("char_limit", CLOSET_CHAR_LIMIT))
 
     def _flush():
         nonlocal closets_written
@@ -258,7 +286,7 @@ def upsert_closet_lines(closets_col, closet_id_base, lines, metadata):
     for line in lines:
         line_len = len(line)
         # Would this line fit whole in the current closet?
-        if current_chars > 0 and current_chars + line_len + 1 > CLOSET_CHAR_LIMIT:
+        if current_chars > 0 and current_chars + line_len + 1 > char_limit:
             _flush()
             closet_num += 1
             current_lines = []

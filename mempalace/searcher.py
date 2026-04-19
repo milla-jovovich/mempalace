@@ -14,7 +14,7 @@ import math
 import re
 from pathlib import Path
 
-from .palace import get_closets_collection, get_collection
+from .palace import _closet_cfg, get_closets_collection, get_collection
 
 # Closet pointer line format: "topic|entities|→drawer_id_a,drawer_id_b"
 # Multiple lines may join with newlines inside one closet document.
@@ -383,8 +383,10 @@ def search_memories(
     # Rank-based boost. The ordinal signal ("which closet matched best") is
     # more reliable than absolute distance on narrative content, where
     # closet distances cluster in 1.2-1.5 range regardless of match quality.
-    CLOSET_RANK_BOOSTS = [0.40, 0.25, 0.15, 0.08, 0.04]
-    CLOSET_DISTANCE_CAP = 1.5  # cosine dist > 1.5 = too weak to use as signal
+    # Values resolved via MempalaceConfig().closets (env > file > default).
+    _ccfg = _closet_cfg()
+    CLOSET_RANK_BOOSTS = list(_ccfg.get("rank_boosts", [0.40, 0.25, 0.15, 0.08, 0.04]))
+    CLOSET_DISTANCE_CAP = float(_ccfg.get("distance_cap", 1.5))
 
     scored: list = []
     for doc, meta, dist in zip(
@@ -440,7 +442,8 @@ def search_memories(
     # neighbors instead of just the drawer vector search landed on. The
     # closet said "this source is relevant"; vector may have picked the
     # wrong chunk within it; grep picks the right one.
-    MAX_HYDRATION_CHARS = 10000
+    # Value resolved via MempalaceConfig().closets (env > file > default).
+    MAX_HYDRATION_CHARS = int(_ccfg.get("max_hydration_chars", 10000))
     for h in hits:
         if h["matched_via"] == "drawer":
             continue
