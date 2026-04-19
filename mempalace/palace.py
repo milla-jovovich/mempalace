@@ -9,7 +9,8 @@ import hashlib
 import os
 import re
 
-from .backends.chroma import ChromaBackend
+from .backends import PalaceRef, get_backend, resolve_backend_for_palace
+from .config import DEFAULT_COLLECTION_NAME, MempalaceConfig
 
 SKIP_DIRS = {
     ".git",
@@ -37,8 +38,6 @@ SKIP_DIRS = {
     "target",
 }
 
-_DEFAULT_BACKEND = ChromaBackend()
-
 # Schema version for drawer normalization. Bump when the normalization
 # pipeline changes in a way that existing drawers should be rebuilt to pick up
 # (e.g., new noise-stripping rules). `file_already_mined` treats drawers with
@@ -52,14 +51,28 @@ NORMALIZE_VERSION = 2
 
 def get_collection(
     palace_path: str,
-    collection_name: str = "mempalace_drawers",
+    collection_name: str = DEFAULT_COLLECTION_NAME,
     create: bool = True,
 ):
     """Get the palace collection through the backend layer."""
-    return _DEFAULT_BACKEND.get_collection(
-        palace_path,
+    config = MempalaceConfig()
+    if collection_name == DEFAULT_COLLECTION_NAME:
+        collection_name = config.collection_name
+
+    backend_name = resolve_backend_for_palace(
+        config_value=config.backend_override,
+        palace_path=palace_path,
+        default="chroma",
+    )
+    options = None
+    if backend_name == "postgres":
+        options = {"dsn": config.postgres_dsn} if config.postgres_dsn else None
+
+    return get_backend(backend_name).get_collection(
+        palace=PalaceRef(id=palace_path, local_path=palace_path),
         collection_name=collection_name,
         create=create,
+        options=options,
     )
 
 
