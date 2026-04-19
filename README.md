@@ -8,7 +8,7 @@
 
 ---
 
-Fork of [MemPalace v3.3.1](https://github.com/milla-jovovich/mempalace/releases/tag/v3.3.1), tracking `upstream/develop`. Running in production since 2026-04-09 — currently 152,682 drawers across 68 rooms in 22 wings, 8 open PRs upstream (#999 merged 2026-04-18). See upstream README for full feature docs.
+Fork of [MemPalace v3.3.1](https://github.com/milla-jovovich/mempalace/releases/tag/v3.3.1), tracking `upstream/develop`. Running in production since 2026-04-09 — currently 152,682 drawers across 68 rooms in 22 wings, 8 open PRs upstream (#999 merged 2026-04-18; #681/#1000/#1023 merged 2026-04-19). See upstream README for full feature docs.
 
 What this fork adds that you won't get from upstream yet: a **deterministic silent-save hook architecture** (zero data loss, `systemMessage` notification), **ChromaDB 1.5.x hardening** (`quarantine_stale_hnsw` drift recovery, segfault-trigger guards, 8-site `None`-metadata safety), and **search that never silently misses** (`search_memories` returns warnings + sqlite BM25 top-up + `available_in_scope` so callers can see what they aren't getting). Full list below.
 
@@ -122,17 +122,15 @@ Status legend: a PR number means there's an open upstream PR for the change; **P
 |---|---|---|---|
 | **Reliability** | Skip `_fix_blob_seq_ids` sqlite open after first successful migration via `.blob_seq_ids_migrated` marker — opening sqlite3 against a live ChromaDB 1.5.x file corrupts the next PersistentClient | fork-only (narrow chromadb 1.5.x debugging path) | `backends/chroma.py` |
 | **Reliability** | `_get_client()` tries `get_collection` before `create_collection` — `get_or_create_collection` segfaults ChromaDB 1.5.x when the existing collection's metadata differs from the call-site metadata | fork-only | `backends/chroma.py` |
-| **Reliability** | `quarantine_stale_hnsw()` helper — renames HNSW segments whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidesteps read-path SIGSEGV from dangling neighbor pointers (same failure mode as neo-cortex-mcp#2) | [#1000](https://github.com/milla-jovovich/mempalace/pull/1000) · closes #823 | `backends/chroma.py` |
 | **Reliability** | `quarantine_stale_hnsw()` should also validate `index_metadata.pickle` integrity — a process killed mid-write leaves a corrupt file with zero mtime drift, so the 1h threshold doesn't fire and the next palace open segfaults. Fix: attempt to deserialize the file in the quarantine check and quarantine on failure regardless of mtime. | PR pending | `backends/chroma.py` |
 | **Performance** | `bulk_check_mined()` — paginated pre-fetch for concurrent mining | fork-only (complementary to upstream's file-locking in [#784](https://github.com/milla-jovovich/mempalace/pull/784)) | `palace.py`, `miner.py` |
 | **Performance** | Graph cache — 60s TTL, invalidated on writes | [#661](https://github.com/milla-jovovich/mempalace/pull/661) | `palace_graph.py` |
 | **Performance** | L1 importance pre-filter — `importance >= 3` first, full scan fallback | [#660](https://github.com/milla-jovovich/mempalace/pull/660) | `layers.py` |
-| **Performance** | `miner.status()` paginates `col.get()` in 10 K-drawer batches — upstream's single `col.get(limit=total)` hits SQLite's max-variable limit on palaces with many thousands of drawers | PR pending | `miner.py` |
+| **Performance** | `miner.status()` paginates `col.get()` in 10 K-drawer batches — upstream's single `col.get(limit=total)` hits SQLite's max-variable limit on palaces with many thousands of drawers | [#1036](https://github.com/milla-jovovich/mempalace/pull/1036) · closes #802, #1015 | `miner.py` |
 | **Config** | Configurable chunking parameters — `chunk_size` (default 800 chars), `chunk_overlap` (100), `min_chunk_size` (50) written to `config.json` and exposed via `MempalaceConfig` properties | [#1024](https://github.com/milla-jovovich/mempalace/pull/1024) | `config.py`, `miner.py` |
 | **Search** | Warnings + sqlite BM25 top-up when vector underdelivers — `search_memories` returns `warnings: [...]` and `available_in_scope: N` so callers see why recall was partial; fallback hits tagged `matched_via: "sqlite_bm25_fallback"`. The palace never silently returns fewer results than the scope contains (sibling of #951, addresses read-side of #823) | [#1005](https://github.com/milla-jovovich/mempalace/pull/1005) | `searcher.py` |
 | **Hooks** | Silent save mode — direct Python API, deterministic, zero data loss; extracts 2–3 topic words from recent messages for the diary title; optional desktop toast via `notify-send` | [#673](https://github.com/milla-jovovich/mempalace/pull/673) · APPROVED externally 2026-04-12 | `hooks_cli.py` |
 | **Hooks** | `mempal_save_hook.sh` auto-detects Python — checks `MEMPAL_PYTHON` env var, then repo venv at `../../venv/bin/python3`, then system `python3`; no hardcoded path required. Same pattern applied to `.claude-plugin/` stop and precompact hooks. | fork-only | `hooks/mempal_save_hook.sh`, `.claude-plugin/hooks/mempal-stop-hook.sh`, `.claude-plugin/hooks/mempal-precompact-hook.sh` |
-| **Hooks** | PID file guard prevents stacking mine processes — `_ingest_transcript` and `_maybe_auto_ingest` both check `hook_state/mine.pid` via `os.kill(pid, 0)` before spawning; without this, every hook fire (every 15 messages) launched a new `mempalace mine` that piled onto previous ones still running (observed: 4 concurrent mines at ~770% CPU) | [#1023](https://github.com/milla-jovovich/mempalace/pull/1023) | `hooks_cli.py` |
 | **Hooks** | Honor silent_save when `stop_hook_active:true` — Claude Code 2.1.114 sets the flag on every plugin-dispatched Stop fire after the first, and the legacy block-mode loop guard was suppressing every subsequent auto-save (silent, no log entry, marker stuck). Fixed to only skip on the flag in block mode | [#1021](https://github.com/milla-jovovich/mempalace/pull/1021) | `hooks_cli.py` |
 | **Hooks** | Write hook JSON to real stdout via `sys.modules` lookup — `mempalace.mcp_server` redirects stdout→stderr at import to protect MCP stdio from ChromaDB C-level noise; `_output()` checks `sys.modules` for an already-loaded `mcp_server` and reuses its `_REAL_STDOUT_FD`, otherwise writes directly to fd 1. Avoids triggering the redirect as a side effect. | [#1021](https://github.com/milla-jovovich/mempalace/pull/1021) | `hooks_cli.py` |
 | **Features** | Diary wing routing — derive project wing from transcript path; `tool_diary_write` and `tool_diary_read` accept an optional `wing` parameter | [#659](https://github.com/milla-jovovich/mempalace/pull/659) | `hooks_cli.py`, `mcp_server.py` |
@@ -142,6 +140,9 @@ Status legend: a PR number means there's an open upstream PR for the change; **P
 ### Merged upstream (post-v3.3.1)
 
 - `None`-metadata guards across 8 read-path loops — `searcher.py` (CLI + API + closet-boost), `miner.status()`, and 4 MCP handlers ([#999](https://github.com/milla-jovovich/mempalace/pull/999), merged 2026-04-18)
+- `quarantine_stale_hnsw()` helper — renames HNSW segments whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidesteps read-path SIGSEGV ([#1000](https://github.com/milla-jovovich/mempalace/pull/1000), closes #823, merged 2026-04-19)
+- PID file guard prevents stacking `mempalace mine` processes on every hook fire ([#1023](https://github.com/milla-jovovich/mempalace/pull/1023), merged 2026-04-19). Includes the cross-platform PID-check fix: `os.kill(pid, 0)` on Windows *terminates* the target via `TerminateProcess` instead of acting as an existence probe — replaced with `ctypes` `OpenProcess`/`GetExitCodeProcess`.
+- Unicode checkmark replaced with ASCII `+` for Windows encoding ([#681](https://github.com/milla-jovovich/mempalace/pull/681), closes #535, merged 2026-04-19)
 
 ### Merged upstream (in v3.3.0)
 
@@ -270,14 +271,16 @@ Tools and patterns we're evaluating for the two open problems above. Not competi
 
 | PR | Status | Description |
 |---|---|---|
-| [#659](https://github.com/milla-jovovich/mempalace/pull/659) | clean, waiting review | Diary wing parameter |
+| [#659](https://github.com/milla-jovovich/mempalace/pull/659) | `MERGEABLE`, bensig review addressed 2026-04-19 (wing_ prefix + agent filter) | Diary wing parameter |
 | [#660](https://github.com/milla-jovovich/mempalace/pull/660) | `MERGEABLE`, waiting review | L1 importance pre-filter |
 | [#661](https://github.com/milla-jovovich/mempalace/pull/661) | feedback addressed (threading.Lock in 8adf35a), waiting `@bensig` re-review | Graph cache with write-invalidation |
-| [#673](https://github.com/milla-jovovich/mempalace/pull/673) | APPROVED by external reviewer on 2026-04-12, waiting maintainer merge | Deterministic hook saves (broader than upstream's narrower #966) |
-| [#681](https://github.com/milla-jovovich/mempalace/pull/681) | clean, waiting review | Unicode checkmark → ASCII |
-| [#1000](https://github.com/milla-jovovich/mempalace/pull/1000) | CI green (all platforms), Copilot + Dialectician review addressed, waiting maintainer review | `quarantine_stale_hnsw()` for HNSW/sqlite drift crashes |
+| [#673](https://github.com/milla-jovovich/mempalace/pull/673) | APPROVED by external reviewer on 2026-04-12, rebased on develop 2026-04-19 | Deterministic hook saves (broader than upstream's narrower #966) |
 | [#1005](https://github.com/milla-jovovich/mempalace/pull/1005) | CI green (all platforms), Copilot + Dialectician review addressed, waiting maintainer review | Warnings + sqlite BM25 top-up — never silently return fewer results than scope contains |
-| [#1021](https://github.com/milla-jovovich/mempalace/pull/1021) | CI green (all platforms), Copilot review addressed, waiting maintainer review | Hook stdout routing + silent_save guard fixes for Claude Code 2.1.114 |
+| [#1021](https://github.com/milla-jovovich/mempalace/pull/1021) | bensig review addressed 2026-04-19 (`silent_guard` default), CI green | Hook stdout routing + silent_save guard fixes for Claude Code 2.1.114 |
+| [#1024](https://github.com/milla-jovovich/mempalace/pull/1024) | CI green, filed 2026-04-18 | Configurable `chunk_size` / `chunk_overlap` / `min_chunk_size` |
+| [#1036](https://github.com/milla-jovovich/mempalace/pull/1036) | filed 2026-04-19, closes #802 + #1015 | Paginate `miner.status()` — fixes SQLITE_MAX_VARIABLE_NUMBER crash past ~32 K drawers |
+
+Merged since v3.3.1: [#681](https://github.com/milla-jovovich/mempalace/pull/681), [#999](https://github.com/milla-jovovich/mempalace/pull/999), [#1000](https://github.com/milla-jovovich/mempalace/pull/1000), [#1023](https://github.com/milla-jovovich/mempalace/pull/1023).
 
 Closed: [#626](https://github.com/milla-jovovich/mempalace/pull/626), [#633](https://github.com/milla-jovovich/mempalace/pull/633), [#662](https://github.com/milla-jovovich/mempalace/pull/662) (superseded by BM25), [#663](https://github.com/milla-jovovich/mempalace/pull/663) (upstream wrote [#757](https://github.com/milla-jovovich/mempalace/pull/757)), [#738](https://github.com/milla-jovovich/mempalace/pull/738) (docs stale), [#629](https://github.com/milla-jovovich/mempalace/pull/629) (superseded — upstream shipped batching + file locking), [#632](https://github.com/milla-jovovich/mempalace/pull/632) (superseded — `--version`, `purge`, `repair` all shipped in v3.3.0).
 
