@@ -12,7 +12,7 @@ Fork of [MemPalace v3.3.1](https://github.com/milla-jovovich/mempalace/releases/
 
 What this fork adds that you won't get from upstream yet: a **deterministic silent-save hook architecture** (zero data loss, `systemMessage` notification), **ChromaDB 1.5.x hardening** (`quarantine_stale_hnsw` drift recovery, segfault-trigger guards, 8-site `None`-metadata safety), and **search that never silently misses** (`search_memories` returns warnings + sqlite BM25 top-up + `available_in_scope` so callers can see what they aren't getting). Full list below.
 
-**Status at a glance:** active as of 2026-04-19 · [Discussion #1017](https://github.com/MemPalace/mempalace/discussions/1017) introduces the fork upstream · 1063 tests pass on `main` · [Open upstream PRs](#open-upstream-prs) (8) are the contribution pipeline · [Issues on this repo](https://github.com/jphein/mempalace/issues) for fork-specific feedback.
+1063 tests pass on `main` · [Discussion #1017](https://github.com/MemPalace/mempalace/discussions/1017) introduces the fork upstream · [Issues on this repo](https://github.com/jphein/mempalace/issues) for fork-specific feedback.
 
 ## What this looks like in practice
 
@@ -104,15 +104,7 @@ Neither has automatic consolidation. Claude Code has unreleased "Auto Dream" con
 
 ## Fork Changes
 
-What this fork adds beyond upstream v3.3.1.
-
-### Headlines
-
-The three that matter most if you only read one section:
-
-- **Silent-save hook architecture** — the stop hook writes to the palace directly via the Python API, advances the save marker only after a confirmed write, and surfaces a `systemMessage` line in the terminal. Deterministic, zero data loss, no dependency on the AI acting on a `block` prompt. ([#673](https://github.com/milla-jovovich/mempalace/pull/673), APPROVED externally.) Claude Code 2.1.114 tightened the Stop-hook output contract: the terminal `<Line>` renders reliably only when the hook emits the full schema (`continue:true`, `suppressOutput:false`, `systemMessage:…`) rather than bare `systemMessage`. Plus a related fd-level stdout-routing fix for when `mcp_server` transitively redirects `sys.stdout` to stderr. Producer-side fixes in [#1021](https://github.com/milla-jovovich/mempalace/pull/1021); observation flagged upstream at [anthropics/claude-code#50542](https://github.com/anthropics/claude-code/issues/50542).
-- **ChromaDB 1.5.x hardening** — `quarantine_stale_hnsw()` recovers a palace whose HNSW has drifted from sqlite before it segfaults the Rust graph-walk ([#1000](https://github.com/milla-jovovich/mempalace/pull/1000), closes #823). `None`-metadata guards across 8 read-path loops landed upstream in [#999](https://github.com/milla-jovovich/mempalace/pull/999) (merged 2026-04-18).
-- **Search that never silently misses** — `search_memories` returns `warnings: [...]`, `available_in_scope: N`, and a sqlite+BM25 fallback when vector underdelivers. The palace will tell you *why* it returned fewer results than the scope holds, instead of just returning them ([#1005](https://github.com/milla-jovovich/mempalace/pull/1005)).
+What this fork adds beyond upstream v3.3.1. Full list in the table; see the lead paragraph for the three differentiators worth reading first.
 
 ### Still ahead of upstream
 
@@ -141,7 +133,7 @@ Status legend: a PR number means there's an open upstream PR for the change; **P
 
 - `None`-metadata guards across 8 read-path loops — `searcher.py` (CLI + API + closet-boost), `miner.status()`, and 4 MCP handlers ([#999](https://github.com/milla-jovovich/mempalace/pull/999), merged 2026-04-18)
 - `quarantine_stale_hnsw()` helper — renames HNSW segments whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidesteps read-path SIGSEGV ([#1000](https://github.com/milla-jovovich/mempalace/pull/1000), closes #823, merged 2026-04-19)
-- PID file guard prevents stacking `mempalace mine` processes on every hook fire ([#1023](https://github.com/milla-jovovich/mempalace/pull/1023), merged 2026-04-19). Includes the cross-platform PID-check fix: `os.kill(pid, 0)` on Windows *terminates* the target via `TerminateProcess` instead of acting as an existence probe — replaced with `ctypes` `OpenProcess`/`GetExitCodeProcess`. Complementary broader work in [#976](https://github.com/milla-jovovich/mempalace/pull/976) (@felipetruman, CONFLICTING): adds a process-wide `mine_global_lock()` that also catches direct-CLI fan-out (not just hook-triggered), plus pins `hnsw:num_threads: 1` to fix HNSW SIGSEGVs (#974) and `link_lists.bin` blowup (#965).
+- PID file guard prevents stacking `mempalace mine` processes on every hook fire ([#1023](https://github.com/milla-jovovich/mempalace/pull/1023), merged 2026-04-19), with a cross-platform PID-check fix (`os.kill(pid, 0)` on Windows *terminates* the target — replaced with `ctypes` `OpenProcess`/`GetExitCodeProcess`). Broader complementary work in [#976](https://github.com/milla-jovovich/mempalace/pull/976) covers direct-CLI fan-out + an HNSW `num_threads` pin.
 - Unicode checkmark replaced with ASCII `+` for Windows encoding ([#681](https://github.com/milla-jovovich/mempalace/pull/681), closes #535, merged 2026-04-19)
 
 ### Merged upstream (in v3.3.0)
@@ -154,18 +146,10 @@ Status legend: a PR number means there's an open upstream PR for the change; **P
 
 ### Pulled in from upstream v3.3.1
 
-- Multi-language entity detection: Portuguese, Russian, Italian, Hindi, Indonesian, Chinese (#907, #911, #928, #931, #932, #945, #760, #156, #773, #778)
-- BCP-47 case-insensitive locale resolution (#928)
-- Script-aware word boundaries for Devanagari/Arabic/Hebrew/Thai (#932)
-- UTF-8 encoding on `Path.read_text()` — fixes GBK/non-UTF-8 locale corruption (#946)
-- Non-blocking precompact hook (#863) — replaces our fork's blocking precompact
-- Basic `silent_save` honoring in stop hook (#966) — narrower than our fork's deterministic-save architecture (below), so we keep the fork version
+Six changes landed on fork via the upstream merge: multi-language entity detection, BCP-47 locales, script-aware word boundaries, UTF-8 read encoding, non-blocking precompact hook (#863), and basic `silent_save` honoring (#966 — narrower than our fork's deterministic-save architecture, so we keep the fork version). See [upstream v3.3.1 release notes](https://github.com/MemPalace/mempalace/releases/tag/v3.3.1) for details.
 
 ### Superseded by upstream
 
-- Epsilon mtime comparison (`abs() < epsilon`) — upstream merged equivalent fix as PR #610 (Arnold Wender, 2026-04-12; their threshold 0.001 vs our 0.01, semantically equivalent). `bulk_check_mined()` in the same fork commit is independent and fork-only.
-- `.jsonl` added to `READABLE_EXTENSIONS` — upstream-authored at the same SHA (560fdbd); also raised `MAX_FILE_SIZE` 10 MB → 500 MB in d137d12. Not a fork contribution.
-- `max_distance` / `min_similarity` threshold — upstream merged a superset via PR #667 (`tool_search` already has `max_distance: float = 1.5` and back-compat `min_similarity` converter).
 - Hybrid keyword fallback (`$contains`) — upstream shipped Okapi-BM25 (60/40 blend) via [#789](https://github.com/milla-jovovich/mempalace/pull/789)
 - Batch ChromaDB writes — upstream has file-level locking for concurrent agents via [#784](https://github.com/milla-jovovich/mempalace/pull/784)
 - Inline transcript mining in hooks — upstream uses `mempalace mine` in background
@@ -174,13 +158,6 @@ Status legend: a PR number means there's an open upstream PR for the change; **P
 ## Planned work
 
 Ordered by impact. Informed by competitive research ([Karta](https://github.com/rohithzr/karta), Hindsight, [engram](https://github.com/NickCirv/engram), [context-engine](https://github.com/Emmimal/context-engine), CaviraOSS) and our own usage patterns — see [Sources](#sources) at the bottom for the full reference list. Each item is evaluated against the three principles above.
-
-### Done
-- Hybrid search fallback (superseded by upstream BM25)
-- Graph cache with write-invalidation (shipped in this fork; #661 rebased, threading.Lock added, awaiting re-review)
-- L1 importance pre-filter (#660 rebased, clean)
-- Convo miner wing assignment (#659 rebased, clean)
-- Silent hook saves (shipped in this fork; #673 still ahead of upstream's #966 — ours has marker-after-confirmed-save, themes extraction, systemMessage notification)
 
 ### P0 — Multi-label tags *(1-2 days, additive, upstream candidate)*
 
@@ -208,9 +185,9 @@ This preserves hierarchy's benefits (scope, browse, delete-as-unit) while elimin
 
 **Status 2026-04-19: handled by [#1032](https://github.com/milla-jovovich/mempalace/pull/1032)** (@zackchiutw, MERGEABLE, filed 2026-04-19). Ships a config-driven 4-stage rerank pipeline with **Weibull time-decay** as one stage — exactly this item's intent. All stages off by default; opt-in via `~/.mempalace/config.json`. Watch that PR; no fork work needed unless it stalls.
 
-Older implementation of the same idea: [#337](https://github.com/milla-jovovich/mempalace/pull/337) (@matrix9neonebuchadnezzar2199-sketch, simpler half-life decay, filed 2026-04-09, no activity since 2026-04-14).
+Older implementation of the same idea: [#337](https://github.com/milla-jovovich/mempalace/pull/337) (@matrix9neonebuchadnezzar2199-sketch, simpler half-life decay, stale since 2026-04-14).
 
-Original design notes kept for reference: add `last_accessed` and `access_count` to drawer metadata; post-process with a decay curve. Reference: [context-engine](https://github.com/Emmimal/context-engine) has a ~200-line exponential decay port. Independent `mempalace prune --stale-days 180 --dry-run` CLI is still a fork opportunity (#1032 doesn't touch pruning).
+Independent `mempalace prune --stale-days 180 --dry-run` CLI is still a fork opportunity (#1032 doesn't touch pruning).
 
 ### P3 — Feedback loops *(rerank tracked upstream; rating/reflection still open)*
 
@@ -241,12 +218,6 @@ Strip known injection patterns (role-play instructions, "ignore previous instruc
 - [#381 — Qdrant vector search](https://github.com/milla-jovovich/mempalace/pull/381) (@Anush008, earlier competing implementation)
 - [#574 — LanceDB abstraction + migration path](https://github.com/milla-jovovich/mempalace/pull/574) (@dekoza)
 - [#575 — LanceDB multi-device sync](https://github.com/milla-jovovich/mempalace/pull/575) (@dekoza, builds on #574)
-
-**Original fork-mode design notes** (kept for reference, no longer planned as fork work):
-
-- *Flashcard / concept chunking* — Milla's approach (session_extract → session_chunker → palace_ingest_incremental). LLM-summarized cards instead of verbatim; opt-in `--mode flashcard` would trade completeness for token economy. Can coexist with verbatim.
-- *AAAK encoding* — lossy abbreviation (entity codes, pipe-separated Zettel fields, emotion markers). Benchmarks 84.2% R@5 vs verbatim's 96.6%. Upstream-maintained if it ships.
-- *Diary enrichment mode* — Haiku writes topic-summary docs alongside verbatim. Feeds into P0 tags and P3 rerank. The cleanest of the three if any get picked up.
 
 ### Deprioritized
 
