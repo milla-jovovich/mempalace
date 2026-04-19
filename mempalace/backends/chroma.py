@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 _BLOB_FIX_MARKER = ".blob_seq_ids_migrated"
 
 
-def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> list:
+def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> list[str]:
     """Rename HNSW segment dirs whose files are stale vs. chroma.sqlite3.
 
     When ChromaDB 1.5.x loads an HNSW segment that disagrees with the live
@@ -40,7 +40,7 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> li
     except OSError:
         return []
 
-    moved: list = []
+    moved: list[str] = []
     try:
         entries = os.listdir(palace_path)
     except OSError:
