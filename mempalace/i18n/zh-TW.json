@@ -1,0 +1,44 @@
+{
+  "lang": "zh-TW",
+  "label": "繁體中文",
+  "terms": {
+    "palace": "宮殿",
+    "wing": "翼",
+    "hall": "走廊",
+    "closet": "櫃子",
+    "drawer": "抽屜",
+    "mine": "挖掘",
+    "search": "搜尋",
+    "status": "狀態",
+    "init": "初始化",
+    "repair": "修復",
+    "migrate": "遷移",
+    "entity": "實體",
+    "topic": "主題"
+  },
+  "cli": {
+    "mine_start": "正在挖掘 {path}...",
+    "mine_complete": "完成。建立了 {closets} 個櫃子、{drawers} 個抽屜。",
+    "mine_skip": "已挖掘。使用 --force 重新執行。",
+    "search_no_results": "未找到結果: {query}",
+    "search_results": "找到 {count} 個結果:",
+    "status_palace": "宮殿: {path}",
+    "status_wings": "{count} 個翼",
+    "status_closets": "{count} 個櫃子",
+    "status_drawers": "{count} 個抽屜",
+    "init_complete": "宮殿已初始化於 {path}",
+    "init_exists": "{path} 中已存在宮殿",
+    "repair_complete": "修復完成。已修正 {fixed} 個問題。",
+    "migrate_complete": "遷移完成。",
+    "no_palace": "未找到宮殿。請執行: mempalace init <目錄>"
+  },
+  "aaak": {
+    "instruction": "用中文壓縮。概念之間用管道符(|)，詞語之間用連字符(-)。省略虛詞和連接詞。保留專有名詞和數字的準確性。"
+  },
+  "regex": {
+    "topic_pattern": "[\\u4E00-\\u9FFF]{2,}|[A-Za-z][A-Za-z0-9_]{2,}",
+    "stop_words": "的 了 在 是 我 有 和 就 不 人 都 一 一個 上 也 很 到 說 要 去 你 會 著 沒有 看 好 自己 這 那 她 他 它 們 但是 因為 所以 如果 雖然 然後 或者 而且",
+    "quote_pattern": "「([^」]{10,100})」|\u201c([^\u201d]{10,100})\u201d",
+    "action_pattern": "(構建|修復|添加|刪除|確認|創建|實現|修理|編寫|測試|驗證|更新|配置|啟動|停止)(?:了|完成|成功)"
+  }
+}

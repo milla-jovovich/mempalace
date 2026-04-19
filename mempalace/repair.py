@@ -32,7 +32,7 @@ import os
 import shutil
 import time
 
-import chromadb
+from .backends.chroma import ChromaBackend
 
 
 COLLECTION_NAME = "mempalace_drawers"
@@ -90,8 +90,7 @@ def scan_palace(palace_path=None, only_wing=None):
     print(f"\n  Palace: {palace_path}")
     print("  Loading...")
 
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_collection(COLLECTION_NAME)
+    col = ChromaBackend().get_collection(palace_path, COLLECTION_NAME)
 
     where = {"wing": only_wing} if only_wing else None
     total = col.count()
@@ -174,8 +173,7 @@ def prune_corrupt(palace_path=None, confirm=False):
         print("  Re-run with --confirm to actually delete.")
         return
 
-    client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_collection(COLLECTION_NAME)
+    col = ChromaBackend().get_collection(palace_path, COLLECTION_NAME)
     before = col.count()
     print(f"  Collection size before: {before:,}")
 
@@ -222,9 +220,9 @@ def rebuild_index(palace_path=None):
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
 
-    client = chromadb.PersistentClient(path=palace_path)
+    backend = ChromaBackend()
     try:
-        col = client.get_collection(COLLECTION_NAME)
+        col = backend.get_collection(palace_path, COLLECTION_NAME)
         total = col.count()
     except Exception as e:
         print(f"  Error reading palace: {e}")
@@ -264,8 +262,8 @@ def rebuild_index(palace_path=None):
 
     # Rebuild with correct HNSW settings
     print("  Rebuilding collection with hnsw:space=cosine...")
-    client.delete_collection(COLLECTION_NAME)
-    new_col = client.create_collection(COLLECTION_NAME, metadata={"hnsw:space": "cosine"})
+    backend.delete_collection(palace_path, COLLECTION_NAME)
+    new_col = backend.create_collection(palace_path, COLLECTION_NAME)
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
