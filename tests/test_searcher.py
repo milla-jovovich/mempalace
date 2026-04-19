@@ -62,6 +62,7 @@ class TestSearchMemories:
     def test_created_at_fallback_when_filed_at_missing(self):
         """created_at defaults to 'unknown' when filed_at is absent."""
         mock_col = MagicMock()
+        mock_col.count.return_value = 1
         mock_col.query.return_value = {
             "ids": [["drawer_no_date"]],
             "documents": [["Some text without a date"]],
@@ -82,6 +83,7 @@ class TestSearchMemories:
         would be worse than a crash because it makes the palace look empty
         when the data is actually there."""
         mock_col = MagicMock()
+        mock_col.count.return_value = 0
         mock_col.query.side_effect = RuntimeError("query failed")
         # col.get is also called (for the sqlite fallback and pool count);
         # return an empty pool so the fallback finds nothing to promote.
@@ -105,6 +107,7 @@ class TestSearchMemories:
         rather than raising `AttributeError: 'NoneType' object has no
         attribute 'get'` while the rest of the result set renders."""
         mock_col = MagicMock()
+        mock_col.count.return_value = 2
         mock_col.query.return_value = {
             "documents": [["first doc", "second doc"]],
             "metadatas": [[{"source_file": "a.md", "wing": "w", "room": "r"}, None]],
@@ -137,6 +140,7 @@ class TestSearchMemories:
         had 5,243 drawers in the requested wing. After this change, the
         sqlite pool is BM25-ranked and the top keyword matches fill in."""
         mock_col = MagicMock()
+        mock_col.count.return_value = 4
         # Vector returns only 1 result
         mock_col.query.return_value = {
             "documents": [["vector hit about kiyo"]],
@@ -224,6 +228,7 @@ class TestSearchCLI:
         fallback. The warning is printed so the user sees why the palace
         is returning fewer results than expected."""
         mock_col = MagicMock()
+        mock_col.count.return_value = 0
         mock_col.query.side_effect = RuntimeError("boom")
         mock_col.get.return_value = {"documents": [], "metadatas": [], "ids": []}
 

@@ -307,27 +307,24 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
 
 def _count_in_scope(drawers_col, where: dict) -> int | None:
-    """Return the total number of drawers matching ``where`` via paginated
-    ``col.get(include=[], ...)`` calls.
+    """Return the total number of drawers matching ``where``.
 
-    ChromaDB's ``Collection.count()`` does not accept a ``where`` filter, so
-    for a sqlite-authoritative per-scope count we paginate ``get()`` with
-    ``include=[]`` (ids are always returned by Chroma, even when include is
-    empty) and sum the batch sizes. Pagination keeps each query well under
-    the #950 "too many SQL variables" limit.
+    When ``where`` is empty (unfiltered scope), uses ``Collection.count()``
+    which is O(1). Otherwise paginates ``get(include=[])`` — ChromaDB's
+    ``count()`` does not accept a ``where`` filter. Pagination keeps each
+    query well under the #950 "too many SQL variables" limit.
 
     Returns ``None`` if the count could not be computed (e.g., filter
     planner error).
     """
-    PAGE = 5000
-    offset = 0
-    total = 0
     try:
+        if not where:
+            return drawers_col.count()
+        PAGE = 5000
+        offset = 0
+        total = 0
         while True:
-            kwargs: dict = {"limit": PAGE, "offset": offset, "include": []}
-            if where:
-                kwargs["where"] = where
-            batch = drawers_col.get(**kwargs)
+            batch = drawers_col.get(limit=PAGE, offset=offset, include=[], where=where)
             batch_ids = batch.get("ids") or []
             if not batch_ids:
                 break
@@ -657,10 +654,17 @@ def search_memories(
     vector_hit_count = len(hits)
     vector_underdelivered = vector_hit_count < n_results
 
-    # Sqlite-authoritative scope count + top-up fallback. When max_distance
-    # is set, the caller wants strict similarity — don't pad with BM25-only
-    # hits that have no vector distance. Scope count still runs so callers
-    # can see what they're missing.
+    # Capture vector hit count before BM25 may extend hits. The scope warning
+    # must fire whenever vector underdelivered — even when BM25 fills the
+    # request to n_results — because vector is still the degraded layer.
+    # BM25 fallback is a reliability mechanism: it fires when the distance
+    # threshold is permissive (max_distance=0.0 means "no filtering") OR
+    # when a vector error occurred (warnings non-empty at this point). This
+    # ensures MCP callers on a drifted palace get fallback coverage even
+    # though tool_search passes max_distance=1.5, without firing fallback
+    # when a strict distance filter legitimately eliminates all results on
+    # a working HNSW index.
+    allow_fallback = (max_distance <= 0.0) or bool(warnings)
     available_in_scope, fallback_warnings = _sqlite_fallback_and_scope(
         drawers_col,
         query,
@@ -668,7 +672,7 @@ def search_memories(
         hits,
         n_results=n_results,
         vector_underdelivered=vector_underdelivered,
-        allow_fallback=(max_distance <= 0.0),
+        allow_fallback=allow_fallback,
     )
     warnings.extend(fallback_warnings)
 
