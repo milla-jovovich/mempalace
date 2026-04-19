@@ -45,6 +45,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 13. **feat: search warnings + sqlite BM25 top-up** — `search_memories()` returns `warnings: [...]` and `available_in_scope: N` whenever the vector path underdelivers (sparse HNSW after repair, `#951` filter-planner failure, drift). Fallback promotes BM25-ranked sqlite candidates tagged `matched_via: "sqlite_bm25_fallback"`. Closes the "silent 0-hit when data is in sqlite" failure mode. CLI `search()` delegates to `search_memories()` so both paths share the fallback.
 14. **fix: stop_hook_active guard** — guard only applies in block mode; silent mode skips it so Claude Code 2.1.114's plugin dispatch (which sets `stop_hook_active:true` on every fire after the first) doesn't suppress subsequent auto-saves
 15. **fix: `_output()` stdout routing** — uses `sys.modules.get()` to find an already-loaded `mcp_server` and reuse its `_REAL_STDOUT_FD`; otherwise writes directly to fd 1. Avoids importing `mcp_server` cold (which would trigger its stdout→stderr redirect as a side effect). Write-all loop handles partial `os.write()` returns.
+16. **fix: `.jsonl` exempt from `JUNK_FILE_SIZE` cap** — `scan_project()` skips files >500 KB as suspected junk (SQL dumps, generated JSON), but `.jsonl` transcripts from Claude Code routinely exceed that; exempted so large sessions aren't silently dropped by the miner.
 
 ### Merged into upstream (post-v3.3.1)
 
@@ -61,6 +62,17 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 - Non-blocking precompact hook (#863) — replaces our fork's blocking precompact
 - Basic `silent_save` honoring in stop hook (#966) — narrower than our fork's deterministic-save architecture, so we keep #673's version
 
+### Pulled in from upstream/develop (merged 2026-04-19)
+
+- RFC 002 §9 scaffolding: `BaseSourceAdapter`, `PalaceContext`, registry, transforms (`mempalace/sources/`) — #1014
+- `chromadb >=1.5.4,<2` — Python 3.13/3.14 compat, version cap guards future major breakage — #1010
+- `Layer3.search_raw` None guard — #1013
+- Sweeper + tandem transcript safety net — prevents silent drop of `.jsonl` files — #998
+- `_validate_where()` operator validator (RFC 001 §1.4) — unknown operators raise `UnsupportedFilterError` instead of silently dropping — #995
+- RFC 002 spec docs (`docs/rfcs/002-source-adapter-plugin-spec.md`) — #990
+- Landing page redesign — #984
+- `sweep` CLI command added alongside existing `export`
+
 ### Superseded by upstream
 
 - Hybrid keyword fallback (#662) — upstream shipped Okapi-BM25
@@ -69,7 +81,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 ## Upstream PRs
 
-As of 2026-04-18: 6 merged, 8 open, 7 closed. PRs target `develop`.
+As of 2026-04-19: 6 merged, 8 open, 7 closed. PRs target `develop`. Fork `main` tracks `upstream/develop`.
 
 | PR | Status | Description |
 |----|--------|-------------|
@@ -79,9 +91,9 @@ As of 2026-04-18: 6 merged, 8 open, 7 closed. PRs target `develop`.
 | #673 | open (APPROVED externally 2026-04-12, waiting maintainer merge) | Deterministic hook saves (broader than upstream's #966) |
 | #681 | open (clean, waiting review) | Unicode checkmark → ASCII (#535) |
 | #999 | **merged** 2026-04-18 | `None`-metadata guards in `searcher.py`, `miner.status()`, and 4 `mcp_server.py` handlers |
-| #1000 | open (`MERGEABLE`, closes #823, Copilot addressed, rebased onto #995) | `quarantine_stale_hnsw()` for HNSW/sqlite drift |
-| #1005 | open (`MERGEABLE`, Copilot addressed) | Warnings + sqlite BM25 top-up when vector underdelivers (never silent miss) |
-| #1021 | open (Copilot review addressed — 5 points, waiting review) | Hook stdout routing + silent_save guard fixes for Claude Code 2.1.114 |
+| #1000 | open (CI green all platforms, Copilot + Dialectician review addressed, waiting maintainer) | `quarantine_stale_hnsw()` for HNSW/sqlite drift |
+| #1005 | open (CI green all platforms, Copilot + Dialectician review addressed, waiting maintainer) | Warnings + sqlite BM25 top-up when vector underdelivers (never silent miss) |
+| #1021 | open (CI green all platforms, Copilot review addressed, waiting maintainer) | Hook stdout routing + silent_save guard fixes for Claude Code 2.1.114 |
 | #629 | **closed** | Superseded — upstream shipped batching + file locking |
 | #632 | **closed** | Superseded — `--version`, `purge`, `repair` all shipped in v3.3.0 |
 | #664 | **merged** | BLOB seq_id migration repair |

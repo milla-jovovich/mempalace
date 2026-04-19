@@ -8,11 +8,11 @@
 
 ---
 
-Fork of [MemPalace v3.3.1](https://github.com/milla-jovovich/mempalace/releases/tag/v3.3.1). Running in production since 2026-04-09 — currently 137,949 drawers across 68 rooms in 22 wings, 7 open PRs upstream (#999 merged 2026-04-18). See upstream README for full feature docs.
+Fork of [MemPalace v3.3.1](https://github.com/milla-jovovich/mempalace/releases/tag/v3.3.1), tracking `upstream/develop`. Running in production since 2026-04-09 — currently 137,949 drawers across 68 rooms in 22 wings, 8 open PRs upstream (#999 merged 2026-04-18). See upstream README for full feature docs.
 
 What this fork adds that you won't get from upstream yet: a **deterministic silent-save hook architecture** (zero data loss, `systemMessage` notification), **ChromaDB 1.5.x hardening** (`quarantine_stale_hnsw` drift recovery, segfault-trigger guards, 8-site `None`-metadata safety), and **search that never silently misses** (`search_memories` returns warnings + sqlite BM25 top-up + `available_in_scope` so callers can see what they aren't getting). Full list below.
 
-**Status at a glance:** active as of 2026-04-18 · [Discussion #1017](https://github.com/MemPalace/mempalace/discussions/1017) introduces the fork upstream · 998 tests pass on `main` · [Open upstream PRs](#open-upstream-prs) (8) are the contribution pipeline · [Issues on this repo](https://github.com/jphein/mempalace/issues) for fork-specific feedback.
+**Status at a glance:** active as of 2026-04-19 · [Discussion #1017](https://github.com/MemPalace/mempalace/discussions/1017) introduces the fork upstream · 1063 tests pass on `main` · [Open upstream PRs](#open-upstream-prs) (8) are the contribution pipeline · [Issues on this repo](https://github.com/jphein/mempalace/issues) for fork-specific feedback.
 
 ## What this looks like in practice
 
@@ -254,9 +254,9 @@ Tools and patterns we're evaluating for the two open problems above. Not competi
 | [#661](https://github.com/milla-jovovich/mempalace/pull/661) | feedback addressed (threading.Lock in 8adf35a), waiting `@bensig` re-review | Graph cache with write-invalidation |
 | [#673](https://github.com/milla-jovovich/mempalace/pull/673) | APPROVED by external reviewer on 2026-04-12, waiting maintainer merge | Deterministic hook saves (broader than upstream's narrower #966) |
 | [#681](https://github.com/milla-jovovich/mempalace/pull/681) | clean, waiting review | Unicode checkmark → ASCII |
-| [#1000](https://github.com/milla-jovovich/mempalace/pull/1000) | Copilot + Dialectician review addressed (`list[str]` type hints), waiting review | `quarantine_stale_hnsw()` for HNSW/sqlite drift crashes |
-| [#1005](https://github.com/milla-jovovich/mempalace/pull/1005) | Copilot + Dialectician review addressed (MCP fallback gate, O(1) unfiltered scope count, CLI palace path), waiting review | Warnings + sqlite BM25 top-up — never silently return fewer results than scope contains |
-| [#1021](https://github.com/milla-jovovich/mempalace/pull/1021) | Copilot review addressed (5 points: `sys.modules` lookup instead of unconditional import, write-all loop, docstring, narrowed exceptions, regression tests), waiting review | Hook stdout routing + silent_save guard fixes for Claude Code 2.1.114 |
+| [#1000](https://github.com/milla-jovovich/mempalace/pull/1000) | CI green (all platforms), Copilot + Dialectician review addressed, waiting maintainer review | `quarantine_stale_hnsw()` for HNSW/sqlite drift crashes |
+| [#1005](https://github.com/milla-jovovich/mempalace/pull/1005) | CI green (all platforms), Copilot + Dialectician review addressed, waiting maintainer review | Warnings + sqlite BM25 top-up — never silently return fewer results than scope contains |
+| [#1021](https://github.com/milla-jovovich/mempalace/pull/1021) | CI green (all platforms), Copilot review addressed, waiting maintainer review | Hook stdout routing + silent_save guard fixes for Claude Code 2.1.114 |
 
 Closed: [#626](https://github.com/milla-jovovich/mempalace/pull/626), [#633](https://github.com/milla-jovovich/mempalace/pull/633), [#662](https://github.com/milla-jovovich/mempalace/pull/662) (superseded by BM25), [#663](https://github.com/milla-jovovich/mempalace/pull/663) (upstream wrote [#757](https://github.com/milla-jovovich/mempalace/pull/757)), [#738](https://github.com/milla-jovovich/mempalace/pull/738) (docs stale), [#629](https://github.com/milla-jovovich/mempalace/pull/629) (superseded — upstream shipped batching + file locking), [#632](https://github.com/milla-jovovich/mempalace/pull/632) (superseded — `--version`, `purge`, `repair` all shipped in v3.3.0).
 
