@@ -20,7 +20,7 @@ JP's fork of [milla-jovovich/mempalace](https://github.com/milla-jovovich/mempal
 
 ```bash
 source venv/bin/activate
-python -m pytest tests/ -q              # ~900 tests (benchmarks deselected)
+python -m pytest tests/ -q              # ~1063 tests (benchmarks deselected)
 mempalace status                         # check palace state
 mempalace search "query"                 # test search
 python -m mempalace.mcp_server           # run MCP server standalone
@@ -34,7 +34,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 2. **feat: bulk_check_mined()** — paginated pre-fetch of all source_file/mtime pairs for concurrent mining
 3. **feat: similarity threshold** — `max_distance` parameter in search, default 1.5 cosine distance in MCP
 4. **feat: hooks_cli silent save** — stop hook saves directly via Python API with systemMessage notification, deterministic, zero data loss
-5. **feat: tool output mining** — normalize.py captures tool_use/tool_result blocks from Claude Code JSONL with per-tool formatting strategies
+5. **feat: `mempal_save_hook.sh` Python auto-detection** — checks `MEMPAL_PYTHON` env var → repo venv → system `python3`; no hardcoded path required
 6. **fix: convo_miner wing assignment** — `_wing_from_transcript_path()` extracts project name from Claude Code transcript path
 7. **perf: graph cache** — `build_graph()` cached module-level with 60s TTL, invalidated on writes via `invalidate_graph_cache()`
 8. **perf: L1 importance pre-filter** — `_fetch_drawers()` tries `importance >= 3` first, falls back to full scan only if < 15 results
@@ -46,6 +46,9 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 14. **fix: stop_hook_active guard** — guard only applies in block mode; silent mode skips it so Claude Code 2.1.114's plugin dispatch (which sets `stop_hook_active:true` on every fire after the first) doesn't suppress subsequent auto-saves
 15. **fix: `_output()` stdout routing** — uses `sys.modules.get()` to find an already-loaded `mcp_server` and reuse its `_REAL_STDOUT_FD`; otherwise writes directly to fd 1. Avoids importing `mcp_server` cold (which would trigger its stdout→stderr redirect as a side effect). Write-all loop handles partial `os.write()` returns.
 16. **fix: `.jsonl` exempt from `JUNK_FILE_SIZE` cap** — `scan_project()` skips files >500 KB as suspected junk (SQL dumps, generated JSON), but `.jsonl` transcripts from Claude Code routinely exceed that; exempted so large sessions aren't silently dropped by the miner.
+17. **fix: `_get_client()` get-then-create guard** — `get_or_create_collection` segfaults ChromaDB 1.5.x when existing collection metadata differs; fork tries `get_collection` first, falls back to `create_collection` only on `InvalidCollectionException`.
+18. **perf: `miner.status()` paginated `col.get()`** — upstream's single `col.get(limit=total)` hits SQLite's max-variable limit on palaces with many thousands of drawers; fork paginates in 10 K-drawer batches.
+19. **feat: configurable chunking parameters** — `chunk_size` (800), `chunk_overlap` (100), `min_chunk_size` (50) written to `config.json` and exposed via `MempalaceConfig` properties.
 
 ### Merged into upstream (post-v3.3.1)
 
