@@ -296,7 +296,7 @@ mempalace status
 
 ```
 source venv/bin/activate
-python -m pytest tests/ -q              # ~900 tests (benchmarks deselected)
+python -m pytest tests/ -q              # ~1063 tests (benchmarks deselected)
 mempalace status                         # palace health
 ruff check . && ruff format --check .    # lint + format
 ```
