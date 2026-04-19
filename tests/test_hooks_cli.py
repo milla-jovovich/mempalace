@@ -10,8 +10,6 @@ import pytest
 
 from mempalace.hooks_cli import (
     SAVE_INTERVAL,
-    PRECOMPACT_BLOCK_REASON,
-    STOP_BLOCK_REASON,
     _count_human_messages,
     _extract_recent_messages,
     _get_mine_dir,
