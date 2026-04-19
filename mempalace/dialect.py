@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
-AAAK Dialect -- Compressed Symbolic Memory Language
+AAAK Dialect -- Structured Symbolic Summary Format
 ====================================================
 
-A structured symbolic format that ANY LLM reads natively at ~30x compression.
-Not latent vectors. Not English prose. A universal memory compression dialect.
+A lossy summarization format that extracts entities, topics, key sentences,
+emotions, and flags from plain text into a compact structured representation.
+Any LLM reads it natively — no decoder required.
 
 Works with: Claude, ChatGPT, Gemini, Llama, Mistral -- any model that reads text.
+
+NOTE: AAAK is NOT lossless compression. The original text cannot be reconstructed
+from AAAK output. It is a structured summary layer (closets) that points to the
+original verbatim content (drawers). The 96.6% benchmark score is from raw mode,
+not AAAK mode.
 
 Adapted for mempalace: works standalone on plain text and ChromaDB drawers.
 No dependency on palace.py or layers.py.
@@ -152,6 +158,8 @@ _FLAG_SIGNALS = {
 }
 
 # Common filler/stop words to strip from topic extraction
+_ALPHA_RE = re.compile(r"[^a-zA-Z]")
+
 _STOP_WORDS = {
     "the",
     "a",
@@ -311,13 +319,17 @@ class Dialect:
         dialect.generate_layer1("zettels/", output="LAYER1.aaak")
     """
 
-    def __init__(self, entities: Dict[str, str] = None, skip_names: List[str] = None):
+    def __init__(
+        self, entities: Dict[str, str] = None, skip_names: List[str] = None, lang: str = None
+    ):
         """
         Args:
             entities: Mapping of full names -> short codes.
                       e.g. {"Alice": "ALC", "Bob": "BOB"}
                       If None, entities are auto-coded from first 3 chars.
             skip_names: Names to skip (fictional characters, etc.)
+            lang: Language code (e.g. "fr", "ko"). Loads AAAK instruction
+                  and regex patterns from i18n dictionary.
         """
         self.entity_codes = {}
         if entities:
@@ -325,6 +337,15 @@ class Dialect:
                 self.entity_codes[name] = code
                 self.entity_codes[name.lower()] = code
         self.skip_names = [n.lower() for n in (skip_names or [])]
+
+        # Load language-specific AAAK instruction and regex patterns
+        from mempalace.i18n import load_lang, t, current_lang, get_regex
+
+        if lang:
+            load_lang(lang)
+        self.lang = lang or current_lang()
+        self.aaak_instruction = t("aaak.instruction")
+        self.lang_regex = get_regex()
 
     @classmethod
     def from_config(cls, config_path: str) -> "Dialect":
@@ -341,6 +362,7 @@ class Dialect:
         return cls(
             entities=config.get("entities", {}),
             skip_names=config.get("skip_names", []),
+            lang=config.get("lang", "en"),
         )
 
     def save_config(self, config_path: str):
@@ -521,7 +543,7 @@ class Dialect:
         # Fallback: find capitalized words that look like names (2+ chars, not sentence-start)
         words = text.split()
         for i, w in enumerate(words):
-            clean = re.sub(r"[^a-zA-Z]", "", w)
+            clean = _ALPHA_RE.sub("", w)
             if (
                 len(clean) >= 2
                 and clean[0].isupper()
@@ -538,19 +560,19 @@ class Dialect:
 
     def compress(self, text: str, metadata: dict = None) -> str:
         """
-        Compress plain text into AAAK Dialect format.
+        Summarize plain text into AAAK Dialect format.
 
-        This is the primary method for mempalace: takes any text content
-        (drawer content, transcript chunk, note) and returns a compressed
-        symbolic representation.
+        Extracts entities, topics, a key sentence, emotions, and flags
+        from the input text. This is lossy — the original text cannot be
+        reconstructed from the output.
 
         Args:
-            text: Plain text content to compress
+            text: Plain text content to summarize
             metadata: Optional dict with keys like 'source_file', 'wing',
                       'room', 'date', etc.
 
         Returns:
-            AAAK-compressed string (~30x smaller than input)
+            AAAK-formatted summary string
         """
         metadata = metadata or {}
 
@@ -930,19 +952,34 @@ class Dialect:
 
     @staticmethod
     def count_tokens(text: str) -> int:
-        """Rough token count (1 token ~ 3 chars for structured text)."""
-        return len(text) // 3
+        """Estimate token count using word-based heuristic (~1.3 tokens per word).
+
+        This is an approximation. For accurate counts, use a real tokenizer
+        like tiktoken. The old len(text)//3 heuristic was wildly inaccurate
+        and made AAAK compression ratios look much better than reality.
+        """
+        words = text.split()
+        # Most English words tokenize to 1-2 tokens; punctuation and
+        # special chars in AAAK (|, +, :) each cost a token.
+        # ~1.3 tokens/word is a conservative average.
+        return max(1, int(len(words) * 1.3))
 
     def compression_stats(self, original_text: str, compressed: str) -> dict:
-        """Get compression statistics for a text->AAAK conversion."""
+        """Get size comparison stats for a text->AAAK conversion.
+
+        NOTE: AAAK is lossy summarization, not compression. The "ratio"
+        reflects how much shorter the summary is, not a compression ratio
+        in the traditional sense — information is lost.
+        """
         orig_tokens = self.count_tokens(original_text)
         comp_tokens = self.count_tokens(compressed)
         return {
-            "original_tokens": orig_tokens,
-            "compressed_tokens": comp_tokens,
-            "ratio": orig_tokens / max(comp_tokens, 1),
+            "original_tokens_est": orig_tokens,
+            "summary_tokens_est": comp_tokens,
+            "size_ratio": round(orig_tokens / max(comp_tokens, 1), 1),
             "original_chars": len(original_text),
-            "compressed_chars": len(compressed),
+            "summary_chars": len(compressed),
+            "note": "Estimates only. Use tiktoken for accurate counts. AAAK is lossy.",
         }
 
 
@@ -1021,9 +1058,9 @@ if __name__ == "__main__":
         encoded = dialect.encode_file(data)
         stats = dialect.compression_stats(json_str, encoded)
         print("=== COMPRESSION STATS ===")
-        print(f"JSON:     ~{stats['original_tokens']:,} tokens")
-        print(f"AAAK:     ~{stats['compressed_tokens']:,} tokens")
-        print(f"Ratio:    {stats['ratio']:.0f}x")
+        print(f"JSON:     ~{stats['original_tokens_est']:,} tokens (est)")
+        print(f"AAAK:     ~{stats['summary_tokens_est']:,} tokens (est)")
+        print(f"Ratio:    {stats['size_ratio']}x (lossy — information is lost)")
         print()
         print("=== AAAK DIALECT OUTPUT ===")
         print(encoded)
@@ -1043,8 +1080,12 @@ if __name__ == "__main__":
         text = " ".join(args)
         compressed = dialect.compress(text)
         stats = dialect.compression_stats(text, compressed)
-        print(f"Original: ~{stats['original_tokens']} tokens ({stats['original_chars']} chars)")
-        print(f"AAAK:     ~{stats['compressed_tokens']} tokens ({stats['compressed_chars']} chars)")
-        print(f"Ratio:    {stats['ratio']:.1f}x")
+        print(
+            f"Original: ~{stats['original_tokens_est']} tokens est ({stats['original_chars']} chars)"
+        )
+        print(
+            f"AAAK:     ~{stats['summary_tokens_est']} tokens est ({stats['summary_chars']} chars)"
+        )
+        print(f"Ratio:    {stats['size_ratio']}x (lossy summary, not lossless compression)")
         print()
         print(compressed)
