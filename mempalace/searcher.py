@@ -7,11 +7,28 @@ drawer query is the floor — always runs — and closet hits add a rank-based
 boost when they agree. Closets are a ranking *signal*, never a gate, so
 weak closets (regex extraction on narrative content) can only help, never
 hide drawers the direct path would have found.
+
+## Final-order note (two-stage sort) ##
+``search_memories`` applies **two** sort passes — if you expected the output
+to be monotonic in ``effective_distance``, here is why it isn't:
+
+  1. **Stage 1** (``scored.sort(_sort_key)``) — orders candidates by
+     ``effective_distance = vector_distance - closet_boost`` ascending,
+     then takes the top ``n_results`` for hydration.
+  2. **Stage 2** (``_hybrid_rank``) — re-orders the final slice by a convex
+     combination of vector similarity and min-max-normalised BM25 over the
+     candidate corpus (``0.6 * vec_sim + 0.4 * bm25_norm`` descending).
+
+The list the caller sees is Stage 2's output. ``_sort_key`` is therefore an
+internal / intermediate ranking signal, not the final one; pass
+``_debug=True`` to ``search_memories`` to see it preserved in the result
+dicts alongside timings.
 """
 
 import logging
 import math
 import re
+import time
 from pathlib import Path
 
 from .palace import get_closets_collection, get_collection
@@ -301,13 +318,15 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     print()
 
 
-def search_memories(
+def search_memories(  # noqa: C901 — end-to-end search pipeline; splitting hurts readability
     query: str,
     palace_path: str,
     wing: str = None,
     room: str = None,
     n_results: int = 5,
     max_distance: float = 0.0,
+    *,
+    _debug: bool = False,
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
 
@@ -323,7 +342,22 @@ def search_memories(
             cosine distance (hnsw:space=cosine) — 0 = identical, 2 = opposite.
             Results with distance > this value are filtered out. A value of
             0.0 disables filtering. Typical useful range: 0.3–1.0.
+        _debug: When True, preserve intermediate ranking keys
+            (``_sort_key``, ``_drawer_rank``) in each result dict and attach
+            per-stage timings to the top-level response under the ``timings``
+            key (ms): ``drawer_query_ms``, ``closet_query_ms``,
+            ``hydrate_ms``, ``hybrid_rerank_ms``, ``total_ms``. Intended for
+            tuning + regression tests; leave False in production.
+
+    Note on final order:
+        The returned ``results`` list is sorted by the BM25+vector hybrid
+        (see module docstring), *not* by ``effective_distance``. See the
+        "two-stage sort" block in ``searcher.py``'s module docstring for
+        the full rationale.
     """
+    _t_total_start = time.perf_counter()
+    timings: dict = {}
+
     try:
         drawers_col = get_collection(palace_path, create=False)
     except Exception as e:
@@ -350,7 +384,9 @@ def search_memories(
         }
         if where:
             dkwargs["where"] = where
+        _t0 = time.perf_counter()
         drawer_results = drawers_col.query(**dkwargs)
+        timings["drawer_query_ms"] = round((time.perf_counter() - _t0) * 1000, 2)
     except Exception as e:
         return {"error": f"Search error: {e}"}
 
@@ -365,7 +401,9 @@ def search_memories(
         }
         if where:
             ckwargs["where"] = where
+        _t0 = time.perf_counter()
         closet_results = closets_col.query(**ckwargs)
+        timings["closet_query_ms"] = round((time.perf_counter() - _t0) * 1000, 2)
         for rank, (cdoc, cmeta, cdist) in enumerate(
             zip(
                 _first_or_empty(closet_results, "documents"),
@@ -387,10 +425,12 @@ def search_memories(
     CLOSET_DISTANCE_CAP = 1.5  # cosine dist > 1.5 = too weak to use as signal
 
     scored: list = []
-    for doc, meta, dist in zip(
-        _first_or_empty(drawer_results, "documents"),
-        _first_or_empty(drawer_results, "metadatas"),
-        _first_or_empty(drawer_results, "distances"),
+    for drawer_rank, (doc, meta, dist) in enumerate(
+        zip(
+            _first_or_empty(drawer_results, "documents"),
+            _first_or_empty(drawer_results, "metadatas"),
+            _first_or_empty(drawer_results, "distances"),
+        )
     ):
         # Filter on raw distance before rounding to avoid precision loss.
         if max_distance > 0.0 and dist > max_distance:
@@ -427,6 +467,10 @@ def search_memories(
             "_sort_key": effective_dist,
             "_source_file_full": source,
             "_chunk_index": meta.get("chunk_index"),
+            # Drawer ordinal in the raw vector query (pre-boost, pre-hybrid).
+            # Preserved only when ``_debug=True``; useful to correlate the
+            # final hybrid order against the pure vector order.
+            "_drawer_rank": drawer_rank,
         }
         if closet_preview:
             entry["closet_preview"] = closet_preview
@@ -441,6 +485,7 @@ def search_memories(
     # closet said "this source is relevant"; vector may have picked the
     # wrong chunk within it; grep picks the right one.
     MAX_HYDRATION_CHARS = 10000
+    _t0 = time.perf_counter()
     for h in hits:
         if h["matched_via"] == "drawer":
             continue
@@ -489,17 +534,33 @@ def search_memories(
         h["text"] = expanded
         h["drawer_index"] = best_idx
         h["total_drawers"] = len(ordered_docs)
+    timings["hydrate_ms"] = round((time.perf_counter() - _t0) * 1000, 2)
 
-    # BM25 hybrid re-rank within the final candidate set.
+    # Stage 2 of the two-stage sort: BM25+vector hybrid re-rank within the
+    # final candidate set. This is the ordering the caller sees, not the
+    # ``effective_distance`` order from Stage 1. See module docstring.
+    _t0 = time.perf_counter()
     hits = _hybrid_rank(hits, query)
+    timings["hybrid_rerank_ms"] = round((time.perf_counter() - _t0) * 1000, 2)
+
+    # Internal keys are always popped from non-debug responses to keep the
+    # public contract tight; in debug mode ``_sort_key`` and ``_drawer_rank``
+    # survive for inspection.
     for h in hits:
-        h.pop("_sort_key", None)
         h.pop("_source_file_full", None)
         h.pop("_chunk_index", None)
+        if not _debug:
+            h.pop("_sort_key", None)
+            h.pop("_drawer_rank", None)
 
-    return {
+    timings["total_ms"] = round((time.perf_counter() - _t_total_start) * 1000, 2)
+
+    response = {
         "query": query,
         "filters": {"wing": wing, "room": room},
         "total_before_filter": len(_first_or_empty(drawer_results, "documents")),
         "results": hits,
     }
+    if _debug:
+        response["timings"] = timings
+    return response
