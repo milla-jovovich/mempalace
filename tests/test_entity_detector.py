@@ -474,6 +474,28 @@ def test_extract_candidates_with_cyrillic_locale():
         assert "Иван" in result
 
 
+def test_extract_candidates_with_hebrew_locale():
+    """The shipped Hebrew locale catches repeated Hebrew names."""
+    text = "נועה אמרה שלום. נועה שאלה למה. נועה חייכה. נועה החליטה להצטרף."
+    result = extract_candidates(text, languages=("en", "he"))
+    assert "נועה" in result
+    assert result["נועה"] >= 3
+
+
+def test_score_entity_hebrew_person_verbs():
+    """Hebrew person-verb patterns fire when the Hebrew locale is enabled."""
+    text = "נועה אמרה שלום. נועה שאלה למה. נועה חייכה. תודה נועה."
+    lines = text.splitlines()
+
+    en_only = score_entity("נועה", text, lines, languages=("en",))
+    multi = score_entity("נועה", text, lines, languages=("en", "he"))
+
+    assert multi["person_score"] > en_only["person_score"]
+    assert any(
+        "action" in signal or "addressed" in signal for signal in multi["person_signals"]
+    )
+
+
 def test_score_entity_unions_person_verbs_across_languages():
     """A non-English person-verb pattern fires when its locale is enabled."""
     locale = {
