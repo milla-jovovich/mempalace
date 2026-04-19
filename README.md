@@ -184,6 +184,8 @@ Tags are the cross-cutting-concerns layer that hierarchy can't provide. A conver
 
 Add `tags` metadata (3-8 per drawer, extracted during mining via TF-IDF or longest-non-stopword heuristic — we already have `_extract_keyword` in `searcher.py`). ChromaDB `where_document` and metadata `$contains` handle the query. This is additive: drawers still get a wing when derivation is unambiguous, and now they also get content tags for cross-wing retrieval.
 
+**Optional LLM enrichment layer (opt-in, additive):** Milla Jovovich's production setup adds a parallel Haiku pass at index time — Haiku reads each session and writes a short synthetic document ("Session topics: yoga, Tuesday routine. Summary: …") stored alongside the verbatim drawer. The verbatim is untouched; the topic doc improves semantic routing without replacing it. This maps directly onto the tag approach: the Haiku-extracted topics become the tag values. Benchmark: heuristic-tagged baseline scores 96.6% R@5 on LongMemEval; Haiku-enriched scoring is competitive before rerank. Implement as an opt-in `--enrich` flag on `mempalace mine` that calls Haiku per session and appends topic metadata. No API key required for the default path.
+
 ### P1 — Derive hierarchy from unambiguous signals *(half day)*
 
 Reframe from "best-effort classification" to "derive from what we actually know." The cwd at write time, the transcript file path, the project directory — these are unambiguous. Entity detection on drawer content is not.
@@ -202,7 +204,9 @@ Search should favor recent and frequently-accessed memories. Add `last_accessed`
 
 ### P3 — Feedback loops *(1-2 days)*
 
-Tier 1 (ship first): `mempalace_rate_memory(drawer_id, useful: bool)` MCP tool. Useful memories rank higher; flagged-not-useful get demoted. Tier 2 (later): query history table + implicit echo/fizzle signals once there's enough data. Hindsight calls this "reflect" — synthesizing across memories to identify what's useful.
+Tier 0 (cheapest signal, no user action): **LLM rerank.** After vector + BM25 returns top-K candidates, a Haiku call re-reads them against the original query and re-orders by answer relevance — a task embeddings fundamentally cannot do, since they measure semantic similarity not usefulness. Milla's production `longmemeval_bench.py` validates this: 96.6% R@5 baseline → **99.4% with Haiku rerank**, ~$0.001 per question. Implement as an opt-in `rerank=True` parameter on `search_memories` and `mempalace_search`. No schema changes needed; purely post-processing on the result set already returned.
+
+Tier 1 (ship next): `mempalace_rate_memory(drawer_id, useful: bool)` MCP tool. Useful memories rank higher; flagged-not-useful get demoted. Tier 2 (later): query history table + implicit echo/fizzle signals once there's enough data. Hindsight calls this "reflect" — synthesizing across memories to identify what's useful.
 
 ### P4 — KG auto-population + entity resolution *(1.5 days)*
 
@@ -220,7 +224,8 @@ Strip known injection patterns (role-play instructions, "ignore previous instruc
 
 ### Deprioritized
 
-- **AAAK work** — upstream's problem; we store verbatim.
+- **AAAK work** — upstream's problem; we store verbatim. Benchmark confirms it: AAAK mode scores 84.2% R@5 vs verbatim's 96.6% — the lossy encoding costs 12 points of recall.
+- **Flashcard / concept chunking** — Milla's personal pipeline (session_extract → session_chunker → palace_ingest_incremental) breaks sessions into small concept-scoped cards written in real time. It's a valid approach for token economy but violates Principle 1 — the cards are summaries, not verbatim. The LLM enrichment path in P0 gets the routing benefits without replacing the source text.
 - **Expanding hierarchy types** (tunnels, closets, new room categories). Adding more categories doesn't address the write-time classification problem. Tags (P0) and derived scope (P1) do.
 - **Benchmark work** — our value is "137K drawers of verbatim local history with fast search," not upstream's LongMemEval score.
 - **Full architecture rewrite** — not worth the migration cost.
