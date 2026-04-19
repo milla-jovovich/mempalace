@@ -11,7 +11,7 @@ MemPalace works natively with [Gemini CLI](https://github.com/google/gemini-cli)
 
 ```bash
 # Clone the repository
-git clone https://github.com/milla-jovovich/mempalace.git
+git clone https://github.com/MemPalace/mempalace.git
 cd mempalace
 
 # Create a virtual environment
@@ -40,12 +40,14 @@ You can optionally create or edit:
 Register MemPalace as an MCP server:
 
 ```bash
-gemini mcp add mempalace /absolute/path/to/mempalace/.venv/bin/python3 \
-  -m mempalace.mcp_server --scope user
+gemini mcp add --scope user mempalace \
+  -- /absolute/path/to/mempalace/.venv/bin/python -m mempalace.mcp_server
 ```
 
 ::: warning
-Use the **absolute path** to the Python binary to ensure it works from any directory.
+Use the **absolute path** to the Python binary so the server starts from any
+working directory. The `--` separator prevents Gemini from parsing
+`-m mempalace.mcp_server` as its own flags.
 :::
 
 ## Enable Auto-Saving

@@ -23,7 +23,7 @@ from collections import defaultdict
 
 from .config import MempalaceConfig
 from .palace import get_collection as _get_collection
-from .searcher import build_where_filter
+from .searcher import _first_or_empty, build_where_filter
 
 
 # ---------------------------------------------------------------------------
@@ -272,15 +272,17 @@ class Layer3:
         except Exception as e:
             return f"Search error: {e}"
 
-        docs = results["documents"][0]
-        metas = results["metadatas"][0]
-        dists = results["distances"][0]
+        docs = _first_or_empty(results, "documents")
+        metas = _first_or_empty(results, "metadatas")
+        dists = _first_or_empty(results, "distances")
 
         if not docs:
             return "No results found."
 
         lines = [f'## L3 — SEARCH RESULTS for "{query}"']
         for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
+            meta = meta or {}
+            doc = doc or ""
             similarity = round(1 - dist, 3)
             wing_name = meta.get("wing", "?")
             room_name = meta.get("room", "?")
@@ -323,10 +325,17 @@ class Layer3:
 
         hits = []
         for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
+            _first_or_empty(results, "documents"),
+            _first_or_empty(results, "metadatas"),
+            _first_or_empty(results, "distances"),
         ):
+            # ChromaDB may return None for doc/meta when a drawer's HNSW entry
+            # exists but its metadata/document rows haven't been materialized
+            # (partial-flush states, mid-delete, schema upgrade boundaries).
+            # Degrade gracefully — the hit still appears with real distance;
+            # storage fields show their fallback where content is missing.
+            meta = meta or {}
+            doc = doc or ""
             hits.append(
                 {
                     "text": doc,

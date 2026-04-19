@@ -2,13 +2,12 @@
 
 import logging
 
-from .cli import main  # noqa: E402
 from .version import __version__  # noqa: E402
 
-# ChromaDB 0.6.x ships a Posthog telemetry client whose capture() signature is
-# incompatible with the bundled posthog library, producing noisy stderr warnings
-# on every client operation ("Failed to send telemetry event … capture() takes
-# 1 positional argument but 3 were given").  Silence just that logger.
+# chromadb telemetry: posthog capture() was broken in 0.6.x causing noisy stderr
+# warnings ("capture() takes 1 positional argument but 3 were given"). In 1.x the
+# posthog client is a no-op stub, so this is now harmless — kept as a guard in
+# case future chromadb versions re-introduce real telemetry calls.
 logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
 
 # NOTE: the previous block set ``ORT_DISABLE_COREML=1`` on macOS arm64 as a
@@ -25,4 +24,4 @@ logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICA
 # intact, so the real fix is upgrading chromadb to 1.5.4+, which #581
 # proposes.  See #397 for the history of this line.
 
-__all__ = ["main", "__version__"]
+__all__ = ["__version__"]

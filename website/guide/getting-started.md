@@ -9,7 +9,7 @@ pip install mempalace
 ```
 
 ::: danger Security Warning
-The domain `mempalace.tech` is a **brand-squatting site** not affiliated with this project. It is known to run ad-redirects and potential malware. The official MemPalace distribution is only available via this [GitHub repository](https://github.com/milla-jovovich/mempalace) and [PyPI](https://pypi.org/project/mempalace/). Never install binaries or scripts from unofficial domains.
+The domain `mempalace.tech` is a **brand-squatting site** not affiliated with this project. It is known to run ad-redirects and potential malware. The official MemPalace distribution is only available via this [GitHub repository](https://github.com/MemPalace/mempalace) and [PyPI](https://pypi.org/project/mempalace/). Never install binaries or scripts from unofficial domains.
 :::
 
 ### Requirements
@@ -23,7 +23,7 @@ No API key required for the core local workflow. After installation, the main st
 ### From Source
 
 ```bash
-git clone https://github.com/milla-jovovich/mempalace.git
+git clone https://github.com/MemPalace/mempalace.git
 cd mempalace
 pip install -e ".[dev]"
 ```
@@ -34,14 +34,20 @@ Three steps: **init**, **mine**, **search**.
 
 ### 1. Initialize Your Palace
 
+`mempalace init` requires a project directory to scan. Pass a path,
+or `.` to use the current directory.
+
 ```bash
 mempalace init ~/projects/myapp
+# or, from inside the project:
+mempalace init .
 ```
 
 This scans your project directory and:
+
 - Detects people and projects from file content
 - Creates rooms from your folder structure
-- Sets up `~/.mempalace/` config directory
+- Ensures the `~/.mempalace/` config directory exists
 
 ### 2. Mine Your Data
 

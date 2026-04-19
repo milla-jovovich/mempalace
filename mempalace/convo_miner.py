@@ -25,6 +25,26 @@ from .palace import (
 )
 
 
+# Cached hall keywords — avoids re-reading config per drawer
+_HALL_KEYWORDS_CACHE = None
+
+
+def _detect_hall_cached(content: str) -> str:
+    """Route content to a hall using cached keywords. Same logic as miner.detect_hall."""
+    global _HALL_KEYWORDS_CACHE
+    if _HALL_KEYWORDS_CACHE is None:
+        from .config import MempalaceConfig
+
+        _HALL_KEYWORDS_CACHE = MempalaceConfig().hall_keywords
+    content_lower = content[:3000].lower()
+    scores = {}
+    for hall, keywords in _HALL_KEYWORDS_CACHE.items():
+        score = sum(1 for kw in keywords if kw in content_lower)
+        if score > 0:
+            scores[hall] = score
+    return max(scores, key=scores.get) if scores else "general"
+
+
 # File types that might contain conversations
 CONVO_EXTENSIONS = {
     ".txt",
@@ -35,7 +55,14 @@ CONVO_EXTENSIONS = {
 
 MIN_CHUNK_SIZE = 30
 CHUNK_SIZE = 800  # chars per drawer — align with miner.py
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB — skip files larger than this.
+# Matches miner.py at 500 MB. Long Claude Code sessions, multi-year
+# ChatGPT exports, and lifetime Slack dumps routinely exceed 10 MB; the
+# cap at that level silently dropped them with `continue`. Per-drawer
+# size is bounded by CHUNK_SIZE, but larger source files still produce
+# more drawers and therefore more embedding/storage work — and content
+# is normalized and loaded fully into memory before chunking, so memory
+# use also scales with source size.
 
 
 def _register_file(collection, source_file: str, wing: str, agent: str):
@@ -318,6 +345,7 @@ def _file_chunks_locked(collection, source_file, chunks, wing, room, agent, extr
                         {
                             "wing": wing,
                             "room": chunk_room,
+                            "hall": _detect_hall_cached(chunk["content"]),
                             "source_file": source_file,
                             "chunk_index": chunk["chunk_index"],
                             "added_by": agent,
@@ -450,7 +478,7 @@ def mine_convos(
             room_counts[r] += n
 
         total_drawers += drawers_added
-        print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
+        print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
 
     print(f"\n{'=' * 55}")
     print("  Done.")

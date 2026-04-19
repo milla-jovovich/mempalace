@@ -30,6 +30,21 @@ class SearchError(Exception):
 _TOKEN_RE = re.compile(r"\w{2,}", re.UNICODE)
 
 
+def _first_or_empty(results, key: str) -> list:
+    """Return the first inner list of a query result field, or [].
+
+    Accepts both the typed :class:`QueryResult` (attribute access) and the
+    pre-typed chroma dict shape; this polymorphism is retained so test mocks
+    still work and callers mid-migration do not crash. Preserves the empty-
+    collection semantics from issue #195: when no queries returned hits, the
+    outer list may be empty and indexing ``[0]`` would raise.
+    """
+    outer = getattr(results, key, None) if not isinstance(results, dict) else results.get(key)
+    if not outer:
+        return []
+    return outer[0] or []
+
+
 def _tokenize(text: str) -> list:
     """Lowercase + strip to alphanumeric tokens of length ≥ 2."""
     return _TOKEN_RE.findall(text.lower())
@@ -195,7 +210,7 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
         return {"text": matched_doc, "drawer_index": chunk_idx, "total_drawers": None}
 
     indexed_docs = []
-    for doc, meta in zip(neighbors.get("documents") or [], neighbors.get("metadatas") or []):
+    for doc, meta in zip(neighbors.documents, neighbors.metadatas):
         ci = meta.get("chunk_index")
         if isinstance(ci, int):
             indexed_docs.append((ci, doc))
@@ -210,8 +225,7 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
     total_drawers = None
     try:
         all_meta = drawers_col.get(where={"source_file": src}, include=["metadatas"])
-        ids = all_meta.get("ids") or []
-        total_drawers = len(ids) if ids else None
+        total_drawers = len(all_meta.ids) if all_meta.ids else None
     except Exception:
         pass
 
@@ -253,9 +267,9 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"\n  Search error: {e}")
         raise SearchError(f"Search error: {e}") from e
 
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    dists = results["distances"][0]
+    docs = _first_or_empty(results, "documents")
+    metas = _first_or_empty(results, "metadatas")
+    dists = _first_or_empty(results, "distances")
 
     if not docs:
         print(f'\n  No results found for: "{query}"')
@@ -275,6 +289,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         if similarity < min_similarity:
             continue
         displayed += 1
+        meta = meta or {}
         source = Path(meta.get("source_file", "?")).name
         wing_name = meta.get("wing", "?")
         room_name = meta.get("room", "?")
@@ -367,11 +382,12 @@ def search_memories(
         closet_results = closets_col.query(**ckwargs)
         for rank, (cdoc, cmeta, cdist) in enumerate(
             zip(
-                closet_results["documents"][0],
-                closet_results["metadatas"][0],
-                closet_results["distances"][0],
+                _first_or_empty(closet_results, "documents"),
+                _first_or_empty(closet_results, "metadatas"),
+                _first_or_empty(closet_results, "distances"),
             )
         ):
+            cmeta = cmeta or {}
             source = cmeta.get("source_file", "")
             if source and source not in closet_boost_by_source:
                 closet_boost_by_source[source] = (rank, cdist, cdoc[:200])
@@ -386,14 +402,15 @@ def search_memories(
 
     scored: list = []
     for doc, meta, dist in zip(
-        drawer_results["documents"][0],
-        drawer_results["metadatas"][0],
-        drawer_results["distances"][0],
+        _first_or_empty(drawer_results, "documents"),
+        _first_or_empty(drawer_results, "metadatas"),
+        _first_or_empty(drawer_results, "distances"),
     ):
         # Filter on raw distance before rounding to avoid precision loss.
         if max_distance > 0.0 and dist > max_distance:
             continue
 
+        meta = meta or {}
         source = meta.get("source_file", "") or ""
         boost = 0.0
         matched_via = "drawer"
@@ -414,6 +431,7 @@ def search_memories(
             "wing": meta.get("wing", "unknown"),
             "room": meta.get("room", "unknown"),
             "source_file": Path(source).name if source else "?",
+            "created_at": meta.get("filed_at", "unknown"),
             "similarity": similarity,
             "distance": round(dist, 4),
             "effective_distance": round(effective_dist, 4),
@@ -453,8 +471,8 @@ def search_memories(
             )
         except Exception:
             continue
-        docs = source_drawers.get("documents") or []
-        metas_ = source_drawers.get("metadatas") or []
+        docs = source_drawers.documents
+        metas_ = source_drawers.metadatas
         if len(docs) <= 1:
             continue
 
@@ -499,6 +517,6 @@ def search_memories(
     return {
         "query": query,
         "filters": {"wing": wing, "room": room},
-        "total_before_filter": len(drawer_results["documents"][0]),
+        "total_before_filter": len(_first_or_empty(drawer_results, "documents")),
         "results": hits,
     }
