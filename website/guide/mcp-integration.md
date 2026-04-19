@@ -24,6 +24,36 @@ claude mcp add mempalace -- python -m mempalace.mcp_server
 claude mcp add mempalace -- python -m mempalace.mcp_server --palace /path/to/palace
 ```
 
+### Docker / Remote Docker
+
+If MemPalace runs in Docker, a simple pattern is to keep the container alive
+and start the stdio MCP server via `docker exec` for each client connection.
+
+This is especially useful when you want:
+
+- one shared palace for multiple clients
+- an always-on remote host instead of a laptop-local install
+- containerized isolation and volume-based backup/restore
+- a small amount of operational resilience via Docker restart policies
+
+It is less compelling if you only use MemPalace from one local machine and are
+happy with a normal Python install.
+
+Local Docker host:
+
+```bash
+claude mcp add mempalace -- docker exec -i mempalace python -m mempalace.mcp_server --palace /data/palace
+```
+
+Remote Docker host over SSH:
+
+```bash
+claude mcp add mempalace -- ssh user@host docker exec -i mempalace python -m mempalace.mcp_server --palace /data/palace
+```
+
+See the full example at
+[`examples/docker/README.md`](https://github.com/MemPalace/mempalace/blob/develop/examples/docker/README.md).
+
 Now your AI has all 29 tools available. Ask it anything:
 
 > *"What did we decide about auth last month?"*

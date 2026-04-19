@@ -28,6 +28,16 @@ cd mempalace
 pip install -e ".[dev]"
 ```
 
+### In Docker
+
+If you want to keep MemPalace on a separate machine or inside a container, see
+the minimal Compose example in
+[`examples/docker/README.md`](https://github.com/MemPalace/mempalace/blob/develop/examples/docker/README.md).
+
+That setup is most useful when you want one shared palace for multiple clients,
+an always-on remote host, or a more isolated/portable deployment than a local
+Python install.
+
 ## Quick Start
 
 Three steps: **init**, **mine**, **search**.
