@@ -184,6 +184,7 @@ class TestSearchMemories:
         # Warnings explain the top-up
         assert any("sqlite+BM25" in w for w in result["warnings"])
 
+
 # ── search() (CLI print function) ─────────────────────────────────────
 
 

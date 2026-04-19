@@ -790,7 +790,11 @@ def scan_project(
                     continue
                 # Skip suspiciously large text files (SQL dumps, generated JSON, etc.)
                 # .jsonl files are Claude Code transcripts — exempt from junk cap
-                if not force_include and fsize > JUNK_FILE_SIZE and filepath.suffix.lower() != ".jsonl":
+                if (
+                    not force_include
+                    and fsize > JUNK_FILE_SIZE
+                    and filepath.suffix.lower() != ".jsonl"
+                ):
                     continue
             except OSError:
                 continue
