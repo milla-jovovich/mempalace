@@ -237,12 +237,22 @@ class KnowledgeGraph:
 
     # ── Query operations ──────────────────────────────────────────────────
 
-    def query_entity(self, name: str, as_of: str = None, direction: str = "outgoing"):
+    def query_entity(
+        self,
+        name: str,
+        as_of: str = None,
+        direction: str = "outgoing",
+        apply_decay: bool = False,
+        decay_config: dict = None,
+    ):
         """
         Get all relationships for an entity.
 
         direction: "outgoing" (entity → ?), "incoming" (? → entity), "both"
         as_of: date string — only return facts valid at that time
+        apply_decay: if True, compute effective_confidence using Weibull decay
+            based on extracted_at timestamp. Does not modify stored values.
+        decay_config: dict with k, lambda, floor keys (defaults: k=1.2, lambda=180, floor=0.5)
         """
         eid = self._entity_id(name)
 
@@ -257,19 +267,22 @@ class KnowledgeGraph:
                     query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
                     params.extend([as_of, as_of])
                 for row in conn.execute(query, params).fetchall():
-                    results.append(
-                        {
-                            "direction": "outgoing",
-                            "subject": name,
-                            "predicate": row["predicate"],
-                            "object": row["obj_name"],
-                            "valid_from": row["valid_from"],
-                            "valid_to": row["valid_to"],
-                            "confidence": row["confidence"],
-                            "source_closet": row["source_closet"],
-                            "current": row["valid_to"] is None,
-                        }
-                    )
+                    entry = {
+                        "direction": "outgoing",
+                        "subject": name,
+                        "predicate": row["predicate"],
+                        "object": row["obj_name"],
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
+                    }
+                    if apply_decay:
+                        entry["effective_confidence"] = self._decay_confidence(
+                            row["confidence"], row["extracted_at"], decay_config
+                        )
+                    results.append(entry)
 
             if direction in ("incoming", "both"):
                 query = "SELECT t.*, e.name as sub_name FROM triples t JOIN entities e ON t.subject = e.id WHERE t.object = ?"
@@ -278,21 +291,43 @@ class KnowledgeGraph:
                     query += " AND (t.valid_from IS NULL OR t.valid_from <= ?) AND (t.valid_to IS NULL OR t.valid_to >= ?)"
                     params.extend([as_of, as_of])
                 for row in conn.execute(query, params).fetchall():
-                    results.append(
-                        {
-                            "direction": "incoming",
-                            "subject": row["sub_name"],
-                            "predicate": row["predicate"],
-                            "object": name,
-                            "valid_from": row["valid_from"],
-                            "valid_to": row["valid_to"],
-                            "confidence": row["confidence"],
-                            "source_closet": row["source_closet"],
-                            "current": row["valid_to"] is None,
-                        }
-                    )
+                    entry = {
+                        "direction": "incoming",
+                        "subject": row["sub_name"],
+                        "predicate": row["predicate"],
+                        "object": name,
+                        "valid_from": row["valid_from"],
+                        "valid_to": row["valid_to"],
+                        "confidence": row["confidence"],
+                        "source_closet": row["source_closet"],
+                        "current": row["valid_to"] is None,
+                    }
+                    if apply_decay:
+                        entry["effective_confidence"] = self._decay_confidence(
+                            row["confidence"], row["extracted_at"], decay_config
+                        )
+                    results.append(entry)
 
         return results
+
+    def _decay_confidence(self, confidence, extracted_at, decay_config=None):
+        """Compute effective confidence with Weibull decay. Read-only."""
+        if not extracted_at:
+            return confidence
+        try:
+            from .reranker import weibull_survival, _parse_age_days
+
+            age = _parse_age_days(extracted_at)
+            if age <= 0:
+                return confidence
+            cfg = decay_config or {}
+            k = float(cfg.get("k", 1.2))
+            lam = float(cfg.get("lambda", 180))
+            floor = float(cfg.get("floor", 0.5))
+            s = weibull_survival(age, k, lam)
+            return round(confidence * (floor + (1.0 - floor) * s), 3)
+        except Exception:
+            return confidence
 
     def query_relationship(self, predicate: str, as_of: str = None):
         """Get all triples with a given relationship type."""

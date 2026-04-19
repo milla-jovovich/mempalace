@@ -234,6 +234,24 @@ class MempalaceConfig:
         return normalized
 
     @property
+    def rerank_config(self) -> dict:
+        """Rerank pipeline configuration.
+
+        Returns the 'rerank' section from config.json, or empty dict
+        if not configured. Example config::
+
+            {
+                "rerank": {
+                    "weibull_decay": {"enabled": true, "k": 1.5, "lambda": 90, "floor": 0.3},
+                    "keyword_boost": {"enabled": true, "weight": 0.30},
+                    "importance_boost": {"enabled": false, "weight": 0.15},
+                    "llm_rerank": {"enabled": false, "model": "claude-haiku-4-5-20251001", "top_k": 10}
+                }
+            }
+        """
+        return self._file_config.get("rerank", {})
+
+    @property
     def hook_silent_save(self):
         """Whether the stop hook saves directly (True) or blocks for MCP calls (False)."""
         return self._file_config.get("hooks", {}).get("silent_save", True)

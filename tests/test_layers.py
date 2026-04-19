@@ -381,9 +381,10 @@ def test_layer3_search_with_results():
     )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.searcher.get_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
+        mock_cfg.return_value.rerank_config = {}
         layer = Layer3(palace_path="/fake")
         result = layer.search("important")
 
@@ -397,9 +398,10 @@ def test_layer3_search_no_results():
     mock_col.query.return_value = _mock_query_results([], [], [])
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.searcher.get_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
+        mock_cfg.return_value.rerank_config = {}
         layer = Layer3(palace_path="/fake")
         result = layer.search("nothing")
 
@@ -415,9 +417,10 @@ def test_layer3_search_with_wing_filter():
     )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.searcher.get_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
+        mock_cfg.return_value.rerank_config = {}
         layer = Layer3(palace_path="/fake")
         layer.search("q", wing="proj")
 
@@ -434,9 +437,10 @@ def test_layer3_search_with_room_filter():
     )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.searcher.get_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
+        mock_cfg.return_value.rerank_config = {}
         layer = Layer3(palace_path="/fake")
         layer.search("q", room="backend")
 
@@ -453,9 +457,10 @@ def test_layer3_search_with_wing_and_room():
     )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.searcher.get_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
+        mock_cfg.return_value.rerank_config = {}
         layer = Layer3(palace_path="/fake")
         layer.search("q", wing="proj", room="backend")
 
@@ -468,9 +473,10 @@ def test_layer3_search_error():
     mock_col.query.side_effect = RuntimeError("search failed")
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.searcher.get_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
+        mock_cfg.return_value.rerank_config = {}
         layer = Layer3(palace_path="/fake")
         result = layer.search("q")
 
@@ -486,9 +492,10 @@ def test_layer3_search_truncates_long_docs():
     )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.searcher.get_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
+        mock_cfg.return_value.rerank_config = {}
         layer = Layer3(palace_path="/fake")
         result = layer.search("q")
 
@@ -504,9 +511,10 @@ def test_layer3_search_raw_returns_dicts():
     )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.searcher.get_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
+        mock_cfg.return_value.rerank_config = {}
         layer = Layer3(palace_path="/fake")
         hits = layer.search_raw("q")
 
@@ -526,9 +534,10 @@ def test_layer3_search_raw_with_filters():
     )
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.searcher.get_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
+        mock_cfg.return_value.rerank_config = {}
         layer = Layer3(palace_path="/fake")
         layer.search_raw("q", wing="w", room="r")
 
@@ -541,9 +550,10 @@ def test_layer3_search_raw_error():
     mock_col.query.side_effect = RuntimeError("fail")
     with (
         patch("mempalace.layers.MempalaceConfig") as mock_cfg,
-        patch("mempalace.layers._get_collection", return_value=mock_col),
+        patch("mempalace.searcher.get_collection", return_value=mock_col),
     ):
         mock_cfg.return_value.palace_path = "/fake"
+        mock_cfg.return_value.rerank_config = {}
         layer = Layer3(palace_path="/fake")
         result = layer.search_raw("q")
 
