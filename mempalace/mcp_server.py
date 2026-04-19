@@ -433,6 +433,7 @@ def tool_search(
     max_distance: float = 1.5,
     min_similarity: float = None,
     context: str = None,
+    full: bool = False,
 ):
     limit = max(1, min(limit, _MAX_RESULTS))
     try:
@@ -465,6 +466,17 @@ def tool_search(
         }
     if context:
         result["context_received"] = True
+    # Progressive disclosure: by default return a compact summary so the
+    # caller can decide which drawers to fetch in full. Callers that need
+    # verbatim text pass full=True (or follow up with mempalace_get_drawer).
+    if not full and isinstance(result.get("results"), list):
+        from .privacy import summarize_for_search
+
+        for hit in result["results"]:
+            text = hit.get("text", "")
+            hit["text"] = summarize_for_search(text, 30)
+            hit["summary"] = True
+            hit.pop("closet_preview", None)
     return result
 
 
@@ -614,6 +626,19 @@ def tool_add_drawer(
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
+    # Strip <private>...</private> blocks before they hit the embedding,
+    # the drawer ID hash, or the WAL. Refuse writes that are entirely
+    # wrapped in <private> tags.
+    from .privacy import redact_private
+
+    content, fully_private = redact_private(content)
+    if fully_private:
+        return {"success": False, "reason": "content fully marked private"}
+    try:
+        content = sanitize_content(content)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
     col = _get_collection(create=True)
     if not col:
         return _no_palace()
@@ -695,11 +720,44 @@ def tool_delete_drawer(drawer_id: str):
         return {"success": False, "error": str(e)}
 
 
-def tool_get_drawer(drawer_id: str):
-    """Fetch a single drawer by ID. Returns full content and metadata."""
+def tool_get_drawer(drawer_id):
+    """Fetch one or more drawers by ID.
+
+    ``drawer_id`` accepts a single string (returns ``{drawer_id, content,
+    wing, room, metadata}`` as before) or a list of strings (returns
+    ``{"drawers": [...]}`` with one entry per requested ID, including
+    ``{"drawer_id": ..., "error": "..."}`` for IDs that weren't found).
+    """
     col = _get_collection()
     if not col:
         return _no_palace()
+
+    # Batch form — caller passed a list/tuple of IDs.
+    if isinstance(drawer_id, (list, tuple)):
+        ids = [str(d) for d in drawer_id]
+        try:
+            result = col.get(ids=ids, include=["documents", "metadatas"])
+        except Exception as e:
+            return {"error": str(e)}
+        found = {}
+        for did, doc, meta in zip(
+            result.get("ids", []) or [],
+            result.get("documents", []) or [],
+            result.get("metadatas", []) or [],
+        ):
+            found[did] = {
+                "drawer_id": did,
+                "content": doc,
+                "wing": meta.get("wing", ""),
+                "room": meta.get("room", ""),
+                "metadata": meta,
+            }
+        drawers = [
+            found.get(did, {"drawer_id": did, "error": f"Drawer not found: {did}"}) for did in ids
+        ]
+        return {"drawers": drawers}
+
+    # Single-ID form — preserve the original response shape.
     try:
         result = col.get(ids=[drawer_id], include=["documents", "metadatas"])
         if not result["ids"]:
@@ -928,6 +986,18 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     """
     try:
         agent_name = sanitize_name(agent_name, "agent_name")
+        entry = sanitize_content(entry)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    # Strip <private>...</private> before embedding/logging. Refuse
+    # diary entries that are entirely private.
+    from .privacy import redact_private
+
+    entry, fully_private = redact_private(entry)
+    if fully_private:
+        return {"success": False, "reason": "content fully marked private"}
+    try:
         entry = sanitize_content(entry)
     except ValueError as e:
         return {"success": False, "error": str(e)}
@@ -1372,6 +1442,10 @@ TOOLS = {
                     "type": "string",
                     "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking.",
                 },
+                "full": {
+                    "type": "boolean",
+                    "description": "If true, return verbatim drawer text. Default false returns a ~30-char summary per hit plus drawer_id; fetch full content via mempalace_get_drawer.",
+                },
             },
             "required": ["query"],
         },
@@ -1425,11 +1499,15 @@ TOOLS = {
         "handler": tool_delete_drawer,
     },
     "mempalace_get_drawer": {
-        "description": "Fetch a single drawer by ID — returns full content and metadata.",
+        "description": "Fetch one or more drawers by ID — returns full content and metadata. Pass a single string for one drawer (existing shape) or a list of strings for batch fetch (returns {drawers: [...]}).",
         "input_schema": {
             "type": "object",
             "properties": {
-                "drawer_id": {"type": "string", "description": "ID of the drawer to fetch"},
+                "drawer_id": {
+                    "type": ["string", "array"],
+                    "items": {"type": "string"},
+                    "description": "Drawer ID, or list of IDs for batch fetch.",
+                },
             },
             "required": ["drawer_id"],
         },
