@@ -623,9 +623,12 @@ def search_memories(
             (#1222). Set by the MCP server when the HNSW capacity probe
             detects a divergence that would segfault chromadb on segment
             load.
-        lang: Locale code for BM25 stop-word filtering. When omitted, reads
-            ``MempalaceConfig().lang`` which resolves via env, config.json,
-            ``entity_languages[0]``, then falls back to English.
+        lang: Locale code for BM25 stop-word filtering (opt-in). When
+            omitted, reads ``MempalaceConfig().lang_explicit`` — returns an
+            empty set unless the user has set ``MEMPALACE_LANG`` /
+            ``MEMPAL_LANG`` or ``config.json["lang"]``. Palaces without an
+            explicit language skip filtering entirely, preserving pre-PR
+            byte-identical scoring.
     """
     if vector_disabled:
         return _bm25_only_via_sqlite(
