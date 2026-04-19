@@ -1015,7 +1015,13 @@ def tool_diary_read(agent_name: str, last_n: int = 10, wing: str = ""):
 
     try:
         results = col.get(
-            where={"$and": [{"wing": wing}, {"room": "diary"}]},
+            where={
+                "$and": [
+                    {"wing": wing},
+                    {"room": "diary"},
+                    {"agent": agent_name},
+                ]
+            },
             include=["documents", "metadatas"],
             limit=10000,
         )

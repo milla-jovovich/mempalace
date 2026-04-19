@@ -234,8 +234,8 @@ def test_stop_hook_saves_silently_at_interval(tmp_path):
     # Saves silently — systemMessage notification with themes, no block
     assert result["systemMessage"].startswith("\u2726 15 memories woven into the palace")
     assert "hooks" in result["systemMessage"]
-    # tmp_path has no "-Projects-" segment, so _wing_from_transcript_path falls back to "sessions"
-    mock_save.assert_called_once_with(str(transcript), "test", wing="sessions", toast=False)
+    # tmp_path has no "-Projects-" segment, so _wing_from_transcript_path falls back to "wing_sessions"
+    mock_save.assert_called_once_with(str(transcript), "test", wing="wing_sessions", toast=False)
 
 
 def test_stop_hook_derives_wing_from_transcript_path(tmp_path):
@@ -254,7 +254,7 @@ def test_stop_hook_derives_wing_from_transcript_path(tmp_path):
             {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
             state_dir=tmp_path,
         )
-    mock_save.assert_called_once_with(str(transcript), "test", wing="myproject", toast=False)
+    mock_save.assert_called_once_with(str(transcript), "test", wing="wing_myproject", toast=False)
 
 
 def test_stop_hook_tracks_save_point(tmp_path):
@@ -307,21 +307,21 @@ def test_precompact_allows(tmp_path):
 
 def test_wing_from_transcript_path_extracts_project():
     path = "/home/jp/.claude/projects/-home-jp-Projects-memorypalace/session.jsonl"
-    assert _wing_from_transcript_path(path) == "memorypalace"
+    assert _wing_from_transcript_path(path) == "wing_memorypalace"
 
 
 def test_wing_from_transcript_path_fallback():
-    assert _wing_from_transcript_path("/some/random/path.jsonl") == "sessions"
+    assert _wing_from_transcript_path("/some/random/path.jsonl") == "wing_sessions"
 
 
 def test_wing_from_transcript_path_windows_backslashes():
     path = "C:\\Users\\jp\\.claude\\projects\\-home-jp-Projects-myapp\\session.jsonl"
-    assert _wing_from_transcript_path(path) == "myapp"
+    assert _wing_from_transcript_path(path) == "wing_myapp"
 
 
 def test_wing_from_transcript_path_lowercases():
     path = "/home/jp/.claude/projects/-home-jp-Projects-MyProject/session.jsonl"
-    assert _wing_from_transcript_path(path) == "myproject"
+    assert _wing_from_transcript_path(path) == "wing_myproject"
 
 
 # --- _log ---
