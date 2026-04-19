@@ -13,6 +13,7 @@ import logging
 import math
 import re
 from pathlib import Path
+from typing import Optional
 
 from .palace import get_closets_collection, get_collection
 
@@ -306,7 +307,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     print()
 
 
-def _count_in_scope(drawers_col, where: dict) -> int | None:
+def _count_in_scope(drawers_col, where: dict) -> Optional[int]:
     """Return the total number of drawers matching ``where``.
 
     When ``where`` is empty (unfiltered scope), uses ``Collection.count()``
