@@ -7,8 +7,10 @@ Reads documents and metadata directly from the palace's SQLite database
 then re-imports everything into a fresh palace using the currently installed
 ChromaDB version.
 
-This fixes the 3.0.0 → 3.1.0 upgrade path where chromadb was downgraded
-from 1.5.x to 0.6.x, breaking the on-disk storage format.
+Since mempalace 3.2.0 (chromadb>=1.5.4), chromadb automatically migrates
+0.4.1+ databases on first open — no manual migration needed for upgrades.
+Use this command only when downgrading chromadb (e.g. rolling back to an
+older mempalace release) or if automatic migration fails.
 
 Usage:
     mempalace migrate                          # migrate default palace

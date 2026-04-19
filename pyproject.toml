@@ -21,6 +21,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Utilities",
 ]
@@ -36,6 +38,15 @@ Repository = "https://github.com/MemPalace/mempalace"
 
 [project.scripts]
 mempalace = "mempalace.cli:main"
+
+[project.entry-points."mempalace.backends"]
+chroma = "mempalace.backends.chroma:ChromaBackend"
+
+# RFC 002 source-adapter entry-point group. Core publishes no first-party
+# adapters under this group yet; ``miner.py`` and ``convo_miner.py`` migrate
+# onto ``BaseSourceAdapter`` in a follow-up PR. Third-party adapter packages
+# (``mempalace-source-cursor``, ``mempalace-source-git``, …) register here.
+[project.entry-points."mempalace.sources"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]

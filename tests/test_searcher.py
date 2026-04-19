@@ -184,7 +184,6 @@ class TestSearchMemories:
         # Warnings explain the top-up
         assert any("sqlite+BM25" in w for w in result["warnings"])
 
-
 # ── search() (CLI print function) ─────────────────────────────────────
 
 
@@ -261,6 +260,5 @@ class TestSearchCLI:
         captured = capsys.readouterr()
         assert "[1]" in captured.out
         assert "[2]" in captured.out
+        # Second result renders with fallback '?' values instead of crashing
         assert "second doc" in captured.out
-
-
