@@ -519,9 +519,7 @@ def hook_stop(data: dict, harness: str):
             try:
                 silent_guard = MempalaceConfig().hook_silent_save
             except AttributeError as exc:
-                _log(
-                    f"WARNING: could not read hook_silent_save: {exc}; defaulting to silent mode"
-                )
+                _log(f"WARNING: could not read hook_silent_save: {exc}; defaulting to silent mode")
         if not silent_guard:
             _output({})
             return
