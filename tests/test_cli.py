@@ -9,6 +9,7 @@ import pytest
 
 from mempalace.cli import (
     cmd_compress,
+    cmd_config_show_closets,
     cmd_hook,
     cmd_init,
     cmd_instructions,
@@ -79,7 +80,61 @@ def test_cmd_search_error_exits(mock_config_cls):
         assert exc_info.value.code == 1
 
 
-# ── cmd_instructions ───────────────────────────────────────────────────
+# ── cmd_config_show_closets ───────────────────────────────────────────────
+
+
+def test_cmd_config_show_closets_prints_defaults(tmp_path, capsys):
+    args = argparse.Namespace()
+    with patch("mempalace.cli.MempalaceConfig") as mock_cls:
+        from mempalace.config import DEFAULT_CLOSETS
+
+        instance = MagicMock()
+        instance.closets = dict(DEFAULT_CLOSETS)
+        instance.closets_source.return_value = {k: "default" for k in DEFAULT_CLOSETS}
+        instance._config_file = tmp_path / "config.json"
+        mock_cls.return_value = instance
+        cmd_config_show_closets(args)
+    out = capsys.readouterr().out
+    # Every documented key must appear, tagged with its source.
+    for key in DEFAULT_CLOSETS:
+        assert key in out, f"missing key {key!r} in output"
+    assert "[default]" in out
+    assert "MEMPALACE_CLOSET_*" in out
+
+
+def test_cmd_config_show_closets_marks_env_and_file_sources(tmp_path, capsys):
+    args = argparse.Namespace()
+    with patch("mempalace.cli.MempalaceConfig") as mock_cls:
+        instance = MagicMock()
+        instance.closets = {
+            "enabled": True,
+            "char_limit": 777,
+            "extract_window": 5000,
+            "rank_boosts": [0.5, 0.3, 0.1],
+            "distance_cap": 0.9,
+            "max_hydration_chars": 10000,
+            "fallback_min_lines": 3,
+        }
+        instance.closets_source.return_value = {
+            "enabled": "default",
+            "char_limit": "env",
+            "extract_window": "default",
+            "rank_boosts": "file",
+            "distance_cap": "env",
+            "max_hydration_chars": "default",
+            "fallback_min_lines": "default",
+        }
+        instance._config_file = tmp_path / "config.json"
+        mock_cls.return_value = instance
+        cmd_config_show_closets(args)
+    out = capsys.readouterr().out
+    assert "777" in out
+    assert "[env]" in out
+    assert "[file]" in out
+    assert "[default]" in out
+
+
+# ── cmd_instructions ──────────────────────────────────────────────────────────
 
 
 def test_cmd_instructions_calls_run_instructions():
