@@ -502,19 +502,22 @@ def hook_stop(data: dict, harness: str):
     # no loop to prevent — and Claude Code's plugin dispatch sets this flag on every
     # fire after the first, which would otherwise suppress all subsequent auto-saves.
     if str(stop_hook_active).lower() in ("true", "1", "yes"):
-        silent_guard = False
+        # Safe default: assume silent mode on any config-read failure so saves
+        # proceed rather than being silently dropped. Silent mode is the default
+        # (v3.3.0+), so if we can't read config, behave as if it's still on.
+        silent_guard = True
         try:
             from .config import MempalaceConfig
         except ImportError as exc:
             _log(
-                f"WARNING: could not import MempalaceConfig for stop guard: {exc}; preserving block-mode guard"
+                f"WARNING: could not import MempalaceConfig for stop guard: {exc}; defaulting to silent mode"
             )
         else:
             try:
                 silent_guard = MempalaceConfig().hook_silent_save
             except AttributeError as exc:
                 _log(
-                    f"WARNING: could not read hook_silent_save: {exc}; preserving block-mode guard"
+                    f"WARNING: could not read hook_silent_save: {exc}; defaulting to silent mode"
                 )
         if not silent_guard:
             _output({})
