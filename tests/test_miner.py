@@ -373,6 +373,52 @@ def test_status_handles_none_metadata_without_crash(tmp_path, capsys):
     assert "WING: proj" in out
 
 
+def test_status_paginates_instead_of_one_shot_fetch(tmp_path, capsys):
+    """status() must paginate col.get() instead of fetching all drawers at once.
+
+    At large palace sizes (~12k drawers on chroma 1.5.8) a single
+    ``col.get(limit=total)`` exceeds chroma's SQLite bound-variable cap and
+    raises ``chromadb.errors.InternalError: too many SQL variables``. The fix
+    is to fetch in pages. This test reproduces the failure mode with a fake
+    collection that rejects any oversized single-fetch call."""
+    from unittest.mock import patch
+
+    class PaginatingFakeCol:
+        def __init__(self, total: int):
+            self._total = total
+            self.get_calls: list[tuple[int, int]] = []
+
+        def count(self):
+            return self._total
+
+        def get(self, *args, **kwargs):
+            limit = kwargs.get("limit", self._total)
+            offset = kwargs.get("offset", 0)
+            # Simulate chroma's SQL-variable cap: any single fetch that
+            # asks for the whole palace at once blows up. Matches the
+            # real-world error seen at ~12k drawers.
+            if limit > 5000:
+                raise RuntimeError("too many SQL variables")
+            self.get_calls.append((limit, offset))
+            end = min(offset + limit, self._total)
+            return {
+                "ids": [f"d{i}" for i in range(offset, end)],
+                "metadatas": [{"wing": "w", "room": "r"} for _ in range(offset, end)],
+            }
+
+    fake = PaginatingFakeCol(total=12_000)
+    with patch("mempalace.miner.get_collection", return_value=fake):
+        status(str(tmp_path))
+
+    # Must have paginated — more than one call, each under the cap.
+    assert len(fake.get_calls) > 1
+    assert all(limit <= 5000 for (limit, _offset) in fake.get_calls)
+    # Every drawer must have been counted.
+    out = capsys.readouterr().out
+    assert "12000 drawers" in out
+    assert "WING: w" in out
+
+
 # ── normalize_version schema gate ───────────────────────────────────────
 #
 # When the normalization pipeline changes shape (e.g., strip_noise lands),

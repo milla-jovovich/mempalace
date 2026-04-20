@@ -847,10 +847,18 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
+    # Count by wing and room.
+    # Paginate: one-shot get(limit=total) exceeds chroma's SQLite bound-variable
+    # cap at large palace sizes (reproduced at ~12k drawers on chroma 1.5.8).
     total = col.count()
-    r = col.get(limit=total, include=["metadatas"]) if total else {"metadatas": []}
-    metas = r["metadatas"]
+    metas: list = []
+    offset = 0
+    while offset < total:
+        batch = col.get(limit=1000, offset=offset, include=["metadatas"])
+        if not batch["ids"]:
+            break
+        metas.extend(batch["metadatas"])
+        offset += len(batch["ids"])
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:

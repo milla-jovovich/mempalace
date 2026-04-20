@@ -221,7 +221,18 @@ def regenerate_closets(
         print("No drawers in palace.")
         return {"processed": 0}
 
-    all_data = drawers_col.get(limit=total, include=["documents", "metadatas"])
+    # Paginate: one-shot get(limit=total) exceeds chroma's SQLite bound-variable
+    # cap at large palace sizes (reproduced at ~12k drawers on chroma 1.5.8).
+    all_data: dict = {"ids": [], "documents": [], "metadatas": []}
+    offset = 0
+    while offset < total:
+        batch = drawers_col.get(limit=1000, offset=offset, include=["documents", "metadatas"])
+        if not batch["ids"]:
+            break
+        all_data["ids"].extend(batch["ids"])
+        all_data["documents"].extend(batch["documents"])
+        all_data["metadatas"].extend(batch["metadatas"])
+        offset += len(batch["ids"])
     by_source = {}
     for doc_id, doc, meta in zip(all_data["ids"], all_data["documents"], all_data["metadatas"]):
         source = meta.get("source_file", "unknown")
