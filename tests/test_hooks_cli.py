@@ -11,8 +11,10 @@ import pytest
 from mempalace.hooks_cli import (
     SAVE_INTERVAL,
     STOP_BLOCK_REASON,
+    _build_mine_cmd,
     _count_human_messages,
     _get_mine_dir,
+    _get_mine_target,
     _log,
     _maybe_auto_ingest,
     _mine_already_running,
@@ -477,9 +479,12 @@ def test_precompact_mines_transcript_dir(tmp_path, monkeypatch):
         )
     assert result == {}
     mock_run.assert_called_once()
-    # Verify mine dir is the transcript's parent
+    # Verify mine dir is the transcript's parent. The command is
+    # `<python> -m mempalace mine <dir> [flags]`, so the mine dir is always
+    # the argument immediately after "mine".
     call_args = mock_run.call_args[0][0]
-    assert str(tmp_path) in call_args[-1]
+    mine_idx = call_args.index("mine")
+    assert call_args[mine_idx + 1] == str(tmp_path)
 
 
 # --- run_hook ---
@@ -622,3 +627,156 @@ def test_stop_hook_rejects_injected_stop_hook_active(tmp_path):
     # The injected value is not "true"/"1"/"yes", so the hook should NOT pass through
     # It should count messages and block at the interval
     assert result["decision"] == "block"
+
+
+# --- _get_mine_target ---
+
+
+def test_get_mine_target_mempal_dir(tmp_path):
+    """MEMPAL_DIR pointing at a valid directory wins over transcript_path."""
+    mempal_dir = tmp_path / "project"
+    mempal_dir.mkdir()
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+    with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
+        assert _get_mine_target(str(transcript)) == (str(mempal_dir), "mempal_dir")
+
+
+def test_get_mine_target_transcript_fallback(tmp_path):
+    """Falls back to transcript parent dir with source='transcript'."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+    with patch.dict("os.environ", {}, clear=True):
+        assert _get_mine_target(str(transcript)) == (str(tmp_path), "transcript")
+
+
+def test_get_mine_target_empty():
+    """Returns ('', '') when nothing is available."""
+    with patch.dict("os.environ", {}, clear=True):
+        assert _get_mine_target("") == ("", "")
+
+
+def test_get_mine_target_invalid_mempal_dir_falls_back(tmp_path):
+    """Non-existent MEMPAL_DIR should not short-circuit; fall back to transcript."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+    with patch.dict("os.environ", {"MEMPAL_DIR": "/nonexistent/path"}):
+        assert _get_mine_target(str(transcript)) == (str(tmp_path), "transcript")
+
+
+# --- _build_mine_cmd ---
+
+
+def _assert_flag(cmd: list, flag: str, value: str):
+    """Assert that `flag value` appears as adjacent items in cmd."""
+    assert flag in cmd, f"expected {flag} in {cmd}"
+    assert cmd[cmd.index(flag) + 1] == value, f"expected {flag}={value} in {cmd}"
+
+
+def test_build_mine_cmd_transcript_defaults_to_convos_and_conversations_wing():
+    """Transcript-sourced mines default to --mode convos + --wing conversations."""
+    import sys as _sys
+
+    with patch.dict("os.environ", {}, clear=True):
+        cmd = _build_mine_cmd("/tmp/somedir", "transcript")
+    assert cmd[:5] == [_sys.executable, "-m", "mempalace", "mine", "/tmp/somedir"]
+    _assert_flag(cmd, "--mode", "convos")
+    _assert_flag(cmd, "--wing", "conversations")
+
+
+def test_build_mine_cmd_mempal_dir_keeps_projects_mode_and_no_wing():
+    """MEMPAL_DIR-sourced mines default to --mode projects with no --wing."""
+    with patch.dict("os.environ", {}, clear=True):
+        cmd = _build_mine_cmd("/tmp/projdir", "mempal_dir")
+    _assert_flag(cmd, "--mode", "projects")
+    assert "--wing" not in cmd
+
+
+def test_build_mine_cmd_explicit_mode_overrides_auto():
+    """MEMPAL_MODE=projects forces projects mode even on transcript source."""
+    with patch.dict("os.environ", {"MEMPAL_MODE": "projects"}):
+        cmd = _build_mine_cmd("/tmp/somedir", "transcript")
+    _assert_flag(cmd, "--mode", "projects")
+
+
+def test_build_mine_cmd_explicit_wing_overrides_default():
+    """MEMPAL_WING overrides the transcript default wing."""
+    with patch.dict("os.environ", {"MEMPAL_WING": "my-project"}):
+        cmd = _build_mine_cmd("/tmp/somedir", "transcript")
+    _assert_flag(cmd, "--wing", "my-project")
+
+
+def test_build_mine_cmd_extract_applied_only_in_convos_mode():
+    """MEMPAL_EXTRACT=general is forwarded in convos mode."""
+    with patch.dict("os.environ", {"MEMPAL_EXTRACT": "general"}):
+        cmd = _build_mine_cmd("/tmp/somedir", "transcript")
+    _assert_flag(cmd, "--extract", "general")
+
+
+def test_build_mine_cmd_extract_ignored_in_projects_mode():
+    """MEMPAL_EXTRACT is silently ignored when mode resolves to projects."""
+    with patch.dict("os.environ", {"MEMPAL_EXTRACT": "general"}):
+        cmd = _build_mine_cmd("/tmp/somedir", "mempal_dir")
+    assert "--extract" not in cmd
+
+
+def test_build_mine_cmd_invalid_mode_falls_back_to_auto_detect(tmp_path):
+    """Unknown MEMPAL_MODE falls back to auto-detect, NOT silent drop.
+
+    Silently dropping --mode would let the CLI's 'projects' default re-apply,
+    reintroducing the transcript-as-projects bug. Invalid values must trigger
+    auto-detect instead, and log a warning for debuggability.
+    """
+    with patch.dict("os.environ", {"MEMPAL_MODE": "convoss"}):
+        with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
+            cmd = _build_mine_cmd("/tmp/somedir", "transcript")
+    # Auto-detect from source=transcript → convos, even though MEMPAL_MODE
+    # was invalid.
+    _assert_flag(cmd, "--mode", "convos")
+    # Warning must be logged so typos surface in ~/.mempalace/hook_state/hook.log.
+    log_content = (tmp_path / "hook.log").read_text()
+    assert "MEMPAL_MODE" in log_content
+    assert "'convoss'" in log_content
+    assert "auto" in log_content
+
+
+def test_build_mine_cmd_invalid_extract_is_ignored_with_warning(tmp_path):
+    """Unknown MEMPAL_EXTRACT is dropped (miner uses its default) with a warning."""
+    with patch.dict("os.environ", {"MEMPAL_EXTRACT": "garbled"}):
+        with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
+            cmd = _build_mine_cmd("/tmp/somedir", "transcript")
+    assert "--extract" not in cmd
+    log_content = (tmp_path / "hook.log").read_text()
+    assert "MEMPAL_EXTRACT" in log_content
+    assert "'garbled'" in log_content
+
+
+# --- _maybe_auto_ingest end-to-end command shape ---
+
+
+def test_maybe_auto_ingest_transcript_uses_convos_mode(tmp_path):
+    """Auto-mine on a transcript path spawns mempalace mine --mode convos --wing conversations."""
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("")
+    with patch.dict("os.environ", {}, clear=True):
+        with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
+            with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
+                with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
+                    _maybe_auto_ingest(str(transcript))
+    cmd = mock_popen.call_args[0][0]
+    assert "--mode" in cmd and cmd[cmd.index("--mode") + 1] == "convos"
+    assert "--wing" in cmd and cmd[cmd.index("--wing") + 1] == "conversations"
+
+
+def test_maybe_auto_ingest_mempal_dir_uses_projects_mode(tmp_path):
+    """Auto-mine via MEMPAL_DIR stays in projects mode with no forced wing."""
+    mempal_dir = tmp_path / "project"
+    mempal_dir.mkdir()
+    with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
+        with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
+            with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
+                with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
+                    _maybe_auto_ingest()
+    cmd = mock_popen.call_args[0][0]
+    assert "--mode" in cmd and cmd[cmd.index("--mode") + 1] == "projects"
+    assert "--wing" not in cmd
