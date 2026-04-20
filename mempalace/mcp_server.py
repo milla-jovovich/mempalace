@@ -1003,10 +1003,10 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         return _no_palace()
 
     try:
-        results = col.get(
-            where={"$and": [{"wing": wing}, {"room": "diary"}]},
+        results = get_all(
+            col,
             include=["documents", "metadatas"],
-            limit=10000,
+            where={"$and": [{"wing": wing}, {"room": "diary"}]},
         )
 
         if not results["ids"]:

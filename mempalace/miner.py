@@ -15,6 +15,7 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
+from .chromadb_utils import get_all
 from .palace import (
     NORMALIZE_VERSION,
     SKIP_DIRS,
@@ -848,8 +849,7 @@ def status(palace_path: str):
         return
 
     # Count by wing and room
-    total = col.count()
-    r = col.get(limit=total, include=["metadatas"]) if total else {"metadatas": []}
+    r = get_all(col, include=["metadatas"])
     metas = r["metadatas"]
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
