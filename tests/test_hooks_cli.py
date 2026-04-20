@@ -26,6 +26,15 @@ from mempalace.hooks_cli import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_stop_hook_env(monkeypatch):
+    """Clear stop-hook env vars so a developer's shell config can't make
+    these tests flaky (e.g. a local ``MEMPAL_SAVE_INTERVAL=5`` would break
+    the interval assertions below)."""
+    for key in ("MEMPAL_SAVE_INTERVAL", "MEMPAL_STOP_HOOK_DISABLE"):
+        monkeypatch.delenv(key, raising=False)
+
+
 # --- _sanitize_session_id ---
 
 
