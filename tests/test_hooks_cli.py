@@ -112,9 +112,7 @@ def test_count_handles_list_content(tmp_path):
             {
                 "message": {
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": "<command-message>x</command-message>"}
-                    ],
+                    "content": [{"type": "text", "text": "<command-message>x</command-message>"}],
                 }
             },
         ],
@@ -282,10 +280,7 @@ def test_stop_hook_passthrough_below_interval(tmp_path):
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
         transcript,
-        [
-            {"message": {"role": "user", "content": f"msg {i}"}}
-            for i in range(SAVE_INTERVAL - 1)
-        ],
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL - 1)],
     )
     result = _capture_hook_output(
         hook_stop,
@@ -303,10 +298,7 @@ def test_stop_hook_saves_silently_at_interval(tmp_path):
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
         transcript,
-        [
-            {"message": {"role": "user", "content": f"msg {i}"}}
-            for i in range(SAVE_INTERVAL)
-        ],
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
     save_result = {"count": 15, "themes": ["hooks", "notifications"]}
     with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result) as mock_save:
@@ -345,10 +337,7 @@ def test_stop_hook_tracks_save_point(tmp_path):
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
         transcript,
-        [
-            {"message": {"role": "user", "content": f"msg {i}"}}
-            for i in range(SAVE_INTERVAL)
-        ],
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
     data = {
         "session_id": "test",
@@ -555,9 +544,7 @@ def test_maybe_auto_ingest_oserror(tmp_path):
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
             with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
-                with patch(
-                    "mempalace.hooks_cli.subprocess.Popen", side_effect=OSError("fail")
-                ):
+                with patch("mempalace.hooks_cli.subprocess.Popen", side_effect=OSError("fail")):
                     _maybe_auto_ingest()  # should not raise
 
 
@@ -664,10 +651,7 @@ def test_stop_hook_oserror_on_last_save_read(tmp_path):
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
         transcript,
-        [
-            {"message": {"role": "user", "content": f"msg {i}"}}
-            for i in range(SAVE_INTERVAL)
-        ],
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
     # Write invalid content to last save file
     (tmp_path / "test_last_save").write_text("not_a_number")
@@ -687,10 +671,7 @@ def test_stop_hook_oserror_on_write(tmp_path):
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
         transcript,
-        [
-            {"message": {"role": "user", "content": f"msg {i}"}}
-            for i in range(SAVE_INTERVAL)
-        ],
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
 
     def bad_write_text(*args, **kwargs):
@@ -908,10 +889,7 @@ def test_stop_hook_rejects_injected_stop_hook_active(tmp_path):
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
         transcript,
-        [
-            {"message": {"role": "user", "content": f"msg {i}"}}
-            for i in range(SAVE_INTERVAL)
-        ],
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
     with patch(
         "mempalace.hooks_cli._save_diary_direct", return_value={"count": 1, "themes": []}
