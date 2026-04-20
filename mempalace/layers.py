@@ -281,7 +281,6 @@ class Layer3:
 
         lines = [f'## L3 — SEARCH RESULTS for "{query}"']
         for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
-
             meta = meta or {}
             doc = doc or ""
             similarity = round(max(0.0, 1 - dist), 3)
