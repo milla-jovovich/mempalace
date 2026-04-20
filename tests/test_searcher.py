@@ -67,6 +67,35 @@ class TestSearchMemories:
         assert result["filters"]["wing"] == "project"
         assert result["filters"]["room"] == "backend"
 
+    def test_search_memories_skips_orphan_hnsw_entries(self, caplog):
+        """Orphan HNSW entries (meta=None or doc=None) must not crash search."""
+        mock_col = MagicMock()
+        mock_col.query.return_value = {
+            "documents": [["real doc", None, "another real"]],
+            "metadatas": [[{"wing": "w", "room": "r"}, None, {"wing": "w2", "room": "r2"}]],
+            "distances": [[0.1, 0.2, 0.3]],
+        }
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
+            result = search_memories("test", "/fake/path")
+        assert "error" not in result
+        assert len(result["results"]) == 2
+        assert result["results"][0]["wing"] == "w"
+        assert result["results"][1]["wing"] == "w2"
+
+    def test_search_memories_skips_orphan_when_doc_is_none(self):
+        """Null document (paired with any meta) is also an orphan."""
+        mock_col = MagicMock()
+        mock_col.query.return_value = {
+            "documents": [[None, "real"]],
+            "metadatas": [[{"wing": "w", "room": "r"}, {"wing": "w2", "room": "r2"}]],
+            "distances": [[0.1, 0.2]],
+        }
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
+            result = search_memories("test", "/fake/path")
+        assert "error" not in result
+        assert len(result["results"]) == 1
+        assert result["results"][0]["wing"] == "w2"
+
 
 # ── search() (CLI print function) ─────────────────────────────────────
 
@@ -119,3 +148,16 @@ class TestSearchCLI:
         captured = capsys.readouterr()
         # Should have output with at least one result block
         assert "[1]" in captured.out
+
+    def test_search_cli_skips_orphan_hnsw_entries(self, capsys):
+        """CLI search must not crash when a query result has null metadata."""
+        mock_col = MagicMock()
+        mock_col.query.return_value = {
+            "documents": [["real doc content", None]],
+            "metadatas": [[{"wing": "w", "room": "r", "source_file": "f.md"}, None]],
+            "distances": [[0.1, 0.2]],
+        }
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
+            search("test", "/fake/path")
+        captured = capsys.readouterr()
+        assert "real doc content" in captured.out

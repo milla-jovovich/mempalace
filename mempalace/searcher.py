@@ -75,6 +75,14 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     print(f"{'=' * 60}\n")
 
     for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
+        if meta is None or doc is None:
+            logger.warning(
+                "Skipping orphan HNSW entry at distance %.4f (meta=%s, doc=%s)",
+                dist,
+                "None" if meta is None else "ok",
+                "None" if doc is None else "ok",
+            )
+            continue
         similarity = round(max(0.0, 1 - dist), 3)
         source = Path(meta.get("source_file", "?")).name
         wing_name = meta.get("wing", "?")
@@ -148,6 +156,16 @@ def search_memories(
     for doc, meta, dist in zip(docs, metas, dists):
         # Filter on raw distance before rounding to avoid precision loss
         if max_distance > 0.0 and dist > max_distance:
+            continue
+        # Skip HNSW orphans — vectors whose main-table rows are gone return
+        # meta=None and/or doc=None. Never crash; log so they can be pruned.
+        if meta is None or doc is None:
+            logger.warning(
+                "Skipping orphan HNSW entry at distance %.4f (meta=%s, doc=%s)",
+                dist,
+                "None" if meta is None else "ok",
+                "None" if doc is None else "ok",
+            )
             continue
         hits.append(
             {

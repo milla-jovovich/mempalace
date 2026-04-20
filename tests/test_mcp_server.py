@@ -139,6 +139,31 @@ class TestHandleRequest:
         )
         assert resp["error"]["code"] == -32601
 
+    def test_tool_exception_message_includes_class_name(self, monkeypatch):
+        """When a tool handler raises, the -32000 error must surface the
+        exception class name, not a bare 'Internal tool error'. Diagnosing
+        production issues without log access depends on this."""
+        from mempalace import mcp_server
+
+        def boom(**kwargs):
+            raise KeyError("missing-key")
+
+        monkeypatch.setitem(
+            mcp_server.TOOLS,
+            "mempalace_status",
+            {**mcp_server.TOOLS["mempalace_status"], "handler": boom},
+        )
+        resp = mcp_server.handle_request(
+            {
+                "method": "tools/call",
+                "id": 99,
+                "params": {"name": "mempalace_status", "arguments": {}},
+            }
+        )
+        assert resp["error"]["code"] == -32000
+        assert "KeyError" in resp["error"]["message"]
+        assert "missing-key" in resp["error"]["message"]
+
     def test_unknown_method(self):
         from mempalace.mcp_server import handle_request
 
