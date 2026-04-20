@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from mempalace.hooks_cli import (
     _get_mine_dir,
     _log,
     _maybe_auto_ingest,
+    _mine_already_running,
     _parse_harness_input,
     _sanitize_session_id,
     _validate_transcript_path,
@@ -250,9 +252,10 @@ def test_maybe_auto_ingest_with_env(tmp_path):
     mempal_dir.mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
-            with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
-                _maybe_auto_ingest()
-                mock_popen.assert_called_once()
+            with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
+                with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
+                    _maybe_auto_ingest()
+                    mock_popen.assert_called_once()
 
 
 def test_maybe_auto_ingest_with_transcript(tmp_path):
@@ -261,9 +264,10 @@ def test_maybe_auto_ingest_with_transcript(tmp_path):
     transcript.write_text("")
     with patch.dict("os.environ", {}, clear=True):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
-            with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
-                _maybe_auto_ingest(str(transcript))
-                mock_popen.assert_called_once()
+            with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
+                with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
+                    _maybe_auto_ingest(str(transcript))
+                    mock_popen.assert_called_once()
 
 
 def test_maybe_auto_ingest_oserror(tmp_path):
@@ -272,8 +276,54 @@ def test_maybe_auto_ingest_oserror(tmp_path):
     mempal_dir.mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
-            with patch("mempalace.hooks_cli.subprocess.Popen", side_effect=OSError("fail")):
-                _maybe_auto_ingest()  # should not raise
+            with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
+                with patch("mempalace.hooks_cli.subprocess.Popen", side_effect=OSError("fail")):
+                    _maybe_auto_ingest()  # should not raise
+
+
+def test_maybe_auto_ingest_skips_when_mine_running(tmp_path):
+    """Does not spawn a new mine process if one is already running."""
+    mempal_dir = tmp_path / "project"
+    mempal_dir.mkdir()
+    with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
+        with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
+            with patch("mempalace.hooks_cli._mine_already_running", return_value=True):
+                with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
+                    _maybe_auto_ingest()
+                    mock_popen.assert_not_called()
+
+
+# --- _mine_already_running ---
+
+
+def test_mine_already_running_no_file(tmp_path):
+    """Returns False when no PID file exists."""
+    with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
+        assert _mine_already_running() is False
+
+
+def test_mine_already_running_dead_pid(tmp_path):
+    """Returns False when PID file contains a PID that no longer exists."""
+    pid_file = tmp_path / "mine.pid"
+    pid_file.write_text("999999999")  # almost certainly not a real PID
+    with patch("mempalace.hooks_cli._MINE_PID_FILE", pid_file):
+        assert _mine_already_running() is False
+
+
+def test_mine_already_running_live_pid(tmp_path):
+    """Returns True when PID file contains the current process's own PID."""
+    pid_file = tmp_path / "mine.pid"
+    pid_file.write_text(str(os.getpid()))  # current process is definitely alive
+    with patch("mempalace.hooks_cli._MINE_PID_FILE", pid_file):
+        assert _mine_already_running() is True
+
+
+def test_mine_already_running_corrupt_file(tmp_path):
+    """Returns False when PID file contains non-integer content."""
+    pid_file = tmp_path / "mine.pid"
+    pid_file.write_text("not-a-pid")
+    with patch("mempalace.hooks_cli._MINE_PID_FILE", pid_file):
+        assert _mine_already_running() is False
 
 
 # --- _get_mine_dir ---

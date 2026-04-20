@@ -55,7 +55,7 @@ mempalace init ~/projects/myapp
 ```bash
 # Mine content into the palace
 mempalace mine ~/projects/myapp                    # project files
-mempalace mine ~/chats/ --mode convos              # conversation exports
+mempalace mine ~/.claude/projects/ --mode convos   # Claude Code sessions (scope with --wing per project)
 
 # Search
 mempalace search "why did we switch to GraphQL"

@@ -343,6 +343,36 @@ def test_status_missing_palace_does_not_create_empty_collection(tmp_path, capsys
     assert not palace_path.exists()
 
 
+def test_status_handles_none_metadata_without_crash(tmp_path, capsys):
+    """status must not crash when col.get returns a None entry in metadatas.
+
+    Palaces can contain drawers whose metadata was never set (older mining
+    paths, drawers written by third-party tools). Before the guard, status
+    crashed mid-tally with ``AttributeError: 'NoneType' object has no
+    attribute 'get'`` at the wing/room histogram line."""
+    from unittest.mock import patch
+
+    class FakeCol:
+        def count(self):
+            return 2
+
+        def get(self, *args, **kwargs):
+            return {
+                "ids": ["a", "b"],
+                "documents": ["doc a", "doc b"],
+                "metadatas": [{"wing": "proj", "room": "r"}, None],
+            }
+
+    with patch("mempalace.miner.get_collection", return_value=FakeCol()):
+        status(str(tmp_path))
+
+    out = capsys.readouterr().out
+    # No crash; the None-metadata row is counted under the ?/? fallback
+    # alongside the real wing=proj row.
+    assert "WING: ?" in out
+    assert "WING: proj" in out
+
+
 # ── normalize_version schema gate ───────────────────────────────────────
 #
 # When the normalization pipeline changes shape (e.g., strip_noise lands),

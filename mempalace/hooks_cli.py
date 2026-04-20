@@ -150,20 +150,70 @@ def _get_mine_dir(transcript_path: str = "") -> str:
     return ""
 
 
+_MINE_PID_FILE = STATE_DIR / "mine.pid"
+
+
+def _pid_alive(pid: int) -> bool:
+    """Cross-platform existence check for a PID.
+
+    On POSIX, ``os.kill(pid, 0)`` is the well-known no-op existence probe.
+    On Windows, ``os.kill`` maps to ``TerminateProcess(handle, sig)`` and
+    would *terminate* the target process with exit code ``sig`` — using
+    it here would kill our own mine child (or worse, the caller itself).
+    Use ``OpenProcess`` + ``GetExitCodeProcess`` via ctypes instead.
+    """
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _mine_already_running() -> bool:
+    """Return True if a background mine process from a previous hook fire is still alive."""
+    try:
+        pid = int(_MINE_PID_FILE.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    return _pid_alive(pid)
+
+
+def _spawn_mine(cmd: list) -> None:
+    """Spawn a mine subprocess, write its PID to the lock file, log to hook.log."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = STATE_DIR / "hook.log"
+    with open(log_path, "a") as log_f:
+        proc = subprocess.Popen(cmd, stdout=log_f, stderr=log_f)
+    _MINE_PID_FILE.write_text(str(proc.pid))
+
+
 def _maybe_auto_ingest(transcript_path: str = ""):
     """Run mempalace mine in background if a mine directory is available."""
     mine_dir = _get_mine_dir(transcript_path)
     if not mine_dir:
         return
+    if _mine_already_running():
+        _log("Skipping auto-ingest: mine already running")
+        return
     try:
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        log_path = STATE_DIR / "hook.log"
-        with open(log_path, "a") as log_f:
-            subprocess.Popen(
-                [sys.executable, "-m", "mempalace", "mine", mine_dir],
-                stdout=log_f,
-                stderr=log_f,
-            )
+        _spawn_mine([sys.executable, "-m", "mempalace", "mine", mine_dir])
     except OSError:
         pass
 
