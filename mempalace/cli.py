@@ -37,6 +37,11 @@ from .config import MempalaceConfig
 from .version import __version__
 
 
+# Valid values for `mempalace mine --mode` and `--extract`. Shared with
+# hooks_cli.py so the auto-mine env-var validation tracks the CLI surface.
+MINE_MODES = ("projects", "convos")
+MINE_EXTRACTS = ("exchange", "general")
+
 _MEMPALACE_PROJECT_FILES = ("mempalace.yaml", "entities.json")
 
 
@@ -557,7 +562,7 @@ def main():
     p_mine.add_argument("dir", help="Directory to mine")
     p_mine.add_argument(
         "--mode",
-        choices=["projects", "convos"],
+        choices=list(MINE_MODES),
         default="projects",
         help="Ingest mode: 'projects' for code/docs (default), 'convos' for chat exports",
     )
@@ -584,7 +589,7 @@ def main():
     )
     p_mine.add_argument(
         "--extract",
-        choices=["exchange", "general"],
+        choices=list(MINE_EXTRACTS),
         default="exchange",
         help="Extraction strategy for convos mode: 'exchange' (default) or 'general' (5 memory types)",
     )

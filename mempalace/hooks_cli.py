@@ -138,16 +138,71 @@ def _output(data: dict):
     print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
-def _get_mine_dir(transcript_path: str = "") -> str:
-    """Determine directory to mine from MEMPAL_DIR or transcript path."""
+# Default wing for transcript-sourced auto-mines. Overridable via MEMPAL_WING.
+_TRANSCRIPT_DEFAULT_WING = "conversations"
+_AUTO_MODE = "auto"
+
+
+def _get_mine_target(transcript_path: str = "") -> tuple:
+    """Return (mine_dir, source) where source is 'mempal_dir', 'transcript', or ''."""
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
     if mempal_dir and os.path.isdir(mempal_dir):
-        return mempal_dir
+        return mempal_dir, "mempal_dir"
     if transcript_path:
         path = Path(transcript_path).expanduser()
         if path.is_file():
-            return str(path.parent)
-    return ""
+            return str(path.parent), "transcript"
+    return "", ""
+
+
+def _get_mine_dir(transcript_path: str = "") -> str:
+    """Legacy wrapper — returns only the mine dir. Prefer _get_mine_target."""
+    mine_dir, _ = _get_mine_target(transcript_path)
+    return mine_dir
+
+
+def _build_mine_cmd(mine_dir: str, source: str) -> list:
+    """Build `mempalace mine` argv, configurable via env vars.
+
+    MEMPAL_MODE    — one of MINE_MODES, or 'auto' (default). Auto picks convos
+                     for transcript-sourced mines, projects otherwise. Unknown
+                     values fall back to auto (with a warning in hook.log).
+    MEMPAL_WING    — explicit wing name. Transcript-sourced mines default to
+                     _TRANSCRIPT_DEFAULT_WING when unset; MEMPAL_DIR-sourced
+                     mines leave --wing out so the miner derives it.
+    MEMPAL_EXTRACT — one of MINE_EXTRACTS. Applied only in convos mode.
+                     Unknown values are dropped with a warning.
+    """
+    # Local import: cli.py imports run_hook from this module.
+    from .cli import MINE_EXTRACTS, MINE_MODES
+
+    cmd = [sys.executable, "-m", "mempalace", "mine", mine_dir]
+
+    mode = os.environ.get("MEMPAL_MODE", _AUTO_MODE).strip().lower() or _AUTO_MODE
+    if mode != _AUTO_MODE and mode not in MINE_MODES:
+        _log(
+            f"MEMPAL_MODE={mode!r} not in {MINE_MODES + (_AUTO_MODE,)}; falling back to auto-detect"
+        )
+        mode = _AUTO_MODE
+    if mode == _AUTO_MODE:
+        mode = "convos" if source == "transcript" else "projects"
+    cmd.extend(["--mode", mode])
+
+    wing = os.environ.get("MEMPAL_WING", "").strip()
+    if not wing and source == "transcript":
+        wing = _TRANSCRIPT_DEFAULT_WING
+    if wing:
+        cmd.extend(["--wing", wing])
+
+    if mode == "convos":
+        extract = os.environ.get("MEMPAL_EXTRACT", "").strip().lower()
+        if extract and extract not in MINE_EXTRACTS:
+            _log(f"MEMPAL_EXTRACT={extract!r} not in {MINE_EXTRACTS}; using miner default")
+            extract = ""
+        if extract:
+            cmd.extend(["--extract", extract])
+
+    return cmd
 
 
 _MINE_PID_FILE = STATE_DIR / "mine.pid"
@@ -206,21 +261,21 @@ def _spawn_mine(cmd: list) -> None:
 
 def _maybe_auto_ingest(transcript_path: str = ""):
     """Run mempalace mine in background if a mine directory is available."""
-    mine_dir = _get_mine_dir(transcript_path)
+    mine_dir, source = _get_mine_target(transcript_path)
     if not mine_dir:
         return
     if _mine_already_running():
         _log("Skipping auto-ingest: mine already running")
         return
     try:
-        _spawn_mine([sys.executable, "-m", "mempalace", "mine", mine_dir])
+        _spawn_mine(_build_mine_cmd(mine_dir, source))
     except OSError:
         pass
 
 
 def _mine_sync(transcript_path: str = ""):
     """Run mempalace mine synchronously (for precompact -- data must land first)."""
-    mine_dir = _get_mine_dir(transcript_path)
+    mine_dir, source = _get_mine_target(transcript_path)
     if not mine_dir:
         return
     try:
@@ -228,7 +283,7 @@ def _mine_sync(transcript_path: str = ""):
         log_path = STATE_DIR / "hook.log"
         with open(log_path, "a") as log_f:
             subprocess.run(
-                [sys.executable, "-m", "mempalace", "mine", mine_dir],
+                _build_mine_cmd(mine_dir, source),
                 stdout=log_f,
                 stderr=log_f,
                 timeout=60,
