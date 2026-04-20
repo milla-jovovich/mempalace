@@ -57,9 +57,24 @@ MEMPAL_DIR=""
 # Read JSON input from stdin
 INPUT=$(cat)
 
+# Skip if project has no initialized mempalace wing (no mempalace.yaml found)
+WORKING_DIR=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cwd', ''))" 2>/dev/null)
+[ -z "$WORKING_DIR" ] && WORKING_DIR="$(pwd)"
+
+check_dir="$WORKING_DIR"
+while [ "$check_dir" != "/" ]; do
+    [ -f "$check_dir/mempalace.yaml" ] && break
+    check_dir="$(dirname "$check_dir")"
+done
+
+if [ ! -f "$check_dir/mempalace.yaml" ]; then
+    echo "{}"
+    exit 0
+fi
+
 SESSION_ID=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id','unknown'))" 2>/dev/null)
 
-echo "[$(date '+%H:%M:%S')] PRE-COMPACT triggered for session $SESSION_ID" >> "$STATE_DIR/hook.log"
+echo "[$(date '+%H:%M:%S')] PRE-COMPACT triggered for session $SESSION_ID in $WORKING_DIR" >> "$STATE_DIR/hook.log"
 
 # Optional: run mempalace ingest synchronously so memories land before compaction
 if [ -n "$MEMPAL_DIR" ] && [ -d "$MEMPAL_DIR" ]; then
