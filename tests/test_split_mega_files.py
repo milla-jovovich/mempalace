@@ -51,6 +51,30 @@ def test_extract_people_detects_names_from_content(monkeypatch):
     assert people == ["Alice", "Ben"]
 
 
+def test_extract_people_escapes_regex_metacharacters(monkeypatch):
+    """Names with regex metacharacters must not crash or false-match."""
+    # Dr. Smith: dot must match literal dot, not any character
+    monkeypatch.setattr(smf, "KNOWN_PEOPLE", ["Dr. Smith"])
+    smf._KNOWN_NAMES_CACHE = None
+
+    lines_exact = ["Talked with Dr. Smith about plans\n"]
+    assert "Dr. Smith" in smf.extract_people(lines_exact)
+
+    lines_false = ["Talked with Dr_ Smith about plans\n"]
+    assert "Dr. Smith" not in smf.extract_people(lines_false)
+
+
+def test_extract_people_no_crash_on_regex_metacharacters(monkeypatch):
+    """Names containing brackets, parens, or plus signs must not crash."""
+    dangerous_names = ["C++", "Mary (Smith)", "[Admin]", "A*B"]
+    monkeypatch.setattr(smf, "KNOWN_PEOPLE", dangerous_names)
+    smf._KNOWN_NAMES_CACHE = None
+
+    # Should not raise re.error — just run without crashing
+    result = smf.extract_people(["Some text with C++ mentioned\n"])
+    assert isinstance(result, list)
+
+
 # ── Config: force_reload and invalid JSON ──────────────────────────────
 
 

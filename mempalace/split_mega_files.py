@@ -141,7 +141,7 @@ def extract_people(lines):
 
     # Speaker tags: "Alice:", "Ben:", etc.
     for person in KNOWN_PEOPLE:
-        if re.search(rf"\b{person}\b", text, re.IGNORECASE):
+        if re.search(rf"\b{re.escape(person)}\b", text, re.IGNORECASE):
             found.add(person)
 
     # Working directory username hint — map to known people if configured
