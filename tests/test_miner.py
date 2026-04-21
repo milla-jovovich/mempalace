@@ -222,6 +222,44 @@ def test_scan_project_include_override_beats_skip_dirs():
         shutil.rmtree(tmpdir)
 
 
+def test_scan_project_exclude_pattern_by_extension(tmp_path):
+    """--exclude '**/*.json' skips all JSON files."""
+    write_file(tmp_path / "app.py", "x = 1\n" * 20)
+    write_file(tmp_path / "config.json", '{"key": "value"}\n' * 20)
+    assert scanned_files(tmp_path, exclude_patterns=["**/*.json"]) == ["app.py"]
+
+
+def test_scan_project_exclude_pattern_by_directory(tmp_path):
+    """--exclude 'resources/**' skips all files under resources/."""
+    write_file(tmp_path / "app.py", "x = 1\n" * 20)
+    write_file(tmp_path / "resources" / "data.json", '{"k": 1}\n' * 20)
+    write_file(tmp_path / "resources" / "schema.sql", "SELECT 1;\n" * 20)
+    assert scanned_files(tmp_path, exclude_patterns=["resources/**"]) == ["app.py"]
+
+
+def test_scan_project_exclude_multiple_patterns(tmp_path):
+    """Multiple exclude patterns all apply."""
+    write_file(tmp_path / "app.py", "x = 1\n" * 20)
+    write_file(tmp_path / "config.json", '{"k": 1}\n' * 20)
+    write_file(tmp_path / "schema.sql", "SELECT 1;\n" * 20)
+    assert scanned_files(
+        tmp_path, exclude_patterns=["**/*.json", "**/*.sql"]
+    ) == ["app.py"]
+
+
+def test_scan_project_force_include_beats_exclude(tmp_path):
+    """include_ignored overrides exclude_patterns for the same file."""
+    write_file(tmp_path / "app.py", "x = 1\n" * 20)
+    write_file(tmp_path / ".gitignore", "*.json\n")
+    write_file(tmp_path / "keep.json", '{"k": 1}\n' * 20)
+    result = scanned_files(
+        tmp_path,
+        exclude_patterns=["**/*.json"],
+        include_ignored=["keep.json"],
+    )
+    assert "keep.json" in result
+
+
 def test_scan_project_skip_dirs_still_apply_without_override():
     tmpdir = tempfile.mkdtemp()
     try:

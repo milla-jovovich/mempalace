@@ -910,6 +910,7 @@ def scan_project(
     project_dir: str,
     respect_gitignore: bool = True,
     include_ignored: list = None,
+    exclude_patterns: list = None,
 ) -> list:
     """Return list of all readable file paths."""
     project_path = Path(project_dir).expanduser().resolve()
@@ -954,6 +955,11 @@ def scan_project(
                 continue
             if filepath.suffix.lower() not in READABLE_EXTENSIONS and not exact_force_include:
                 continue
+            # Exclude patterns (from mempalace.yaml or --exclude flag)
+            if exclude_patterns and not force_include:
+                rel = str(filepath.relative_to(project_path))
+                if any(fnmatch.fnmatch(rel, pat) for pat in exclude_patterns):
+                    continue
             if respect_gitignore and active_matchers and not force_include:
                 if is_gitignored(filepath, active_matchers, is_dir=False):
                     continue
@@ -985,6 +991,7 @@ def mine(
     respect_gitignore: bool = True,
     include_ignored: list = None,
     files: list = None,
+    exclude_patterns: list = None,
 ):
     """Mine a project directory into the palace.
 
@@ -1006,6 +1013,7 @@ def mine(
             respect_gitignore=respect_gitignore,
             include_ignored=include_ignored,
             files=files,
+            exclude_patterns=exclude_patterns,
         )
 
     try:
@@ -1020,6 +1028,7 @@ def mine(
                 respect_gitignore=respect_gitignore,
                 include_ignored=include_ignored,
                 files=files,
+                exclude_patterns=exclude_patterns,
             )
     except MineAlreadyRunning:
         print(
@@ -1040,9 +1049,14 @@ def _mine_impl(
     respect_gitignore: bool = True,
     include_ignored: list = None,
     files: list = None,
+    exclude_patterns: list = None,
 ):
     project_path = Path(project_dir).expanduser().resolve()
     config = load_config(project_dir)
+
+    # Merge config-level excludes with CLI --exclude flags
+    config_excludes = config.get("exclude", []) or []
+    effective_excludes = list(config_excludes) + list(exclude_patterns or [])
 
     wing = wing_override or config["wing"]
     rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
@@ -1052,6 +1066,7 @@ def _mine_impl(
             project_dir,
             respect_gitignore=respect_gitignore,
             include_ignored=include_ignored,
+            exclude_patterns=effective_excludes,
         )
     if limit > 0:
         files = files[:limit]
@@ -1072,6 +1087,8 @@ def _mine_impl(
         print("  .gitignore: DISABLED")
     if include_ignored:
         print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
+    if effective_excludes:
+        print(f"  Exclude: {', '.join(effective_excludes)}")
     print(f"{'-' * 55}\n")
 
     if not dry_run:
