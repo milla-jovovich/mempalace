@@ -223,10 +223,11 @@ def test_scan_project_include_override_beats_skip_dirs():
 
 
 def test_scan_project_exclude_pattern_by_extension(tmp_path):
-    """--exclude '**/*.json' skips all JSON files."""
+    """--exclude '*.json' skips JSON files at any depth (fnmatch * matches /)."""
     write_file(tmp_path / "app.py", "x = 1\n" * 20)
     write_file(tmp_path / "config.json", '{"key": "value"}\n' * 20)
-    assert scanned_files(tmp_path, exclude_patterns=["**/*.json"]) == ["app.py"]
+    write_file(tmp_path / "src" / "nested.json", '{"k": 1}\n' * 20)
+    assert scanned_files(tmp_path, exclude_patterns=["*.json"]) == ["app.py"]
 
 
 def test_scan_project_exclude_pattern_by_directory(tmp_path):
@@ -254,7 +255,7 @@ def test_scan_project_force_include_beats_exclude(tmp_path):
     write_file(tmp_path / "keep.json", '{"k": 1}\n' * 20)
     result = scanned_files(
         tmp_path,
-        exclude_patterns=["**/*.json"],
+        exclude_patterns=["*.json"],
         include_ignored=["keep.json"],
     )
     assert "keep.json" in result
