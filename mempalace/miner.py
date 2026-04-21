@@ -69,7 +69,12 @@ SKIP_FILENAMES = {
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
-DRAWER_UPSERT_BATCH_SIZE = 1000
+DRAWER_UPSERT_BATCH_SIZE = 1000  # canonical fork knob — used by add_drawers()
+# Alias for upstream PR #1085's name; same semantic (ChromaDB hard cap is
+# 5461). Fork keeps the more conservative 1000 default for embedding-pass
+# memory headroom; raise it toward 5000 if mining throughput is a
+# bottleneck.
+CHROMA_BATCH_LIMIT = DRAWER_UPSERT_BATCH_SIZE
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB — skip files larger than this.
 # Long Claude Code sessions and large transcript exports routinely exceed
 # 10 MB. The cap exists as a defensive rail against pathological binary
@@ -733,62 +738,96 @@ def _extract_entities_for_metadata(content: str) -> str:
     return ";".join(capped)
 
 
-def _build_drawer_metadata(
-    wing: str,
-    room: str,
-    source_file: str,
-    chunk_index: int,
-    agent: str,
-    content: str,
-    source_mtime: Optional[float],
-) -> dict:
-    """Build the metadata dict for one drawer without upserting.
+def _build_drawer(wing, room, source_file, chunk_index, agent, content, now=None, source_mtime=None):
+    """Build the ID, document, and metadata for a single drawer.
 
-    Split out from ``add_drawer`` so ``process_file`` can batch all chunks
-    of a file into a single ``collection.upsert`` — one embedding forward
-    pass per batch instead of per chunk.
+    Shared by ``add_drawer`` (single insert) and ``add_drawers`` (batch insert)
+    so metadata construction stays DRY. Hoists ``datetime.now()`` and
+    ``os.path.getmtime()`` so callers can amortize them across all chunks
+    of a file.
     """
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
     metadata = {
         "wing": wing,
         "room": room,
         "source_file": source_file,
         "chunk_index": chunk_index,
         "added_by": agent,
-        "filed_at": datetime.now().isoformat(),
+        "filed_at": now or datetime.now().isoformat(),
         "normalize_version": NORMALIZE_VERSION,
+        "hall": detect_hall(content),
     }
     if source_mtime is not None:
         metadata["source_mtime"] = source_mtime
-    metadata["hall"] = detect_hall(content)
+    else:
+        try:
+            metadata["source_mtime"] = os.path.getmtime(source_file)
+        except OSError:
+            pass
     entities = _extract_entities_for_metadata(content)
     if entities:
         metadata["entities"] = entities
-    return metadata
+    return drawer_id, content, metadata
 
 
 def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
 ):
-    """Add one drawer to the palace.
-
-    Kept for backward compatibility with external callers. In-tree the
-    miner uses ``_build_drawer_metadata`` + a batched ``collection.upsert``
-    to amortize the embedding model's forward-pass cost across chunks.
-    """
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
-    try:
-        source_mtime = os.path.getmtime(source_file)
-    except OSError:
-        source_mtime = None
-    metadata = _build_drawer_metadata(
-        wing, room, source_file, chunk_index, agent, content, source_mtime
-    )
+    """Add one drawer to the palace."""
+    drawer_id, doc, metadata = _build_drawer(wing, room, source_file, chunk_index, agent, content)
     collection.upsert(
-        documents=[content],
+        documents=[doc],
         ids=[drawer_id],
         metadatas=[metadata],
     )
     return True
+
+
+def add_drawers(collection, wing, room, chunks, source_file, agent):
+    """Batch-insert multiple drawers in one ChromaDB call per sub-batch.
+
+    Collects all chunks into batch lists and upserts them in groups of
+    ``DRAWER_UPSERT_BATCH_SIZE`` (alias of ``CHROMA_BATCH_LIMIT``, kept
+    so existing fork tests that ``monkeypatch.setattr(miner,
+    "DRAWER_UPSERT_BATCH_SIZE", N)`` still drive the sub-batch loop).
+    Returns ``(drawers_added, batch_ids)``.
+    """
+    now = datetime.now().isoformat()
+    try:
+        source_mtime = os.path.getmtime(source_file)
+    except OSError:
+        source_mtime = None
+
+    batch_docs = []
+    batch_ids = []
+    batch_metas = []
+
+    for chunk in chunks:
+        drawer_id, doc, metadata = _build_drawer(
+            wing, room, source_file, chunk["chunk_index"], agent,
+            chunk["content"], now=now, source_mtime=source_mtime,
+        )
+        batch_docs.append(doc)
+        batch_ids.append(drawer_id)
+        batch_metas.append(metadata)
+
+    if not batch_docs:
+        return 0, []
+
+    # Sub-batch to stay under ChromaDB's max batch size (5461).
+    # DRAWER_UPSERT_BATCH_SIZE is kept as the public knob (fork-only,
+    # preserved across the upstream #1085 cherry-pick); CHROMA_BATCH_LIMIT
+    # is upstream's name for the same constant.
+    drawers_added = 0
+    for i in range(0, len(batch_docs), DRAWER_UPSERT_BATCH_SIZE):
+        collection.upsert(
+            documents=batch_docs[i : i + DRAWER_UPSERT_BATCH_SIZE],
+            ids=batch_ids[i : i + DRAWER_UPSERT_BATCH_SIZE],
+            metadatas=batch_metas[i : i + DRAWER_UPSERT_BATCH_SIZE],
+        )
+        drawers_added += len(batch_docs[i : i + DRAWER_UPSERT_BATCH_SIZE])
+
+    return drawers_added, batch_ids
 
 
 # =============================================================================
@@ -847,51 +886,21 @@ def process_file(
         except Exception:
             pass
 
-        # Batch chunks into bounded upserts so the embedding model sees many
-        # chunks per forward pass without building one huge Chroma/SQLite
-        # request for pathological files. A bad chunk can fail its sub-batch;
-        # that is the deliberate trade-off for amortizing embedding overhead.
-        try:
-            source_mtime = os.path.getmtime(source_file)
-        except OSError:
-            source_mtime = None
-
-        drawers_added = 0
-        for batch_start in range(0, len(chunks), DRAWER_UPSERT_BATCH_SIZE):
-            batch_docs: list = []
-            batch_ids: list = []
-            batch_metas: list = []
-            for chunk in chunks[batch_start : batch_start + DRAWER_UPSERT_BATCH_SIZE]:
-                drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
-                batch_docs.append(chunk["content"])
-                batch_ids.append(drawer_id)
-                batch_metas.append(
-                    _build_drawer_metadata(
-                        wing,
-                        room,
-                        source_file,
-                        chunk["chunk_index"],
-                        agent,
-                        chunk["content"],
-                        source_mtime,
-                    )
-                )
-            collection.upsert(
-                documents=batch_docs,
-                ids=batch_ids,
-                metadatas=batch_metas,
-            )
-            drawers_added += len(batch_docs)
+        # Batch all chunks through a single add_drawers() call — sub-
+        # batches at DRAWER_UPSERT_BATCH_SIZE so the embedding model sees
+        # many chunks per forward pass without building one huge
+        # Chroma/SQLite request for pathological files. A bad chunk fails
+        # its sub-batch; that is the deliberate trade-off for amortizing
+        # embedding overhead. (Upstream PR #1085, cherry-picked.)
+        drawers_added, batch_ids = add_drawers(
+            collection, wing, room, chunks, source_file, agent,
+        )
 
         # Build closet — the searchable index pointing to these drawers.
         # Purge first: a re-mine (mtime change or normalize_version bump) must
         # fully replace the prior closets, not append to them.
         if closets_col and drawers_added > 0:
-            drawer_ids = [
-                f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(c['chunk_index'])).encode()).hexdigest()[:24]}"
-                for c in chunks
-            ]
-            closet_lines = build_closet_lines(source_file, drawer_ids, content, wing, room)
+            closet_lines = build_closet_lines(source_file, batch_ids, content, wing, room)
             closet_id_base = (
                 f"closet_{wing}_{room}_{hashlib.sha256(source_file.encode()).hexdigest()[:24]}"
             )
