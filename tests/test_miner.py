@@ -80,7 +80,19 @@ def test_scan_project_respects_gitignore():
     finally:
         shutil.rmtree(tmpdir)
 
+def test_scan_project_includes_kotlin_files():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+        write_file(
+            project_root / "src" / "Main.kt",
+            'fun main() {\n    println("hello")\n}\n' * 20,
+        )
 
+        assert scanned_files(project_root) == ["src/Main.kt"]
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        
 def test_scan_project_respects_nested_gitignore():
     tmpdir = tempfile.mkdtemp()
     try:
