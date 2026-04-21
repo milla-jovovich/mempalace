@@ -212,6 +212,7 @@ def get_entity_patterns(languages=("en",)) -> dict:
         the consumer compiles them directly with no further wrapping.
       - ``direct_address_pattern`` is returned as a list of per-language
         alternation patterns (not concatenated — each is applied separately).
+        ``direct_address_patterns`` is kept as a backwards-compatible alias.
 
     Locales with combining-mark scripts can declare ``boundary_chars`` in
     their entity section (e.g. ``"\\\\w\\\\u0900-\\\\u097F"`` for Hindi);
@@ -262,6 +263,7 @@ def get_entity_patterns(languages=("en",)) -> dict:
         "person_verb_patterns": _dedupe(acc["person_verbs"]),
         "pronoun_patterns": _dedupe(acc["pronouns"]),
         "dialogue_patterns": _dedupe(acc["dialogue"]),
+        "direct_address_pattern": acc["direct_address"],
         "direct_address_patterns": acc["direct_address"],
         "project_verb_patterns": _dedupe(acc["project_verbs"]),
         "stopwords": sorted(acc["stopwords"]),
