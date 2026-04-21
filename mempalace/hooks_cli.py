@@ -90,6 +90,12 @@ def _output(data: dict):
 def _maybe_auto_ingest():
     """If MEMPAL_DIR is set and exists, run mempalace mine in background."""
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
+    if mempal_dir:
+        # Resolve to real path to prevent symlink traversal to sensitive directories
+        try:
+            mempal_dir = os.path.realpath(mempal_dir)
+        except (OSError, ValueError):
+            return
     if mempal_dir and os.path.isdir(mempal_dir):
         try:
             log_path = STATE_DIR / "hook.log"
@@ -187,6 +193,11 @@ def hook_precompact(data: dict, harness: str):
 
     # Optional: auto-ingest synchronously before compaction (so memories land first)
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
+    if mempal_dir:
+        try:
+            mempal_dir = os.path.realpath(mempal_dir)
+        except (OSError, ValueError):
+            mempal_dir = ""
     if mempal_dir and os.path.isdir(mempal_dir):
         try:
             log_path = STATE_DIR / "hook.log"

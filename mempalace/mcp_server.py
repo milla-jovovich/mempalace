@@ -246,7 +246,14 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
+_SEARCH_LIMIT_MAX = 100  # Guard against OOM from unbounded result requests
+
+
 def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+    if not isinstance(limit, int) or limit < 1:
+        limit = 5
+    if limit > _SEARCH_LIMIT_MAX:
+        limit = _SEARCH_LIMIT_MAX
     return search_memories(
         query,
         palace_path=_config.palace_path,
@@ -333,6 +340,9 @@ def tool_add_drawer(
         content = sanitize_content(content)
     except ValueError as e:
         return {"success": False, "error": str(e)}
+    # Sanitize metadata-only fields: strip null bytes and cap length
+    if source_file is not None:
+        source_file = str(source_file).replace(" ", "")[:500]
 
     col = _get_collection(create=True)
     if not col:
@@ -413,8 +423,13 @@ def tool_delete_drawer(drawer_id: str):
 # ==================== KNOWLEDGE GRAPH ====================
 
 
+_KG_VALID_DIRECTIONS = {"outgoing", "incoming", "both"}
+
+
 def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
     """Query the knowledge graph for an entity's relationships."""
+    if direction not in _KG_VALID_DIRECTIONS:
+        return {"success": False, "error": f"direction must be one of: {sorted(_KG_VALID_DIRECTIONS)}"}
     results = _kg.query_entity(entity, as_of=as_of, direction=direction)
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
 
@@ -485,6 +500,8 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     try:
         agent_name = sanitize_name(agent_name, "agent_name")
         entry = sanitize_content(entry)
+        if topic != "general":
+            topic = sanitize_name(topic, "topic")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -540,11 +557,18 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
         return {"success": False, "error": str(e)}
 
 
+_DIARY_READ_MAX = 200  # Prevent unbounded memory reads
+
+
 def tool_diary_read(agent_name: str, last_n: int = 10):
     """
     Read an agent's recent diary entries. Returns the last N entries
     in chronological order — the agent's personal journal.
     """
+    if not isinstance(last_n, int) or last_n < 1:
+        last_n = 10
+    if last_n > _DIARY_READ_MAX:
+        last_n = _DIARY_READ_MAX
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     col = _get_collection()
     if not col:
@@ -931,16 +955,28 @@ def main():
             line = line.strip()
             if not line:
                 continue
-            request = json.loads(line)
+            try:
+                request = json.loads(line)
+            except json.JSONDecodeError as e:
+                # Return a well-formed JSON-RPC parse error so MCP clients can recover
+                error_resp = {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32700, "message": f"Parse error: {e}"},
+                }
+                sys.stdout.write(json.dumps(error_resp) + "
+")
+                sys.stdout.flush()
+                continue
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
+                sys.stdout.write(json.dumps(response) + "
+")
                 sys.stdout.flush()
         except KeyboardInterrupt:
             break
         except Exception as e:
             logger.error(f"Server error: {e}")
-
 
 if __name__ == "__main__":
     main()
