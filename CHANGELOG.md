@@ -36,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Improvements
 - Optimize entity detection with regex caching and pre-compilation (#828)
 - Extract locked filing block into helper to keep `mine_convos` under C901 complexity
+- **`trust_type` drawer metadata.** New `mempalace.trust_type` module defines a three-way prefix convention for `added_by` strings (`mechanical:<hook>`, `human:<user>`, `llm_judge:<model>`) and parses the high-level category. Both canonical `add_drawer` sites (`miner.add_drawer` and `mcp_server.tool_add_drawer`) auto-populate `trust_type` in drawer metadata when `added_by` carries a recognized prefix, so consumers can filter `where={"trust_type": "human"}` without pattern-matching agent strings downstream. Unrecognized `added_by` values leave `trust_type` unset — legacy callers see no behavior change.
 
 ### Documentation
 - Add `docs/CLOSETS.md` — closet layer overview
