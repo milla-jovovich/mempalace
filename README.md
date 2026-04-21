@@ -8,11 +8,11 @@
 
 ---
 
-Fork of [MemPalace v3.3.1](https://github.com/milla-jovovich/mempalace/releases/tag/v3.3.1), tracking `upstream/develop`. Running in production since 2026-04-09 — currently 152,794 drawers across 68 rooms in 23 wings, 7 open PRs upstream (#999 merged 2026-04-18; #681/#1000/#1023 merged 2026-04-19; #1036 closed as duplicate of approved #851). See upstream README for full feature docs.
+Fork of [MemPalace](https://github.com/milla-jovovich/mempalace), tracking `upstream/develop` through the 2026-04-21 sync. Upstream shipped [v3.3.2](https://github.com/MemPalace/mempalace/releases/tag/v3.3.2) on 2026-04-21 — contains our #681, #1000, #1023. Running in production since 2026-04-09 — currently 165,632 drawers across 68 rooms in 28 wings, 7 open PRs upstream (#999 merged 2026-04-18; #681/#1000/#1023 released in v3.3.2; #1036 closed as duplicate of approved #851). See upstream README for full feature docs.
 
 What this fork adds that you won't get from upstream yet: a **deterministic silent-save hook architecture** (zero data loss, `systemMessage` notification), **ChromaDB 1.5.x hardening** (`quarantine_stale_hnsw` drift recovery, segfault-trigger guards, 8-site `None`-metadata safety), and **search that never silently misses** (`search_memories` returns warnings + sqlite BM25 top-up + `available_in_scope` so callers can see what they aren't getting). Full list below.
 
-1063 tests pass on `main` · [Discussion #1017](https://github.com/MemPalace/mempalace/discussions/1017) introduces the fork upstream · [Issues on this repo](https://github.com/jphein/mempalace/issues) for fork-specific feedback.
+1096 tests pass on `main` · [Discussion #1017](https://github.com/MemPalace/mempalace/discussions/1017) introduces the fork upstream · [Issues on this repo](https://github.com/jphein/mempalace/issues) for fork-specific feedback.
 
 ## What this looks like in practice
 
@@ -47,7 +47,7 @@ We surveyed the memory-system landscape in April 2026 and found no verbatim-firs
 
 | System | Verbatim? | Local? | MCP? | Notes |
 |---|---|---|---|---|
-| **MemPalace** | Yes | Yes | Yes | What we have. 152,682 drawers as of 2026-04-18. |
+| **MemPalace** | Yes | Yes | Yes | What we have. 165,632 drawers as of 2026-04-21. |
 | [Hindsight](https://github.com/vectorize-io/hindsight) | No — LLM extracts facts | Yes (Docker) | Yes | Three ops: retain / recall / reflect. Original text is lost. |
 | [Mem0](https://github.com/mem0ai/mem0) / [OpenMemory](https://github.com/mem0ai/mem0/tree/main/openmemory) | No — extracts "memories" | Partial | Yes | Cloud-first; OpenMemory is the local-mode sibling. |
 | [Cognee](https://github.com/topoteretes/cognee) | No — knowledge graph | Yes | Yes (added since we wrote this row) | "Knowledge Engine" via ECL pipeline. |
@@ -104,7 +104,7 @@ Neither has automatic consolidation. Claude Code has unreleased "Auto Dream" con
 
 ## Fork Changes
 
-What this fork adds beyond upstream v3.3.1. Full list in the table; see the lead paragraph for the three differentiators worth reading first.
+What this fork adds beyond upstream v3.3.2. Full list in the table; see the lead paragraph for the three differentiators worth reading first.
 
 ### Still ahead of upstream
 
@@ -121,7 +121,7 @@ Status legend: a PR number means there's an open upstream PR for the change; **P
 | **Performance** | `miner.status()` paginates `col.get()` in 10 K-drawer batches — upstream's single `col.get(limit=total)` hits SQLite's max-variable limit on palaces with many thousands of drawers | tracked upstream in [#851](https://github.com/milla-jovovich/mempalace/pull/851) (approved, MERGEABLE, also fixes #850); fork's paginated version has been running since 2026-04-10 | `miner.py` |
 | **Config** | Configurable chunking parameters — `chunk_size` (default 800 chars), `chunk_overlap` (100), `min_chunk_size` (50) written to `config.json` and exposed via `MempalaceConfig` properties | [#1024](https://github.com/milla-jovovich/mempalace/pull/1024) | `config.py`, `miner.py` |
 | **Search** | Warnings + sqlite BM25 top-up when vector underdelivers — `search_memories` returns `warnings: [...]` and `available_in_scope: N` so callers see why recall was partial; fallback hits tagged `matched_via: "sqlite_bm25_fallback"`. The palace never silently returns fewer results than the scope contains (sibling of #951, addresses read-side of #823) | [#1005](https://github.com/milla-jovovich/mempalace/pull/1005) | `searcher.py` |
-| **Hooks** | Silent save mode — direct Python API, deterministic, zero data loss; extracts 2–3 topic words from recent messages for the diary title; optional desktop toast via `notify-send` | [#673](https://github.com/milla-jovovich/mempalace/pull/673) · APPROVED externally 2026-04-12 | `hooks_cli.py` |
+| **Hooks** | Silent save mode — direct Python API, deterministic, zero data loss; extracts 2–3 topic words from recent messages for the diary title; optional desktop toast via `notify-send` | [#673](https://github.com/milla-jovovich/mempalace/pull/673) · APPROVED externally 2026-04-12, rebased + squashed 2026-04-21, `MERGEABLE` | `hooks_cli.py` |
 | **Hooks** | `mempal_save_hook.sh` auto-detects Python — checks `MEMPAL_PYTHON` env var, then repo venv at `../../venv/bin/python3`, then system `python3`; no hardcoded path required. Same pattern applied to `.claude-plugin/` stop and precompact hooks. | fork-only | `hooks/mempal_save_hook.sh`, `.claude-plugin/hooks/mempal-stop-hook.sh`, `.claude-plugin/hooks/mempal-precompact-hook.sh` |
 | **Hooks** | Honor silent_save when `stop_hook_active:true` — Claude Code 2.1.114 sets the flag on every plugin-dispatched Stop fire after the first, and the legacy block-mode loop guard was suppressing every subsequent auto-save (silent, no log entry, marker stuck). Fixed to only skip on the flag in block mode | [#1021](https://github.com/milla-jovovich/mempalace/pull/1021) | `hooks_cli.py` |
 | **Hooks** | Write hook JSON to real stdout via `sys.modules` lookup — `mempalace.mcp_server` redirects stdout→stderr at import to protect MCP stdio from ChromaDB C-level noise; `_output()` checks `sys.modules` for an already-loaded `mcp_server` and reuses its `_REAL_STDOUT_FD`, otherwise writes directly to fd 1. Avoids triggering the redirect as a side effect. | [#1021](https://github.com/milla-jovovich/mempalace/pull/1021) | `hooks_cli.py` |
@@ -132,9 +132,12 @@ Status legend: a PR number means there's an open upstream PR for the change; **P
 ### Merged upstream (post-v3.3.1)
 
 - `None`-metadata guards across 8 read-path loops — `searcher.py` (CLI + API + closet-boost), `miner.status()`, and 4 MCP handlers ([#999](https://github.com/milla-jovovich/mempalace/pull/999), merged 2026-04-18)
-- `quarantine_stale_hnsw()` helper — renames HNSW segments whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidesteps read-path SIGSEGV ([#1000](https://github.com/milla-jovovich/mempalace/pull/1000), closes #823, merged 2026-04-19)
-- PID file guard prevents stacking `mempalace mine` processes on every hook fire ([#1023](https://github.com/milla-jovovich/mempalace/pull/1023), merged 2026-04-19), with a cross-platform PID-check fix (`os.kill(pid, 0)` on Windows *terminates* the target — replaced with `ctypes` `OpenProcess`/`GetExitCodeProcess`). Broader complementary work in [#976](https://github.com/milla-jovovich/mempalace/pull/976) covers direct-CLI fan-out + an HNSW `num_threads` pin.
-- Unicode checkmark replaced with ASCII `+` for Windows encoding ([#681](https://github.com/milla-jovovich/mempalace/pull/681), closes #535, merged 2026-04-19)
+
+**Released in [v3.3.2](https://github.com/MemPalace/mempalace/releases/tag/v3.3.2) on 2026-04-21:**
+
+- `quarantine_stale_hnsw()` helper — renames HNSW segments whose `data_level0.bin` is 1h+ older than `chroma.sqlite3`, sidesteps read-path SIGSEGV ([#1000](https://github.com/milla-jovovich/mempalace/pull/1000), closes #823)
+- PID file guard prevents stacking `mempalace mine` processes on every hook fire ([#1023](https://github.com/milla-jovovich/mempalace/pull/1023)), with a cross-platform PID-check fix (`os.kill(pid, 0)` on Windows *terminates* the target — replaced with `ctypes` `OpenProcess`/`GetExitCodeProcess`). Broader complementary work in [#976](https://github.com/milla-jovovich/mempalace/pull/976) covers direct-CLI fan-out + an HNSW `num_threads` pin.
+- Unicode checkmark replaced with ASCII `+` for Windows encoding ([#681](https://github.com/milla-jovovich/mempalace/pull/681), closes #535)
 
 ### Merged upstream (in v3.3.0)
 
@@ -256,13 +259,13 @@ Tools and patterns we're evaluating for the two open problems above. Not competi
 |---|---|---|
 | [#659](https://github.com/milla-jovovich/mempalace/pull/659) | `MERGEABLE`, bensig review addressed 2026-04-19 (wing_ prefix + agent filter) | Diary wing parameter |
 | [#660](https://github.com/milla-jovovich/mempalace/pull/660) | `MERGEABLE`, waiting review | L1 importance pre-filter |
-| [#661](https://github.com/milla-jovovich/mempalace/pull/661) | feedback addressed (threading.Lock in 8adf35a), waiting `@bensig` re-review | Graph cache with write-invalidation |
-| [#673](https://github.com/milla-jovovich/mempalace/pull/673) | APPROVED by external reviewer on 2026-04-12, rebased on develop 2026-04-19 | Deterministic hook saves (broader than upstream's narrower #966) |
+| [#661](https://github.com/milla-jovovich/mempalace/pull/661) | feedback addressed (threading.Lock in 8adf35a), pinged 2026-04-18, waiting `@bensig` re-review. GitHub holds the `CHANGES_REQUESTED` state until the reviewer dismisses it — this does not mean the PR owes a response. | Graph cache with write-invalidation |
+| [#673](https://github.com/milla-jovovich/mempalace/pull/673) | APPROVED externally 2026-04-12, rebased fresh on `upstream/develop` + squashed to 1 commit 2026-04-21, `MERGEABLE` | Deterministic hook saves (broader than upstream's narrower #966) |
 | [#1005](https://github.com/milla-jovovich/mempalace/pull/1005) | CI green (all platforms), Copilot + Dialectician review addressed, waiting maintainer review | Warnings + sqlite BM25 top-up — never silently return fewer results than scope contains |
 | [#1021](https://github.com/milla-jovovich/mempalace/pull/1021) | bensig review addressed 2026-04-19 (`silent_guard` default), CI green | Hook stdout routing + silent_save guard fixes for Claude Code 2.1.114 |
 | [#1024](https://github.com/milla-jovovich/mempalace/pull/1024) | CI green, filed 2026-04-18 | Configurable `chunk_size` / `chunk_overlap` / `min_chunk_size` |
 
-Merged since v3.3.1: [#681](https://github.com/milla-jovovich/mempalace/pull/681), [#999](https://github.com/milla-jovovich/mempalace/pull/999), [#1000](https://github.com/milla-jovovich/mempalace/pull/1000), [#1023](https://github.com/milla-jovovich/mempalace/pull/1023).
+Merged since v3.3.1: [#999](https://github.com/milla-jovovich/mempalace/pull/999) (2026-04-18), plus [#681](https://github.com/milla-jovovich/mempalace/pull/681), [#1000](https://github.com/milla-jovovich/mempalace/pull/1000), [#1023](https://github.com/milla-jovovich/mempalace/pull/1023) all shipped in [v3.3.2](https://github.com/MemPalace/mempalace/releases/tag/v3.3.2) (2026-04-21).
 
 Closed: [#626](https://github.com/milla-jovovich/mempalace/pull/626), [#633](https://github.com/milla-jovovich/mempalace/pull/633), [#662](https://github.com/milla-jovovich/mempalace/pull/662) (superseded by BM25), [#663](https://github.com/milla-jovovich/mempalace/pull/663) (upstream wrote [#757](https://github.com/milla-jovovich/mempalace/pull/757)), [#738](https://github.com/milla-jovovich/mempalace/pull/738) (docs stale), [#629](https://github.com/milla-jovovich/mempalace/pull/629) (superseded — upstream shipped batching + file locking), [#632](https://github.com/milla-jovovich/mempalace/pull/632) (superseded — `--version`, `purge`, `repair` all shipped in v3.3.0), [#1036](https://github.com/milla-jovovich/mempalace/pull/1036) (superseded by #851 which was already approved, also fixes #850).
 
@@ -283,7 +286,7 @@ mempalace status
 
 ```
 source venv/bin/activate
-python -m pytest tests/ -q              # ~1063 tests (benchmarks deselected)
+python -m pytest tests/ -q              # ~1096 tests (benchmarks deselected)
 mempalace status                         # palace health
 ruff check . && ruff format --check .    # lint + format
 ```
