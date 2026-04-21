@@ -92,7 +92,20 @@ def test_scan_project_includes_kotlin_files():
         assert scanned_files(project_root) == ["src/Main.kt"]
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
-        
+
+
+def test_scan_project_includes_kotlin_script_files():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        project_root = Path(tmpdir).resolve()
+        write_file(
+            project_root / "scripts" / "build.kts",
+            'tasks.register("hello") {\n    doLast { println("hello") }\n}\n' * 20,
+        )
+
+        assert scanned_files(project_root) == ["scripts/build.kts"]
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)        
 def test_scan_project_respects_nested_gitignore():
     tmpdir = tempfile.mkdtemp()
     try:
