@@ -14,7 +14,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-SAVE_INTERVAL = 15
+from mempalace.config import MempalaceConfig
+
 STATE_DIR = Path.home() / ".mempalace" / "hook_state"
 
 STOP_BLOCK_REASON = (
@@ -253,11 +254,22 @@ def _parse_harness_input(data: dict, harness: str) -> dict:
 
 
 def hook_stop(data: dict, harness: str):
-    """Stop hook: block every N messages for auto-save."""
+    """Stop hook: block every N messages for auto-save.
+
+    Interval is configurable via hooks.save_interval in config.json
+    or MEMPALACE_HOOKS_SAVE_INTERVAL env var.  Set to 0 to disable.
+    """
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
     stop_hook_active = parsed["stop_hook_active"]
     transcript_path = parsed["transcript_path"]
+
+    save_interval = MempalaceConfig().hooks_save_interval
+
+    # Interval 0 = disabled
+    if save_interval == 0:
+        _output({})
+        return
 
     # If already in a save cycle, let through (infinite-loop prevention)
     if str(stop_hook_active).lower() in ("true", "1", "yes"):
@@ -281,7 +293,7 @@ def hook_stop(data: dict, harness: str):
 
     _log(f"Session {session_id}: {exchange_count} exchanges, {since_last} since last save")
 
-    if since_last >= SAVE_INTERVAL and exchange_count > 0:
+    if since_last >= save_interval and exchange_count > 0:
         # Update last save point
         try:
             last_save_file.write_text(str(exchange_count), encoding="utf-8")
@@ -313,10 +325,19 @@ def hook_session_start(data: dict, harness: str):
 
 
 def hook_precompact(data: dict, harness: str):
-    """Precompact hook: mine transcript synchronously, then allow compaction."""
+    """Precompact hook: mine transcript synchronously, then allow compaction.
+
+    Controlled separately from stop hook via hooks.precompact config
+    or MEMPALACE_HOOKS_PRECOMPACT env var. Default: enabled.
+    """
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
     transcript_path = parsed["transcript_path"]
+
+    if not MempalaceConfig().hooks_precompact:
+        _log(f"PRE-COMPACT skipped (disabled) for session {session_id}")
+        _output({})
+        return
 
     _log(f"PRE-COMPACT triggered for session {session_id}")
 

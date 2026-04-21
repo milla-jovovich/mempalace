@@ -9,7 +9,6 @@ from unittest.mock import patch
 import pytest
 
 from mempalace.hooks_cli import (
-    SAVE_INTERVAL,
     STOP_BLOCK_REASON,
     _count_human_messages,
     _get_mine_dir,
@@ -24,6 +23,9 @@ from mempalace.hooks_cli import (
     hook_precompact,
     run_hook,
 )
+
+# Default save interval used by existing tests (matches config default)
+SAVE_INTERVAL = 15
 
 
 # --- _sanitize_session_id ---
@@ -120,9 +122,14 @@ def _capture_hook_output(hook_fn, data, harness="claude-code", state_dir=None):
     patches = [patch("mempalace.hooks_cli._output", side_effect=lambda d: buf.write(json.dumps(d)))]
     if state_dir:
         patches.append(patch("mempalace.hooks_cli.STATE_DIR", state_dir))
+    # If MempalaceConfig is not already patched by caller, provide defaults
+    mock_cfg = patch("mempalace.hooks_cli.MempalaceConfig")
+    patches.append(mock_cfg)
     with contextlib.ExitStack() as stack:
-        for p in patches:
-            stack.enter_context(p)
+        mocks = [stack.enter_context(p) for p in patches]
+        cfg_mock = mocks[-1]
+        cfg_mock.return_value.hooks_save_interval = SAVE_INTERVAL
+        cfg_mock.return_value.hooks_precompact = True
         hook_fn(data, harness)
     return json.loads(buf.getvalue())
 
@@ -622,3 +629,110 @@ def test_stop_hook_rejects_injected_stop_hook_active(tmp_path):
     # The injected value is not "true"/"1"/"yes", so the hook should NOT pass through
     # It should count messages and block at the interval
     assert result["decision"] == "block"
+
+
+# --- configurable save interval ---
+
+
+def _capture_hook_with_config(hook_fn, data, state_dir, save_interval=15, precompact=True):
+    """Run a hook with specific config values and capture output + _mine_sync calls."""
+    import io
+
+    buf = io.StringIO()
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(
+            patch("mempalace.hooks_cli._output", side_effect=lambda d: buf.write(json.dumps(d)))
+        )
+        stack.enter_context(patch("mempalace.hooks_cli.STATE_DIR", state_dir))
+        mock_cfg = stack.enter_context(patch("mempalace.hooks_cli.MempalaceConfig"))
+        mock_cfg.return_value.hooks_save_interval = save_interval
+        mock_cfg.return_value.hooks_precompact = precompact
+        mine_mock = stack.enter_context(patch("mempalace.hooks_cli._mine_sync"))
+        hook_fn(data, "claude-code")
+    return json.loads(buf.getvalue()), mine_mock
+
+
+def test_stop_hook_disabled_by_zero_interval(tmp_path):
+    """save_interval=0 disables the stop hook entirely."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(30)],
+    )
+    result, _ = _capture_hook_with_config(
+        hook_stop,
+        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        state_dir=tmp_path,
+        save_interval=0,
+    )
+    assert result == {}
+
+
+def test_stop_hook_custom_interval(tmp_path):
+    """save_interval=5 triggers after 5 messages, not 15."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(5)],
+    )
+    result, _ = _capture_hook_with_config(
+        hook_stop,
+        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        state_dir=tmp_path,
+        save_interval=5,
+    )
+    assert result["decision"] == "block"
+
+
+def test_stop_hook_custom_interval_not_reached(tmp_path):
+    """save_interval=50 does NOT trigger at 15 messages."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(15)],
+    )
+    result, _ = _capture_hook_with_config(
+        hook_stop,
+        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        state_dir=tmp_path,
+        save_interval=50,
+    )
+    assert result == {}
+
+
+def test_precompact_disabled_by_config(tmp_path):
+    """hooks.precompact=false skips the precompact mining (no _mine_sync call)."""
+    result, mine_mock = _capture_hook_with_config(
+        hook_precompact,
+        {"session_id": "test"},
+        state_dir=tmp_path,
+        precompact=False,
+    )
+    assert result == {}
+    mine_mock.assert_not_called()
+
+
+def test_precompact_enabled_by_default(tmp_path):
+    """Precompact mines synchronously by default and passes through (post-#863)."""
+    result, mine_mock = _capture_hook_with_config(
+        hook_precompact,
+        {"session_id": "test"},
+        state_dir=tmp_path,
+        save_interval=0,
+        precompact=True,
+    )
+    assert result == {}
+    mine_mock.assert_called_once()
+
+
+def test_stop_disabled_precompact_still_works(tmp_path):
+    """save_interval=0 doesn't affect precompact — they're independent."""
+    result, mine_mock = _capture_hook_with_config(
+        hook_precompact,
+        {"session_id": "test"},
+        state_dir=tmp_path,
+        save_interval=0,
+        precompact=True,
+    )
+    assert result == {}
+    mine_mock.assert_called_once()
