@@ -57,7 +57,7 @@ from .config import (  # noqa: E402
     sanitize_content,
 )
 from .version import __version__  # noqa: E402
-from .backends.chroma import ChromaBackend, ChromaCollection  # noqa: E402
+from .backends.chroma import ChromaBackend, ChromaCollection, quarantine_stale_hnsw  # noqa: E402
 from .query_sanitizer import sanitize_query  # noqa: E402
 from .searcher import search_memories  # noqa: E402
 from .palace_graph import (  # noqa: E402
@@ -101,6 +101,23 @@ if _args.palace:
     _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
 else:
     _kg = KnowledgeGraph()
+
+
+# Auto-recover from HNSW/SQLite drift before any ChromaDB client is opened.
+# Stale HNSW segments cause SIGSEGV on get_collection / add_drawer (issue
+# #1061, #823, chroma-core/chroma#2594). quarantine_stale_hnsw() is a no-op
+# when nothing has drifted and is internally exception-safe, so it's cheap
+# and safe to run unconditionally at startup.
+try:
+    _quarantined = quarantine_stale_hnsw(_config.palace_path)
+    if _quarantined:
+        logger.warning(
+            "Quarantined %d stale HNSW segment(s) on startup: %s",
+            len(_quarantined),
+            _quarantined,
+        )
+except Exception:
+    logger.exception("quarantine_stale_hnsw failed on startup (non-fatal)")
 
 
 _client_cache = None
