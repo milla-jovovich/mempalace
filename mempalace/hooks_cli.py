@@ -88,19 +88,34 @@ def _output(data: dict):
 
 
 def _maybe_auto_ingest():
-    """If MEMPAL_DIR is set and exists, run mempalace mine in background."""
+    """If MEMPAL_DIR is set and exists, run mempalace mine in background.
+
+    The path is resolved to an absolute path and passed as a positional
+    argument (not interpolated into a shell string) so tainted env-var values
+    cannot inject shell metacharacters or extra arguments.
+    """
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
-    if mempal_dir and os.path.isdir(mempal_dir):
-        try:
-            log_path = STATE_DIR / "hook.log"
-            with open(log_path, "a") as log_f:
-                subprocess.Popen(
-                    [sys.executable, "-m", "mempalace", "mine", mempal_dir],
-                    stdout=log_f,
-                    stderr=log_f,
-                )
-        except OSError:
-            pass
+    if not mempal_dir:
+        return
+    # Resolve to an absolute path before use to prevent path traversal via
+    # relative components. Also reject values that look like option flags
+    # (starting with '-') to avoid argument injection into the subprocess.
+    try:
+        resolved = str(Path(mempal_dir).resolve())
+    except (OSError, ValueError):
+        return
+    if not os.path.isdir(resolved) or resolved.startswith("-"):
+        return
+    try:
+        log_path = STATE_DIR / "hook.log"
+        with open(log_path, "a") as log_f:
+            subprocess.Popen(
+                [sys.executable, "-m", "mempalace", "mine", resolved],
+                stdout=log_f,
+                stderr=log_f,
+            )
+    except OSError:
+        pass
 
 
 SUPPORTED_HARNESSES = {"claude-code", "codex"}
@@ -186,8 +201,14 @@ def hook_precompact(data: dict, harness: str):
     _log(f"PRE-COMPACT triggered for session {session_id}")
 
     # Optional: auto-ingest synchronously before compaction (so memories land first)
+    # Resolve MEMPAL_DIR to an absolute path (same hardening as _maybe_auto_ingest).
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
-    if mempal_dir and os.path.isdir(mempal_dir):
+    if mempal_dir:
+        try:
+            mempal_dir = str(Path(mempal_dir).resolve())
+        except (OSError, ValueError):
+            mempal_dir = ""
+    if mempal_dir and os.path.isdir(mempal_dir) and not mempal_dir.startswith("-"):
         try:
             log_path = STATE_DIR / "hook.log"
             with open(log_path, "a") as log_f:

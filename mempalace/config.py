@@ -16,7 +16,13 @@ from pathlib import Path
 # in file paths, SQLite, or ChromaDB metadata.
 
 MAX_NAME_LENGTH = 128
-_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_ .'-]{0,126}[a-zA-Z0-9]?$")
+# Names must start with an alphanumeric character.
+# Single-character names are valid (only the first group matches).
+# Multi-character names must also END with an alphanumeric character so that
+# trailing hyphens, dots, or spaces are rejected (e.g. "wing-" is invalid).
+# Inner characters may include: letters, digits, underscore, space, dot,
+# single-quote, and hyphen.
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9_ .'-]{0,125}[a-zA-Z0-9])?$")
 
 
 def sanitize_name(value: str, field_name: str = "name") -> str:

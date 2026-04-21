@@ -100,8 +100,8 @@ def _wal_log(operation: str, params: dict, result: dict = None):
         logger.error(f"WAL write failed: {e}")
 
 
-_client_cache = None
-_collection_cache = None
+# NOTE: _client_cache and _collection_cache are declared once above (lines 66-67).
+# The duplicate declarations that previously appeared here have been removed.
 
 
 def _get_client():
@@ -246,7 +246,13 @@ def tool_get_taxonomy():
     return {"taxonomy": taxonomy}
 
 
+_MAX_SEARCH_RESULTS = 100
+
+
 def tool_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+    # Clamp limit to [1, _MAX_SEARCH_RESULTS] to prevent resource exhaustion
+    # from arbitrarily large or nonsensical values.
+    limit = max(1, min(int(limit), _MAX_SEARCH_RESULTS))
     return search_memories(
         query,
         palace_path=_config.palace_path,
@@ -338,7 +344,9 @@ def tool_add_drawer(
     if not col:
         return _no_palace()
 
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content[:100]).encode()).hexdigest()[:24]}"
+    # Hash the full content (not just the first 100 chars) so that two
+    # different documents in the same wing/room always get distinct IDs.
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content).encode()).hexdigest()[:24]}"
 
     _wal_log(
         "add_drawer",
@@ -448,6 +456,14 @@ def tool_kg_add(
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
     """Mark a fact as no longer true (set end date)."""
+    # Apply the same sanitization as tool_kg_add to keep the two consistent.
+    try:
+        subject = sanitize_name(subject, "subject")
+        predicate = sanitize_name(predicate, "predicate")
+        object = sanitize_name(object, "object")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
     _wal_log(
         "kg_invalidate",
         {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
@@ -485,6 +501,9 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     try:
         agent_name = sanitize_name(agent_name, "agent_name")
         entry = sanitize_content(entry)
+        # Sanitize topic: allow None/empty (default to "general"), otherwise validate.
+        if topic and topic != "general":
+            topic = sanitize_name(topic, "topic")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -545,6 +564,12 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
     Read an agent's recent diary entries. Returns the last N entries
     in chronological order — the agent's personal journal.
     """
+    try:
+        agent_name = sanitize_name(agent_name, "agent_name")
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    # Clamp last_n to [1, 1000] to prevent nonsensical slicing.
+    last_n = max(1, min(int(last_n), 1000))
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     col = _get_collection()
     if not col:
