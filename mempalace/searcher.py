@@ -285,7 +285,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
 
     displayed = 0
     for doc, meta, dist in zip(docs, metas, dists):
-        similarity = round(max(0.0, 1 - dist), 3)
+        similarity = round(1 - dist, 3)
         if similarity < min_similarity:
             continue
         displayed += 1
@@ -423,7 +423,7 @@ def search_memories(
                 closet_preview = c_preview
 
         effective_dist = dist - boost
-        similarity = round(max(0.0, 1 - effective_dist), 3)
+        similarity = round(1 - effective_dist, 3)
         if similarity < min_similarity:
             continue
         entry = {
