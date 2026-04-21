@@ -80,9 +80,7 @@ def test_korean_status_drawers_uses_count():
     """ko.json status_drawers must use {count}, not {drawers}."""
     load_lang("ko")
     result = t("cli.status_drawers", count=42)
-    assert (
-        "42" in result
-    ), f"Expected '42' in '{result}' -- count variable not interpolated"
+    assert "42" in result, f"Expected '42' in '{result}' -- count variable not interpolated"
 
 
 def test_vietnamese_status_drawers_uses_count():
@@ -100,9 +98,7 @@ def test_from_config_defaults_to_english(tmp_path):
     config_path.write_text('{"entities": {}}')
 
     d = Dialect.from_config(str(config_path))
-    assert (
-        d.lang == "en"
-    ), f"Expected 'en', got '{d.lang}' -- state leak from prior load_lang"
+    assert d.lang == "en", f"Expected 'en', got '{d.lang}' -- state leak from prior load_lang"
 
 
 def test_vietnamese_does_not_fallback_to_english():

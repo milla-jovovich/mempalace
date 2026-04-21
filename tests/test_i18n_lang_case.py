@@ -91,9 +91,9 @@ def test_get_entity_patterns_shares_cache_across_cases():
     cache_keys = list(i18n._entity_cache.keys())
     get_entity_patterns(("ZH-CN",))
     get_entity_patterns(("zh-cn",))
-    assert len(i18n._entity_cache) == len(
-        cache_keys
-    ), "different casings of the same language must not create new cache entries"
+    assert len(i18n._entity_cache) == len(cache_keys), (
+        "different casings of the same language must not create new cache entries"
+    )
 
     get_entity_patterns(("vi",))
     cache_keys_vi = list(i18n._entity_cache.keys())
@@ -101,9 +101,9 @@ def test_get_entity_patterns_shares_cache_across_cases():
     get_entity_patterns(("VI",))
     get_entity_patterns(("Vi",))
 
-    assert len(i18n._entity_cache) == len(
-        cache_keys_vi
-    ), "different casings of the same language must not create new cache entries"
+    assert len(i18n._entity_cache) == len(cache_keys_vi), (
+        "different casings of the same language must not create new cache entries"
+    )
 
 
 def test_unknown_language_still_falls_back_to_english():

@@ -120,8 +120,7 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> li
             os.rename(seg_dir, target)
             moved.append(target)
             logger.warning(
-                "Quarantined stale HNSW segment %s "
-                "(sqlite %.0fs newer than HNSW); renamed to %s",
+                "Quarantined stale HNSW segment %s (sqlite %.0fs newer than HNSW); renamed to %s",
                 seg_dir,
                 sqlite_mtime - hnsw_mtime,
                 target,
