@@ -62,7 +62,7 @@ def test_dialect_compress_samples():
         "de": "Wir haben beschlossen, von SQLite auf PostgreSQL zu migrieren für bessere gleichzeitige Schreibvorgänge. Ben hat den PR gestern genehmigt.",
         "zh-CN": "我们决定从SQLite迁移到PostgreSQL以获得更好的并发写入。Ben昨天批准了PR。",
         "id": "Kami memutuskan untuk migrasi dari SQLite ke PostgreSQL untuk penulisan bersamaan yang lebih baik. Ben telah menyetujui PR kemarin.",
-        "vi": "Chúng tôi quyết định chuyển từ SQLite sang PostgreSQL để cải thiện khả năng ghi đồng thời. Ben đã duyệt PR hôm qua."
+        "vi": "Chúng tôi quyết định chuyển từ SQLite sang PostgreSQL để cải thiện khả năng ghi đồng thời. Ben đã duyệt PR hôm qua.",
     }
 
     for lang, text in samples.items():
@@ -80,13 +80,17 @@ def test_korean_status_drawers_uses_count():
     """ko.json status_drawers must use {count}, not {drawers}."""
     load_lang("ko")
     result = t("cli.status_drawers", count=42)
-    assert "42" in result, f"Expected '42' in '{result}' -- count variable not interpolated"
+    assert (
+        "42" in result
+    ), f"Expected '42' in '{result}' -- count variable not interpolated"
+
 
 def test_vietnamese_status_drawers_uses_count():
     """vi.json status_drawers must use {count}."""
     load_lang("vi")
     result = t("cli.status_drawers", count=42)
     assert "42" in result, f"Expected '42' in '{result}'"
+
 
 def test_from_config_defaults_to_english(tmp_path):
     """Dialect.from_config without a lang key must not inherit module-level state."""
@@ -96,7 +100,10 @@ def test_from_config_defaults_to_english(tmp_path):
     config_path.write_text('{"entities": {}}')
 
     d = Dialect.from_config(str(config_path))
-    assert d.lang == "en", f"Expected 'en', got '{d.lang}' -- state leak from prior load_lang"
+    assert (
+        d.lang == "en"
+    ), f"Expected 'en', got '{d.lang}' -- state leak from prior load_lang"
+
 
 def test_vietnamese_does_not_fallback_to_english():
     from mempalace.i18n import get_entity_patterns
@@ -120,6 +127,7 @@ def test_vietnamese_regex_matches_text():
         matches += re.findall(p, text)
 
     assert len(matches) > 0
+
 
 def test_vietnamese_direct_address():
     from mempalace.i18n import get_entity_patterns
@@ -149,6 +157,7 @@ def test_vietnamese_direct_address():
 
     assert len(matches) > 0
 
+
 def test_vietnamese_unicode_normalization():
     import unicodedata
     from mempalace.i18n import get_entity_patterns
@@ -168,6 +177,7 @@ def test_vietnamese_unicode_normalization():
     assert match(text_nfc) != []
     assert match(text_nfd) != []
 
+
 def test_vietnamese_mixed_english():
     from mempalace.i18n import get_entity_patterns
     import re
@@ -181,6 +191,7 @@ def test_vietnamese_mixed_english():
         matches += re.findall(p, text)
 
     assert len(matches) > 0
+
 
 def test_vietnamese_dialogue_patterns():
     from mempalace.i18n import get_entity_patterns
@@ -247,7 +258,7 @@ def test_vietnamese_regex_patterns_compile_and_match_samples():
     action_re = re.compile(patterns["action_pattern"], re.IGNORECASE)
 
     text = (
-        'Nguyễn Văn Anh đã triển khai hệ thống GraphQL. '
+        "Nguyễn Văn Anh đã triển khai hệ thống GraphQL. "
         '"Đây là một đoạn trích dẫn đủ dài để kiểm tra quote pattern hoạt động." '
         "Nhóm vừa cập nhật pipeline xử lý dữ liệu."
     )

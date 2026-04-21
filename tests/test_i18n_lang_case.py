@@ -41,7 +41,6 @@ def test_canonical_lang_uppercase_resolves():
     assert _canonical_lang("Vi") == "vi"
 
 
-
 def test_canonical_lang_unknown_returns_none():
     assert _canonical_lang("xx") is None
     assert _canonical_lang("") is None
@@ -63,6 +62,7 @@ def test_load_lang_case_insensitive():
     if "vi" in available_languages() and vi_lower != en:
         assert i18n.current_lang() == "vi"
 
+
 def test_entity_section_loads_for_uppercase_input():
     """`_load_entity_section('PT-BR')` must read pt-br.json, not return {}."""
     pt_lower = _load_entity_section("pt-br")
@@ -72,6 +72,7 @@ def test_entity_section_loads_for_uppercase_input():
     vi_lower = _load_entity_section("vi")
     vi_upper = _load_entity_section("VI")
     assert vi_lower == vi_upper
+
 
 def test_get_entity_patterns_case_insensitive():
     """Entity patterns must be identical regardless of input case."""
@@ -103,6 +104,7 @@ def test_get_entity_patterns_shares_cache_across_cases():
     assert len(i18n._entity_cache) == len(
         cache_keys_vi
     ), "different casings of the same language must not create new cache entries"
+
 
 def test_unknown_language_still_falls_back_to_english():
     """A code with no matching file must fall through to English (existing contract)."""
