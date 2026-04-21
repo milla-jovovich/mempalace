@@ -6,7 +6,7 @@ Extracts commit messages, diffs, metadata, and files changed.
 Stores verbatim content as drawers. No summaries. Ever.
 """
 
-import git
+import subprocess
 import hashlib
 from datetime import datetime
 from pathlib import Path
@@ -23,68 +23,67 @@ from .palace import (
 )
 
 
-def get_branches(repo: git.Repo) -> list:
+def run_git(repo_path: Path, *args) -> str:
+    """Run a git command and return stdout."""
+    result = subprocess.run(
+        ["git"] + list(args),
+        cwd=repo_path,
+        capture_output=True,
+    )
+    return result.stdout.decode("utf-8", errors="replace").strip()
+
+
+def get_branches(repo_path: Path) -> list:
     """Get all local and remote branch names."""
-    return [b.name for b in repo.branches]
+    output = run_git(repo_path, "branch", "--format=%(refname:short)")
+    if not output:
+        return []
+    return [b.strip() for b in output.split("\n") if b.strip()]
 
 
-def get_all_commits(repo: git.Repo, branch: str = None) -> list:
+def get_all_commits(repo_path: Path, branch: str = None) -> list:
     """Get all commits for a branch (newest first)."""
+    output = run_git(repo_path, "log", branch, "--format=%H%x00%ai%x00%an%x00%ae%x00%s%x00%b%x00")
+
+    if not output:
+        return []
+
     commits = []
-    for commit in repo.iter_commits(branch):
+    entries = output.split("\x00")
+    i = 0
+    while i < len(entries):
+        if not entries[i].strip():
+            i += 1
+            continue
+        if len(entries) - i < 6:
+            break
+        hash_val = entries[i].strip()
+        if not hash_val or len(hash_val) < 7:
+            i += 1
+            continue
         commits.append({
-            "hash": commit.hexsha,
-            "date": commit.committed_datetime.isoformat(),
-            "author": commit.author.name,
-            "author_email": commit.author.email,
-            "subject": commit.message.split("\n")[0],
-            "body": commit.message,
+            "hash": hash_val,
+            "date": entries[i + 1],
+            "author": entries[i + 2],
+            "email": entries[i + 3],
+            "subject": entries[i + 4],
+            "body": entries[i + 5],
         })
+        i += 6
     return commits
 
 
-def get_commit_diff(repo: git.Repo, commit_hash: str) -> str:
+def get_commit_diff(repo_path: Path, commit_hash: str) -> str:
     """Get the diff for a commit (excluding binary files)."""
-    try:
-        commit = repo.commit(commit_hash)
-        parent = commit.parents[0] if commit.parents else None
-        if parent:
-            diff_index = parent.diff(commit)
-            diffs = []
-            for d in diff_index:
-                if d.change_type in ("A", "C", "M"):  # Added, Copied, Modified
-                    if d.new_file:
-                        diffs.append(f"+++ {d.b_path}\n")
-                    else:
-                        diffs.append(d.diff.decode("utf-8", errors="replace"))
-            return "\n".join(diffs)
-        else:
-            tree = commit.tree
-            diffs = []
-            for blob in tree.traverse(prune=[]):
-                if blob.type == "blob":
-                    try:
-                        content = blob.data_stream.read().decode("utf-8", errors="replace")
-                        diffs.append(f"+++ {blob.path}\n{content}")
-                    except Exception:
-                        pass
-            return "\n".join(diffs)
-    except Exception:
-        return ""
+    return run_git(repo_path, "show", commit_hash, "--format=", "--diff-filter=ACM")
 
 
-def get_commit_files_changed(repo: git.Repo, commit_hash: str) -> list:
+def get_commit_files_changed(repo_path: Path, commit_hash: str) -> list:
     """List of files changed in a commit."""
-    try:
-        commit = repo.commit(commit_hash)
-        parent = commit.parents[0] if commit.parents else None
-        if parent:
-            diff_index = parent.diff(commit)
-            return [d.b_path for d in diff_index if d.b_path]
-        else:
-            return [blob.path for blob in commit.tree.traverse() if blob.type == "blob"]
-    except Exception:
+    output = run_git(repo_path, "diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash)
+    if not output:
         return []
+    return [f.strip() for f in output.split("\n") if f.strip()]
 
 
 def detect_room_from_files(filepaths: list, fallback: str = "general") -> str:
@@ -161,14 +160,13 @@ def add_git_drawer(
 
 
 def process_commit(
-    repo: git.Repo,
+    repo_path: Path,
     commit: dict,
     collection,
     closets_col,
     wing: str,
     agent: str,
     dry_run: bool,
-    repo_path: Path,
 ):
     """Process a single commit into the palace."""
     commit_hash = commit["hash"]
@@ -178,8 +176,8 @@ def process_commit(
         if file_already_mined(collection, source, check_mtime=False):
             return 0, "general"
 
-    diff = get_commit_diff(repo, commit_hash)
-    files_changed = get_commit_files_changed(repo, commit_hash)
+    diff = get_commit_diff(repo_path, commit_hash)
+    files_changed = get_commit_files_changed(repo_path, commit_hash)
 
     subject = commit.get("subject", "")
     body = commit.get("body", "")
@@ -187,7 +185,7 @@ def process_commit(
     date = commit.get("date", "")
 
     content = f"""commit {commit_hash}
-Author: {author} <{commit.get('author_email', '')}>
+Author: {author} <{commit.get('email', '')}>
 Date:   {date}
 
 {subject}
@@ -255,13 +253,11 @@ def mine_git(
     """Mine a git repo commit by commit."""
     repo_path = Path(repo_dir).expanduser().resolve()
 
-    try:
-        repo = git.Repo(repo_path)
-    except Exception:
+    if not (repo_path / ".git").exists():
         print(f"  Not a git repo: {repo_path}")
         return
 
-    all_branches = get_branches(repo)
+    all_branches = get_branches(repo_path)
     if not all_branches:
         print(f"  No branches found in {repo_path}")
         return
@@ -295,21 +291,20 @@ def mine_git(
 
     for branch in target_branches:
         print(f"  Branch: {branch}")
-        commits = get_all_commits(repo, branch)
+        commits = get_all_commits(repo_path, branch)
 
         for commit in commits:
             if limit > 0 and commits_processed >= limit:
                 break
 
             drawers, room = process_commit(
-                repo=repo,
+                repo_path=repo_path,
                 commit=commit,
                 collection=collection,
                 closets_col=closets_col,
                 wing=wing_name,
                 agent=agent,
                 dry_run=dry_run,
-                repo_path=repo_path,
             )
 
             if drawers == 0:
