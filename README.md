@@ -48,6 +48,7 @@ We surveyed the memory-system landscape in April 2026 and found no verbatim-firs
 | System | Verbatim? | Local? | MCP? | Notes |
 |---|---|---|---|---|
 | **MemPalace** | Yes | Yes | Yes | What we have. 165,632 drawers as of 2026-04-21. |
+| [Celiums](https://celiums.ai/) | Yes | Yes (SQLite, Docker, or DO) | Yes (6 tools) | Fellow verbatim-first. Stores full module text (2–20K words each) with PAD emotional vectors, importance scores, and circadian metadata. Bundles a 500K+ expert-module knowledge base alongside personal memory — a different product shape. |
 | [Hindsight](https://github.com/vectorize-io/hindsight) | No — LLM extracts facts | Yes (Docker) | Yes | Three ops: retain / recall / reflect. Original text is lost. |
 | [Mem0](https://github.com/mem0ai/mem0) / [OpenMemory](https://github.com/mem0ai/mem0/tree/main/openmemory) | No — extracts "memories" | Partial | Yes | Cloud-first; OpenMemory is the local-mode sibling. |
 | [Cognee](https://github.com/topoteretes/cognee) | No — knowledge graph | Yes | Yes (added since we wrote this row) | "Knowledge Engine" via ECL pipeline. |
@@ -56,6 +57,8 @@ We surveyed the memory-system landscape in April 2026 and found no verbatim-firs
 | [CaviraOSS OpenMemory](https://github.com/CaviraOSS/OpenMemory) | No — temporal graph | Yes | Yes | SQL-native. |
 
 **Verbatim storage is the differentiator.** For recovering exact commands, error messages, code snippets, and what someone actually said, you need the original text. Everything else — hierarchy, tags, knowledge graphs, decay — is enrichment *layered on top of* a faithful archive. If any of those layers fails or needs rebuilding, the underlying truth is still there.
+
+Celiums (added above) validates the call: an independently-designed local-first system that went the same way — full original text preserved, metadata layered on top. Where MemPalace and Celiums differ is the second product axis. Celiums bundles a curated 500K-module expert knowledge base alongside personal memory (two corpora, shared search interface). MemPalace is personal-only — the archive is whatever the user has written, mined, or said, and the search surface is exactly that. Two reasonable answers to "what is memory for"; worth making the scope explicit.
 
 ## Architectural principles
 
@@ -198,6 +201,8 @@ Independent `mempalace prune --stale-days 180 --dry-run` CLI is still a fork opp
 
 Tier 1+ still open upstream: `mempalace_rate_memory(drawer_id, useful: bool)` MCP tool, implicit echo/fizzle signals, Hindsight-style "reflect" synthesis. These remain viable fork or upstream contributions independent of #1032.
 
+**Alternative importance-scoring reference — [Celiums](https://celiums.ai/):** combines novelty (habituation dampens repeats), emotional intensity (PAD vectors), and circadian context (peak-cognitive-hour weighting) into a per-memory 0.0–1.0 score. More axes than pure recency decay, and the score is stored alongside the verbatim drawer rather than being a query-time rerank. Worth reading before designing our rating-signal schema — we don't need the full brain-inspired module stack, but the separation between *stored* importance (novelty at write time) and *queried* ranking (relevance + recency + feedback) is a useful distinction we haven't made explicit yet.
+
 ### P4 — KG auto-population + entity resolution *(1.5 days)*
 
 The knowledge graph has 5 MCP tools and a SQLite backend but ~zero data. Hooks should extract `subject/predicate/object` triples on every save using heuristics (no LLM — `project → has_file → path`, `session → discussed → room` patterns). Normalize entity IDs (lowercase, strip punctuation, collapse whitespace). Alias table + Levenshtein < 2 for fuzzy matches. Prerequisite for contradiction detection.
@@ -309,6 +314,7 @@ Articles and surveys that shaped the fork's direction, competitive framing, and 
 - [**ByteRover CLI**](https://github.com/campfirein/byterover-cli) — 5-tier progressive retrieval (exact cache → fuzzy cache → index → LLM → agentic). Pattern to consider for the context-feeding open problem.
 - [**engram**](https://github.com/NickCirv/engram) — Go + SQLite FTS5 parallel index; file-read interception prototype referenced in [discussion #798](https://github.com/MemPalace/mempalace/discussions/798). Cited in deprioritized FTS5 item and the auto-surfacing open problem.
 - [**context-engine**](https://github.com/Emmimal/context-engine) — ~200-line exponential decay implementation that ports directly into P2. Author Emmimal P Alexander's [context-engineering writeup](https://towardsdatascience.com/rag-isnt-enough-i-built-the-missing-context-layer-that-makes-llm-systems-work/) (*Towards Data Science*) frames the five components of the "missing context layer" — hybrid retrieval, re-ranking, memory decay, compression, token-budget enforcement — and informs our framing of the auto-surfacing open problem.
+- [**Celiums**](https://celiums.ai/) ([MCP server](https://glama.ai/mcp/servers/terrizoaguimor/celiums-memory)) — independently-designed local-first verbatim memory system. Triple-store backend (PostgreSQL + Qdrant + Valkey) or single-file SQLite; stores original text plus PAD emotional vectors, importance scores, and circadian metadata. Validates principle 1 (verbatim is the foundational promise — a second serious system independently made the same call) and informs P3's importance-scoring design. Fork takeaway: keep the drawer verbatim, layer richer metadata on top — we currently store wing/room/importance but could expand along the novelty/emotional/feedback axes without touching the archive.
 
 ### Verification note
 
