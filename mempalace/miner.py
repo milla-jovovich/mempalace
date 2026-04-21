@@ -42,6 +42,7 @@ READABLE_EXTENSIONS = {
     ".html",
     ".css",
     ".java",
+    ".kt",
     ".go",
     ".rs",
     ".rb",
