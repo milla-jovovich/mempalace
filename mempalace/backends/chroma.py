@@ -23,8 +23,6 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 
-_BLOB_FIX_MARKER = ".blob_seq_ids_migrated"
-
 _REQUIRED_OPERATORS = frozenset({"$eq", "$ne", "$in", "$nin", "$and", "$or", "$contains"})
 _OPTIONAL_OPERATORS = frozenset({"$gt", "$gte", "$lt", "$lte"})
 _SUPPORTED_OPERATORS = _REQUIRED_OPERATORS | _OPTIONAL_OPERATORS
@@ -54,19 +52,38 @@ def _validate_where(where: Optional[dict]) -> None:
 def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> list[str]:
     """Rename HNSW segment dirs whose files are stale vs. chroma.sqlite3.
 
-    When ChromaDB 1.5.x loads an HNSW segment that disagrees with the live
-    ``embeddings`` table in sqlite, the Rust graph-walk dereferences dangling
-    neighbor pointers and segfaults in a background thread (the failure
-    mirrored at neo-cortex-mcp#2 and observed locally at offset ``a3ee57``
-    in ``chromadb_rust_bindings.abi3.so``).
+    When a ChromaDB 1.5.x PersistentClient opens a palace whose on-disk
+    HNSW segment is significantly older than ``chroma.sqlite3``, the Rust
+    graph-walk can dereference dangling neighbor pointers for entries that
+    exist in the metadata segment but not in the HNSW index, and segfault
+    in a background thread on the next ``count()`` or ``query(...)`` call.
 
-    Heuristic: if the sqlite mtime is more than *stale_seconds* newer than
-    the HNSW ``data_level0.bin`` mtime, the segment is suspect and gets
-    renamed out of the way. Chroma reopens cleanly without it and rebuilds
-    index files on next write. The original directory is renamed, not
-    deleted, so recovery remains possible.
+    This is the same failure mode reported at #823 (semantic search stale
+    after ``add_drawer``), observed at neo-cortex-mcp#2 (SIGSEGV on
+    ``count()`` with chromadb 1.5.5), and acknowledged as by-design at
+    chroma-core/chroma#2594. On one fork palace (135K drawers), the drift
+    caused a 65–85% crash rate on fresh-process opens; fresh-process
+    crash rate dropped to 0% after the segment dir was renamed out of the
+    way and ChromaDB rebuilt lazily.
 
-    Returns the list of quarantined segment paths.
+    Heuristic: if ``chroma.sqlite3`` is more than ``stale_seconds`` newer
+    than the segment's ``data_level0.bin``, the segment is considered
+    suspect and renamed to ``<uuid>.drift-<timestamp>``. ChromaDB reopens
+    cleanly without it and writes fresh index files on next use. The
+    original directory is renamed, not deleted, so recovery remains
+    possible if the heuristic misfires.
+
+    The default threshold (1h) is deliberately conservative — ChromaDB's
+    HNSW flush cadence means legitimate drift is normally on the order of
+    seconds to minutes. A segment that is more than an hour out of date is
+    almost certainly in a "crashed mid-write" state.
+
+    Args:
+        palace_path: path to the palace directory containing ``chroma.sqlite3``
+        stale_seconds: minimum mtime gap to treat a segment as stale
+
+    Returns:
+        List of paths that were quarantined (empty if nothing drifted).
     """
     db_path = os.path.join(palace_path, "chroma.sqlite3")
     if not os.path.isfile(db_path):
@@ -123,21 +140,12 @@ def _fix_blob_seq_ids(palace_path: str) -> None:
     type INTEGER) is not compatible with SQL type BLOB".
 
     Must run BEFORE PersistentClient is created (the compactor fires on init).
-
-    Opening a Python sqlite3 connection against a ChromaDB 1.5.x WAL-mode
-    database leaves state that segfaults the next PersistentClient call.
-    After the migration has run once successfully, a marker file is written
-    so subsequent opens skip the sqlite connection entirely.
     """
     db_path = os.path.join(palace_path, "chroma.sqlite3")
     if not os.path.isfile(db_path):
         return
-    marker = os.path.join(palace_path, _BLOB_FIX_MARKER)
-    if os.path.isfile(marker):
-        return
     try:
         with sqlite3.connect(db_path) as conn:
-            table_rows: dict = {}
             for table in ("embeddings", "max_seq_id"):
                 try:
                     rows = conn.execute(
@@ -145,18 +153,12 @@ def _fix_blob_seq_ids(palace_path: str) -> None:
                     ).fetchall()
                 except sqlite3.OperationalError:
                     continue
-                if rows:
-                    table_rows[table] = rows
-            for table, rows in table_rows.items():
+                if not rows:
+                    continue
                 updates = [(int.from_bytes(blob, byteorder="big"), rowid) for rowid, blob in rows]
                 conn.executemany(f"UPDATE {table} SET seq_id = ? WHERE rowid = ?", updates)
                 logger.info("Fixed %d BLOB seq_ids in %s", len(updates), table)
             conn.commit()
-        try:
-            with open(marker, "w", encoding="utf-8") as f:
-                f.write("migrated\n")
-        except OSError:
-            pass
     except Exception:
         logger.exception("Could not fix BLOB seq_ids in %s", db_path)
 
@@ -532,15 +534,9 @@ class ChromaBackend(BaseBackend):
             hnsw_space = options.get("hnsw_space", hnsw_space)
 
         if create:
-            # ChromaDB 1.5.x segfaults when get_or_create_collection is called
-            # with metadata that differs from an existing collection's metadata.
-            # Fetch first; only pass hnsw:space when actually creating fresh.
-            try:
-                collection = client.get_collection(collection_name)
-            except Exception:
-                collection = client.create_collection(
-                    collection_name, metadata={"hnsw:space": hnsw_space}
-                )
+            collection = client.get_or_create_collection(
+                collection_name, metadata={"hnsw:space": hnsw_space}
+            )
         else:
             collection = client.get_collection(collection_name)
         return ChromaCollection(collection)

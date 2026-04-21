@@ -655,7 +655,7 @@ def process_file(
     chunks = chunk_text(content, source_file)
 
     if dry_run:
-        print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
+        print(f"    [DRY RUN] {filepath.name} -> room:{room} ({len(chunks)} drawers)")
         return len(chunks), room
 
     # Lock this file so concurrent agents don't interleave delete+insert.
@@ -875,7 +875,7 @@ def mine(
         print("  .gitignore: DISABLED")
     if include_ignored:
         print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
-    print(f"{'─' * 55}\n")
+    print(f"{'-' * 55}\n")
 
     if not dry_run:
         collection = get_collection(palace_path)
@@ -888,7 +888,6 @@ def mine(
     files_skipped = 0
     room_counts = defaultdict(int)
 
-    # --- Sequential path (workers=1 or dry_run) ---
     if workers <= 1 or dry_run:
         for i, filepath in enumerate(files, 1):
             drawers, room = process_file(
@@ -907,17 +906,12 @@ def mine(
                 total_drawers += drawers
                 room_counts[room] += 1
                 if not dry_run:
-                    print(f"  \u2713 [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+                    print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
     else:
-        # --- Concurrent path (workers > 1) ---
-        # process_file() uses mine_lock() for per-file locking, so it's safe
-        # to call from multiple threads on different files.
-
-        # Phase 0: bulk-fetch already-mined mtimes to skip files without
-        # per-file DB queries.
+        # Concurrent path — process_file() holds mine_lock() per file, so
+        # different files can be mined in parallel threads safely.
         mined_map = bulk_check_mined(collection)
 
-        # Filter out already-mined files before spawning threads.
         files_to_process = []
         for filepath in files:
             if _is_already_mined(str(filepath), mined_map):
@@ -962,7 +956,7 @@ def mine(
                     room_counts[room] += 1
                     processed_count += 1
                     print(
-                        f"  \u2713 [{processed_count:4}/{len(files_to_process)}] "
+                        f"  + [{processed_count:4}/{len(files_to_process)}] "
                         f"{filepath.name[:50]:50} +{drawers}"
                     )
 

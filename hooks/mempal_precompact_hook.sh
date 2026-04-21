@@ -54,101 +54,25 @@ mkdir -p "$STATE_DIR"
 # Leave empty to skip auto-ingest (AI handles saving via the block reason).
 MEMPAL_DIR=""
 
-# Python interpreter with mempalace + chromadb installed.
-# Auto-detects: MEMPAL_PYTHON env var → repo venv → system python3
-if [ -n "$MEMPAL_PYTHON" ]; then
-    MP_PYTHON="$MEMPAL_PYTHON"
-elif [ -f "$(dirname "$(dirname "${BASH_SOURCE[0]}")")/venv/bin/python3" ]; then
-    MP_PYTHON="$(dirname "$(dirname "${BASH_SOURCE[0]}")")/venv/bin/python3"
-else
-    MP_PYTHON="python3"
+# Resolve the Python interpreter. Same contract as mempal_save_hook.sh:
+# MEMPAL_PYTHON (explicit override) → $(command -v python3) → bare python3.
+MEMPAL_PYTHON_BIN="${MEMPAL_PYTHON:-}"
+if [ -z "$MEMPAL_PYTHON_BIN" ] || [ ! -x "$MEMPAL_PYTHON_BIN" ]; then
+    MEMPAL_PYTHON_BIN="$(command -v python3 2>/dev/null || echo python3)"
 fi
 
 # Read JSON input from stdin
 INPUT=$(cat)
 
-SESSION_ID=$(echo "$INPUT" | python3 -c "
-import sys, json, re
-data = json.load(sys.stdin)
-sid = data.get('session_id', 'unknown')
-safe = lambda s: re.sub(r'[^a-zA-Z0-9_/.\-~]', '', str(s))
-print(safe(sid))
-" 2>/dev/null)
+SESSION_ID=$(echo "$INPUT" | "$MEMPAL_PYTHON_BIN" -c "import sys,json; print(json.load(sys.stdin).get('session_id','unknown'))" 2>/dev/null)
 
 echo "[$(date '+%H:%M:%S')] PRE-COMPACT triggered for session $SESSION_ID" >> "$STATE_DIR/hook.log"
-
-# Also parse transcript_path if present in the input
-TRANSCRIPT_PATH=$(echo "$INPUT" | python3 -c "
-import sys, json, re
-data = json.load(sys.stdin)
-tp = data.get('transcript_path', '')
-safe = lambda s: re.sub(r'[^a-zA-Z0-9_/.\-~]', '', str(s))
-print(safe(tp))
-" 2>/dev/null)
-TRANSCRIPT_PATH="${TRANSCRIPT_PATH/#\~/$HOME}"
-
-# If no transcript_path in input, find it by session_id
-if [ -z "$TRANSCRIPT_PATH" ] || [ ! -f "$TRANSCRIPT_PATH" ]; then
-    if [ -n "$SESSION_ID" ] && [ "$SESSION_ID" != "unknown" ]; then
-        FOUND=$(find "$HOME/.claude/projects" -name "${SESSION_ID}.jsonl" -type f 2>/dev/null | head -1)
-        if [ -n "$FOUND" ]; then
-            TRANSCRIPT_PATH="$FOUND"
-        fi
-    fi
-fi
-
-# Auto-mine the transcript — captures tool output before compaction loses it
-if [ -f "$TRANSCRIPT_PATH" ]; then
-    echo "[$(date '+%H:%M:%S')] Mining transcript: $TRANSCRIPT_PATH" >> "$STATE_DIR/hook.log"
-    "$MP_PYTHON" - "$TRANSCRIPT_PATH" <<'PYMINE'
-import sys
-try:
-    import hashlib
-    from datetime import datetime
-    from mempalace.normalize import normalize
-    from mempalace.convo_miner import chunk_exchanges, detect_convo_room
-    from mempalace.palace import get_collection
-    from mempalace.config import MempalaceConfig
-    palace = MempalaceConfig().palace_path
-    content = normalize(sys.argv[1])
-    if content and len(content.strip()) >= 50:
-        collection = get_collection(palace)
-        source = sys.argv[1]
-        # No file_already_mined check — transcript grows during session.
-        # upsert is idempotent: same chunk_index → same ID → overwrite.
-        chunks = chunk_exchanges(content)
-        if chunks:
-            room = detect_convo_room(content) or "session"
-            wing = "conversations"
-            docs, ids, metas = [], [], []
-            for chunk in chunks:
-                cid = hashlib.sha256(
-                    (source + str(chunk["chunk_index"])).encode()
-                ).hexdigest()[:24]
-                docs.append(chunk["content"])
-                ids.append(f"drawer_{wing}_{room}_{cid}")
-                metas.append({
-                    "wing": wing, "room": room, "source_file": source,
-                    "chunk_index": chunk["chunk_index"],
-                    "added_by": "hook", "filed_at": datetime.now().isoformat(),
-                    "ingest_mode": "convos", "extract_mode": "exchange",
-                })
-            for i in range(0, len(docs), 100):
-                collection.upsert(
-                    documents=docs[i:i+100], ids=ids[i:i+100],
-                    metadatas=metas[i:i+100],
-                )
-except Exception:
-    pass  # Hook must never crash the AI
-PYMINE
-    >> "$STATE_DIR/hook.log" 2>&1
-fi
 
 # Optional: run mempalace ingest synchronously so memories land before compaction
 if [ -n "$MEMPAL_DIR" ] && [ -d "$MEMPAL_DIR" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     REPO_DIR="$(dirname "$SCRIPT_DIR")"
-    "$MP_PYTHON" -m mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1
+    mempalace mine "$MEMPAL_DIR" >> "$STATE_DIR/hook.log" 2>&1
 fi
 
 # Silent: return empty JSON to not block. "decision": "allow" is invalid —

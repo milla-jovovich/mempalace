@@ -1,3 +1,4 @@
+import os
 import sqlite3
 
 import chromadb
@@ -11,7 +12,12 @@ from mempalace.backends import (
     available_backends,
     get_backend,
 )
-from mempalace.backends.chroma import ChromaBackend, ChromaCollection, _fix_blob_seq_ids
+from mempalace.backends.chroma import (
+    ChromaBackend,
+    ChromaCollection,
+    _fix_blob_seq_ids,
+    quarantine_stale_hnsw,
+)
 
 
 class _FakeCollection:
@@ -372,3 +378,68 @@ def test_fix_blob_seq_ids_noop_without_blobs(tmp_path):
 def test_fix_blob_seq_ids_noop_without_database(tmp_path):
     """No error when palace has no chroma.sqlite3."""
     _fix_blob_seq_ids(str(tmp_path))  # should not raise
+
+
+# ── quarantine_stale_hnsw ─────────────────────────────────────────────────
+
+
+def _make_palace_with_segment(tmp_path, hnsw_mtime, sqlite_mtime):
+    """Helper: build a palace dir with one HNSW segment + sqlite at given mtimes."""
+    palace = tmp_path / "palace"
+    palace.mkdir()
+    (palace / "chroma.sqlite3").write_text("")
+    seg = palace / "abcd-1234-5678"
+    seg.mkdir()
+    (seg / "data_level0.bin").write_text("")
+    os.utime(seg / "data_level0.bin", (hnsw_mtime, hnsw_mtime))
+    os.utime(palace / "chroma.sqlite3", (sqlite_mtime, sqlite_mtime))
+    return palace, seg
+
+
+def test_quarantine_stale_hnsw_renames_drifted_segment(tmp_path):
+    """Segment whose data_level0.bin is 2h older than sqlite gets renamed."""
+    now = 1_700_000_000.0
+    palace, seg = _make_palace_with_segment(tmp_path, hnsw_mtime=now - 7200, sqlite_mtime=now)
+    moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
+    assert len(moved) == 1
+    assert ".drift-" in moved[0]
+    assert not seg.exists()
+    # the renamed directory still exists and contains the original file
+    renamed = list(palace.iterdir())
+    drift_dirs = [p for p in renamed if ".drift-" in p.name]
+    assert len(drift_dirs) == 1
+    assert (drift_dirs[0] / "data_level0.bin").exists()
+
+
+def test_quarantine_stale_hnsw_leaves_fresh_segment_alone(tmp_path):
+    """Segment with recent mtime vs sqlite is not touched."""
+    now = 1_700_000_000.0
+    palace, seg = _make_palace_with_segment(tmp_path, hnsw_mtime=now - 10, sqlite_mtime=now)
+    moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
+    assert moved == []
+    assert seg.exists()
+
+
+def test_quarantine_stale_hnsw_no_palace(tmp_path):
+    """Missing palace path or chroma.sqlite3: return [] without raising."""
+    assert quarantine_stale_hnsw(str(tmp_path / "missing")) == []
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert quarantine_stale_hnsw(str(empty)) == []
+
+
+def test_quarantine_stale_hnsw_skips_already_quarantined(tmp_path):
+    """Directories already named with ``.drift-`` suffix are never re-renamed."""
+    now = 1_700_000_000.0
+    palace = tmp_path / "palace"
+    palace.mkdir()
+    (palace / "chroma.sqlite3").write_text("")
+    os.utime(palace / "chroma.sqlite3", (now, now))
+    drift = palace / "abcd-1234.drift-20260101-000000"
+    drift.mkdir()
+    (drift / "data_level0.bin").write_text("")
+    os.utime(drift / "data_level0.bin", (now - 99999, now - 99999))
+
+    moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
+    assert moved == []
+    assert drift.exists()
