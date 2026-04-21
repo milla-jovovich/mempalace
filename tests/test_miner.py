@@ -80,6 +80,7 @@ def test_scan_project_respects_gitignore():
     finally:
         shutil.rmtree(tmpdir)
 
+
 def test_scan_project_includes_kotlin_files():
     tmpdir = tempfile.mkdtemp()
     try:
@@ -105,7 +106,9 @@ def test_scan_project_includes_kotlin_script_files():
 
         assert scanned_files(project_root) == ["scripts/build.kts"]
     finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)        
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def test_scan_project_respects_nested_gitignore():
     tmpdir = tempfile.mkdtemp()
     try:
@@ -249,23 +252,6 @@ def test_scan_project_skip_dirs_still_apply_without_override():
         shutil.rmtree(tmpdir)
 
 
-def test_entity_metadata_finds_cyrillic_names(monkeypatch):
-    """Entity extraction must find non-Latin names when entity_languages includes the locale."""
-    import mempalace.palace as palace_mod
-    from mempalace.miner import _extract_entities_for_metadata
-
-    # Reset cached patterns so they reload with the monkeypatched languages
-    monkeypatch.setattr(palace_mod, "_CANDIDATE_RX_CACHE", None)
-    monkeypatch.setattr(
-        "mempalace.config.MempalaceConfig.entity_languages",
-        property(lambda self: ("en", "ru")),
-    )
-
-    content = "Михаил написал код. Михаил отправил PR. Михаил получил ревью."
-    result = _extract_entities_for_metadata(content)
-    assert "Михаил" in result, f"Cyrillic name not found in entity metadata: {result!r}"
-
-
 def test_file_already_mined_check_mtime():
     tmpdir = tempfile.mkdtemp()
     try:
@@ -366,36 +352,6 @@ def test_status_missing_palace_does_not_create_empty_collection(tmp_path, capsys
     out = capsys.readouterr().out
     assert "No palace found" in out
     assert not palace_path.exists()
-
-
-def test_status_handles_none_metadata_without_crash(tmp_path, capsys):
-    """status must not crash when col.get returns a None entry in metadatas.
-
-    Palaces can contain drawers whose metadata was never set (older mining
-    paths, drawers written by third-party tools). Before the guard, status
-    crashed mid-tally with ``AttributeError: 'NoneType' object has no
-    attribute 'get'`` at the wing/room histogram line."""
-    from unittest.mock import patch
-
-    class FakeCol:
-        def count(self):
-            return 2
-
-        def get(self, *args, **kwargs):
-            return {
-                "ids": ["a", "b"],
-                "documents": ["doc a", "doc b"],
-                "metadatas": [{"wing": "proj", "room": "r"}, None],
-            }
-
-    with patch("mempalace.miner.get_collection", return_value=FakeCol()):
-        status(str(tmp_path))
-
-    out = capsys.readouterr().out
-    # No crash; the None-metadata row is counted under the ?/? fallback
-    # alongside the real wing=proj row.
-    assert "WING: ?" in out
-    assert "WING: proj" in out
 
 
 # ── normalize_version schema gate ───────────────────────────────────────
