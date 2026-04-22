@@ -494,7 +494,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
     Pass yes=True to auto-accept all detected entities without prompting.
     """
     print(f"\n{'=' * 58}")
-    print("  MemPalace — Entity Detection")
+    print("  MemPalace -- Entity Detection")
     print(f"{'=' * 58}")
     print("\n  Scanned your files. Here's what we found:\n")
 
@@ -514,7 +514,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
         )
         return {"people": confirmed_people, "projects": confirmed_projects}
 
-    print(f"\n{'─' * 58}")
+    print(f"\n{'-' * 58}")
     print("  Options:")
     print("    [enter]  Accept all")
     print("    [edit]   Remove wrong entries or reclassify uncertain")
@@ -529,7 +529,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
     if choice == "edit":
         # Handle uncertain first
         if detected["uncertain"]:
-            print("\n  Uncertain entities — classify each:")
+            print("\n  Uncertain entities -- classify each:")
             for e in detected["uncertain"]:
                 ans = input(f"    {e['name']} — (p)erson, (r)project, or (s)kip? ").strip().lower()
                 if ans == "p":
