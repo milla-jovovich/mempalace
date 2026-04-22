@@ -148,6 +148,40 @@ Claude Code has two complementary memory layers, used in tandem:
 
 Neither has automatic consolidation. Claude Code has unreleased "Auto Dream" consolidation code behind a disabled feature flag ([anthropics/claude-code#38461](https://github.com/anthropics/claude-code/issues/38461)) — if it ships, it covers only the lightweight layer. MemPalace decay (P2) and feedback (P3) remain the right priorities for the verbatim archive.
 
+## Ecosystem — third-party projects, forks, and evaluation frameworks
+
+From a 2026-04-21 sweep of upstream MemPalace issue + comment + discussion history. State moves; check the repos directly for current status. Projects here are grouped by how they relate to MemPalace, not by quality.
+
+### Companion tools (compose with MemPalace, don't replace it)
+
+- **[palace-daemon](https://github.com/rboarescu/palace-daemon)** (@rboarescu) — FastAPI gateway + MCP-over-HTTP proxy. Three asyncio semaphores (read / write / mine) with a dedicated mine lane so bulk imports can't starve interactive queries. Explicitly pins correctness floor at MemPalace ≥3.3.2. Solves the multi-client / multi-machine axis our fork doesn't address. See the "Multi-client coordination" note in Active Investigations.
+- **[engram](https://github.com/NickCirv/engram)** (@NickCirv) — File-read interception for AI coding assistants. Uses MemPalace as one of six context providers at session start via `mcp-mempalace mempalace-search`; caches with 1h TTL. Referenced in upstream [discussion #798](https://github.com/MemPalace/mempalace/discussions/798).
+- **[engram](https://github.com/harreh3iesh/engram)** (@harreh3iesh — different project, same name) — Hooks + tools for AI memory, first-class MemPalace backend. Notable pattern: a **stuck detector** (`PreToolUse` hook that counts Grep/Glob calls and nudges the AI when it's spinning). Upstream [discussion #748](https://github.com/MemPalace/mempalace/discussions/748).
+- **[cdd-mempalace](https://github.com/fuzzymoomoo/cdd-mempalace)** (@fuzzymoomoo) — Bridge library mapping Context-Driven Development methodology onto MemPalace's wings/halls/rooms structure. Ships `MAPPING.md` + engineering-memory examples. Multiple active upstream PRs (test coverage, Windows fixes, docs). fuzzymoomoo is probably the most-invested production user after us — see upstream discussions [#765](https://github.com/MemPalace/mempalace/discussions/765), [#891](https://github.com/MemPalace/mempalace/discussions/891), [#910](https://github.com/MemPalace/mempalace/discussions/910).
+
+### Evaluation frameworks
+
+- **[multipass-structural-memory-eval](https://github.com/M0nkeyFl0wer/multipass-structural-memory-eval)** (@M0nkeyFl0wer) — Nine-category diagnostic framework for memory systems. Most-referenced external project across upstream comments (27 mentions). **"Category 9: The Handshake"** explicitly tests *integration under production model usage*, not just offline retrieval — which is a gap our LongMemEval numbers don't close. Delta-focused methodology (measures improvement between versions rather than absolute scores). Candidate tool for validating fork-vs-upstream changes.
+
+### Adjacent / competing memory systems with concrete technical differences
+
+- **[agentmemory](https://github.com/rohitg00/agentmemory)** (@rohitg00) — Persistent memory for AI coding agents, BM25 + vector hybrid. Reports **95.2% R@5** on LongMemEval-S with the same `all-MiniLM-L6-v2` embedding model. Filed a benchmark methodology review in upstream [discussion #747](https://github.com/MemPalace/mempalace/discussions/747) that's worth reading before publishing any head-to-head numbers.
+- **[engram-2](https://github.com/199-biotechnologies/engram-2)** (@199-biotechnologies — a third, unrelated engram) — Rust CLI memory system, deterministic, SQLite + FTS5 only (no vector DB). Hybrid retrieval via Gemini embeddings + FTS5 through reciprocal rank fusion. Claims **0.990 R@5** on LongMemEval (vs MemPalace's 0.984) with no reranking, and reports **MemPalace's end-to-end QA accuracy as 17%** — a concrete critique flagged for investigation below. "Memory layer budgeting" (identity / critical / topic / deep tiers with token accounting) is a pattern worth studying.
+- For the broader verbatim-first cohort (Longhand, Celiums, mcp-memory-service), see the "Why this fork exists" table above.
+
+### Active forks beyond ours
+
+As of 2026-04-21, the upstream MemPalace repo has **6,386 forks**. The ones below appear in upstream PR / issue comments with meaningful divergence or contribution activity:
+
+| Fork | Contributor work |
+|---|---|
+| [jphein/mempalace](https://github.com/jphein/mempalace) | this fork |
+| [fuzzymoomoo/cdd-mempalace](https://github.com/fuzzymoomoo/cdd-mempalace) | 10 comment refs; CDD integration layer, multiple upstream PRs |
+| [potterdigital/mempalace](https://github.com/potterdigital/mempalace) | author of upstream's [#1081](https://github.com/MemPalace/mempalace/pull/1081) (HNSW repair hint for filtered queries) |
+| [vnguyen-lexipol/mempalace](https://github.com/vnguyen-lexipol/mempalace) | author of upstream's [#851](https://github.com/MemPalace/mempalace/pull/851) (miner.status pagination) |
+| [messelink/mempalace](https://github.com/messelink/mempalace), [FabioLissi/mempalace](https://github.com/FabioLissi/mempalace) | multiple comment refs each; relationship unclear, listed for completeness |
+| [Kushmaro/memcitadel](https://github.com/Kushmaro/memcitadel) | renamed fork; positioning unclear |
+
 ## Fork Changes
 
 Merged history below. For what's in flight or pending, see the top-of-README "Fork change queue."
@@ -256,6 +290,14 @@ Strip known injection patterns (role-play instructions, "ignore previous instruc
 - **FTS5 parallel index** — right idea (engram proves it), but significant infrastructure alongside ChromaDB. Revisit after tags and decay are proven.
 
 ## Active investigations
+
+### Verifying engram-2's "17% end-to-end QA" critique of MemPalace
+
+[engram-2](https://github.com/199-biotechnologies/engram-2) published a benchmark note stating MemPalace achieves 0.984 R@5 on LongMemEval but **only 17% end-to-end question-answering accuracy**. If true, it's the sharpest competitive critique in the space: retrieval recall doesn't translate to answer quality. Possible explanations range from "their downstream prompting is unusually strict" to "MemPalace's result formatting genuinely degrades LLM interpretation." Either way, publishing R@5 without an E2E number leaves the fork exposed to this framing. Running LongMemEval-S end-to-end through our fork against a modern reader model and reporting the delta is cheap (a few hours) and would either close the gap (methodology) or surface a real consumption problem we haven't measured.
+
+### Multi-palace separation — curated "authority" vs auto-mined "chat memory"
+
+@kostadis raised this in upstream [discussion #1018](https://github.com/MemPalace/mempalace/discussions/1018): they want a **manually curated palace** (canonical docs, no auto-hooks) alongside the existing chat-memory palace (auto-mined from transcripts). Our fork's hooks dump everything into a single palace, which pollutes curated content. This intersects with Row 5 (hook opt-out) but is a structural request, not a settings one — the right fix is multi-palace support with a per-hook target flag. Not filing a PR-candidate row yet because the feature needs design review (does it fit mempalace's single-`palace_path` model? does it want a `palace_name` / alias layer? who owns the routing decision at query time?). Candidate for a P-level roadmap item once we've thought it through.
 
 ### Auto-surfacing context Claude doesn't know to ask for
 
