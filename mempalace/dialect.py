@@ -43,16 +43,9 @@ FLAGS:
 
 import json
 import os
-import regex as re  # Unicode-aware regex (supports \p{Lu}, \p{Ll}, \p{L} for any script)
+import re
 from typing import List, Dict, Optional
 from pathlib import Path
-
-from mempalace.languages import (
-    EMOTION_SIGNALS as _EMOTION_SIGNALS,
-    FLAG_SIGNALS as _FLAG_SIGNALS,
-    TOPIC_STOPWORDS as _STOP_WORDS,
-    DECISION_WORDS as _DECISION_WORDS,
-)
 
 
 # === EMOTION CODES (universal) ===
@@ -100,6 +93,210 @@ EMOTION_CODES = {
     "surprise": "surprise",
 }
 
+# Keywords that signal emotions in plain text
+_EMOTION_SIGNALS = {
+    "decided": "determ",
+    "prefer": "convict",
+    "worried": "anx",
+    "excited": "excite",
+    "frustrated": "frust",
+    "confused": "confuse",
+    "love": "love",
+    "hate": "rage",
+    "hope": "hope",
+    "fear": "fear",
+    "trust": "trust",
+    "happy": "joy",
+    "sad": "grief",
+    "surprised": "surprise",
+    "grateful": "grat",
+    "curious": "curious",
+    "wonder": "wonder",
+    "anxious": "anx",
+    "relieved": "relief",
+    "satisf": "satis",
+    "disappoint": "grief",
+    "concern": "anx",
+}
+
+# Keywords that signal flags
+_FLAG_SIGNALS = {
+    "decided": "DECISION",
+    "chose": "DECISION",
+    "switched": "DECISION",
+    "migrated": "DECISION",
+    "replaced": "DECISION",
+    "instead of": "DECISION",
+    "because": "DECISION",
+    "founded": "ORIGIN",
+    "created": "ORIGIN",
+    "started": "ORIGIN",
+    "born": "ORIGIN",
+    "launched": "ORIGIN",
+    "first time": "ORIGIN",
+    "core": "CORE",
+    "fundamental": "CORE",
+    "essential": "CORE",
+    "principle": "CORE",
+    "belief": "CORE",
+    "always": "CORE",
+    "never forget": "CORE",
+    "turning point": "PIVOT",
+    "changed everything": "PIVOT",
+    "realized": "PIVOT",
+    "breakthrough": "PIVOT",
+    "epiphany": "PIVOT",
+    "api": "TECHNICAL",
+    "database": "TECHNICAL",
+    "architecture": "TECHNICAL",
+    "deploy": "TECHNICAL",
+    "infrastructure": "TECHNICAL",
+    "algorithm": "TECHNICAL",
+    "framework": "TECHNICAL",
+    "server": "TECHNICAL",
+    "config": "TECHNICAL",
+}
+
+# Common filler/stop words to strip from topic extraction
+_ALPHA_RE = re.compile(r"[^a-zA-Z]")
+
+_STOP_WORDS = {
+    "the",
+    "a",
+    "an",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "will",
+    "would",
+    "could",
+    "should",
+    "may",
+    "might",
+    "shall",
+    "can",
+    "to",
+    "of",
+    "in",
+    "for",
+    "on",
+    "with",
+    "at",
+    "by",
+    "from",
+    "as",
+    "into",
+    "about",
+    "between",
+    "through",
+    "during",
+    "before",
+    "after",
+    "above",
+    "below",
+    "up",
+    "down",
+    "out",
+    "off",
+    "over",
+    "under",
+    "again",
+    "further",
+    "then",
+    "once",
+    "here",
+    "there",
+    "when",
+    "where",
+    "why",
+    "how",
+    "all",
+    "each",
+    "every",
+    "both",
+    "few",
+    "more",
+    "most",
+    "other",
+    "some",
+    "such",
+    "no",
+    "nor",
+    "not",
+    "only",
+    "own",
+    "same",
+    "so",
+    "than",
+    "too",
+    "very",
+    "just",
+    "don",
+    "now",
+    "and",
+    "but",
+    "or",
+    "if",
+    "while",
+    "that",
+    "this",
+    "these",
+    "those",
+    "it",
+    "its",
+    "i",
+    "we",
+    "you",
+    "he",
+    "she",
+    "they",
+    "me",
+    "him",
+    "her",
+    "us",
+    "them",
+    "my",
+    "your",
+    "his",
+    "our",
+    "their",
+    "what",
+    "which",
+    "who",
+    "whom",
+    "also",
+    "much",
+    "many",
+    "like",
+    "because",
+    "since",
+    "get",
+    "got",
+    "use",
+    "used",
+    "using",
+    "make",
+    "made",
+    "thing",
+    "things",
+    "way",
+    "well",
+    "really",
+    "want",
+    "need",
+}
+
+
 class Dialect:
     """
     AAAK Dialect encoder -- works on plain text or structured zettel data.
@@ -122,13 +319,17 @@ class Dialect:
         dialect.generate_layer1("zettels/", output="LAYER1.aaak")
     """
 
-    def __init__(self, entities: Dict[str, str] = None, skip_names: List[str] = None):
+    def __init__(
+        self, entities: Dict[str, str] = None, skip_names: List[str] = None, lang: str = None
+    ):
         """
         Args:
             entities: Mapping of full names -> short codes.
                       e.g. {"Alice": "ALC", "Bob": "BOB"}
                       If None, entities are auto-coded from first 3 chars.
             skip_names: Names to skip (fictional characters, etc.)
+            lang: Language code (e.g. "fr", "ko"). Loads AAAK instruction
+                  and regex patterns from i18n dictionary.
         """
         self.entity_codes = {}
         if entities:
@@ -136,6 +337,15 @@ class Dialect:
                 self.entity_codes[name] = code
                 self.entity_codes[name.lower()] = code
         self.skip_names = [n.lower() for n in (skip_names or [])]
+
+        # Load language-specific AAAK instruction and regex patterns
+        from mempalace.i18n import load_lang, t, current_lang, get_regex
+
+        if lang:
+            load_lang(lang)
+        self.lang = lang or current_lang()
+        self.aaak_instruction = t("aaak.instruction")
+        self.lang_regex = get_regex()
 
     @classmethod
     def from_config(cls, config_path: str) -> "Dialect":
@@ -152,6 +362,7 @@ class Dialect:
         return cls(
             entities=config.get("entities", {}),
             skip_names=config.get("skip_names", []),
+            lang=config.get("lang", "en"),
         )
 
     def save_config(self, config_path: str):
@@ -241,7 +452,7 @@ class Dialect:
     def _extract_topics(self, text: str, max_topics: int = 3) -> List[str]:
         """Extract key topic words from plain text."""
         # Tokenize: alphanumeric words, lowercase
-        words = re.findall(r"\p{L}[\p{L}_-]{2,}", text)
+        words = re.findall(r"[a-zA-Z][a-zA-Z_-]{2,}", text)
         # Count frequency, skip stop words
         freq = {}
         for w in words:
@@ -274,11 +485,31 @@ class Dialect:
             return ""
 
         # Score each sentence
+        decision_words = {
+            "decided",
+            "because",
+            "instead",
+            "prefer",
+            "switched",
+            "chose",
+            "realized",
+            "important",
+            "key",
+            "critical",
+            "discovered",
+            "learned",
+            "conclusion",
+            "solution",
+            "reason",
+            "why",
+            "breakthrough",
+            "insight",
+        }
         scored = []
         for s in sentences:
             score = 0
             s_lower = s.lower()
-            for w in _DECISION_WORDS:
+            for w in decision_words:
                 if w in s_lower:
                     score += 2
             # Prefer shorter, punchier sentences
@@ -312,7 +543,7 @@ class Dialect:
         # Fallback: find capitalized words that look like names (2+ chars, not sentence-start)
         words = text.split()
         for i, w in enumerate(words):
-            clean = re.sub(r"[^\p{L}]", "", w)
+            clean = _ALPHA_RE.sub("", w)
             if (
                 len(clean) >= 2
                 and clean[0].isupper()

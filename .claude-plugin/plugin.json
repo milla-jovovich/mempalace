@@ -1,6 +1,6 @@
 {
   "name": "mempalace",
-  "version": "3.0.14",
+  "version": "3.3.2",
   "description": "Give your AI a memory — mine projects and conversations into a searchable palace. 19 MCP tools, auto-save hooks, and guided setup.",
   "author": {
     "name": "milla-jovovich"
@@ -25,5 +25,5 @@
     "palace",
     "search"
   ],
-  "repository": "https://github.com/milla-jovovich/mempalace"
+  "repository": "https://github.com/MemPalace/mempalace"
 }

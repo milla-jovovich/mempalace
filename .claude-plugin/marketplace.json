@@ -2,14 +2,14 @@
   "name": "mempalace",
   "owner": {
     "name": "milla-jovovich",
-    "url": "https://github.com/milla-jovovich"
+    "url": "https://github.com/MemPalace"
   },
   "plugins": [
     {
       "name": "mempalace",
       "source": "./.claude-plugin",
       "description": "AI memory system — mine projects and conversations into a searchable palace. 19 MCP tools, auto-save hooks, guided setup.",
-      "version": "3.0.14",
+      "version": "3.3.2",
       "author": {
         "name": "milla-jovovich"
       }
