@@ -68,6 +68,70 @@ def get_closets_collection(palace_path: str, create: bool = True):
     return get_collection(palace_path, collection_name="mempalace_closets", create=create)
 
 
+def close_palace(palace_path: str) -> None:
+    """Flush ChromaDB's compactor and release cached handles for a palace.
+
+    Must be called before process exit when the mine loop finishes
+    (normally or via SIGINT) to prevent HNSW index corruption.
+    """
+    _DEFAULT_BACKEND.close_palace(palace_path)
+
+
+class safe_mine_session:
+    """Context manager that protects a mine loop from SIGINT corruption.
+
+    Usage::
+
+        with safe_mine_session(palace_path, dry_run=dry_run) as session:
+            for filepath in files:
+                process_file(filepath, ...)
+                if session.interrupted:
+                    break
+
+    On ``__exit__``, the session flushes ChromaDB's compactor via
+    ``close_palace()`` *before* restoring the original signal handler —
+    closing the window where a Ctrl+C during flush could corrupt the
+    HNSW index.
+    """
+
+    def __init__(self, palace_path: str, *, dry_run: bool = False):
+        self.palace_path = palace_path
+        self.dry_run = dry_run
+        self.interrupted = False
+        self._prev_handler = None
+
+    def __enter__(self):
+        import signal
+
+        self._prev_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, self._handle_sigint)
+        return self
+
+    def _handle_sigint(self, signum, frame):
+        if not self.interrupted:
+            self.interrupted = True
+            print("\n  ⏸ Ctrl+C received — finishing current file before stopping...")
+        else:
+            print("\n  ⏸ Stopping after this file — interrupting mid-write corrupts the index.")
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        import signal
+
+        # Flush the compactor BEFORE restoring the signal handler.
+        # This closes the window where Ctrl+C during flush could
+        # corrupt the HNSW index.
+        if not self.dry_run:
+            try:
+                close_palace(self.palace_path)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Failed to close palace cleanly: %s", e,
+                )
+        signal.signal(signal.SIGINT, self._prev_handler)
+        return False
+
+
 CLOSET_CHAR_LIMIT = 1500  # fill closet until ~1500 chars, then start a new one
 CLOSET_EXTRACT_WINDOW = 5000  # how many chars of source content to scan for entities/topics
 

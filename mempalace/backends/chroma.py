@@ -1134,14 +1134,28 @@ class ChromaBackend(BaseBackend):
         return ChromaCollection(collection)
 
     def close_palace(self, palace) -> None:
-        """Drop cached handles for ``palace``. Accepts ``PalaceRef`` or legacy path str."""
+        """Drop cached handles for ``palace``. Accepts ``PalaceRef`` or legacy path str.
+
+        Calls ``client.close()`` first to flush ChromaDB's background
+        compactor — failing to do so corrupts the HNSW index on exit.
+        """
         path = palace.local_path if isinstance(palace, PalaceRef) else palace
         if path is None:
             return
-        self._clients.pop(path, None)
+        client = self._clients.pop(path, None)
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                logger.warning("Failed to close ChromaDB client for %s", path, exc_info=True)
         self._freshness.pop(path, None)
 
     def close(self) -> None:
+        for client in self._clients.values():
+            try:
+                client.close()
+            except Exception:
+                logger.warning("Failed to close ChromaDB client", exc_info=True)
         self._clients.clear()
         self._freshness.clear()
         self._closed = True
