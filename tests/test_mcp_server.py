@@ -514,6 +514,30 @@ class TestWriteTools:
         )
         assert result["is_duplicate"] is False
 
+    def test_check_duplicate_similarity_never_negative(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        """Similarity scores returned by tool_check_duplicate must be >= 0.
+
+        With hnsw:space=cosine, ChromaDB can return distances slightly above
+        1.0 for maximally dissimilar vectors, making ``1 - dist`` negative.
+        The fix clamps with ``max(0.0, 1 - dist)`` — same as searcher.py.
+        """
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_check_duplicate
+
+        # Use threshold=0.0 so ALL matches come back regardless of score
+        result = tool_check_duplicate(
+            "Chocolate cake recipe with vanilla frosting and strawberries.",
+            threshold=0.0,
+        )
+        assert "matches" in result
+        for match in result["matches"]:
+            assert match["similarity"] >= 0.0, (
+                f"Negative similarity {match['similarity']} returned for drawer "
+                f"{match['id']} — max(0.0, ...) clamp is missing"
+            )
+
     def test_get_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_get_drawer

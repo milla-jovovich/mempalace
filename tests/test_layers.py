@@ -477,6 +477,26 @@ def test_layer3_search_error():
     assert "Search error" in result
 
 
+def test_layer3_search_similarity_never_negative():
+    """Cosine distance > 1.0 should be clamped to sim=0.0, not go negative."""
+    mock_col = MagicMock()
+    mock_col.query.return_value = _mock_query_results(
+        ["unrelated doc"],
+        [{"wing": "w", "room": "r"}],
+        [1.5],  # cosine distance > 1.0 — maximally dissimilar
+    )
+    with (
+        patch("mempalace.layers.MempalaceConfig") as mock_cfg,
+        patch("mempalace.layers._get_collection", return_value=mock_col),
+    ):
+        mock_cfg.return_value.palace_path = "/fake"
+        layer = Layer3(palace_path="/fake")
+        result = layer.search("q")
+
+    assert "sim=-" not in result, "Negative similarity should not appear in L3 output"
+    assert "sim=0.0" in result
+
+
 def test_layer3_search_truncates_long_docs():
     mock_col = MagicMock()
     mock_col.query.return_value = _mock_query_results(
@@ -493,6 +513,29 @@ def test_layer3_search_truncates_long_docs():
         result = layer.search("q")
 
     assert "..." in result
+
+
+def test_layer3_search_raw_similarity_never_negative():
+    """search_raw() similarity must be clamped to >= 0.0 for cosine dist > 1.0."""
+    mock_col = MagicMock()
+    mock_col.query.return_value = _mock_query_results(
+        ["unrelated doc"],
+        [{"wing": "w", "room": "r", "source_file": ""}],
+        [1.5],  # cosine distance > 1.0
+    )
+    with (
+        patch("mempalace.layers.MempalaceConfig") as mock_cfg,
+        patch("mempalace.layers._get_collection", return_value=mock_col),
+    ):
+        mock_cfg.return_value.palace_path = "/fake"
+        layer = Layer3(palace_path="/fake")
+        hits = layer.search_raw("q")
+
+    assert len(hits) == 1
+    assert (
+        hits[0]["similarity"] >= 0.0
+    ), f"Negative similarity {hits[0]['similarity']} returned by search_raw()"
+    assert hits[0]["similarity"] == 0.0
 
 
 def test_layer3_search_raw_returns_dicts():
