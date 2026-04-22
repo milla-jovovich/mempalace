@@ -265,6 +265,10 @@ What didn't work: SessionStart pre-loading, auto-memory bridges, PreCompact re-r
 
 P1's cwd-derived wings are relevant here: once wings are derived from unambiguous signals, they become a cheap scoping prior for any automatic surfacing mechanism. "Claude is in `/Projects/mempalace`; query that wing first" is a lot cheaper than training a router. No memory system has solved this well — it's the unsolved problem of the [OSS Insight Agent Memory Race](https://ossinsight.io/blog/agent-memory-race-2026).
 
+### Multi-client coordination — deferred, tracked via @rboarescu's palace-daemon
+
+Several users have hit the "multiple clients hammering one palace" pattern — @worktarget's #904 report, the ChromaDB concurrency family in #357 / #521 / #832, and the multi-machine case (laptop → home server palace). The fork hasn't built for this axis because the single-client reliability stack (segfault hardening, hook determinism, verbatim search) had higher returns on our day-to-day pain. @rboarescu has since stood up [palace-daemon](https://github.com/rboarescu/palace-daemon), a FastAPI gateway that sits between clients and MemPalace with three semaphores (read / write / mine) and a dedicated mine lane so bulk imports never starve interactive queries. Also ships an MCP-over-HTTP proxy for remote machines. The daemon's design note explicitly pins its correctness floor at MemPalace ≥3.3.2, which matches our fork's internal-reliability work — the two are compositional, not competitive. **Watching, not forking:** if someone asks us about multi-machine setups, the answer is palace-daemon, not a rewrite of our hooks.
+
 ### Stale auto-loaded docs
 
 Knowledge lives across 7+ layers: global CLAUDE.md, project CLAUDE.md, auto-memory (14 files), docs/, superpowers specs, code comments, MemPalace. The auto-loaded layers go stale and actively mislead Claude. Ironically, MemPalace is the only layer that *can't* go stale (verbatim + timestamped) but it's the only one that's never auto-loaded.
