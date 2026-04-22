@@ -1,24 +1,20 @@
 #!/bin/bash
 # MemPalace PreCompact Hook — thin wrapper calling Python CLI
 # All logic lives in mempalace.hooks_cli for cross-harness extensibility
-run_mempalace_hook() {
-  if command -v mempalace >/dev/null 2>&1; then
-    mempalace hook run "$@"
-    return $?
-  fi
+#
+# Python resolution order:
+#   1. MEMPALACE_PYTHON env var (user override)
+#   2. Plugin root's venv (development installs; Claude Code also creates one per plugin)
+#   3. System python3 (pip install --user / pipx)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
 
-  if command -v python3 >/dev/null 2>&1 && python3 -c "import mempalace" >/dev/null 2>&1; then
-    python3 -m mempalace hook run "$@"
-    return $?
-  fi
-
-  if command -v python >/dev/null 2>&1 && python -c "import mempalace" >/dev/null 2>&1; then
-    python -m mempalace hook run "$@"
-    return $?
-  fi
-
-  echo "MemPalace hook error: could not find a runnable mempalace command or module" >&2
-  return 1
-}
-
-run_mempalace_hook --hook precompact --harness claude-code
+if [ -n "$MEMPALACE_PYTHON" ] && [ -x "$MEMPALACE_PYTHON" ]; then
+    PYTHON="$MEMPALACE_PYTHON"
+elif [ -x "$PLUGIN_ROOT/venv/bin/python3" ]; then
+    PYTHON="$PLUGIN_ROOT/venv/bin/python3"
+else
+    PYTHON="python3"
+fi
+INPUT=$(cat)
+echo "$INPUT" | "$PYTHON" -m mempalace hook run --hook precompact --harness claude-code

@@ -48,6 +48,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 16. **perf: `miner.status()` paginated `col.get()`** — upstream's single `col.get(limit=total)` hits SQLite's max-variable limit on palaces with many thousands of drawers; fork paginates in 10 K-drawer batches.
 17. **feat: configurable chunking parameters** — `chunk_size` (800), `chunk_overlap` (100), `min_chunk_size` (50) written to `config.json` and exposed via `MempalaceConfig` properties.
 18. ~~**fix: PID file guard prevents stacking mine processes**~~ — **merged upstream via #1023 in v3.3.2.** Includes the Windows `os.kill` → `OpenProcess` cross-platform fix. No longer fork-ahead.
+19. **fix: `.claude-plugin/` venv-aware Python resolution** — hooks (`mempal-stop-hook.sh`, `mempal-precompact-hook.sh`) and `.mcp.json` resolve Python in this order: `MEMPALACE_PYTHON` env → `$PLUGIN_ROOT/venv/bin/python3` → system `python3`. Upstream's `5fe0c1c` + `be9214a` (fatkobra) and `9f5b8f5` (Pim) regressed to PATH-only lookups and bare `"mempalace-mcp"` command, which break editable dev installs where `mempalace`/`mempalace-mcp` only live in the repo venv. Documented here so future `upstream/develop` merges surface the conflict rather than silently re-regress. Candidate for PR upstream — Claude Code plugin installs also get a `${CLAUDE_PLUGIN_ROOT}/venv/` and benefit from the fallback.
 
 ### Merged into upstream (post-v3.3.1)
 
