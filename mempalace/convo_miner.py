@@ -109,11 +109,22 @@ def chunk_exchanges(
     Falls back to paragraph chunking if no > markers.
 
     Optional params override module-level defaults when provided.
+
+    Raises ``ValueError`` if ``chunk_size`` is not a positive integer or
+    ``min_chunk_size`` is negative. A non-positive ``chunk_size`` would
+    cause ``_chunk_by_exchange`` below to loop forever — ``content[:0]``
+    is empty, ``content[0:]`` is the whole string, and the remainder
+    never shrinks.
     """
     if chunk_size is None:
         chunk_size = CHUNK_SIZE
     if min_chunk_size is None:
         min_chunk_size = MIN_CHUNK_SIZE
+
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be > 0, got {chunk_size}")
+    if min_chunk_size < 0:
+        raise ValueError(f"min_chunk_size must be >= 0, got {min_chunk_size}")
 
     lines = content.split("\n")
     quote_lines = sum(1 for line in lines if line.strip().startswith(">"))
