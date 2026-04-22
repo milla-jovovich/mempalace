@@ -948,6 +948,18 @@ class ChromaBackend(BaseBackend):
         except OSError:
             return (0, 0.0)
 
+    @staticmethod
+    def _cache_key(path: str) -> str:
+        """Normalize a palace path for consistent cache-dict key lookup.
+
+        Resolves relative paths, symlinks, and trailing slashes so that
+        ``get_collection("./palace")`` and ``close_palace("/abs/palace")``
+        always hit the same cache entry.
+        """
+        from pathlib import Path
+
+        return str(Path(path).resolve())
+
     def _client(self, palace_path: str):
         """Return a cached ``PersistentClient``, rebuilding on inode/mtime change.
 
@@ -970,6 +982,7 @@ class ChromaBackend(BaseBackend):
 
             raise BackendClosedError("ChromaBackend has been closed")
 
+        palace_path = self._cache_key(palace_path)
         cached = self._clients.get(palace_path)
         cached_inode, cached_mtime = self._freshness.get(palace_path, (0, 0.0))
         current_inode, current_mtime = self._db_stat(palace_path)
@@ -1142,6 +1155,7 @@ class ChromaBackend(BaseBackend):
         path = palace.local_path if isinstance(palace, PalaceRef) else palace
         if path is None:
             return
+        path = self._cache_key(path)
         client = self._clients.pop(path, None)
         if client is not None:
             try:

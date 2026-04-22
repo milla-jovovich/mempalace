@@ -4,10 +4,13 @@ palace.py — Shared palace operations.
 Consolidates collection access patterns used by both miners and the MCP server.
 """
 
+import atexit
 import contextlib
 import hashlib
 import os
 import re
+import signal
+import sys
 
 from .backends.chroma import ChromaBackend
 
@@ -38,6 +41,14 @@ SKIP_DIRS = {
 }
 
 _DEFAULT_BACKEND = ChromaBackend()
+atexit.register(_DEFAULT_BACKEND.close)
+
+# Convert SIGTERM → sys.exit(0) so atexit handlers fire when an MCP
+# server, systemd, or IDE kills this process.  Without this bridge,
+# SIGTERM terminates immediately — atexit never runs, ChromaDB's
+# compactor never flushes, and HNSW segments can be left corrupt.
+if hasattr(signal, "SIGTERM"):
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
 
 # Schema version for drawer normalization. Bump when the normalization
 # pipeline changes in a way that existing drawers should be rebuilt to pick up
