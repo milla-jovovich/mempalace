@@ -676,6 +676,20 @@ def _as_list(v: Any) -> list:
     return [v]
 
 
+def _close_client(client) -> None:
+    """Call ``PersistentClient.close()`` if available, swallow otherwise.
+
+    chromadb 1.5.x exposes ``Client.close()`` to release rust-side SQLite
+    file locks; older versions relied on GC. Try/except keeps forward-compat.
+    """
+    if client is None:
+        return
+    try:
+        client.close()
+    except Exception:
+        logger.debug("client.close() unavailable or failed", exc_info=True)
+
+
 class ChromaCollection(BaseCollection):
     """Thin adapter translating ChromaDB dict returns into typed results."""
 
@@ -977,7 +991,7 @@ class ChromaBackend(BaseBackend):
         db_path = os.path.join(palace_path, "chroma.sqlite3")
         # DB was present when cache was built but is now missing → invalidate.
         if cached is not None and not os.path.isfile(db_path):
-            self._clients.pop(palace_path, None)
+            _close_client(self._clients.pop(palace_path, None))
             self._freshness.pop(palace_path, None)
             cached = None
             cached_inode, cached_mtime = 0, 0.0
@@ -1134,14 +1148,22 @@ class ChromaBackend(BaseBackend):
         return ChromaCollection(collection)
 
     def close_palace(self, palace) -> None:
-        """Drop cached handles for ``palace``. Accepts ``PalaceRef`` or legacy path str."""
+        """Drop cached handles for ``palace`` and release its SQLite file lock.
+
+        Accepts ``PalaceRef`` or legacy path str. chromadb's rust-side file
+        lock is held until ``PersistentClient.close()`` is called, so plain
+        dict eviction would leave the palace path unreopenable and
+        unremovable in the same process.
+        """
         path = palace.local_path if isinstance(palace, PalaceRef) else palace
         if path is None:
             return
-        self._clients.pop(path, None)
+        _close_client(self._clients.pop(path, None))
         self._freshness.pop(path, None)
 
     def close(self) -> None:
+        for client in self._clients.values():
+            _close_client(client)
         self._clients.clear()
         self._freshness.clear()
         self._closed = True
