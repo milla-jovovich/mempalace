@@ -36,6 +36,7 @@ READABLE_EXTENSIONS = {
     ".jsx",
     ".tsx",
     ".json",
+    ".jsonl",
     ".yaml",
     ".yml",
     ".html",
@@ -62,7 +63,14 @@ SKIP_FILENAMES = {
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB — skip files larger than this.
+# Long Claude Code sessions and large transcript exports routinely exceed
+# 10 MB. The cap exists as a defensive rail against pathological binary
+# files, not as a limit on legitimate text. Per-drawer size is bounded
+# by CHUNK_SIZE, but larger sources still produce proportionally more
+# drawers and therefore more storage, embedding, and processing work —
+# and file reads are not streamed (the whole content is loaded into
+# memory before chunking), so memory use scales with source size too.
 
 
 # =============================================================================
@@ -604,7 +612,7 @@ def process_file(
     chunks = chunk_text(content, source_file)
 
     if dry_run:
-        print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
+        print(f"    [DRY RUN] {filepath.name} -> room:{room} ({len(chunks)} drawers)")
         return len(chunks), room
 
     # Lock this file so concurrent agents don't interleave delete+insert.
@@ -781,7 +789,7 @@ def mine(
         print("  .gitignore: DISABLED")
     if include_ignored:
         print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
-    print(f"{'─' * 55}\n")
+    print(f"{'-' * 55}\n")
 
     if not dry_run:
         collection = get_collection(palace_path)
@@ -811,7 +819,7 @@ def mine(
             total_drawers += drawers
             room_counts[room] += 1
             if not dry_run:
-                print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+                print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
 
     print(f"\n{'=' * 55}")
     print("  Done.")
@@ -839,17 +847,24 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
+    # Count by wing and room — paginate to avoid SQLite "too many SQL
+    # variables" error on large palaces (see #802, #850).
     total = col.count()
-    r = col.get(limit=total, include=["metadatas"]) if total else {"metadatas": []}
-    metas = r["metadatas"]
-
-    wing_rooms = defaultdict(lambda: defaultdict(int))
-    for m in metas:
-        wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+    wing_rooms: dict = defaultdict(lambda: defaultdict(int))
+    batch_size = 5000
+    offset = 0
+    while offset < total:
+        r = col.get(limit=batch_size, offset=offset, include=["metadatas"])
+        batch = r["metadatas"]
+        if not batch:
+            break
+        for m in batch:
+            m = m or {}
+            wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+        offset += len(batch)
 
     print(f"\n{'=' * 55}")
-    print(f"  MemPalace Status — {len(metas)} drawers")
+    print(f"  MemPalace Status — {total} drawers")
     print(f"{'=' * 55}\n")
     for wing, rooms in sorted(wing_rooms.items()):
         print(f"  WING: {wing}")

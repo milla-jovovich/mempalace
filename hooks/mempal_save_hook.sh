@@ -61,13 +61,30 @@ mkdir -p "$STATE_DIR"
 # Leave empty to skip auto-ingest (AI handles saving via the block reason).
 MEMPAL_DIR=""
 
+# Resolve the Python interpreter the hook should use.
+#
+# Why this is nontrivial: GUI-launched Claude Code on macOS (or any harness
+# that doesn't inherit the user's shell PATH) may find a `python3` on PATH
+# that lacks mempalace — e.g. /usr/bin/python3 while the user installed
+# mempalace into a venv or pyenv. Users in that situation can point the
+# hook at the right interpreter by exporting MEMPAL_PYTHON.
+#
+# Resolution order (first hit wins):
+#   1. $MEMPAL_PYTHON          — explicit user override (absolute path)
+#   2. $(command -v python3)   — first python3 on the hook's PATH
+#   3. bare "python3"          — last-resort fallback (hope the PATH has it)
+MEMPAL_PYTHON_BIN="${MEMPAL_PYTHON:-}"
+if [ -z "$MEMPAL_PYTHON_BIN" ] || [ ! -x "$MEMPAL_PYTHON_BIN" ]; then
+    MEMPAL_PYTHON_BIN="$(command -v python3 2>/dev/null || echo python3)"
+fi
+
 # Read JSON input from stdin
 INPUT=$(cat)
 
 # Parse all fields in a single Python call (3x faster than separate invocations)
 # SECURITY: All values are sanitized before being interpolated into shell assignments.
 # stop_hook_active is coerced to a strict True/False to prevent command injection via eval.
-eval $(echo "$INPUT" | python3 -c "
+eval $(echo "$INPUT" | "$MEMPAL_PYTHON_BIN" -c "
 import sys, json, re
 data = json.load(sys.stdin)
 sid = data.get('session_id', 'unknown')
@@ -95,7 +112,7 @@ fi
 # Count human messages in the JSONL transcript
 # SECURITY: Pass transcript path as sys.argv to avoid shell injection via crafted paths
 if [ -f "$TRANSCRIPT_PATH" ]; then
-    EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
+    EXCHANGE_COUNT=$("$MEMPAL_PYTHON_BIN" - "$TRANSCRIPT_PATH" <<'PYEOF'
 import json, sys
 count = 0
 with open(sys.argv[1]) as f:
@@ -144,7 +161,6 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
     # 1. TRANSCRIPT_PATH (from Claude Code) — mine the directory it lives in
     # 2. MEMPAL_DIR (user-configured) — mine that directory
     # At least one should work. If neither is set, nothing mines.
-    PYTHON="$(command -v python3)"
     MINE_DIR=""
     if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
         MINE_DIR="$(dirname "$TRANSCRIPT_PATH")"
@@ -153,7 +169,7 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
         MINE_DIR="$MEMPAL_DIR"
     fi
     if [ -n "$MINE_DIR" ]; then
-        "$PYTHON" -m mempalace mine "$MINE_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
+        mempalace mine "$MINE_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
     fi
 
     # MEMPAL_VERBOSE toggle:

@@ -4,7 +4,7 @@ MemPalace — Give your AI a memory. No API key required.
 
 Two ways to ingest:
   Projects:      mempalace mine ~/projects/my_app          (code, docs, notes)
-  Conversations: mempalace mine ~/chats/ --mode convos     (Claude, ChatGPT, Slack)
+  Conversations: mempalace mine <convo-dir> --mode convos     (Claude Code, Claude.ai, ChatGPT, Slack exports)
 
 Same palace. Same search. Different ingest strategies.
 
@@ -23,7 +23,7 @@ Commands:
 Examples:
     mempalace init ~/projects/my_app
     mempalace mine ~/projects/my_app
-    mempalace mine ~/chats/claude-sessions --mode convos
+    mempalace mine ~/.claude/projects/-Users-you-Projects-my_app --mode convos --wing my_app
     mempalace search "why did we switch to GraphQL"
     mempalace search "pricing discussion" --wing my_app --room costs
 """
@@ -35,6 +35,7 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .version import __version__
 
 
 _MEMPALACE_PROJECT_FILES = ("mempalace.yaml", "entities.json")
@@ -144,6 +145,48 @@ def cmd_mine(args):
             respect_gitignore=not args.no_gitignore,
             include_ignored=include_ignored,
         )
+
+
+def cmd_sweep(args):
+    """Sweep a transcript file or directory.
+
+    The sweeper deduplicates against its own prior writes via
+    deterministic drawer IDs + a timestamp cursor. It does NOT currently
+    coordinate with the file-level miners (miner.py / convo_miner.py) —
+    those produce char-chunked drawers without compatible message
+    metadata, so running both miners may store overlapping content under
+    different IDs.
+    """
+    from .sweeper import sweep, sweep_directory
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    target = os.path.expanduser(args.target)
+
+    if os.path.isfile(target):
+        result = sweep(target, palace_path)
+        print(
+            f"  Swept {target}: +{result['drawers_added']} new, "
+            f"{result['drawers_already_present']} already present, "
+            f"{result['drawers_skipped']} skipped (< cursor)."
+        )
+    elif os.path.isdir(target):
+        result = sweep_directory(target, palace_path)
+        print(
+            f"  Swept {result['files_succeeded']}/{result['files_attempted']} "
+            f"files from {target}: +{result['drawers_added']} new, "
+            f"{result['drawers_already_present']} already present, "
+            f"{result['drawers_skipped']} skipped (< cursor)."
+        )
+        failures = result.get("failures") or []
+        if failures:
+            print(
+                f"  ⚠ {len(failures)} file(s) failed to sweep — see stderr / logs for details.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    else:
+        print(f"  ✗ Not a file or directory: {target}", file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_search(args):
@@ -338,7 +381,7 @@ def cmd_instructions(args):
 
 def cmd_mcp(args):
     """Show how to wire MemPalace into MCP-capable hosts."""
-    base_server_cmd = "python -m mempalace.mcp_server"
+    base_server_cmd = "mempalace-mcp"
 
     if args.palace:
         resolved_palace = str(Path(args.palace).expanduser())
@@ -484,10 +527,17 @@ def cmd_compress(args):
 
 
 def main():
+    version_label = f"MemPalace {__version__}"
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
+        epilog=f"{version_label}\n\n{__doc__}",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=version_label,
+        help="Show version and exit",
     )
     parser.add_argument(
         "--palace",
@@ -551,6 +601,17 @@ def main():
         choices=["exchange", "general"],
         default="exchange",
         help="Extraction strategy for convos mode: 'exchange' (default) or 'general' (5 memory types)",
+    )
+
+    # sweep
+    p_sweep = sub.add_parser(
+        "sweep",
+        help="Tandem miner: catch anything the primary miner missed "
+        "(message-level, timestamp-coordinated, idempotent)",
+    )
+    p_sweep.add_argument(
+        "target",
+        help="A .jsonl transcript file, or a directory to scan recursively",
     )
 
     # search
@@ -699,6 +760,7 @@ def main():
         "split": cmd_split,
         "search": cmd_search,
         "export": cmd_export,
+        "sweep": cmd_sweep,
         "mcp": cmd_mcp,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,

@@ -2,7 +2,7 @@
 """
 MemPalace MCP Server — read/write palace access for Claude Code
 ================================================================
-Install: claude mcp add mempalace -- python -m mempalace.mcp_server [--palace /path/to/palace]
+Install: claude mcp add mempalace -- mempalace-mcp [--palace /path/to/palace]
 
 Tools (read):
   mempalace_status          — total drawers, wing/room breakdown
@@ -315,6 +315,7 @@ def tool_status():
     try:
         all_meta = _get_cached_metadata(col)
         for m in all_meta:
+            m = m or {}
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -368,6 +369,7 @@ def tool_list_wings():
     try:
         all_meta = _get_cached_metadata(col)
         for m in all_meta:
+            m = m or {}
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
     except Exception as e:
@@ -391,6 +393,7 @@ def tool_list_rooms(wing: str = None):
         where = {"wing": wing} if wing else None
         all_meta = _fetch_all_metadata(col, where=where)
         for m in all_meta:
+            m = m or {}
             r = m.get("room", "unknown")
             rooms[r] = rooms.get(r, 0) + 1
     except Exception as e:
@@ -409,6 +412,7 @@ def tool_get_taxonomy():
     try:
         all_meta = _get_cached_metadata(col)
         for m in all_meta:
+            m = m or {}
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
             if w not in taxonomy:
