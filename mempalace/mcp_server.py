@@ -285,7 +285,7 @@ def _get_cached_metadata(col, where=None):
 
 def _sanitize_optional_name(value: str = None, field_name: str = "name") -> str:
     """Validate optional wing/room-style filters."""
-    if value is None:
+    if value is None or value == "":
         return None
     return sanitize_name(value, field_name)
 
