@@ -62,7 +62,7 @@ ENTRIES: list[tuple[str, str]] = [
      "row-level migrations that rename or cast identifier columns."),
 
     ("audit_field_requirement.txt",
-     "Every write to the action store must carry an injection_scan_score in its "
+     "Every write to the action store must carry a security_scan_score in its "
      "metadata. Hardcoded scores of 1.0 were found in three files during an audit; "
      "the guard module now enforces the field is present and dynamically computed "
      "rather than a compile-time constant."),
@@ -107,14 +107,14 @@ ENTRIES: list[tuple[str, str]] = [
 
     ("gpu_memory_ceiling.txt",
      "A GPU with a 24 GB VRAM ceiling requires a serialization mechanism for model "
-     "loads. A Redis lock (vram_mutex) gates concurrent agent spawns so they cannot "
+     "loads. A Redis lock gates concurrent agent spawns so they cannot "
      "collectively exceed the ceiling. Keep the vector store Top-K at 3 or lower to "
      "avoid embedding OOM during heavy inference workloads."),
 
     ("deliverable_verification.txt",
      "A deliverable verification table links to the work-item (mandate) table. Each "
      "row holds sequence number, title, expected file path, minimum byte size, and "
-     "status. An agent calls complete_mandate_task per deliverable; the system "
+     "status. An agent calls a completion handler per deliverable; the system "
      "verifies the file exists on disk before setting status to VERIFIED. The "
      "work-item auto-promotes when all deliverable rows reach VERIFIED."),
 
@@ -129,7 +129,7 @@ ENTRIES: list[tuple[str, str]] = [
      "Context rings gate agent read access in the vector store. Ring 1 is public "
      "(any agent), Ring 2 is confidential client data (restricted agents only), "
      "Ring 3 is financial and legal data, Ring 4 is personal data (home agent only). "
-     "An authorized_ring filter is applied before returning any vector store payload "
+     "An access-ring filter is applied before returning any vector store payload "
      "to prevent cross-ring data leakage."),
 
     ("asyncio_timeout_str_bug.txt",
@@ -266,7 +266,7 @@ QA_PAIRS: list[QAPair] = [
            "already-UUID",
            "'database row identifiers' vs 'UUID objects', 'constructor raises'"),
     QAPair("what safety field must accompany every write to the action store?",
-           "injection_scan_score",
+           "security_scan_score",
            "'action store' vs 'action table', 'safety field' vs 'metadata field'"),
     QAPair("what rule decides whether agent memories go to the relational database or the vector store?",
            "two-tier storage",
@@ -338,7 +338,7 @@ QA_PAIRS: list[QAPair] = [
            "work-item outcomes",
            "'capture to long-term memory' + 'after completing' vs 'execution_memory'"),
     QAPair("when can two models be loaded at the same time without overflowing GPU memory?",
-           "vram_mutex",
+           "Redis lock",
            "'two models at same time' vs 'concurrent agent spawns', 'overflowing GPU' vs 'exceed ceiling'"),
     QAPair("what is the order that models are tried before falling back to the cloud API?",
            "32b → 8b → API",
