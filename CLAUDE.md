@@ -32,18 +32,18 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 1. **feat: bulk_check_mined()** — paginated pre-fetch of all source_file/mtime pairs for concurrent mining (fork-only; independent of the mtime comparison fix, which has since been upstreamed)
 2. **feat: similarity threshold** — `max_distance` parameter in search, default 1.5 cosine distance in MCP
-3. **feat: hooks_cli silent save** — stop hook saves directly via Python API with systemMessage notification, deterministic, zero data loss
+3. ~~**feat: hooks_cli silent save**~~ — **merged upstream via #673 on 2026-04-22.** No longer fork-ahead.
 4. **feat: `mempal_save_hook.sh` Python auto-detection** — checks `MEMPAL_PYTHON` env var → repo venv → system `python3`; no hardcoded path required
 5. **fix: convo_miner wing assignment** — `_wing_from_transcript_path()` extracts project name from Claude Code transcript path
-6. **perf: graph cache** — `build_graph()` cached module-level with 60s TTL, invalidated on writes via `invalidate_graph_cache()`
+6. ~~**perf: graph cache**~~ — **merged upstream via #661 on 2026-04-22.** No longer fork-ahead.
 7. **perf: L1 importance pre-filter** — `_fetch_drawers()` tries `importance >= 3` first, falls back to full scan only if < 15 results
 8. **fix: MCP stale HNSW index** — `_get_client()` detects external writes via mtime (not just inode), `mempalace_reconnect` MCP tool
 9. **fix: diary wing assignment** — `tool_diary_write()` accepts optional `wing` param, stop hook derives project wing from transcript path
 10. **fix: `.blob_seq_ids_migrated` marker** — skip Python `sqlite3.connect()` against a live ChromaDB 1.5.x DB after first successful migration; opening the sqlite file from Python corrupts the next `PersistentClient` call
 11. ~~**feat: `quarantine_stale_hnsw()`**~~ — **merged upstream via #1000 in v3.3.2.** No longer fork-ahead.
 12. **feat: search warnings + sqlite BM25 top-up** — `search_memories()` returns `warnings: [...]` and `available_in_scope: N` whenever the vector path underdelivers (sparse HNSW after repair, `#951` filter-planner failure, drift). Fallback promotes BM25-ranked sqlite candidates tagged `matched_via: "sqlite_bm25_fallback"`. Closes the "silent 0-hit when data is in sqlite" failure mode. CLI `search()` delegates to `search_memories()` so both paths share the fallback.
-13. **fix: stop_hook_active guard** — guard only applies in block mode; silent mode skips it so Claude Code 2.1.114's plugin dispatch (which sets `stop_hook_active:true` on every fire after the first) doesn't suppress subsequent auto-saves
-14. **fix: `_output()` stdout routing** — uses `sys.modules.get()` to find an already-loaded `mcp_server` and reuse its `_REAL_STDOUT_FD`; otherwise writes directly to fd 1. Avoids importing `mcp_server` cold (which would trigger its stdout→stderr redirect as a side effect). Write-all loop handles partial `os.write()` returns.
+13. ~~**fix: stop_hook_active guard**~~ — **merged upstream via #1021 on 2026-04-22.** No longer fork-ahead.
+14. ~~**fix: `_output()` stdout routing**~~ — **merged upstream via #1021 on 2026-04-22.** No longer fork-ahead.
 15. **fix: `_get_client()` get-then-create guard** — `get_or_create_collection` segfaults ChromaDB 1.5.x when existing collection metadata differs; fork tries `get_collection` first, falls back to `create_collection` only on `InvalidCollectionException`.
 16. **perf: `miner.status()` paginated `col.get()`** — upstream's single `col.get(limit=total)` hits SQLite's max-variable limit on palaces with many thousands of drawers; fork paginates in 10 K-drawer batches.
 17. **feat: configurable chunking parameters** — `chunk_size` (800), `chunk_overlap` (100), `min_chunk_size` (50) written to `config.json` and exposed via `MempalaceConfig` properties.
@@ -56,6 +56,9 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 - Unicode checkmark → ASCII for Windows encoding (#681, shipped in v3.3.2)
 - `quarantine_stale_hnsw()` for HNSW/sqlite drift (#1000, shipped in v3.3.2)
 - PID file guard prevents stacking mine processes, with Windows cross-platform `os.kill` fix (#1023, shipped in v3.3.2)
+- Graph cache with write-invalidation — `build_graph()` module-level cache with 60s TTL, `threading.Lock`, `invalidate_graph_cache()` on writes (#661, merged 2026-04-22)
+- Deterministic hook saves — silent mode via direct Python API call to `tool_diary_write()`, plain-text save, marker advances only after confirmed write, `systemMessage` terminal notification (#673, merged 2026-04-22). Replaces the block-mode "ask AI to save" pattern that could silently drop entries.
+- Hook `silent_save` guard + `_output()` stdout routing — silent-mode skips `stop_hook_active` guard so Claude Code 2.1.114 plugin dispatch keeps firing; `_output()` reuses already-loaded `mcp_server`'s `_REAL_STDOUT_FD` or writes directly to fd 1 to avoid cold-import side effects (#1021, merged 2026-04-22)
 
 ### Merged into upstream v3.3.0
 
@@ -88,17 +91,17 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 ## Upstream PRs
 
-As of 2026-04-21: 10 merged, 7 open, 7 closed. PRs target `develop`. Fork `main` tracks `upstream/develop`.
+As of 2026-04-22: 13 merged, 4 open, 7 closed. PRs target `develop`. Fork `main` tracks `upstream/develop`.
 
 | PR | Status | Description |
 |----|--------|-------------|
 | #659 | open (`MERGEABLE`, waiting review) | Diary wing parameter |
 | #660 | open (`MERGEABLE`, waiting review) | L1 importance pre-filter |
-| #661 | open (`CHANGES_REQUESTED` but feedback addressed, waiting `@bensig` re-review — GitHub holds state until reviewer dismisses) | Graph cache with write-invalidation |
-| #673 | open (externally approved 2026-04-12, rebased + squashed on 2026-04-21, `MERGEABLE`) | Deterministic hook saves (broader than upstream's #966) |
 | #1005 | open (CI green all platforms, waiting maintainer) | Warnings + sqlite BM25 top-up when vector underdelivers (never silent miss) |
-| #1021 | open (CI green all platforms, waiting maintainer) | Hook stdout routing + silent_save guard fixes for Claude Code 2.1.114 |
 | #1024 | open (CI green all platforms, waiting maintainer) | Configurable chunk_size, chunk_overlap, min_chunk_size |
+| #661 | **merged** 2026-04-22 | Graph cache with write-invalidation |
+| #673 | **merged** 2026-04-22 | Deterministic hook saves (broader than upstream's #966) — config-flag-gated, strictly safer save semantics |
+| #1021 | **merged** 2026-04-22 | Hook stdout routing + `silent_save` guard fixes for Claude Code 2.1.114 |
 | #681 | **merged** in v3.3.2 (2026-04-21) | Unicode checkmark → ASCII (#535) |
 | #1000 | **merged** in v3.3.2 (2026-04-21) | `quarantine_stale_hnsw()` for HNSW/sqlite drift |
 | #1023 | **merged** in v3.3.2 (2026-04-21) | PID file guard prevents stacking mine processes + Windows `os.kill` cross-platform fix |
