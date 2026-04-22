@@ -22,6 +22,7 @@ from .palace import (
     file_already_mined,
     get_collection,
     mine_lock,
+    safe_mine_session,
 )
 
 
@@ -417,81 +418,86 @@ def mine_convos(
     files_skipped = 0
     room_counts = defaultdict(int)
 
-    for i, filepath in enumerate(files, 1):
-        source_file = str(filepath)
+    with safe_mine_session(palace_path, dry_run=dry_run) as session:
+        for i, filepath in enumerate(files, 1):
+            source_file = str(filepath)
 
-        # Skip if already filed
-        if not dry_run and file_already_mined(collection, source_file):
-            files_skipped += 1
-            continue
+            # Skip if already filed
+            if not dry_run and file_already_mined(collection, source_file):
+                files_skipped += 1
+                continue
 
-        # Normalize format
-        try:
-            content = normalize(str(filepath))
-        except (OSError, ValueError):
-            if not dry_run:
-                _register_file(collection, source_file, wing, agent)
-            continue
+            # Normalize format
+            try:
+                content = normalize(str(filepath))
+            except (OSError, ValueError):
+                if not dry_run:
+                    _register_file(collection, source_file, wing, agent)
+                continue
 
-        if not content or len(content.strip()) < MIN_CHUNK_SIZE:
-            if not dry_run:
-                _register_file(collection, source_file, wing, agent)
-            continue
+            if not content or len(content.strip()) < MIN_CHUNK_SIZE:
+                if not dry_run:
+                    _register_file(collection, source_file, wing, agent)
+                continue
 
-        # Chunk — either exchange pairs or general extraction
-        if extract_mode == "general":
-            from .general_extractor import extract_memories
-
-            chunks = extract_memories(content)
-            # Each chunk already has memory_type; use it as the room name
-        else:
-            chunks = chunk_exchanges(content)
-
-        if not chunks:
-            if not dry_run:
-                _register_file(collection, source_file, wing, agent)
-            continue
-
-        # Detect room from content (general mode uses memory_type instead)
-        if extract_mode != "general":
-            room = detect_convo_room(content)
-        else:
-            room = None  # set per-chunk below
-
-        if dry_run:
+            # Chunk — either exchange pairs or general extraction
             if extract_mode == "general":
-                from collections import Counter
+                from .general_extractor import extract_memories
 
-                type_counts = Counter(c.get("memory_type", "general") for c in chunks)
-                types_str = ", ".join(f"{t}:{n}" for t, n in type_counts.most_common())
-                print(f"    [DRY RUN] {filepath.name} → {len(chunks)} memories ({types_str})")
+                chunks = extract_memories(content)
+                # Each chunk already has memory_type; use it as the room name
             else:
-                print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
-            total_drawers += len(chunks)
-            # Track room counts
-            if extract_mode == "general":
-                for c in chunks:
-                    room_counts[c.get("memory_type", "general")] += 1
+                chunks = chunk_exchanges(content)
+
+            if not chunks:
+                if not dry_run:
+                    _register_file(collection, source_file, wing, agent)
+                continue
+
+            # Detect room from content (general mode uses memory_type instead)
+            if extract_mode != "general":
+                room = detect_convo_room(content)
             else:
+                room = None  # set per-chunk below
+
+            if dry_run:
+                if extract_mode == "general":
+                    from collections import Counter
+
+                    type_counts = Counter(c.get("memory_type", "general") for c in chunks)
+                    types_str = ", ".join(f"{t}:{n}" for t, n in type_counts.most_common())
+                    print(f"    [DRY RUN] {filepath.name} → {len(chunks)} memories ({types_str})")
+                else:
+                    print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
+                total_drawers += len(chunks)
+                # Track room counts
+                if extract_mode == "general":
+                    for c in chunks:
+                        room_counts[c.get("memory_type", "general")] += 1
+                else:
+                    room_counts[room] += 1
+                continue
+
+            if extract_mode != "general":
                 room_counts[room] += 1
-            continue
 
-        if extract_mode != "general":
-            room_counts[room] += 1
+            # Lock + purge stale + file fresh chunks. Lock serializes concurrent
+            # agents; purge removes pre-v2 drawers so the schema bump applies.
+            drawers_added, room_delta, skipped = _file_chunks_locked(
+                collection, source_file, chunks, wing, room, agent, extract_mode
+            )
+            if skipped:
+                files_skipped += 1
+                continue
+            for r, n in room_delta.items():
+                room_counts[r] += n
 
-        # Lock + purge stale + file fresh chunks. Lock serializes concurrent
-        # agents; purge removes pre-v2 drawers so the schema bump applies.
-        drawers_added, room_delta, skipped = _file_chunks_locked(
-            collection, source_file, chunks, wing, room, agent, extract_mode
-        )
-        if skipped:
-            files_skipped += 1
-            continue
-        for r, n in room_delta.items():
-            room_counts[r] += n
+            total_drawers += drawers_added
+            print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
 
-        total_drawers += drawers_added
-        print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers_added}")
+            if session.interrupted:
+                print(f"\n  Stopped gracefully after {i}/{len(files)} files.")
+                break
 
     print(f"\n{'=' * 55}")
     print("  Done.")
