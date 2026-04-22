@@ -316,14 +316,15 @@ class TestReadTools:
         assert result["taxonomy"]["project"]["frontend"] == 1
         assert result["taxonomy"]["notes"]["planning"] == 1
 
-    def test_empty_palace_returns_status(self, monkeypatch, config, kg):
+    def test_empty_palace_returns_status(self, monkeypatch, config, palace_path, kg):
         _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
         from mempalace.mcp_server import tool_status
 
         result = tool_status()
-        # With create=True, empty palace returns valid status (no error)
-        assert "error" not in result
-        assert result["rooms"] == {}
+        assert result["total_drawers"] == 0
+        assert result["wings"] == {}
 
 
 # ── Search Tool ─────────────────────────────────────────────────────────
