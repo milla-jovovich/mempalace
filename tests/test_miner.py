@@ -373,6 +373,32 @@ def test_status_handles_none_metadata_without_crash(tmp_path, capsys):
     assert "WING: proj" in out
 
 
+def test_status_paginates_large_palaces(tmp_path, capsys):
+    """status should page metadata reads instead of fetching every drawer at once."""
+    from unittest.mock import patch
+
+    class FakeCol:
+        def count(self):
+            return 1200
+
+        def get(self, *args, **kwargs):
+            limit = kwargs["limit"]
+            offset = kwargs["offset"]
+            metas = []
+            end = min(offset + limit, 1200)
+            for idx in range(offset, end):
+                metas.append({"wing": "proj", "room": f"room-{idx // 600}"})
+            return {"metadatas": metas}
+
+    with patch("mempalace.miner.get_collection", return_value=FakeCol()):
+        status(str(tmp_path))
+
+    out = capsys.readouterr().out
+    assert "MemPalace Status" in out
+    assert "1200 drawers" in out
+    assert "WING: proj" in out
+
+
 # ── normalize_version schema gate ───────────────────────────────────────
 #
 # When the normalization pipeline changes shape (e.g., strip_noise lands),

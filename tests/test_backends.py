@@ -266,6 +266,44 @@ def test_chroma_cache_picks_up_db_created_after_first_open(tmp_path):
     assert backend._freshness[str(palace_path)] != (0, 0.0)
 
 
+def test_chroma_client_quarantines_stale_hnsw_before_open(monkeypatch, tmp_path):
+    """Backend should quarantine drifted HNSW dirs before constructing the client.
+
+    This guards the real-world crash path where chroma.sqlite3 is much newer
+    than on-disk segment indexes and Chroma can abort the process during the
+    next open/count/query.
+    """
+    now = 1_700_000_000.0
+    palace_path, seg = _make_palace_with_segment(
+        tmp_path, hnsw_mtime=now - 7200, sqlite_mtime=now
+    )
+
+    class _FakeClient:
+        def get_or_create_collection(self, name, metadata=None):
+            return _FakeCollection()
+
+    seen = {}
+
+    def _fake_persistent_client(*, path):
+        seen["path"] = path
+        seen["seg_exists_at_open"] = seg.exists()
+        return _FakeClient()
+
+    monkeypatch.setattr(chromadb, "PersistentClient", _fake_persistent_client)
+
+    collection = ChromaBackend().get_collection(
+        str(palace_path),
+        collection_name="mempalace_drawers",
+        create=True,
+    )
+
+    assert isinstance(collection, ChromaCollection)
+    assert seen["path"] == str(palace_path)
+    assert seen["seg_exists_at_open"] is False
+    drift_dirs = [p for p in palace_path.iterdir() if ".drift-" in p.name]
+    assert len(drift_dirs) == 1
+
+
 def test_base_collection_update_default_rejects_mismatched_lengths():
     """The ABC default update() raises ValueError rather than silently misaligning."""
     from mempalace.backends.base import BaseCollection

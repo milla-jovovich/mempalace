@@ -784,7 +784,7 @@ def mine(
     print(f"  Files:   {len(files)}")
     print(f"  Palace:  {palace_path}")
     if dry_run:
-        print("  DRY RUN — nothing will be filed")
+        print("  DRY RUN - nothing will be filed")
     if not respect_gitignore:
         print("  .gitignore: DISABLED")
     if include_ignored:
@@ -849,8 +849,19 @@ def status(palace_path: str):
 
     # Count by wing and room
     total = col.count()
-    r = col.get(limit=total, include=["metadatas"]) if total else {"metadatas": []}
-    metas = r["metadatas"]
+    metas = []
+    if total:
+        batch_size = 500  # stay under Chroma/SQLite variable limits on large palaces
+        offset = 0
+        while True:
+            batch = col.get(limit=batch_size, offset=offset, include=["metadatas"])
+            batch_metas = batch["metadatas"]
+            if not batch_metas:
+                break
+            metas.extend(batch_metas)
+            offset += len(batch_metas)
+            if len(batch_metas) < batch_size:
+                break
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:
@@ -858,7 +869,7 @@ def status(palace_path: str):
         wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
 
     print(f"\n{'=' * 55}")
-    print(f"  MemPalace Status — {len(metas)} drawers")
+    print(f"  MemPalace Status - {len(metas)} drawers")
     print(f"{'=' * 55}\n")
     for wing, rooms in sorted(wing_rooms.items()):
         print(f"  WING: {wing}")
