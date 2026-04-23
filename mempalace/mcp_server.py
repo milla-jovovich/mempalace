@@ -929,6 +929,9 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
     try:
         agent_name = sanitize_name(agent_name, "agent_name")
         entry = sanitize_content(entry)
+        # Sanitize topic: allow None/empty (default to "general"), otherwise validate.
+        if topic and topic != "general":
+            topic = sanitize_name(topic, "topic")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
