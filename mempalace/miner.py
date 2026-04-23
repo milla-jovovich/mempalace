@@ -11,6 +11,7 @@ import os
 import sys
 import hashlib
 import fnmatch
+import logging
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
@@ -26,6 +27,8 @@ from .palace import (
     purge_file_closets,
     upsert_closet_lines,
 )
+
+logger = logging.getLogger("mempalace_mcp")
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -631,7 +634,7 @@ def process_file(
         try:
             collection.delete(where={"source_file": source_file})
         except Exception:
-            pass
+            logger.debug("Stale-drawer purge failed for %s", source_file, exc_info=True)
 
         drawers_added = 0
         for chunk in chunks:

@@ -27,6 +27,7 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -34,6 +35,8 @@ from datetime import datetime, timezone
 # Share miner's mtime-cached registry loader so we don't double-read
 # ~/.mempalace/known_entities.json on every check_text call.
 from .miner import _load_known_entities_raw
+
+logger = logging.getLogger("mempalace_mcp")
 
 
 # Narrow detection patterns — parse "X is Y's Z" and "X's Z is Y".
@@ -214,6 +217,7 @@ def _check_kg_contradictions(text: str, palace_path: str) -> list:
         try:
             facts = kg.query_entity(subject, direction="outgoing")
         except Exception:
+            logger.debug("KG lookup failed for subject %r", subject, exc_info=True)
             continue
         if not facts:
             continue
