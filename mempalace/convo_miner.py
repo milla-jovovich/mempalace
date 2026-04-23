@@ -130,11 +130,15 @@ def _chunk_by_exchange(lines: list) -> list:
                 next_line = lines[i]
                 if next_line.strip().startswith(">") or next_line.strip().startswith("---"):
                     break
-                if next_line.strip():
-                    ai_lines.append(next_line.strip())
+                # Preserve the line as-is — blank lines and indentation carry meaning
+                # (paragraph breaks, list/code structure) and must survive verbatim.
+                ai_lines.append(next_line)
                 i += 1
 
-            ai_response = " ".join(ai_lines)
+            # Join on newline (not space) so line structure, blank lines, and
+            # indentation reach the drawer unchanged. Trim only trailing blank
+            # lines produced by the loop stopping at the next `>` turn.
+            ai_response = "\n".join(ai_lines).rstrip("\n")
             content = f"{user_turn}\n{ai_response}" if ai_response else user_turn
 
             # Split into multiple drawers when the exchange exceeds CHUNK_SIZE
