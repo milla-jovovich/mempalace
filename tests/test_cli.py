@@ -391,6 +391,7 @@ def test_cmd_mine_projects_mode(mock_config_cls):
         dry_run=False,
         no_gitignore=False,
         include_ignored=[],
+        exclude=[],
         extract="exchange",
     )
     with patch("mempalace.miner.mine") as mock_mine:
@@ -404,6 +405,7 @@ def test_cmd_mine_projects_mode(mock_config_cls):
             dry_run=False,
             respect_gitignore=True,
             include_ignored=[],
+            exclude_patterns=[],
         )
 
 
@@ -420,6 +422,7 @@ def test_cmd_mine_convos_mode(mock_config_cls):
         dry_run=True,
         no_gitignore=False,
         include_ignored=[],
+        exclude=[],
         extract="general",
     )
     with patch("mempalace.convo_miner.mine_convos") as mock_mine:
@@ -448,6 +451,7 @@ def test_cmd_mine_include_ignored_comma_split(mock_config_cls):
         dry_run=False,
         no_gitignore=False,
         include_ignored=["a.txt,b.txt", "c.txt"],
+        exclude=[],
         extract="exchange",
     )
     with patch("mempalace.miner.mine") as mock_mine:
@@ -455,6 +459,34 @@ def test_cmd_mine_include_ignored_comma_split(mock_config_cls):
         mock_mine.assert_called_once()
         call_kwargs = mock_mine.call_args[1]
         assert call_kwargs["include_ignored"] == ["a.txt", "b.txt", "c.txt"]
+        assert call_kwargs["exclude_patterns"] == []
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_mine_exclude_comma_split(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        dir="/src",
+        palace=None,
+        mode="projects",
+        wing=None,
+        agent="mempalace",
+        limit=0,
+        dry_run=False,
+        no_gitignore=False,
+        include_ignored=[],
+        exclude=["**/*.json,resources/**", "src/generated/**"],
+        extract="exchange",
+    )
+    with patch("mempalace.miner.mine") as mock_mine:
+        cmd_mine(args)
+        mock_mine.assert_called_once()
+        call_kwargs = mock_mine.call_args[1]
+        assert call_kwargs["exclude_patterns"] == [
+            "**/*.json",
+            "resources/**",
+            "src/generated/**",
+        ]
 
 
 # ── cmd_wakeup ─────────────────────────────────────────────────────────
