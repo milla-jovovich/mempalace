@@ -9,6 +9,7 @@ via monkeypatch to avoid touching real data.
 from datetime import datetime
 import json
 import sys
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -494,6 +495,41 @@ class TestWriteTools:
 
         result = tool_delete_drawer("nonexistent_drawer")
         assert result["success"] is False
+
+    def test_check_duplicate_handles_none_metadata(self, monkeypatch, config, kg):
+        """tool_check_duplicate must tolerate None entries in the result lists
+        that ChromaDB 1.5.x returns for partially-flushed rows.
+
+        Previously ``meta = results["metadatas"][0][i]`` was unguarded and
+        raised ``AttributeError: 'NoneType' object has no attribute 'get'``
+        the moment the first matching drawer came back with None metadata —
+        surfacing to the MCP client as the uninformative
+        ``"Duplicate check failed"`` because the broad ``except Exception``
+        wrapper swallows the real cause.
+        """
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        mock_col = MagicMock()
+        mock_col.query.return_value = {
+            "ids": [["d1", "d2"]],
+            "distances": [[0.05, 0.05]],
+            "metadatas": [[{"wing": "w", "room": "r"}, None]],
+            "documents": [["first doc", None]],
+        }
+        monkeypatch.setattr(mcp_server, "_get_collection", lambda: mock_col)
+
+        result = mcp_server.tool_check_duplicate("any content", threshold=0.5)
+
+        # Both entries land in matches (above threshold), None ones rendered
+        # with sentinel values rather than crashing the whole response.
+        assert result.get("is_duplicate") is True
+        assert len(result["matches"]) == 2
+        # The None-metadata entry falls back to sentinels.
+        none_entry = result["matches"][1]
+        assert none_entry["wing"] == "?"
+        assert none_entry["room"] == "?"
+        assert none_entry["content"] == ""
 
     def test_check_duplicate(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)

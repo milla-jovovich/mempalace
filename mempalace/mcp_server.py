@@ -484,8 +484,10 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
                 dist = results["distances"][0][i]
                 similarity = round(1 - dist, 3)
                 if similarity >= threshold:
-                    meta = results["metadatas"][0][i]
-                    doc = results["documents"][0][i]
+                    # Chroma 1.5.x can return None for partially-flushed rows;
+                    # coerce to empty sentinels so downstream .get() is safe.
+                    meta = results["metadatas"][0][i] or {}
+                    doc = results["documents"][0][i] or ""
                     duplicates.append(
                         {
                             "id": drawer_id,

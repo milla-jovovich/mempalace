@@ -124,6 +124,8 @@ class Layer1:
         # Score each drawer: prefer high importance, recent filing
         scored = []
         for doc, meta in zip(docs, metas):
+            meta = meta or {}
+            doc = doc or ""
             importance = 3
             # Try multiple metadata keys that might carry weight info
             for key in ("importance", "emotional_weight", "weight"):
@@ -222,6 +224,8 @@ class Layer2:
 
         lines = [f"## L2 — ON-DEMAND ({len(docs)} drawers)"]
         for doc, meta in zip(docs[:n_results], metas[:n_results]):
+            meta = meta or {}
+            doc = doc or ""
             room_name = meta.get("room", "?")
             source = Path(meta.get("source_file", "")).name if meta.get("source_file") else ""
             snippet = doc.strip().replace("\n", " ")
