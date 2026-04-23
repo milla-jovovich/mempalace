@@ -476,9 +476,9 @@ class TestWriteTools:
 
         assert result1["success"] is True
         assert result2["success"] is True
-        assert (
-            result1["drawer_id"] != result2["drawer_id"]
-        ), "Documents with shared header but different content must have distinct drawer IDs"
+        assert result1["drawer_id"] != result2["drawer_id"], (
+            "Documents with shared header but different content must have distinct drawer IDs"
+        )
 
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
@@ -840,3 +840,180 @@ class TestCacheInvalidation:
         assert result["success"] is True
         assert "Reconnected" in result["message"]
         assert isinstance(result["drawers"], int)
+
+
+# ── Progressive disclosure + <private> tag handling ────────────────────
+
+
+class TestProgressiveDisclosure:
+    def test_search_default_returns_summary(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        """Default tool_search hides verbatim text and exposes drawer_id."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        long_text = (
+            "The authentication module uses JWT tokens for session management. "
+            "Tokens expire after 24 hours. Refresh tokens are stored in HttpOnly cookies."
+        )
+        fixture = {
+            "query": "auth",
+            "filters": {"wing": None, "room": None},
+            "total_before_filter": 1,
+            "results": [
+                {
+                    "drawer_id": "drawer_proj_backend_aaa",
+                    "text": long_text,
+                    "wing": "project",
+                    "room": "backend",
+                    "source_file": "auth.py",
+                    "similarity": 0.9,
+                    "distance": 0.1,
+                    "closet_preview": "some preview",
+                }
+            ],
+        }
+        monkeypatch.setattr(mcp_server, "search_memories", lambda *a, **kw: dict(fixture))
+
+        result = mcp_server.tool_search(query="auth")
+        hit = result["results"][0]
+        # Summary-only: short text (<= 30 + ellipsis), summary flag set,
+        # drawer_id preserved, closet_preview dropped.
+        assert hit["summary"] is True
+        assert len(hit["text"]) <= 33  # 30 chars + possible ellipsis
+        assert hit["text"] != long_text
+        assert hit["drawer_id"] == "drawer_proj_backend_aaa"
+        assert hit["wing"] == "project"
+        assert hit["room"] == "backend"
+        assert "similarity" in hit
+        assert "distance" in hit
+        assert "closet_preview" not in hit
+
+    def test_search_full_true_returns_verbatim(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        """full=True bypasses the summarizer."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        long_text = "x" * 200
+        fixture = {
+            "query": "q",
+            "filters": {"wing": None, "room": None},
+            "total_before_filter": 1,
+            "results": [
+                {
+                    "drawer_id": "drawer_zzz",
+                    "text": long_text,
+                    "wing": "w",
+                    "room": "r",
+                    "source_file": "f",
+                    "similarity": 0.9,
+                    "distance": 0.1,
+                }
+            ],
+        }
+        monkeypatch.setattr(mcp_server, "search_memories", lambda *a, **kw: dict(fixture))
+
+        result = mcp_server.tool_search(query="q", full=True)
+        hit = result["results"][0]
+        assert hit["text"] == long_text
+        assert "summary" not in hit
+
+    def test_get_drawer_accepts_list(self, monkeypatch, config, palace_path, seeded_collection, kg):
+        """tool_get_drawer handles a list of IDs and returns a drawers array."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_get_drawer
+
+        ids = ["drawer_proj_backend_aaa", "drawer_proj_backend_bbb", "nonexistent"]
+        result = tool_get_drawer(ids)
+        assert "drawers" in result
+        assert len(result["drawers"]) == 3
+        # Preserves requested order (including unfound IDs).
+        assert result["drawers"][0]["drawer_id"] == "drawer_proj_backend_aaa"
+        assert result["drawers"][1]["drawer_id"] == "drawer_proj_backend_bbb"
+        assert "JWT" in result["drawers"][0]["content"]
+        assert "error" in result["drawers"][2]
+
+
+class TestPrivateTagHandling:
+    def test_add_drawer_strips_partial_private(self, monkeypatch, config, palace_path, kg):
+        """Partial <private> blocks are stripped; the rest of the drawer stores fine."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer, tool_get_drawer
+
+        result = tool_add_drawer(
+            wing="w",
+            room="r",
+            content=(
+                "Public notes about the launch plan. <private>Internal vendor "
+                "pricing: $42/mo confidential</private> Marketing wants copy by Friday."
+            ),
+        )
+        assert result["success"] is True
+        drawer = tool_get_drawer(result["drawer_id"])
+        stored = drawer["content"]
+        assert "vendor pricing" not in stored
+        assert "$42" not in stored
+        assert "confidential" not in stored
+        assert "Marketing" in stored
+        assert "launch plan" in stored
+
+    def test_add_drawer_refuses_fully_private(self, monkeypatch, config, palace_path, kg):
+        """Fully private content is rejected with a clear reason."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer
+
+        result = tool_add_drawer(
+            wing="w",
+            room="r",
+            content="<private>Everything here is private, nothing to store.</private>",
+        )
+        assert result["success"] is False
+        assert "private" in result.get("reason", "").lower()
+
+    def test_diary_write_strips_private(self, monkeypatch, config, palace_path, kg):
+        """Diary entries redact <private> blocks before logging/embedding."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_diary_read, tool_diary_write
+
+        w = tool_diary_write(
+            agent_name="TestAgent",
+            entry=(
+                "Today I reviewed the architecture. <private>Off the record: "
+                "the CTO is pushing us to rewrite in Rust</private> Overall the "
+                "meeting went well."
+            ),
+            topic="meetings",
+        )
+        assert w["success"] is True
+
+        r = tool_diary_read(agent_name="TestAgent")
+        stored = r["entries"][0]["content"]
+        assert "CTO" not in stored
+        assert "Rust" not in stored
+        assert "Off the record" not in stored
+        assert "architecture" in stored
+        assert "meeting went well" in stored
+
+    def test_diary_write_refuses_fully_private(self, monkeypatch, config, palace_path, kg):
+        """Fully private diary entries are rejected."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_diary_write
+
+        result = tool_diary_write(
+            agent_name="TestAgent",
+            entry="<private>I don't want this logged at all.</private>",
+            topic="secret",
+        )
+        assert result["success"] is False
+        assert "private" in result.get("reason", "").lower()

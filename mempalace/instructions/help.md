@@ -28,8 +28,9 @@ AI memory system. Store everything, find anything. Local, free, no API key.
 - mempalace_get_aaak_spec -- Get the AAAK specification
 
 ### Palace (write)
-- mempalace_add_drawer -- Add a new memory (drawer)
+- mempalace_add_drawer -- Add a new memory (drawer). See "Privacy" below.
 - mempalace_delete_drawer -- Delete a memory (drawer)
+- mempalace_get_drawer -- Fetch full content for one or many drawer_ids
 
 ### Knowledge Graph
 - mempalace_kg_query -- Query the knowledge graph
@@ -63,6 +64,37 @@ AI memory system. Store everything, find anything. Local, free, no API key.
     mempalace mcp                         Show MCP setup command
     mempalace hook run                    Run hook logic (for harness integration)
     mempalace instructions <name>         Output skill instructions
+
+---
+
+## Privacy: `<private>` Tags
+
+Any content wrapped in `<private>...</private>` tags is stripped before
+storage. This applies to:
+
+- `mempalace_add_drawer` (content field)
+- `mempalace_diary_write` (entry field)
+
+Behavior:
+- Partial: `"public <private>secret</private> tail"` -> stored as
+  `"public  tail"`.
+- Full wrap: `"<private>all of this</private>"` -> write is refused with
+  `{success: false, reason: "content fully marked private"}`.
+- Case-insensitive, multi-line (DOTALL), non-greedy.
+
+Use this when capturing conversations or transcripts that contain passwords,
+tokens, personal data, or anything the user flags as sensitive. Existing
+drawers are not affected; this is a write-time filter only.
+
+---
+
+## Progressive Disclosure (search tool)
+
+`mempalace_search` returns **summaries by default** (drawer_id + ~30 char
+preview) to conserve tokens. Fetch full content only for relevant hits via
+`mempalace_get_drawer(drawer_id=[...])`. Pass `full=true` to `mempalace_search`
+to bypass and get verbatim text in one call. See `mempalace instructions
+search` for the full pattern.
 
 ---
 

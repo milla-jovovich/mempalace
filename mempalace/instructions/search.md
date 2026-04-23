@@ -20,8 +20,16 @@ can discover the taxonomy first if needed.
 
 If MCP tools are available, use them in this priority order:
 
-- mempalace_search(query, wing, room) -- Primary search tool. Pass the semantic
-  query and any wing/room filters.
+- mempalace_search(query, wing, room, full=false) -- Primary search tool.
+  **Returns a SUMMARY by default** (drawer_id + ~30 char text preview per hit)
+  to conserve tokens. Follow up with `mempalace_get_drawer` using the
+  drawer_ids to fetch full verbatim content only for the hits you actually
+  need. Pass `full=true` to get verbatim text in one shot (bypasses progressive
+  disclosure; use only when auditing or when every hit matters).
+- mempalace_get_drawer(drawer_id) -- Fetch full verbatim content for one or
+  many drawer_ids. Accepts a single string **or an array of strings** for
+  batch fetch. Use this after `mempalace_search` to pull details for the
+  relevant hits.
 - mempalace_list_wings -- Discover all available wings. Use when the user asks
   what categories exist or you need to resolve a wing name.
 - mempalace_list_rooms(wing) -- List rooms within a specific wing. Use to help
@@ -33,6 +41,28 @@ If MCP tools are available, use them in this priority order:
 - mempalace_find_tunnels(wing1, wing2) -- Find cross-wing connections (tunnels)
   between two wings. Use when the user asks about relationships between
   different knowledge domains.
+
+### Progressive Disclosure Pattern (token-efficient)
+
+For most search tasks, follow this two-step flow:
+
+1. `mempalace_search(query="...")` → returns N hits, each with `drawer_id`
+   and a truncated `text` summary (marked `summary: true`). Cost: ~50-100
+   tokens total.
+2. Inspect summaries, pick the relevant drawer_ids, then call
+   `mempalace_get_drawer(drawer_id=["id1", "id2", ...])` to fetch full
+   content only for those. Cost: ~500-1000 tokens per drawer.
+
+This is **~10x cheaper** than loading full content for every hit, and keeps
+the context window lean when the search returns many weakly-relevant
+candidates.
+
+When to use `full=true` instead:
+- You know every hit will be needed (e.g., summarizing all memories on a
+  topic).
+- You are auditing search quality and want to see raw scores against full
+  text.
+- The query is narrow enough that you expect 1-3 hits.
 
 ## 4. CLI Fallback
 
