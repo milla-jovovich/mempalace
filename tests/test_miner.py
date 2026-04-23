@@ -243,9 +243,7 @@ def test_scan_project_exclude_multiple_patterns(tmp_path):
     write_file(tmp_path / "app.py", "x = 1\n" * 20)
     write_file(tmp_path / "config.json", '{"k": 1}\n' * 20)
     write_file(tmp_path / "schema.sql", "SELECT 1;\n" * 20)
-    assert scanned_files(
-        tmp_path, exclude_patterns=["**/*.json", "**/*.sql"]
-    ) == ["app.py"]
+    assert scanned_files(tmp_path, exclude_patterns=["**/*.json", "**/*.sql"]) == ["app.py"]
 
 
 def test_scan_project_force_include_beats_exclude(tmp_path):
