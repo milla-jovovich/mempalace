@@ -476,11 +476,29 @@ class Dialect:
         ranked = sorted(freq.items(), key=lambda x: -x[1])
         return [w for w, _ in ranked[:max_topics]]
 
+    def _split_sentences(self, text: str) -> List[str]:
+        """Split text into sentences, using NLP provider if available."""
+        try:
+            from mempalace.nlp_config import NLPConfig
+
+            config = NLPConfig.resolve()
+            if config.has("sentences"):
+                from mempalace.nlp_providers.registry import get_registry
+
+                registry = get_registry()
+                result = registry.split_sentences(text)
+                if result:
+                    return result
+        except Exception:
+            pass
+        # Fallback: regex splitting
+        return [s.strip() for s in re.split(r"[.!?\n]+", text) if s.strip()]
+
     def _extract_key_sentence(self, text: str) -> str:
         """Extract the most important sentence fragment from text."""
         # Split into sentences
-        sentences = re.split(r"[.!?\n]+", text)
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
+        sentences = self._split_sentences(text)
+        sentences = [s for s in sentences if len(s) > 10]
         if not sentences:
             return ""
 
@@ -530,8 +548,34 @@ class Dialect:
         return best
 
     def _detect_entities_in_text(self, text: str) -> List[str]:
-        """Find known entities in text, or detect capitalized names."""
+        """Find known entities in text, or detect capitalized names.
+        Uses NLP NER provider when available for better entity detection."""
         found = []
+
+        # Try NLP NER provider first
+        try:
+            from mempalace.nlp_config import NLPConfig
+
+            config = NLPConfig.resolve()
+            if config.has("ner"):
+                from mempalace.nlp_providers.registry import get_registry
+
+                registry = get_registry()
+                entities = registry.extract_entities(text)
+                for ent in entities:
+                    name = ent.get("text", "")
+                    if name and len(name) >= 2:
+                        # Use known entity code if available, else auto-generate
+                        code = self.entity_codes.get(name, name[:3].upper())
+                        if code not in found:
+                            found.append(code)
+                    if len(found) >= 3:
+                        break
+                if found:
+                    return found
+        except Exception:
+            pass
+
         # Check known entities
         for name, code in self.entity_codes.items():
             if not name.islower() and name.lower() in text.lower():

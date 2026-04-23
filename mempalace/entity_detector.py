@@ -123,11 +123,30 @@ def extract_candidates(text: str, languages=("en",)) -> dict:
     """
     Extract all capitalized proper noun candidates from text.
     Returns {name: frequency} for names appearing 3+ times.
-
     Each language contributes its own character-class pattern (e.g. ASCII
     for English, Latin+diacritics for pt-br, Cyrillic for Russian,
-    Devanagari for Hindi). Matches from all languages are unioned.
+    Devanagari for Hindi). Matches from all languages are unioned.    
+    Uses NLP NER provider when available for better entity detection.
     """
+    counts = defaultdict(int)
+
+    # Try NLP NER provider first to supplement regex extraction
+    try:
+        from mempalace.nlp_config import NLPConfig
+
+        config = NLPConfig.resolve()
+        if config.has("ner"):
+            from mempalace.nlp_providers.registry import get_registry
+
+            registry = get_registry()
+            entities = registry.extract_entities(text)
+            for ent in entities:
+                name = ent.get("text", "")
+                if name and len(name) > 1 and name.lower() not in STOPWORDS:
+                    counts[name] += 3  # NER entities get automatic threshold
+    except Exception:
+        pass
+
     langs = _normalize_langs(languages)
     patterns = get_entity_patterns(langs)
     stopwords = _get_stopwords(langs)

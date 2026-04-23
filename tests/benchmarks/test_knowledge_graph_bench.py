@@ -288,3 +288,96 @@ class TestKGStats:
 
         avg_ms = sum(latencies) / len(latencies)
         record_metric("kg_stats", f"avg_ms_at_{n_triples}", round(avg_ms, 2))
+
+
+@pytest.mark.benchmark
+class TestTripleExtractionProviders:
+    """Compare triple extraction quality and speed across NLP providers.
+
+    Tests no-NLP (regex/heuristic), GLiNER2, and SLM (Phi-3.5 Mini) approaches
+    on the same input texts.
+    """
+
+    SAMPLE_TEXTS = [
+        "Alice works at Anthropic in San Francisco. She joined the team in 2024.",
+        "We decided to use PostgreSQL instead of MySQL for the new project.",
+        "Dr. Smith presented the results to the board last Thursday.",
+        "The API migration from REST to GraphQL was completed by the backend team.",
+        "Bob recommended using React for the frontend and Django for the backend.",
+    ]
+
+    def _extract_with_provider(self, provider_name, text):
+        """Extract triples using a specific provider."""
+        from mempalace.nlp_providers.registry import get_registry
+
+        registry = get_registry()
+        provider = registry._load_provider(provider_name)
+        if provider and provider.is_available() and "triples" in provider.capabilities:
+            return provider.extract_triples(text)
+        return None
+
+    def test_gliner_triple_extraction(self):
+        """GLiNER2 triple extraction quality and speed."""
+        results = []
+        total_triples = 0
+        start = time.perf_counter()
+        for text in self.SAMPLE_TEXTS:
+            triples = self._extract_with_provider("gliner", text)
+            if triples is None:
+                pytest.skip("GLiNER provider not available")
+            results.append(triples)
+            total_triples += len(triples)
+        elapsed = time.perf_counter() - start
+
+        record_metric("triple_extraction", "gliner_total_triples", total_triples)
+        record_metric("triple_extraction", "gliner_elapsed_sec", round(elapsed, 3))
+        record_metric(
+            "triple_extraction",
+            "gliner_triples_per_sec",
+            round(total_triples / max(elapsed, 0.001), 1),
+        )
+
+    def test_slm_triple_extraction(self):
+        """SLM (Phi-3.5 Mini) triple extraction quality and speed."""
+        results = []
+        total_triples = 0
+        start = time.perf_counter()
+        for text in self.SAMPLE_TEXTS:
+            triples = self._extract_with_provider("slm", text)
+            if triples is None:
+                pytest.skip("SLM provider not available")
+            results.append(triples)
+            total_triples += len(triples)
+        elapsed = time.perf_counter() - start
+
+        record_metric("triple_extraction", "slm_total_triples", total_triples)
+        record_metric("triple_extraction", "slm_elapsed_sec", round(elapsed, 3))
+        record_metric(
+            "triple_extraction",
+            "slm_triples_per_sec",
+            round(total_triples / max(elapsed, 0.001), 1),
+        )
+
+    def test_legacy_triple_extraction(self):
+        """Legacy (no-NLP) entity co-occurrence baseline."""
+        from mempalace.entity_detector import extract_candidates
+
+        total_pairs = 0
+        start = time.perf_counter()
+        for text in self.SAMPLE_TEXTS:
+            candidates = extract_candidates(text)
+            # Legacy approach: entity co-occurrence pairs
+            names = list(candidates.keys())
+            pairs = [
+                (names[i], names[j]) for i in range(len(names)) for j in range(i + 1, len(names))
+            ]
+            total_pairs += len(pairs)
+        elapsed = time.perf_counter() - start
+
+        record_metric("triple_extraction", "legacy_total_pairs", total_pairs)
+        record_metric("triple_extraction", "legacy_elapsed_sec", round(elapsed, 3))
+        record_metric(
+            "triple_extraction",
+            "legacy_pairs_per_sec",
+            round(total_pairs / max(elapsed, 0.001), 1),
+        )

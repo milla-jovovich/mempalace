@@ -6,6 +6,8 @@ __pycache__/
 .pytest_cache/
 mempal.yaml
 .a5c/
+.coverage
+benchmarks/with-nlp-provider/longmemeval_s_cleaned.json
 .claude/
 .codex/
 .codex

@@ -2933,6 +2933,285 @@ def _load_or_create_split(split_file: str, data: list, dev_size: int = 50, seed:
     return split
 
 
+def _nlp_detect_temporal_offset(registry, question, question_date):
+    """Use NLP entity extraction + dateparser to detect temporal references.
+
+    Returns (target_date, tolerance_days) or (None, None).
+    """
+
+    entities = registry.extract_entities(question)
+    date_entities = [e for e in entities if e.get("label", "").lower() == "date"]
+    if not date_entities or not question_date:
+        return None, None
+
+    try:
+        import dateparser
+
+        parsed = dateparser.parse(
+            date_entities[0]["text"],
+            settings={"RELATIVE_BASE": question_date, "PREFER_DATES_FROM": "past"},
+        )
+        if parsed:
+            delta = abs((question_date - parsed).days)
+            tolerance = max(1, delta // 5)
+            return parsed, tolerance
+    except Exception:
+        pass
+    return None, None
+
+
+def _nlp_is_assistant_reference(registry, question):
+    """Use NLP classification to detect assistant-reference intent."""
+    result = registry.classify_text(
+        question, ["asking_about_assistant_response", "general_question"]
+    )
+    if result and result.get("label") == "asking_about_assistant_response":
+        return result.get("confidence", 0) > 0.5
+    return False
+
+
+def build_palace_and_retrieve_nlp_aaak(entry, granularity="session", n_results=50):
+    """
+    NLP-enriched mode: uses mempalace NLP providers for entity extraction
+    and temporal detection for conservative post-retrieval re-ranking.
+
+    Strategy:
+    1. Index raw text (unmodified) into ChromaDB for clean embeddings
+    2. Extract entities from query for lightweight overlap re-ranking
+    3. NLP date entities + dateparser → conservative temporal boosting
+    """
+    from datetime import datetime
+
+    from mempalace.entity_detector import extract_candidates
+    from mempalace.nlp_providers.registry import get_registry
+
+    registry = get_registry()
+
+    def entity_overlap(query_entities, doc_text):
+        """Score overlap using NLP-extracted entities."""
+        if not query_entities:
+            return 0.0
+        doc_lower = doc_text.lower()
+        hits = sum(1 for ent in query_entities if ent.lower() in doc_lower)
+        return hits / len(query_entities)
+
+    def parse_question_date(date_str):
+        try:
+            return datetime.strptime(date_str.split(" (")[0], "%Y/%m/%d")
+        except Exception:
+            return None
+
+    sessions = entry["haystack_sessions"]
+    session_ids = entry["haystack_session_ids"]
+    dates = entry["haystack_dates"]
+    question = entry["question"]
+    question_date = parse_question_date(entry.get("question_date", ""))
+
+    # NLP entity extraction from question
+    query_entities = list(extract_candidates(question).keys())
+
+    corpus_user = []
+    corpus_ids = []
+    corpus_timestamps = []
+
+    for session, sess_id, date in zip(sessions, session_ids, dates):
+        if granularity == "session":
+            user_turns = [t["content"] for t in session if t["role"] == "user"]
+            if user_turns:
+                raw = "\n".join(user_turns)
+                corpus_user.append(raw)
+                corpus_ids.append(sess_id)
+                corpus_timestamps.append(date)
+        else:
+            turn_num = 0
+            for turn in session:
+                if turn["role"] == "user":
+                    raw = turn["content"]
+                    corpus_user.append(raw)
+                    corpus_ids.append(f"{sess_id}_turn_{turn_num}")
+                    corpus_timestamps.append(date)
+                    turn_num += 1
+
+    if not corpus_user:
+        return [], corpus_user, corpus_ids, corpus_timestamps
+
+    # Index raw text — do NOT enrich/modify documents for embedding
+    collection = _fresh_collection()
+    collection.add(
+        documents=corpus_user,
+        ids=[f"doc_{i}" for i in range(len(corpus_user))],
+        metadatas=[
+            {"corpus_id": cid, "timestamp": ts} for cid, ts in zip(corpus_ids, corpus_timestamps)
+        ],
+    )
+
+    results = collection.query(
+        query_texts=[question],
+        n_results=min(n_results, len(corpus_user)),
+        include=["distances", "metadatas", "documents"],
+    )
+
+    result_ids = results["ids"][0]
+    distances = results["distances"][0]
+    documents = results["documents"][0]
+    doc_id_to_idx = {f"doc_{i}": i for i in range(len(corpus_user))}
+
+    # NLP temporal detection via dateparser
+    target_date, tolerance = _nlp_detect_temporal_offset(registry, question, question_date)
+
+    # Conservative re-ranking: entity overlap + temporal boost as tie-breakers
+    hybrid_weight = 0.10
+    scored = []
+    for rid, dist, doc in zip(result_ids, distances, documents):
+        idx = doc_id_to_idx[rid]
+        overlap = entity_overlap(query_entities, doc)
+        fused_dist = dist * (1.0 - hybrid_weight * overlap)
+
+        # Conservative temporal boost
+        if target_date and tolerance:
+            sess_date = parse_question_date(corpus_timestamps[idx])
+            if sess_date:
+                delta_days = abs((sess_date - target_date).days)
+                if delta_days <= tolerance:
+                    temporal_boost = 0.15
+                elif delta_days <= tolerance * 3:
+                    temporal_boost = 0.15 * (1.0 - (delta_days - tolerance) / (tolerance * 2))
+                else:
+                    temporal_boost = 0.0
+                fused_dist = fused_dist * (1.0 - temporal_boost)
+
+        scored.append((idx, fused_dist))
+
+    scored.sort(key=lambda x: x[1])
+    ranked_indices = [idx for idx, _ in scored]
+
+    seen = set(ranked_indices)
+    for i in range(len(corpus_user)):
+        if i not in seen:
+            ranked_indices.append(i)
+
+    return ranked_indices, corpus_user, corpus_ids, corpus_timestamps
+
+
+def build_palace_and_retrieve_nlp_hybrid(
+    entry, granularity="session", n_results=50, hybrid_weight=0.10
+):
+    """
+    NLP-enhanced hybrid mode: uses mempalace NLP providers for entity
+    extraction and temporal detection for conservative re-ranking.
+
+    1. extract_candidates() for NLP entity extraction (query + doc matching)
+    2. NLP registry for date entity detection → conservative temporal boosting
+    """
+    from datetime import datetime
+
+    from mempalace.entity_detector import extract_candidates
+    from mempalace.nlp_providers.registry import get_registry
+
+    registry = get_registry()
+
+    def entity_overlap(query_entities, doc_text):
+        """Score overlap using NLP-extracted entities."""
+        if not query_entities:
+            return 0.0
+        doc_lower = doc_text.lower()
+        hits = sum(1 for ent in query_entities if ent.lower() in doc_lower)
+        return hits / len(query_entities)
+
+    def parse_question_date(date_str):
+        try:
+            return datetime.strptime(date_str.split(" (")[0], "%Y/%m/%d")
+        except Exception:
+            return None
+
+    sessions = entry["haystack_sessions"]
+    session_ids = entry["haystack_session_ids"]
+    dates = entry["haystack_dates"]
+    question = entry["question"]
+    question_date = parse_question_date(entry.get("question_date", ""))
+
+    # NLP entity extraction from question
+    query_entities = list(extract_candidates(question).keys())
+
+    corpus_user = []
+    corpus_ids = []
+    corpus_timestamps = []
+
+    for session, sess_id, date in zip(sessions, session_ids, dates):
+        if granularity == "session":
+            user_turns = [t["content"] for t in session if t["role"] == "user"]
+            if user_turns:
+                corpus_user.append("\n".join(user_turns))
+                corpus_ids.append(sess_id)
+                corpus_timestamps.append(date)
+        else:
+            turn_num = 0
+            for turn in session:
+                if turn["role"] == "user":
+                    corpus_user.append(turn["content"])
+                    corpus_ids.append(f"{sess_id}_turn_{turn_num}")
+                    corpus_timestamps.append(date)
+                    turn_num += 1
+
+    if not corpus_user:
+        return [], corpus_user, corpus_ids, corpus_timestamps
+
+    # Standard hybrid retrieval with NLP entity boosting + temporal
+    collection = _fresh_collection()
+    collection.add(
+        documents=corpus_user,
+        ids=[f"doc_{i}" for i in range(len(corpus_user))],
+        metadatas=[
+            {"corpus_id": cid, "timestamp": ts} for cid, ts in zip(corpus_ids, corpus_timestamps)
+        ],
+    )
+
+    results = collection.query(
+        query_texts=[question],
+        n_results=min(n_results, len(corpus_user)),
+        include=["distances", "metadatas", "documents"],
+    )
+
+    result_ids = results["ids"][0]
+    distances = results["distances"][0]
+    documents = results["documents"][0]
+    doc_id_to_idx = {f"doc_{i}": i for i in range(len(corpus_user))}
+
+    # NLP temporal detection via dateparser
+    target_date, tolerance = _nlp_detect_temporal_offset(registry, question, question_date)
+
+    scored = []
+    for rid, dist, doc in zip(result_ids, distances, documents):
+        idx = doc_id_to_idx[rid]
+        overlap = entity_overlap(query_entities, doc)
+        fused_dist = dist * (1.0 - hybrid_weight * overlap)
+
+        # Conservative temporal boost
+        if target_date and tolerance:
+            sess_date = parse_question_date(corpus_timestamps[idx])
+            if sess_date:
+                delta_days = abs((sess_date - target_date).days)
+                if delta_days <= tolerance:
+                    temporal_boost = 0.15
+                elif delta_days <= tolerance * 3:
+                    temporal_boost = 0.15 * (1.0 - (delta_days - tolerance) / (tolerance * 2))
+                else:
+                    temporal_boost = 0.0
+                fused_dist = fused_dist * (1.0 - temporal_boost)
+
+        scored.append((idx, fused_dist))
+
+    scored.sort(key=lambda x: x[1])
+    ranked_indices = [idx for idx, _ in scored]
+
+    seen = set(ranked_indices)
+    for i in range(len(corpus_user)):
+        if i not in seen:
+            ranked_indices.append(i)
+
+    return ranked_indices, corpus_user, corpus_ids, corpus_timestamps
+
+
 def run_benchmark(
     data_file,
     granularity="session",
@@ -2957,7 +3236,7 @@ def run_benchmark(
     split_subset: "dev" (50 questions for tuning) or "held_out" (450 for final evaluation).
                   None = run all questions.
     """
-    with open(data_file) as f:
+    with open(data_file, encoding="utf-8") as f:
         data = json.load(f)
 
     # Apply train/test split filter before limit/skip
@@ -3079,7 +3358,15 @@ def run_benchmark(
         answer_sids = set(entry["answer_session_ids"])
 
         # Run retrieval with selected mode
-        if mode == "aaak":
+        if mode == "nlp_aaak":
+            rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_nlp_aaak(
+                entry, granularity=granularity
+            )
+        elif mode == "nlp_hybrid":
+            rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_nlp_hybrid(
+                entry, granularity=granularity
+            )
+        elif mode == "aaak":
             rankings, corpus, corpus_ids, corpus_timestamps = build_palace_and_retrieve_aaak(
                 entry, granularity=granularity
             )
@@ -3286,9 +3573,12 @@ if __name__ == "__main__":
             "palace",
             "diary",
             "full",
+            "nlp_aaak",
+            "nlp_hybrid",
         ],
         default="raw",
-        help="Retrieval mode: raw, hybrid, hybrid_v2, hybrid_v3, palace, diary (palace + LLM topic layer)",
+        help="Retrieval mode: raw, aaak, hybrid, hybrid_v2-v4, palace, diary, full, "
+        "nlp_aaak (NLP-enhanced AAAK), nlp_hybrid (NLP-enhanced hybrid)",
     )
     parser.add_argument("--out", default=None, help="Output JSONL file path")
     parser.add_argument(

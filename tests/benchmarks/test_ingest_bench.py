@@ -167,3 +167,96 @@ class TestReingestSkipOverhead:
             "skip_check_per_file_ms",
             round(skip_elapsed * 1000 / max(files_written, 1), 1),
         )
+
+
+@pytest.mark.benchmark
+class TestNLPOperationTiming:
+    """Per-operation timing for NLP pipeline components.
+
+    Reports individual latency for each NLP operation so users can
+    decide which backend level is appropriate for their workload.
+    """
+
+    SAMPLE_TEXT = (
+        "Alice works at Anthropic in San Francisco. She joined in January 2024. "
+        "Bob recommended using PostgreSQL instead of MySQL for the new project. "
+        "The API migration was completed by the backend team last Thursday. "
+        "Dr. Smith presented the quarterly results to the board. "
+        "We decided to switch from AWS to GCP for cost reasons."
+    )
+
+    def _time_operation(self, func, n_iterations=20):
+        """Run an operation n times and return avg/p50/p95 in ms."""
+        latencies = []
+        for _ in range(n_iterations):
+            start = time.perf_counter()
+            func()
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            latencies.append(elapsed_ms)
+        latencies.sort()
+        return {
+            "avg_ms": round(sum(latencies) / len(latencies), 2),
+            "p50_ms": round(latencies[len(latencies) // 2], 2),
+            "p95_ms": round(latencies[int(len(latencies) * 0.95)], 2),
+        }
+
+    def test_entity_extraction_timing(self):
+        """Time entity extraction via extract_candidates()."""
+        from mempalace.entity_detector import extract_candidates
+
+        stats = self._time_operation(lambda: extract_candidates(self.SAMPLE_TEXT))
+        for k, v in stats.items():
+            record_metric("nlp_ops", f"entity_extraction_{k}", v)
+
+    def test_sentence_splitting_timing(self):
+        """Time sentence splitting via NLP registry."""
+        from mempalace.nlp_providers.registry import get_registry
+
+        registry = get_registry()
+        stats = self._time_operation(lambda: registry.split_sentences(self.SAMPLE_TEXT))
+        for k, v in stats.items():
+            record_metric("nlp_ops", f"sentence_split_{k}", v)
+
+    def test_triple_extraction_timing(self):
+        """Time triple extraction via NLP registry."""
+        from mempalace.nlp_providers.registry import get_registry
+
+        registry = get_registry()
+        provider = registry.get_for_capability("triples")
+        if not provider:
+            pytest.skip("No triple extraction provider available")
+        stats = self._time_operation(lambda: registry.extract_triples(self.SAMPLE_TEXT))
+        record_metric("nlp_ops", "triple_extraction_provider", provider.name)
+        for k, v in stats.items():
+            record_metric("nlp_ops", f"triple_extraction_{k}", v)
+
+    def test_classification_timing(self):
+        """Time text classification via NLP registry."""
+        from mempalace.nlp_providers.registry import get_registry
+
+        registry = get_registry()
+        labels = ["decision", "preference", "milestone", "problem", "emotional"]
+        provider = registry.get_for_capability("classify")
+        if not provider:
+            pytest.skip("No classification provider available")
+        stats = self._time_operation(lambda: registry.classify_text(self.SAMPLE_TEXT, labels))
+        record_metric("nlp_ops", "classification_provider", provider.name)
+        for k, v in stats.items():
+            record_metric("nlp_ops", f"classification_{k}", v)
+
+    def test_full_pipeline_timing(self):
+        """Time the full NLP pipeline: split + entities + classify."""
+        from mempalace.entity_detector import extract_candidates
+        from mempalace.general_extractor import extract_memories
+        from mempalace.nlp_providers.registry import get_registry
+
+        registry = get_registry()
+
+        def full_pipeline():
+            registry.split_sentences(self.SAMPLE_TEXT)
+            extract_candidates(self.SAMPLE_TEXT)
+            extract_memories(self.SAMPLE_TEXT, min_confidence=0.3)
+
+        stats = self._time_operation(full_pipeline, n_iterations=10)
+        for k, v in stats.items():
+            record_metric("nlp_ops", f"full_pipeline_{k}", v)

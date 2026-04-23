@@ -381,12 +381,30 @@ def extract_memories(text: str, min_confidence: float = 0.3) -> List[Dict]:
 
         prose = _extract_prose(para)
 
-        # Score against all types
-        scores = {}
-        for mem_type, markers in ALL_MARKERS.items():
-            score, _ = _score_markers(prose, markers)
-            if score > 0:
-                scores[mem_type] = score
+        # Try NLP classification first
+        nlp_classified = False
+        try:
+            from mempalace.nlp_config import NLPConfig
+
+            config = NLPConfig.resolve()
+            if config.has("classify"):
+                from mempalace.nlp_providers.registry import get_registry
+
+                registry = get_registry()
+                classification = registry.classify_text(prose, list(ALL_MARKERS.keys()))
+                if classification and classification.get("confidence", 0) >= 0.5:
+                    nlp_classified = True
+                    scores = {classification["label"]: 5}
+        except Exception:
+            pass
+
+        # Regex marker scoring (fallback or supplement)
+        if not nlp_classified:
+            scores = {}
+            for mem_type, markers in ALL_MARKERS.items():
+                score, _ = _score_markers(prose, markers)
+                if score > 0:
+                    scores[mem_type] = score
 
         if not scores:
             continue
