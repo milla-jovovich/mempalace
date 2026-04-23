@@ -7,22 +7,22 @@ Run from the repo root before cutting a release tag.
 ### Verify `mempalace-mcp` entry point alignment
 
 The plugin configs reference `mempalace-mcp` as the MCP server command, which
-resolves to a `console_script` entry point declared in `pyproject.toml`. If
-these disagree, `pip install mempalace` ships a plugin config pointing at a
-binary that was never installed — exactly what broke v3.3.2
-([#1093](https://github.com/MemPalace/mempalace/issues/1093)).
+resolves to a console script declared under `[project.scripts]` in
+`pyproject.toml`. If these disagree, `pip install mempalace` ships a plugin
+config pointing at a binary that was never installed — exactly what broke
+v3.3.2 ([#1093](https://github.com/MemPalace/mempalace/issues/1093)).
 
 ```bash
-grep -rn mempalace-mcp pyproject.toml .claude-plugin .codex-plugin
+grep -r mempalace-mcp pyproject.toml .claude-plugin .codex-plugin
 ```
 
-Expected on a healthy `develop` (post-[#340](https://github.com/MemPalace/mempalace/pull/340)):
+Expected on a healthy `develop` (post-[#340](https://github.com/MemPalace/mempalace/pull/340)) — one line per file:
 
 ```
-pyproject.toml:41:mempalace-mcp = "mempalace.mcp_server:main"
-.claude-plugin/plugin.json:12:      "command": "mempalace-mcp"
-.codex-plugin/plugin.json:24:      "command": "mempalace-mcp"
-.claude-plugin/.mcp.json:3:    "command": "mempalace-mcp"
+pyproject.toml:mempalace-mcp = "mempalace.mcp_server:main"
+.claude-plugin/plugin.json:      "command": "mempalace-mcp"
+.codex-plugin/plugin.json:      "command": "mempalace-mcp"
+.claude-plugin/.mcp.json:    "command": "mempalace-mcp"
 ```
 
 If `pyproject.toml` has no match, **stop** — the entry point is missing and
