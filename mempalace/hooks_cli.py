@@ -198,10 +198,19 @@ def _output(data: dict):
 
 
 def _get_mine_dir(transcript_path: str = "") -> str:
-    """Determine directory to mine from MEMPAL_DIR or transcript path."""
+    """Determine directory to mine from MEMPAL_DIR or transcript path.
+
+    MEMPAL_DIR is resolved to a real absolute path via os.path.realpath()
+    before use to prevent symlink traversal to sensitive directories.
+    """
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
-    if mempal_dir and os.path.isdir(mempal_dir):
-        return mempal_dir
+    if mempal_dir:
+        try:
+            resolved = os.path.realpath(mempal_dir)
+        except (OSError, ValueError):
+            resolved = ""
+        if resolved and os.path.isdir(resolved):
+            return resolved
     if transcript_path:
         path = Path(transcript_path).expanduser()
         if path.is_file():
