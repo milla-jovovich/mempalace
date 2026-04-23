@@ -959,11 +959,13 @@ def scan_project(
             if exclude_patterns and not force_include:
                 # Normalize to POSIX so patterns like "resources/**" work on Windows too.
                 rel = filepath.relative_to(project_path).as_posix().strip("/")
+
                 def _matches_exclude_pattern(pattern: str) -> bool:
                     # Support common "**/" prefix semantics for root-level files.
                     return fnmatch.fnmatch(rel, pattern) or (
                         pattern.startswith("**/") and fnmatch.fnmatch(rel, pattern[3:])
                     )
+
                 if any(_matches_exclude_pattern(pat) for pat in exclude_patterns):
                     continue
             if respect_gitignore and active_matchers and not force_include:
