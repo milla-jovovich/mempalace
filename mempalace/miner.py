@@ -64,6 +64,7 @@ CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB — skip files larger than this.
+CHROMA_BATCH_LIMIT = 5000  # ChromaDB max is 5461; stay safely under it.
 # Long Claude Code sessions and large transcript exports routinely exceed
 # 10 MB. The cap exists as a defensive rail against pathological binary
 # files, not as a limit on legitimate text. Per-drawer size is bounded
@@ -541,40 +542,90 @@ def _extract_entities_for_metadata(content: str) -> str:
     return ";".join(capped)
 
 
-def add_drawer(
-    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
-):
-    """Add one drawer to the palace."""
+def _build_drawer(wing, room, source_file, chunk_index, agent, content, now=None, source_mtime=None):
+    """Build the ID, document, and metadata for a single drawer.
+
+    Shared by ``add_drawer`` (single insert) and ``add_drawers`` (batch insert)
+    so metadata construction stays DRY.
+    """
     drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
-    try:
-        metadata = {
-            "wing": wing,
-            "room": room,
-            "source_file": source_file,
-            "chunk_index": chunk_index,
-            "added_by": agent,
-            "filed_at": datetime.now().isoformat(),
-            "normalize_version": NORMALIZE_VERSION,
-        }
-        # Store file mtime so we can detect modifications later.
+    metadata = {
+        "wing": wing,
+        "room": room,
+        "source_file": source_file,
+        "chunk_index": chunk_index,
+        "added_by": agent,
+        "filed_at": now or datetime.now().isoformat(),
+        "normalize_version": NORMALIZE_VERSION,
+        "hall": detect_hall(content),
+    }
+    if source_mtime is not None:
+        metadata["source_mtime"] = source_mtime
+    else:
         try:
             metadata["source_mtime"] = os.path.getmtime(source_file)
         except OSError:
             pass
-        # Tag with hall for graph connectivity within wings
-        metadata["hall"] = detect_hall(content)
-        # Tag with entity names for filterable search
-        entities = _extract_entities_for_metadata(content)
-        if entities:
-            metadata["entities"] = entities
-        collection.upsert(
-            documents=[content],
-            ids=[drawer_id],
-            metadatas=[metadata],
+    entities = _extract_entities_for_metadata(content)
+    if entities:
+        metadata["entities"] = entities
+    return drawer_id, content, metadata
+
+
+def add_drawer(
+    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
+):
+    """Add one drawer to the palace."""
+    drawer_id, doc, metadata = _build_drawer(wing, room, source_file, chunk_index, agent, content)
+    collection.upsert(
+        documents=[doc],
+        ids=[drawer_id],
+        metadatas=[metadata],
+    )
+    return True
+
+
+def add_drawers(collection, wing, room, chunks, source_file, agent):
+    """Batch-insert multiple drawers in one ChromaDB call per sub-batch.
+
+    Collects all chunks into batch lists and upserts them in groups of
+    ``CHROMA_BATCH_LIMIT`` to stay under ChromaDB's hard cap (5461).
+    Returns a ``(drawers_added, batch_ids)`` tuple.
+    """
+    now = datetime.now().isoformat()
+    try:
+        source_mtime = os.path.getmtime(source_file)
+    except OSError:
+        source_mtime = None
+
+    batch_docs = []
+    batch_ids = []
+    batch_metas = []
+
+    for chunk in chunks:
+        drawer_id, doc, metadata = _build_drawer(
+            wing, room, source_file, chunk["chunk_index"], agent,
+            chunk["content"], now=now, source_mtime=source_mtime,
         )
-        return True
-    except Exception:
-        raise
+        batch_docs.append(doc)
+        batch_ids.append(drawer_id)
+        batch_metas.append(metadata)
+
+    if not batch_docs:
+        return 0, []
+
+    # Sub-batch to stay under ChromaDB's max batch size.
+    # See CHROMA_BATCH_LIMIT at module level.
+    drawers_added = 0
+    for i in range(0, len(batch_docs), CHROMA_BATCH_LIMIT):
+        collection.upsert(
+            documents=batch_docs[i : i + CHROMA_BATCH_LIMIT],
+            ids=batch_ids[i : i + CHROMA_BATCH_LIMIT],
+            metadatas=batch_metas[i : i + CHROMA_BATCH_LIMIT],
+        )
+        drawers_added += len(batch_docs[i : i + CHROMA_BATCH_LIMIT])
+
+    return drawers_added, batch_ids
 
 
 # =============================================================================
@@ -633,29 +684,15 @@ def process_file(
         except Exception:
             pass
 
-        drawers_added = 0
-        for chunk in chunks:
-            added = add_drawer(
-                collection=collection,
-                wing=wing,
-                room=room,
-                content=chunk["content"],
-                source_file=source_file,
-                chunk_index=chunk["chunk_index"],
-                agent=agent,
-            )
-            if added:
-                drawers_added += 1
+        drawers_added, batch_ids = add_drawers(
+            collection, wing, room, chunks, source_file, agent,
+        )
 
         # Build closet — the searchable index pointing to these drawers.
         # Purge first: a re-mine (mtime change or normalize_version bump) must
         # fully replace the prior closets, not append to them.
         if closets_col and drawers_added > 0:
-            drawer_ids = [
-                f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(c['chunk_index'])).encode()).hexdigest()[:24]}"
-                for c in chunks
-            ]
-            closet_lines = build_closet_lines(source_file, drawer_ids, content, wing, room)
+            closet_lines = build_closet_lines(source_file, batch_ids, content, wing, room)
             closet_id_base = (
                 f"closet_{wing}_{room}_{hashlib.sha256(source_file.encode()).hexdigest()[:24]}"
             )
