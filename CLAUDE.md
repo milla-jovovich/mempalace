@@ -38,7 +38,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 6. ~~**perf: graph cache**~~ — **merged upstream via #661 on 2026-04-22.** No longer fork-ahead.
 7. **perf: L1 importance pre-filter** — `_fetch_drawers()` tries `importance >= 3` first, falls back to full scan only if < 15 results
 8. **fix: MCP stale HNSW index** — `_get_client()` detects external writes via mtime (not just inode), `mempalace_reconnect` MCP tool
-9. **fix: diary wing assignment** — `tool_diary_write()` accepts optional `wing` param, stop hook derives project wing from transcript path
+9. ~~**fix: diary wing assignment**~~ — **merged upstream via #659 on 2026-04-23.** No longer fork-ahead.
 10. **fix: `.blob_seq_ids_migrated` marker** — skip Python `sqlite3.connect()` against a live ChromaDB 1.5.x DB after first successful migration; opening the sqlite file from Python corrupts the next `PersistentClient` call
 11. ~~**feat: `quarantine_stale_hnsw()`**~~ — **merged upstream via #1000 in v3.3.2.** No longer fork-ahead.
 12. **feat: search warnings + sqlite BM25 top-up** — `search_memories()` returns `warnings: [...]` and `available_in_scope: N` whenever the vector path underdelivers (sparse HNSW after repair, `#951` filter-planner failure, drift). Fallback promotes BM25-ranked sqlite candidates tagged `matched_via: "sqlite_bm25_fallback"`. Closes the "silent 0-hit when data is in sqlite" failure mode. CLI `search()` delegates to `search_memories()` so both paths share the fallback.
@@ -60,6 +60,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 - Graph cache with write-invalidation — `build_graph()` module-level cache with 60s TTL, `threading.Lock`, `invalidate_graph_cache()` on writes (#661, merged 2026-04-22)
 - Deterministic hook saves — silent mode via direct Python API call to `tool_diary_write()`, plain-text save, marker advances only after confirmed write, `systemMessage` terminal notification (#673, merged 2026-04-22). Replaces the block-mode "ask AI to save" pattern that could silently drop entries.
 - Hook `silent_save` guard + `_output()` stdout routing — silent-mode skips `stop_hook_active` guard so Claude Code 2.1.114 plugin dispatch keeps firing; `_output()` reuses already-loaded `mcp_server`'s `_REAL_STDOUT_FD` or writes directly to fd 1 to avoid cold-import side effects (#1021, merged 2026-04-22)
+- Diary wing routing — `tool_diary_write` / `tool_diary_read` accept an optional `wing` parameter; stop hook derives project wing from Claude Code transcript path via `_wing_from_transcript_path()` (#659, merged 2026-04-23)
 
 ### Merged into upstream v3.3.0
 
@@ -92,17 +93,17 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 ## Upstream PRs
 
-As of 2026-04-22: 13 merged, 7 open, 7 closed. PRs target `develop`. Fork `main` tracks `upstream/develop`.
+As of 2026-04-23: 14 merged, 6 open, 7 closed. PRs target `develop`. Fork `main` tracks `upstream/develop`.
 
 | PR | Status | Description |
 |----|--------|-------------|
-| #659 | open (`CLEAN`, 6/6 CI green — rebased onto `upstream/develop` 2026-04-22, stale-merge blocker cleared) | Diary wing parameter |
 | #660 | open (`MERGEABLE`, waiting review) | L1 importance pre-filter |
 | #1005 | open (CI green all platforms, Dialectician-acked, waiting maintainer) | Warnings + sqlite BM25 top-up when vector underdelivers (never silent miss) |
 | #1024 | open (CI green all platforms, qodo-acked, waiting maintainer) | Configurable chunk_size, chunk_overlap, min_chunk_size |
 | #1086 | open (`MERGEABLE`) | `mempalace export` CLI wrapper for `export_palace()` (fork-ahead Row 1) |
 | #1087 | open (`MERGEABLE`, 6/6 CI green) | `mempalace purge --wing/--room` CLI — destructive drawer removal (fork-ahead Row 4) |
 | #1094 | open (`CLEAN`, 6/6 CI green) | Coerce `None` metadatas → `{}` at `ChromaCollection.query/.get` boundary (closes #1020) |
+| #659 | **merged** 2026-04-23 | Diary wing parameter (`tool_diary_write` / `tool_diary_read` accept `wing`, hook derives from transcript path) |
 | #661 | **merged** 2026-04-22 | Graph cache with write-invalidation |
 | #673 | **merged** 2026-04-22 | Deterministic hook saves (broader than upstream's #966) — config-flag-gated, strictly safer save semantics |
 | #1021 | **merged** 2026-04-22 | Hook stdout routing + `silent_save` guard fixes for Claude Code 2.1.114 |
