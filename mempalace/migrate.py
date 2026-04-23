@@ -21,6 +21,7 @@ Usage:
 import os
 import shutil
 import sqlite3
+import sys
 from collections import defaultdict
 from datetime import datetime
 
@@ -231,10 +232,26 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
     del col
     del fresh_backend
 
-    # Swap: remove old palace, move new one into place
+    # Swap: remove old palace, move new one into place.
+    # If any step fails after `rmtree`, the palace directory is gone and
+    # `move` may have partially populated it. Restore from the pre-migrate
+    # backup so the user never ends up with a lost palace.
     print("  Swapping old palace for migrated version...")
-    shutil.rmtree(palace_path)
-    shutil.move(temp_palace, palace_path)
+    try:
+        shutil.rmtree(palace_path)
+        shutil.move(temp_palace, palace_path)
+    except Exception as exc:
+        print(
+            f"\n  ERROR: swap failed mid-flight ({exc.__class__.__name__}: {exc})."
+            f"\n  Restoring palace from backup at {backup_path}...",
+            file=sys.stderr,
+        )
+        # Clean any partial state at palace_path, then restore from backup.
+        if os.path.exists(palace_path):
+            shutil.rmtree(palace_path, ignore_errors=True)
+        shutil.copytree(backup_path, palace_path)
+        # Leave temp_palace on disk for post-mortem (caller can remove manually).
+        raise
 
     print("\n  Migration complete.")
     print(f"  Drawers migrated: {final_count}")
