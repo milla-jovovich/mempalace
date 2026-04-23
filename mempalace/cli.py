@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MemPalace — Give your AI a memory. No API key required.
+MemPalace - Give your AI a memory. No API key required.
 
 Two ways to ingest:
   Projects:      mempalace mine ~/projects/my_app          (code, docs, notes)
@@ -103,7 +103,7 @@ def cmd_init(args):
                     json.dump(confirmed, f, indent=2)
                 print(f"  Entities saved: {entities_path}")
         else:
-            print("  No entities detected — proceeding with directory-based rooms.")
+            print("  No entities detected - proceeding with directory-based rooms.")
 
     # Pass 2: detect rooms from folder structure
     detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
@@ -151,7 +151,7 @@ def cmd_sweep(args):
 
     The sweeper deduplicates against its own prior writes via
     deterministic drawer IDs + a timestamp cursor. It does NOT currently
-    coordinate with the file-level miners (miner.py / convo_miner.py) —
+    coordinate with the file-level miners (miner.py / convo_miner.py) -
     those produce char-chunked drawers without compatible message
     metadata, so running both miners may store overlapping content under
     different IDs.
@@ -205,7 +205,7 @@ def cmd_search(args):
 
 
 def cmd_wakeup(args):
-    """Show L0 (identity) + L1 (essential story) — the wake-up context."""
+    """Show L0 (identity) + L1 (essential story) - the wake-up context."""
     from .layers import MemoryStack
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
@@ -292,7 +292,7 @@ def cmd_repair(args):
         print(f"  Drawers found: {total}")
     except Exception as e:
         print(f"  Error reading palace: {e}")
-        print("  Cannot recover — palace may need to be re-mined from source files.")
+        print("  Cannot recover - palace may need to be re-mined from source files.")
         return
 
     if total == 0:
@@ -515,7 +515,7 @@ def cmd_compress(args):
 def main():
     version_label = f"MemPalace {__version__}"
     parser = argparse.ArgumentParser(
-        description="MemPalace — Give your AI a memory. No API key required.",
+        description="MemPalace - Give your AI a memory. No API key required.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"{version_label}\n\n{__doc__}",
     )
@@ -576,7 +576,7 @@ def main():
     p_mine.add_argument(
         "--agent",
         default="mempalace",
-        help="Your name — recorded on every drawer (default: mempalace)",
+        help="Your name - recorded on every drawer (default: mempalace)",
     )
     p_mine.add_argument("--limit", type=int, default=0, help="Max files to process (0 = all)")
     p_mine.add_argument(
@@ -691,7 +691,7 @@ def main():
     # migrate
     p_migrate = sub.add_parser(
         "migrate",
-        help="Migrate palace from a different ChromaDB version (fixes 3.0.0 → 3.1.0 upgrade)",
+        help="Migrate palace from a different ChromaDB version (fixes 3.0.0 -> 3.1.0 upgrade)",
     )
     p_migrate.add_argument(
         "--dry-run",
