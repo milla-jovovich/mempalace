@@ -14,7 +14,9 @@ import math
 import re
 from pathlib import Path
 
+from .config import MempalaceConfig
 from .palace import get_closets_collection, get_collection
+from .reranker import rerank as rerank_pipeline
 
 # Closet pointer line format: "topic|entities|→drawer_id_a,drawer_id_b"
 # Multiple lines may join with newlines inside one closet document.
@@ -301,6 +303,36 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     print()
 
 
+def _load_rerank_config(enabled: bool) -> dict:
+    """Return the ``rerank`` section from config, or empty dict if disabled/unavailable."""
+    if not enabled:
+        return {}
+    try:
+        return MempalaceConfig().rerank_config or {}
+    except Exception:
+        return {}
+
+
+def _apply_rerank(
+    hits: list,
+    query: str,
+    rerank_config: dict,
+    max_distance: float,
+    n_results: int,
+) -> tuple:
+    """Run the rerank pipeline and apply final distance filter + trim.
+
+    Returns ``(hits, reranked)``. When ``rerank_config`` is empty or no hits
+    are in, falls through as a no-op (no stages run, ``reranked`` is False).
+    """
+    if not rerank_config or not hits:
+        return hits, False
+    hits = rerank_pipeline(hits, query, rerank_config)
+    if max_distance > 0.0:
+        hits = [h for h in hits if h.get("fused_distance", h.get("distance", 0.0)) <= max_distance]
+    return hits[:n_results], True
+
+
 def search_memories(
     query: str,
     palace_path: str,
@@ -308,6 +340,7 @@ def search_memories(
     room: str = None,
     n_results: int = 5,
     max_distance: float = 0.0,
+    rerank: bool = True,
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
 
@@ -323,7 +356,14 @@ def search_memories(
             cosine distance (hnsw:space=cosine) — 0 = identical, 2 = opposite.
             Results with distance > this value are filtered out. A value of
             0.0 disables filtering. Typical useful range: 0.3–1.0.
+        rerank: If True (default), apply the rerank pipeline (Weibull decay,
+            keyword boost, importance boost, optional LLM rerank) to the
+            candidate pool before trimming to ``n_results``. The pipeline is
+            a no-op unless at least one stage is enabled in config.json.
     """
+    # Load rerank pipeline config. Absent/empty config = identity function,
+    # so setting ``rerank=True`` when nothing is configured costs nothing.
+    rerank_config = _load_rerank_config(rerank)
     try:
         drawers_col = get_collection(palace_path, create=False)
     except Exception as e:
@@ -420,6 +460,11 @@ def search_memories(
             "effective_distance": round(effective_dist, 4),
             "closet_boost": round(boost, 3),
             "matched_via": matched_via,
+            # Extra fields consumed by rerank stages (Weibull decay +
+            # importance boost). Kept even when rerank is off so the output
+            # shape stays stable for downstream callers.
+            "filed_at": meta.get("filed_at"),
+            "emotional_weight": meta.get("emotional_weight"),
             # Internal: retain the full source_file path + chunk_index so the
             # enrichment step below doesn't have to reverse-lookup via
             # basename-suffix matching (which silently collides when two
@@ -433,7 +478,10 @@ def search_memories(
         scored.append(entry)
 
     scored.sort(key=lambda h: h["_sort_key"])
-    hits = scored[:n_results]
+    # Keep a larger candidate pool when rerank is active so the pipeline has
+    # headroom to reorder across items that fell just outside the top-n.
+    pool_size = n_results * 3 if rerank_config else n_results
+    hits = scored[:pool_size]
 
     # Drawer-grep enrichment: for closet-boosted hits whose source has
     # multiple drawers, return the keyword-best chunk + its immediate
@@ -492,14 +540,23 @@ def search_memories(
 
     # BM25 hybrid re-rank within the final candidate set.
     hits = _hybrid_rank(hits, query)
+
+    # Post-retrieval rerank pipeline (Weibull decay / keyword / importance /
+    # LLM). Only runs when at least one stage is enabled in config; otherwise
+    # the raw + BM25-boosted order is returned unchanged.
+    hits, reranked = _apply_rerank(hits, query, rerank_config, max_distance, n_results)
+
     for h in hits:
         h.pop("_sort_key", None)
         h.pop("_source_file_full", None)
         h.pop("_chunk_index", None)
 
-    return {
+    result = {
         "query": query,
         "filters": {"wing": wing, "room": room},
         "total_before_filter": len(_first_or_empty(drawer_results, "documents")),
         "results": hits,
     }
+    if reranked:
+        result["reranked"] = True
+    return result

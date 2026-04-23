@@ -23,7 +23,8 @@ from collections import defaultdict
 
 from .config import MempalaceConfig
 from .palace import get_collection as _get_collection
-from .searcher import _first_or_empty, build_where_filter
+from .searcher import build_where_filter, search_memories
+from .reranker import apply_decay as _apply_decay, _parse_age_days
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +122,11 @@ class Layer1:
         if not docs:
             return "## L1 — No memories yet."
 
-        # Score each drawer: prefer high importance, recent filing
+        # Score each drawer: prefer high importance, optionally decay by age
+        cfg = MempalaceConfig()
+        l1_decay = cfg.rerank_config.get("l1_decay", {})
+        l1_decay_enabled = l1_decay.get("enabled", False)
+
         scored = []
         for doc, meta in zip(docs, metas):
             importance = 3
@@ -134,6 +139,19 @@ class Layer1:
                     except (ValueError, TypeError):
                         pass
                     break
+
+            # Optional Weibull decay for L1 (gentler defaults than search)
+            if l1_decay_enabled:
+                age = _parse_age_days(meta.get("filed_at"))
+                if age > 0:
+                    importance = _apply_decay(
+                        importance,
+                        age,
+                        k=float(l1_decay.get("k", 1.2)),
+                        lam=float(l1_decay.get("lambda", 365)),
+                        floor=float(l1_decay.get("floor", 0.6)),
+                    )
+
             scored.append((importance, meta, doc))
 
         # Sort by importance descending, take top N
@@ -243,7 +261,7 @@ class Layer2:
 class Layer3:
     """
     Unlimited depth. Semantic search against the full palace.
-    Reuses searcher.py logic against mempalace_drawers.
+    Delegates to search_memories() which includes the rerank pipeline.
     """
 
     def __init__(self, palace_path: str = None):
@@ -252,43 +270,29 @@ class Layer3:
 
     def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
         """Semantic search, returns compact result text."""
-        try:
-            col = _get_collection(self.palace_path, create=False)
-        except Exception:
-            return "No palace found."
+        result = search_memories(
+            query,
+            self.palace_path,
+            wing=wing,
+            room=room,
+            n_results=n_results,
+        )
 
-        where = build_where_filter(wing, room)
+        if result.get("error"):
+            return result.get("error", "No palace found.")
 
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            kwargs["where"] = where
-
-        try:
-            results = col.query(**kwargs)
-        except Exception as e:
-            return f"Search error: {e}"
-
-        docs = _first_or_empty(results, "documents")
-        metas = _first_or_empty(results, "metadatas")
-        dists = _first_or_empty(results, "distances")
-
-        if not docs:
+        hits = result.get("results", [])
+        if not hits:
             return "No results found."
 
         lines = [f'## L3 — SEARCH RESULTS for "{query}"']
-        for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
-            meta = meta or {}
-            doc = doc or ""
-            similarity = round(1 - dist, 3)
-            wing_name = meta.get("wing", "?")
-            room_name = meta.get("room", "?")
-            source = Path(meta.get("source_file", "")).name if meta.get("source_file") else ""
+        for i, hit in enumerate(hits, 1):
+            similarity = hit.get("adjusted_similarity", hit.get("similarity", 0))
+            wing_name = hit.get("wing", "?")
+            room_name = hit.get("room", "?")
+            source = hit.get("source_file", "")
 
-            snippet = doc.strip().replace("\n", " ")
+            snippet = hit.get("text", "").strip().replace("\n", " ")
             if len(snippet) > 300:
                 snippet = snippet[:297] + "..."
 
@@ -303,47 +307,30 @@ class Layer3:
         self, query: str, wing: str = None, room: str = None, n_results: int = 5
     ) -> list:
         """Return raw dicts instead of formatted text."""
-        try:
-            col = _get_collection(self.palace_path, create=False)
-        except Exception:
-            return []
+        result = search_memories(
+            query,
+            self.palace_path,
+            wing=wing,
+            room=room,
+            n_results=n_results,
+        )
 
-        where = build_where_filter(wing, room)
-
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            kwargs["where"] = where
-
-        try:
-            results = col.query(**kwargs)
-        except Exception:
+        if result.get("error"):
             return []
 
         hits = []
-        for doc, meta, dist in zip(
-            _first_or_empty(results, "documents"),
-            _first_or_empty(results, "metadatas"),
-            _first_or_empty(results, "distances"),
-        ):
-            # ChromaDB may return None for doc/meta when a drawer's HNSW entry
-            # exists but its metadata/document rows haven't been materialized
-            # (partial-flush states, mid-delete, schema upgrade boundaries).
-            # Degrade gracefully — the hit still appears with real distance;
-            # storage fields show their fallback where content is missing.
-            meta = meta or {}
-            doc = doc or ""
+        for hit in result.get("results", []):
             hits.append(
                 {
-                    "text": doc,
-                    "wing": meta.get("wing", "unknown"),
-                    "room": meta.get("room", "unknown"),
-                    "source_file": Path(meta.get("source_file", "?")).name,
-                    "similarity": round(1 - dist, 3),
-                    "metadata": meta,
+                    "text": hit.get("text", ""),
+                    "wing": hit.get("wing", "unknown"),
+                    "room": hit.get("room", "unknown"),
+                    "source_file": hit.get("source_file", "?"),
+                    "similarity": hit.get("adjusted_similarity", hit.get("similarity", 0)),
+                    "metadata": {
+                        "filed_at": hit.get("filed_at"),
+                        "emotional_weight": hit.get("emotional_weight"),
+                    },
                 }
             )
         return hits
