@@ -1679,7 +1679,7 @@ def handle_request(request):
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2, ensure_ascii=False)}]},
             }
         except Exception:
             logger.exception(f"Tool error in {tool_name}")
@@ -1713,6 +1713,30 @@ def _restore_stdout():
 
 
 def main():
+    import io
+    
+    # Force UTF-8 encoding on stdin/stdout for Windows compatibility.
+    # Windows defaults to cp936/GBK which breaks CJK content in MCP protocol.
+    # See: https://github.com/milla-jovovich/mempalace/issues/503
+    
+    if hasattr(sys.stdin, 'buffer'):
+        # Use 'surrogateescape' for stdin: allows reading malformed input
+        # without crashing, which is important for handling diverse client encodings
+        sys.stdin = io.TextIOWrapper(
+            sys.stdin.buffer, 
+            encoding='utf-8', 
+            errors='surrogateescape'
+        )
+    
+    if hasattr(sys.stdout, 'buffer'):
+        # Use 'replace' for stdout: replaces invalid characters with �
+        # This prevents lone surrogates from breaking JSON-RPC client parsers
+        sys.stdout = io.TextIOWrapper(
+            sys.stdout.buffer, 
+            encoding='utf-8', 
+            errors='replace'
+        )
+    
     _restore_stdout()
     logger.info("MemPalace MCP Server starting...")
     while True:
@@ -1726,7 +1750,8 @@ def main():
             request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
+                # Fix #359: Preserve non-ASCII characters (Chinese, etc.) in JSON output
+                sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
                 sys.stdout.flush()
         except KeyboardInterrupt:
             break
