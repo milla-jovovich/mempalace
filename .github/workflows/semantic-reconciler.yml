@@ -6,6 +6,9 @@ on:
   push:
     branches:
       - build/conversion-kit
+  pull_request:
+    branches:
+      - build/conversion-kit
 
 permissions:
   contents: read
