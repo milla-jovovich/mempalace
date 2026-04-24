@@ -8,6 +8,7 @@ via monkeypatch to avoid touching real data.
 
 from datetime import datetime
 import json
+import os
 import sys
 
 import pytest
@@ -874,3 +875,114 @@ class TestCacheInvalidation:
         assert result["success"] is True
         assert "Reconnected" in result["message"]
         assert isinstance(result["drawers"], int)
+
+
+class TestKGLazyCache:
+    """Lazy per-path KnowledgeGraph cache (issue #1136)."""
+
+    def test_lazy_init_no_import_side_effect(self, tmp_path):
+        """Importing mcp_server must not create knowledge_graph.sqlite3.
+
+        Runs in a fresh subprocess with HOME pointed at tmp_path so the
+        assertion targets a clean filesystem, independent of conftest's
+        session-level HOME patch.
+        """
+        import subprocess
+        import sys
+
+        kg_file = tmp_path / ".mempalace" / "knowledge_graph.sqlite3"
+        result = subprocess.run(
+            [sys.executable, "-c", "import mempalace.mcp_server"],
+            env={
+                "HOME": str(tmp_path),
+                "USERPROFILE": str(tmp_path),
+                "PATH": os.environ.get("PATH", ""),
+                "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, f"import failed: {result.stderr}"
+        assert not kg_file.exists(), f"import created sqlite file at {kg_file} as a side effect"
+
+    def test_get_kg_returns_same_instance(self, tmp_path, monkeypatch):
+        """Two calls with the same resolved path return the same KG."""
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(mcp_server, "_kg_by_path", {})
+        monkeypatch.setattr(mcp_server, "_palace_flag_given", True)
+        monkeypatch.setenv("MEMPALACE_PALACE_PATH", str(tmp_path))
+
+        kg1 = mcp_server._get_kg()
+        kg2 = mcp_server._get_kg()
+        assert kg1 is kg2
+        assert len(mcp_server._kg_by_path) == 1
+
+    def test_get_kg_different_paths_different_instances(self, tmp_path, monkeypatch):
+        """Different palace paths map to different KG instances."""
+        from mempalace import mcp_server
+
+        tmp_a = tmp_path / "a"
+        tmp_b = tmp_path / "b"
+        tmp_a.mkdir()
+        tmp_b.mkdir()
+
+        monkeypatch.setattr(mcp_server, "_kg_by_path", {})
+        monkeypatch.setattr(mcp_server, "_palace_flag_given", True)
+
+        monkeypatch.setenv("MEMPALACE_PALACE_PATH", str(tmp_a))
+        kg_a = mcp_server._get_kg()
+        monkeypatch.setenv("MEMPALACE_PALACE_PATH", str(tmp_b))
+        kg_b = mcp_server._get_kg()
+
+        assert kg_a is not kg_b
+        assert len(mcp_server._kg_by_path) == 2
+
+    def test_multi_tenant_env_switch(self, tmp_path, monkeypatch):
+        """The issue #1136 acceptance scenario.
+
+        Rotating MEMPALACE_PALACE_PATH between MCP tool calls must route
+        each call to the correct tenant's KG sqlite file.
+        """
+        from mempalace import mcp_server
+
+        tmp_a = tmp_path / "tenant_a"
+        tmp_b = tmp_path / "tenant_b"
+        tmp_a.mkdir()
+        tmp_b.mkdir()
+
+        monkeypatch.setattr(mcp_server, "_kg_by_path", {})
+        monkeypatch.setattr(mcp_server, "_palace_flag_given", True)
+
+        monkeypatch.setenv("MEMPALACE_PALACE_PATH", str(tmp_a))
+        add_result = mcp_server.tool_kg_add(
+            subject="alice_secret",
+            predicate="owns",
+            object="repo_a",
+        )
+        assert add_result.get("success") is True, add_result
+
+        monkeypatch.setenv("MEMPALACE_PALACE_PATH", str(tmp_b))
+        query_b = mcp_server.tool_kg_query(entity="alice_secret")
+        assert query_b.get("count", 0) == 0, f"tenant B leaked tenant A's fact: {query_b}"
+
+        monkeypatch.setenv("MEMPALACE_PALACE_PATH", str(tmp_a))
+        query_a = mcp_server.tool_kg_query(entity="alice_secret")
+        assert query_a.get("count", 0) >= 1, f"tenant A lost its own fact: {query_a}"
+
+    def test_cache_thread_safe(self, tmp_path, monkeypatch):
+        """Concurrent _get_kg() for the same path yields one instance."""
+        import concurrent.futures
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(mcp_server, "_kg_by_path", {})
+        monkeypatch.setattr(mcp_server, "_palace_flag_given", True)
+        monkeypatch.setenv("MEMPALACE_PALACE_PATH", str(tmp_path))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(lambda _: mcp_server._get_kg(), range(16)))
+
+        ids = {id(kg) for kg in results}
+        assert len(ids) == 1, f"expected 1 unique instance, got {len(ids)}"
+        assert len(mcp_server._kg_by_path) == 1
