@@ -93,7 +93,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 ## Upstream PRs
 
-As of 2026-04-23: 14 merged, 8 open, 8 closed. PRs target `develop`. Fork `main` tracks `upstream/develop`.
+As of 2026-04-24: 14 merged, 7 open, 9 closed. PRs target `develop`. Fork `main` tracks `upstream/develop`.
 
 | PR | Status | Description |
 |----|--------|-------------|
@@ -104,7 +104,6 @@ As of 2026-04-23: 14 merged, 8 open, 8 closed. PRs target `develop`. Fork `main`
 | #1087 | open (`MERGEABLE`, 6/6 CI green) | `mempalace purge --wing/--room` CLI — destructive drawer removal (fork-ahead Row 4) |
 | #1094 | open (`CLEAN`, 6/6 CI green) | Coerce `None` metadatas → `{}` at `ChromaCollection.query/.get` boundary (closes #1020) |
 | #1142 | open (filed 2026-04-23) | `docs/RELEASING.md` with `mempalace-mcp` pre-release grep — fulfills #1093's release-checklist proposal, accepted by @bensig 2026-04-23 via email |
-| #1146 | open (filed 2026-04-23) | `#1145` bugs 1+2 — `_wing_from_transcript_path` fallback for non-`~/Projects/` layouts; `tool_diary_read` adopts `#1097`'s empty-wing → no-filter pattern |
 | #659 | **merged** 2026-04-23 | Diary wing parameter (`tool_diary_write` / `tool_diary_read` accept `wing`, hook derives from transcript path) |
 | #661 | **merged** 2026-04-22 | Graph cache with write-invalidation |
 | #673 | **merged** 2026-04-22 | Deterministic hook saves (broader than upstream's #966) — config-flag-gated, strictly safer save semantics |
@@ -126,6 +125,7 @@ As of 2026-04-23: 14 merged, 8 open, 8 closed. PRs target `develop`. Fork `main`
 | #626 | **closed** | Split into #681-684 |
 | #633 | **closed** | Resubmitted as #673 |
 | #1115 | **closed** 2026-04-23 | `.claude-plugin/` venv-aware Python + MCP — withdrew as premature pending #1069 arbitration; CI correctly caught the #942 PATH-only contract violation |
+| #1146 | **closed** 2026-04-24 | #1145 bugs 1+2 — duplicate; @igorls filed [#1147](https://github.com/MemPalace/mempalace/pull/1147) 4 min later with cleaner `.claude/projects/-` primary regex. Fork main keeps `34e36ae` for local use until upstream merges #1147, then we merge develop→main and take upstream's version. |
 
 ## Two-Layer Memory Architecture
 
