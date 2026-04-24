@@ -891,14 +891,12 @@ class TestKGLazyCache:
         import sys
 
         kg_file = tmp_path / ".mempalace" / "knowledge_graph.sqlite3"
+        env = {k: v for k, v in os.environ.items() if not k.startswith("MEMPAL")}
+        env["HOME"] = str(tmp_path)
+        env["USERPROFILE"] = str(tmp_path)
         result = subprocess.run(
             [sys.executable, "-c", "import mempalace.mcp_server"],
-            env={
-                "HOME": str(tmp_path),
-                "USERPROFILE": str(tmp_path),
-                "PATH": os.environ.get("PATH", ""),
-                "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
-            },
+            env=env,
             capture_output=True,
             text=True,
             timeout=30,
