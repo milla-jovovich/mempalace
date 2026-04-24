@@ -845,6 +845,7 @@ def scan_project(
 def mine(
     project_dir: str,
     palace_path: str,
+    config_dir: str = None,
     wing_override: str = None,
     agent: str = "mempalace",
     limit: int = 0,
@@ -855,7 +856,7 @@ def mine(
     """Mine a project directory into the palace."""
 
     project_path = Path(project_dir).expanduser().resolve()
-    config = load_config(project_dir)
+    config = load_config(config_dir or project_dir)
 
     wing = wing_override or config["wing"]
     rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
