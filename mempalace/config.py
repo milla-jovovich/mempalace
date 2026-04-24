@@ -71,6 +71,34 @@ def sanitize_kg_value(value: str, field_name: str = "value") -> str:
     return value
 
 
+# ISO-8601 date validator for knowledge-graph temporal parameters
+# (as_of, valid_from, valid_to, ended). Parameterized queries already
+# prevent SQL injection, but unvalidated date strings silently miss
+# every row — callers cannot distinguish "no fact at this time" from
+# "your date format was unrecognized." Accept YYYY, YYYY-MM, YYYY-MM-DD.
+_ISO_DATE_RE = re.compile(r"^\d{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$")
+
+
+def sanitize_iso_date(value, field_name: str = "date"):
+    """Validate an ISO-8601 date string, accepting None or empty as-is.
+
+    Accepts ``YYYY``, ``YYYY-MM``, or ``YYYY-MM-DD``. Raises ValueError
+    on any other non-empty input so the MCP layer can surface a clear
+    error to the caller instead of silently returning empty results.
+    """
+    if value is None or value == "":
+        return value
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+    value = value.strip()
+    if not _ISO_DATE_RE.match(value):
+        raise ValueError(
+            f"{field_name}={value!r} is not a valid ISO-8601 date "
+            f"(expected YYYY, YYYY-MM, or YYYY-MM-DD)"
+        )
+    return value
+
+
 def sanitize_content(value: str, max_length: int = 100_000) -> str:
     """Validate drawer/diary content length."""
     if not isinstance(value, str) or not value.strip():

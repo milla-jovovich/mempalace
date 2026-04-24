@@ -55,6 +55,7 @@ from .config import (  # noqa: E402
     sanitize_kg_value,
     sanitize_name,
     sanitize_content,
+    sanitize_iso_date,
 )
 from .version import __version__  # noqa: E402
 from .backends.chroma import ChromaBackend, ChromaCollection  # noqa: E402
@@ -844,6 +845,7 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
     """Query the knowledge graph for an entity's relationships."""
     try:
         entity = sanitize_kg_value(entity, "entity")
+        as_of = sanitize_iso_date(as_of, "as_of")
     except ValueError as e:
         return {"error": str(e)}
     if direction not in ("outgoing", "incoming", "both"):
@@ -860,6 +862,7 @@ def tool_kg_add(
         subject = sanitize_kg_value(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
         object = sanitize_kg_value(object, "object")
+        valid_from = sanitize_iso_date(valid_from, "valid_from")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -885,6 +888,7 @@ def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = N
         subject = sanitize_kg_value(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
         object = sanitize_kg_value(object, "object")
+        ended = sanitize_iso_date(ended, "ended")
     except ValueError as e:
         return {"success": False, "error": str(e)}
     _wal_log(

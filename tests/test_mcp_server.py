@@ -665,6 +665,52 @@ class TestKGTools:
         result = tool_kg_stats()
         assert result["entities"] >= 4
 
+    # --- Date validation at the MCP boundary (issue #1164) ---
+
+    def test_kg_add_rejects_invalid_valid_from(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_kg_add
+
+        result = tool_kg_add(
+            subject="Alice",
+            predicate="likes",
+            object="coffee",
+            valid_from="Jan 2025",
+        )
+        assert result["success"] is False
+        assert "valid_from" in result["error"]
+        assert "ISO-8601" in result["error"]
+
+    def test_kg_query_rejects_invalid_as_of(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query
+
+        result = tool_kg_query(entity="Max", as_of="March 2026")
+        assert "error" in result
+        assert "as_of" in result["error"]
+
+    def test_kg_invalidate_rejects_invalid_ended(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_invalidate
+
+        result = tool_kg_invalidate(
+            subject="Max",
+            predicate="does",
+            object="chess",
+            ended="yesterday",
+        )
+        assert result["success"] is False
+        assert "ended" in result["error"]
+
+    def test_kg_query_accepts_partial_iso_dates(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query
+
+        # YYYY and YYYY-MM are valid ISO-8601 forms — must not be rejected.
+        for value in ("2026", "2026-03", "2026-03-15"):
+            result = tool_kg_query(entity="Max", as_of=value)
+            assert "error" not in result, f"rejected valid date {value!r}: {result}"
+
 
 # ── Diary Tools ─────────────────────────────────────────────────────────
 
