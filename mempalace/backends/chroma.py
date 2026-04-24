@@ -133,6 +133,9 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
     return moved
 
 
+_BLOB_FIX_MARKER = ".blob_seq_ids_migrated"
+
+
 def _fix_blob_seq_ids(palace_path: str) -> None:
     """Fix ChromaDB 0.6.x -> 1.5.x migration bug: BLOB seq_ids -> INTEGER.
 
@@ -142,10 +145,20 @@ def _fix_blob_seq_ids(palace_path: str) -> None:
     type INTEGER) is not compatible with SQL type BLOB".
 
     Must run BEFORE PersistentClient is created (the compactor fires on init).
+
+    Opening a Python sqlite3 connection against a ChromaDB 1.5.x WAL-mode
+    database leaves state that segfaults the next PersistentClient call. After
+    the migration has run once successfully, a marker file is written so
+    subsequent opens skip the sqlite connection entirely. Already-migrated
+    palaces can touch the marker manually to opt into the fast path.
     """
     db_path = os.path.join(palace_path, "chroma.sqlite3")
     if not os.path.isfile(db_path):
         return
+    marker = os.path.join(palace_path, _BLOB_FIX_MARKER)
+    if os.path.isfile(marker):
+        return
+    migrated = False
     try:
         with sqlite3.connect(db_path) as conn:
             for table in ("embeddings", "max_seq_id"):
@@ -160,9 +173,18 @@ def _fix_blob_seq_ids(palace_path: str) -> None:
                 updates = [(int.from_bytes(blob, byteorder="big"), rowid) for rowid, blob in rows]
                 conn.executemany(f"UPDATE {table} SET seq_id = ? WHERE rowid = ?", updates)
                 logger.info("Fixed %d BLOB seq_ids in %s", len(updates), table)
+                migrated = True
             conn.commit()
     except Exception:
         logger.exception("Could not fix BLOB seq_ids in %s", db_path)
+        return
+    # Write marker whether or not rows needed migration — the palace is now
+    # confirmed to be in the INTEGER-seq_id state and future opens can skip the
+    # sqlite3.connect() entirely.
+    try:
+        open(marker, "a").close()
+    except OSError:
+        logger.exception("Could not write migration marker %s", marker)
 
 
 # ---------------------------------------------------------------------------
