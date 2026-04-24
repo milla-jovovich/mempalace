@@ -7,9 +7,18 @@ from pathlib import Path
 
 import yaml
 
+RUNTIME_REGISTRY_OLD_ID = "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/registry"
+RUNTIME_REGISTRY_CANONICAL_ID = "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry"
+
 
 def load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def canonical_capability_id(value: str | None) -> str | None:
+    if value == RUNTIME_REGISTRY_OLD_ID:
+        return RUNTIME_REGISTRY_CANONICAL_ID
+    return value
 
 
 def project_runtime(ops_doc: dict, profile_doc: dict) -> dict:
@@ -17,7 +26,7 @@ def project_runtime(ops_doc: dict, profile_doc: dict) -> dict:
     for item in ops_doc.get("operations", []) or []:
         operations.append(
             {
-                "id": item.get("@id"),
+                "id": canonical_capability_id(item.get("@id")),
                 "category": item.get("category"),
                 "description": item.get("description"),
                 "enabled": item.get("enabled", True),
@@ -33,8 +42,9 @@ def project_runtime(ops_doc: dict, profile_doc: dict) -> dict:
     return {
         "package": profile_doc.get("packageName", "mempalace"),
         "command": profile_doc.get("commandName", "mempalace"),
-        "module_entry": profile_doc.get("moduleEntry", "mempalace.mcp_server"),
+        "module_entry": profile_doc.get("moduleEntry", "mempalace.mcp_server_ld"),
         "hidden_dir": profile_doc.get("hiddenDir", ".mempalace"),
+        "repo_url": profile_doc.get("repoUrl", "https://github.com/Fleet-to-Force/mempalace"),
         "runtime": runtime,
         "operations": operations,
         "plugin_profiles": plugins,
@@ -55,7 +65,7 @@ def main() -> int:
 
     if len(sys.argv) == 4:
         out = Path(sys.argv[3]).expanduser().resolve()
-        out.write_text(json.dumps(projected, indent=2), encoding="utf-8")
+        out.write_text(json.dumps(projected, indent=2) + "\n", encoding="utf-8")
         print(str(out))
         return 0
 
