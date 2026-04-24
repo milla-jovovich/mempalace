@@ -8,7 +8,7 @@
 repoRoot: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo
 packageName: mempalace
 commandName: mempalace
-moduleEntry: mempalace.mcp_server
+moduleEntry: mempalace.mcp_server_ld
 hiddenDir: .mempalace
 repoUrl: https://github.com/Fleet-to-Force/mempalace
 
