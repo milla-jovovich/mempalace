@@ -30,7 +30,7 @@
       "name": "registry",
       "description": "Return the projected MemPalace runtime registry, including operations, integration defaults, plugin profiles, and collection identities.",
       "exposure": "public",
-      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/registry"
+      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry"
     }
   ]
 }
