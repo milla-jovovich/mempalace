@@ -41,7 +41,7 @@ before continuing.
 
 ## Step 5: Initialize the palace
 
-Run `mempalace init <dir>` where `<dir>` is the directory from Step 4.
+Run `mempalace init --yes <dir>` where `<dir>` is the directory from Step 4.
 
 If this fails, report the error and stop.
 
@@ -49,7 +49,7 @@ If this fails, report the error and stop.
 
 Run the following command to register the MemPalace MCP server with Claude:
 
-    claude mcp add mempalace -- python -m mempalace.mcp_server
+    claude mcp add mempalace -- mempalace-mcp
 
 If this fails, report the error but continue to the next step (MCP
 configuration can be done manually later).

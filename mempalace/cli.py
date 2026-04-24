@@ -4,7 +4,7 @@ MemPalace — Give your AI a memory. No API key required.
 
 Two ways to ingest:
   Projects:      mempalace mine ~/projects/my_app          (code, docs, notes)
-  Conversations: mempalace mine ~/chats/ --mode convos     (Claude, ChatGPT, Slack)
+  Conversations: mempalace mine <convo-dir> --mode convos     (Claude Code, Claude.ai, ChatGPT, Slack exports)
 
 Same palace. Same search. Different ingest strategies.
 
@@ -25,7 +25,7 @@ Commands:
 Examples:
     mempalace init ~/projects/my_app
     mempalace mine ~/projects/my_app
-    mempalace mine ~/chats/claude-sessions --mode convos
+    mempalace mine ~/.claude/projects/-Users-you-Projects-my_app --mode convos --wing my_app
     mempalace search "why did we switch to GraphQL"
     mempalace search "pricing discussion" --wing my_app --room costs
 """
@@ -40,18 +40,62 @@ from .config import MempalaceConfig
 from .version import __version__
 
 
+_MEMPALACE_PROJECT_FILES = ("mempalace.yaml", "entities.json")
+
+
+def _ensure_mempalace_files_gitignored(project_dir) -> bool:
+    """If project_dir is a git repo, ensure MemPalace's per-project files
+    are listed in .gitignore so they don't get committed by accident.
+
+    Returns True if .gitignore was updated, False otherwise. Issue #185:
+    `mempalace init` writes mempalace.yaml + entities.json into the
+    project root, where they previously had no protection against being
+    staged into git.
+    """
+    from pathlib import Path
+
+    project_path = Path(project_dir).expanduser().resolve()
+    if not (project_path / ".git").exists():
+        return False
+    gitignore = project_path / ".gitignore"
+    existing = gitignore.read_text() if gitignore.exists() else ""
+    existing_lines = {line.strip() for line in existing.splitlines()}
+    missing = [p for p in _MEMPALACE_PROJECT_FILES if p not in existing_lines]
+    if not missing:
+        return False
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    block = prefix + "\n# MemPalace per-project files (issue #185)\n" + "\n".join(missing) + "\n"
+    with open(gitignore, "a") as f:
+        f.write(block)
+    print(f"  Added {', '.join(missing)} to {gitignore.name}")
+    return True
+
+
 def cmd_init(args):
     import json
     from pathlib import Path
     from .entity_detector import scan_for_detection, detect_entities, confirm_entities
     from .room_detector_local import detect_rooms_local
 
+    cfg = MempalaceConfig()
+
+    # Resolve entity-detection languages: --lang overrides config.
+    lang_arg = getattr(args, "lang", None)
+    if lang_arg:
+        languages = [s.strip() for s in lang_arg.split(",") if s.strip()] or ["en"]
+        cfg.set_entity_languages(languages)
+    else:
+        languages = cfg.entity_languages
+    languages_tuple = tuple(languages)
+
     # Pass 1: auto-detect people and projects from file content
     print(f"\n  Scanning for entities in: {args.dir}")
+    if languages_tuple != ("en",):
+        print(f"  Languages: {', '.join(languages_tuple)}")
     files = scan_for_detection(args.dir)
     if files:
         print(f"  Reading {len(files)} files...")
-        detected = detect_entities(files)
+        detected = detect_entities(files, languages=languages_tuple)
         total = len(detected["people"]) + len(detected["projects"]) + len(detected["uncertain"])
         if total > 0:
             confirmed = confirm_entities(detected, yes=getattr(args, "yes", False))
@@ -66,7 +110,10 @@ def cmd_init(args):
 
     # Pass 2: detect rooms from folder structure
     detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
-    MempalaceConfig().init()
+    cfg.init()
+
+    # Pass 3: protect git repos from accidentally committing per-project files
+    _ensure_mempalace_files_gitignored(args.dir)
 
 
 def cmd_mine(args):
@@ -100,6 +147,48 @@ def cmd_mine(args):
             respect_gitignore=not args.no_gitignore,
             include_ignored=include_ignored,
         )
+
+
+def cmd_sweep(args):
+    """Sweep a transcript file or directory.
+
+    The sweeper deduplicates against its own prior writes via
+    deterministic drawer IDs + a timestamp cursor. It does NOT currently
+    coordinate with the file-level miners (miner.py / convo_miner.py) —
+    those produce char-chunked drawers without compatible message
+    metadata, so running both miners may store overlapping content under
+    different IDs.
+    """
+    from .sweeper import sweep, sweep_directory
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    target = os.path.expanduser(args.target)
+
+    if os.path.isfile(target):
+        result = sweep(target, palace_path)
+        print(
+            f"  Swept {target}: +{result['drawers_added']} new, "
+            f"{result['drawers_already_present']} already present, "
+            f"{result['drawers_skipped']} skipped (< cursor)."
+        )
+    elif os.path.isdir(target):
+        result = sweep_directory(target, palace_path)
+        print(
+            f"  Swept {result['files_succeeded']}/{result['files_attempted']} "
+            f"files from {target}: +{result['drawers_added']} new, "
+            f"{result['drawers_already_present']} already present, "
+            f"{result['drawers_skipped']} skipped (< cursor)."
+        )
+        failures = result.get("failures") or []
+        if failures:
+            print(
+                f"  WARNING: {len(failures)} file(s) failed to sweep - see stderr / logs for details.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    else:
+        print(f"  ERROR: Not a file or directory: {target}", file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_search(args):
@@ -138,7 +227,8 @@ def cmd_split(args):
     import sys
 
     # Rebuild argv for split_mega_files argparse
-    argv = ["--source", args.dir]
+    # Expand ~ and resolve to absolute path so split_mega_files sees a real path
+    argv = ["--source", str(Path(args.dir).expanduser().resolve())]
     if args.output_dir:
         argv += ["--output-dir", args.output_dir]
     if args.dry_run:
@@ -159,7 +249,11 @@ def cmd_migrate(args):
     from .migrate import migrate
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-    migrate(palace_path=palace_path, dry_run=args.dry_run)
+    migrate(
+        palace_path=palace_path,
+        dry_run=args.dry_run,
+        confirm=getattr(args, "yes", False),
+    )
 
 
 def cmd_status(args):
@@ -171,13 +265,20 @@ def cmd_status(args):
 
 def cmd_repair(args):
     """Rebuild palace vector index from SQLite metadata."""
-    import chromadb
     import shutil
+    from .backends.chroma import ChromaBackend
+    from .migrate import confirm_destructive_action, contains_palace_database
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    palace_path = os.path.abspath(
+        os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    )
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
 
     if not os.path.isdir(palace_path):
         print(f"\n  No palace found at {palace_path}")
+        return
+    if not contains_palace_database(palace_path):
+        print(f"\n  No palace database found at {db_path}")
         return
 
     print(f"\n{'=' * 55}")
@@ -185,10 +286,11 @@ def cmd_repair(args):
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
 
+    backend = ChromaBackend()
+
     # Try to read existing drawers
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = backend.get_collection(palace_path, "mempalace_drawers")
         total = col.count()
         print(f"  Drawers found: {total}")
     except Exception as e:
@@ -198,6 +300,11 @@ def cmd_repair(args):
 
     if total == 0:
         print("  Nothing to repair.")
+        return
+
+    if not confirm_destructive_action(
+        "Repair", palace_path, assume_yes=getattr(args, "yes", False)
+    ):
         return
 
     # Extract all drawers in batches
@@ -216,16 +323,22 @@ def cmd_repair(args):
     print(f"  Extracted {len(all_ids)} drawers")
 
     # Backup and rebuild
-    palace_path = palace_path.rstrip(os.sep)
+    palace_path = os.path.normpath(palace_path)
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
+        if not contains_palace_database(backup_path):
+            print(
+                "  Backup validation failed: backup path exists but does not contain chroma.sqlite3. "
+                f"Please remove or rename: {backup_path}"
+            )
+            return
         shutil.rmtree(backup_path)
     print(f"  Backing up to {backup_path}...")
     shutil.copytree(palace_path, backup_path)
 
     print("  Rebuilding collection...")
-    client.delete_collection("mempalace_drawers")
-    new_col = client.create_collection("mempalace_drawers")
+    backend.delete_collection(palace_path, "mempalace_drawers")
+    new_col = backend.create_collection(palace_path, "mempalace_drawers")
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
@@ -380,7 +493,7 @@ def cmd_instructions(args):
 
 def cmd_mcp(args):
     """Show how to wire MemPalace into MCP-capable hosts."""
-    base_server_cmd = "python -m mempalace.mcp_server"
+    base_server_cmd = "mempalace-mcp"
 
     if args.palace:
         resolved_palace = str(Path(args.palace).expanduser())
@@ -401,7 +514,7 @@ def cmd_mcp(args):
 
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
-    import chromadb
+    from .backends.chroma import ChromaBackend
     from .dialect import Dialect
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
@@ -421,9 +534,9 @@ def cmd_compress(args):
         dialect = Dialect()
 
     # Connect to palace
+    backend = ChromaBackend()
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = backend.get_collection(palace_path, "mempalace_drawers")
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
@@ -436,7 +549,11 @@ def cmd_compress(args):
     offset = 0
     while True:
         try:
-            kwargs = {"include": ["documents", "metadatas"], "limit": _BATCH, "offset": offset}
+            kwargs = {
+                "include": ["documents", "metadatas"],
+                "limit": _BATCH,
+                "offset": offset,
+            }
             if where:
                 kwargs["where"] = where
             batch = col.get(**kwargs)
@@ -476,7 +593,7 @@ def cmd_compress(args):
         stats = dialect.compression_stats(doc, compressed)
 
         total_original += stats["original_chars"]
-        total_compressed += stats["compressed_chars"]
+        total_compressed += stats["summary_chars"]
 
         compressed_entries.append((doc_id, compressed, meta, stats))
 
@@ -486,7 +603,7 @@ def cmd_compress(args):
             source = Path(meta.get("source_file", "?")).name
             print(f"  [{wing_name}/{room_name}] {source}")
             print(
-                f"    {stats['original_tokens']}t -> {stats['compressed_tokens']}t ({stats['ratio']:.1f}x)"
+                f"    {stats['original_tokens_est']}t -> {stats['summary_tokens_est']}t ({stats['size_ratio']:.1f}x)"
             )
             print(f"    {compressed}")
             print()
@@ -494,11 +611,11 @@ def cmd_compress(args):
     # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
-            comp_col = client.get_or_create_collection("mempalace_compressed")
+            comp_col = backend.get_or_create_collection(palace_path, "mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
-                comp_meta["compression_ratio"] = round(stats["ratio"], 1)
-                comp_meta["original_tokens"] = stats["original_tokens"]
+                comp_meta["compression_ratio"] = round(stats["size_ratio"], 1)
+                comp_meta["original_tokens"] = stats["original_tokens_est"]
                 comp_col.upsert(
                     ids=[doc_id],
                     documents=[compressed],
@@ -513,18 +630,26 @@ def cmd_compress(args):
 
     # Summary
     ratio = total_original / max(total_compressed, 1)
-    orig_tokens = Dialect.count_tokens("x" * total_original)
-    comp_tokens = Dialect.count_tokens("x" * total_compressed)
+    # Estimate tokens from char count (~3.8 chars/token for English text)
+    orig_tokens = max(1, int(total_original / 3.8))
+    comp_tokens = max(1, int(total_compressed / 3.8))
     print(f"  Total: {orig_tokens:,}t -> {comp_tokens:,}t ({ratio:.1f}x compression)")
     if args.dry_run:
         print("  (dry run -- nothing stored)")
 
 
 def main():
+    version_label = f"MemPalace {__version__}"
     parser = argparse.ArgumentParser(
         description=f"MemPalace v{__version__} — Give your AI a memory. No API key required.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
+        epilog=f"{version_label}\n\n{__doc__}",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=version_label,
+        help="Show version and exit",
     )
     parser.add_argument(
         "-V",
@@ -545,7 +670,19 @@ def main():
     p_init = sub.add_parser("init", help="Detect rooms from your folder structure")
     p_init.add_argument("dir", help="Project directory to set up")
     p_init.add_argument(
-        "--yes", action="store_true", help="Auto-accept all detected entities (non-interactive)"
+        "--yes",
+        action="store_true",
+        help="Auto-accept all detected entities (non-interactive)",
+    )
+    p_init.add_argument(
+        "--lang",
+        default=None,
+        help=(
+            "Comma-separated language codes for entity detection "
+            "(e.g. 'en' or 'en,pt-br'). Defaults to value from config "
+            "(MEMPALACE_ENTITY_LANGUAGES env var or config.json), or 'en'. "
+            "When given, the value is also persisted to config.json."
+        ),
     )
 
     # mine
@@ -583,6 +720,17 @@ def main():
         choices=["exchange", "general"],
         default="exchange",
         help="Extraction strategy for convos mode: 'exchange' (default) or 'general' (5 memory types)",
+    )
+
+    # sweep
+    p_sweep = sub.add_parser(
+        "sweep",
+        help="Tandem miner: catch anything the primary miner missed "
+        "(message-level, timestamp-coordinated, idempotent)",
+    )
+    p_sweep.add_argument(
+        "target",
+        help="A .jsonl transcript file, or a directory to scan recursively",
     )
 
     # search
@@ -690,7 +838,7 @@ def main():
     sub.add_parser(
         "repair",
         help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
-    )
+    ).add_argument("--yes", action="store_true", help="Skip confirmation for destructive changes")
 
     # mcp
     sub.add_parser(
@@ -708,6 +856,9 @@ def main():
         "--dry-run",
         action="store_true",
         help="Show what would be migrated without changing anything",
+    )
+    p_migrate.add_argument(
+        "--yes", action="store_true", help="Skip confirmation for destructive changes"
     )
 
     sub.add_parser("status", help="Show what's been filed")
@@ -740,6 +891,7 @@ def main():
         "mine": cmd_mine,
         "split": cmd_split,
         "search": cmd_search,
+        "sweep": cmd_sweep,
         "mcp": cmd_mcp,
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,

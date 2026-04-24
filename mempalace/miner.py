@@ -15,9 +15,17 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-import chromadb
-
-from .palace import SKIP_DIRS, get_collection, file_already_mined
+from .palace import (
+    NORMALIZE_VERSION,
+    SKIP_DIRS,
+    build_closet_lines,
+    file_already_mined,
+    get_closets_collection,
+    get_collection,
+    mine_lock,
+    purge_file_closets,
+    upsert_closet_lines,
+)
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -28,6 +36,7 @@ READABLE_EXTENSIONS = {
     ".jsx",
     ".tsx",
     ".json",
+    ".jsonl",
     ".yaml",
     ".yml",
     ".html",
@@ -54,7 +63,14 @@ SKIP_FILENAMES = {
 CHUNK_SIZE = 800  # chars per drawer
 CHUNK_OVERLAP = 100  # overlap between chunks
 MIN_CHUNK_SIZE = 50  # skip tiny chunks
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip files larger than this
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB — skip files larger than this.
+# Long Claude Code sessions and large transcript exports routinely exceed
+# 10 MB. The cap exists as a defensive rail against pathological binary
+# files, not as a limit on legitimate text. Per-drawer size is bounded
+# by CHUNK_SIZE, but larger sources still produce proportionally more
+# drawers and therefore more storage, embedding, and processing work —
+# and file reads are not streamed (the whole content is loaded into
+# memory before chunking), so memory use scales with source size too.
 
 
 # =============================================================================
@@ -256,16 +272,32 @@ def load_config(project_dir: str) -> dict:
     """Load mempalace.yaml from project directory (falls back to mempal.yaml)."""
     import yaml
 
-    config_path = Path(project_dir).expanduser().resolve() / "mempalace.yaml"
+    resolved_project_dir = Path(project_dir).expanduser().resolve()
+    config_path = resolved_project_dir / "mempalace.yaml"
     if not config_path.exists():
         # Fallback to legacy name
-        legacy_path = Path(project_dir).expanduser().resolve() / "mempal.yaml"
+        legacy_path = resolved_project_dir / "mempal.yaml"
         if legacy_path.exists():
             config_path = legacy_path
         else:
-            print(f"ERROR: No mempalace.yaml found in {project_dir}")
-            print(f"Run: mempalace init {project_dir}")
-            sys.exit(1)
+            wing_name = resolved_project_dir.name
+            print(
+                f"  No mempalace.yaml found in {resolved_project_dir} "
+                f"— using auto-detected defaults (wing='{wing_name}'). "
+                "Directories with the same basename will share a wing; "
+                "add mempalace.yaml to disambiguate.",
+                file=sys.stderr,
+            )
+            return {
+                "wing": wing_name,
+                "rooms": [
+                    {
+                        "name": "general",
+                        "description": "All project files",
+                        "keywords": ["general"],
+                    }
+                ],
+            }
     with open(config_path) as f:
         return yaml.safe_load(f)
 
@@ -370,6 +402,145 @@ def chunk_text(content: str, source_file: str) -> list:
 # =============================================================================
 
 
+_ENTITY_REGISTRY_PATH = os.path.join(os.path.expanduser("~"), ".mempalace", "known_entities.json")
+_ENTITY_REGISTRY_CACHE: dict = {"mtime": None, "names": frozenset(), "raw": {}}
+_ENTITY_EXTRACT_WINDOW = 5000  # chars of content scanned for capitalized words
+_ENTITY_METADATA_LIMIT = 25  # max entities packed into the metadata field
+
+
+def _refresh_known_entities_cache() -> None:
+    """Reload ``~/.mempalace/known_entities.json`` into the module cache if
+    its mtime changed since the last read. Shared by ``_load_known_entities``
+    (flat set) and ``_load_known_entities_raw`` (category dict), so callers
+    can pick whichever shape they need without duplicating the mtime-gated
+    disk read.
+    """
+    try:
+        mtime = os.path.getmtime(_ENTITY_REGISTRY_PATH)
+    except OSError:
+        if _ENTITY_REGISTRY_CACHE["mtime"] is not None:
+            _ENTITY_REGISTRY_CACHE["mtime"] = None
+            _ENTITY_REGISTRY_CACHE["names"] = frozenset()
+            _ENTITY_REGISTRY_CACHE["raw"] = {}
+        return
+
+    if _ENTITY_REGISTRY_CACHE["mtime"] == mtime:
+        return
+
+    names: set = set()
+    raw: dict = {}
+    try:
+        import json
+
+        with open(_ENTITY_REGISTRY_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            raw = data
+            for cat in data.values():
+                if isinstance(cat, list):
+                    names.update(str(n) for n in cat if n)
+                elif isinstance(cat, dict):
+                    names.update(str(k) for k in cat.keys() if k)
+    except Exception:
+        names = set()
+        raw = {}
+
+    _ENTITY_REGISTRY_CACHE["mtime"] = mtime
+    _ENTITY_REGISTRY_CACHE["names"] = frozenset(names)
+    _ENTITY_REGISTRY_CACHE["raw"] = raw
+
+
+def _load_known_entities() -> frozenset:
+    """Flat set of every known entity name (across all categories).
+
+    Cached by mtime; invalidated when the registry file changes.
+    """
+    _refresh_known_entities_cache()
+    return _ENTITY_REGISTRY_CACHE["names"]
+
+
+def _load_known_entities_raw() -> dict:
+    """Full category-dict view of the registry, shape
+    ``{"category": ["Name1", ...], ...}``. Cached by mtime.
+
+    Consumed by modules (e.g., fact_checker) that need to reason about
+    categories rather than a flat name set. Never returns a mutable
+    reference to the cache — callers get a shallow copy.
+    """
+    _refresh_known_entities_cache()
+    return dict(_ENTITY_REGISTRY_CACHE["raw"])
+
+
+_HALL_KEYWORDS_CACHE = None
+
+
+def detect_hall(content: str) -> str:
+    """Route content to a hall based on keyword scoring.
+
+    Halls connect rooms within a wing — they categorize the TYPE of content
+    (emotional, technical, family, etc.) while rooms categorize the TOPIC.
+    """
+    global _HALL_KEYWORDS_CACHE
+    if _HALL_KEYWORDS_CACHE is None:
+        from .config import MempalaceConfig
+
+        _HALL_KEYWORDS_CACHE = MempalaceConfig().hall_keywords
+    content_lower = content[:3000].lower()
+
+    scores = {}
+    for hall, keywords in _HALL_KEYWORDS_CACHE.items():
+        score = sum(1 for kw in keywords if kw in content_lower)
+        if score > 0:
+            scores[hall] = score
+
+    if scores:
+        return max(scores, key=scores.get)
+    return "general"
+
+
+def _extract_entities_for_metadata(content: str) -> str:
+    """Extract entity names from content for metadata tagging.
+
+    Combines the user's known-entity registry (cached across calls) with
+    capitalized words appearing ≥2 times in the first ``_ENTITY_EXTRACT_WINDOW``
+    chars. Filters out the closet stoplist (``When``, ``After``, ``The``, …)
+    so sentence-starters don't masquerade as proper nouns.
+
+    Returns semicolon-separated string suitable for ChromaDB metadata
+    filtering. The list is truncated to ``_ENTITY_METADATA_LIMIT`` entries
+    *before* joining so a name is never cut in half.
+    """
+    import re
+
+    from .palace import _ENTITY_STOPLIST
+
+    matched: set = set()
+
+    known = _load_known_entities()
+    for name in known:
+        if re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", content):
+            matched.add(name)
+
+    from .palace import _candidate_entity_words
+
+    window = content[:_ENTITY_EXTRACT_WINDOW]
+    words = _candidate_entity_words(window)
+    freq: dict = {}
+    for w in words:
+        if w in _ENTITY_STOPLIST:
+            continue
+        freq[w] = freq.get(w, 0) + 1
+    for w, c in freq.items():
+        if c >= 2 and len(w) > 2:
+            matched.add(w)
+
+    if not matched:
+        return ""
+    # Truncate the *list*, not the joined string — never split a name.
+    capped = sorted(matched)[:_ENTITY_METADATA_LIMIT]
+    return ";".join(capped)
+
+
 def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
 ):
@@ -383,12 +554,19 @@ def add_drawer(
             "chunk_index": chunk_index,
             "added_by": agent,
             "filed_at": datetime.now().isoformat(),
+            "normalize_version": NORMALIZE_VERSION,
         }
         # Store file mtime so we can detect modifications later.
         try:
             metadata["source_mtime"] = os.path.getmtime(source_file)
         except OSError:
             pass
+        # Tag with hall for graph connectivity within wings
+        metadata["hall"] = detect_hall(content)
+        # Tag with entity names for filterable search
+        entities = _extract_entities_for_metadata(content)
+        if entities:
+            metadata["entities"] = entities
         collection.upsert(
             documents=[content],
             ids=[drawer_id],
@@ -412,43 +590,88 @@ def process_file(
     rooms: list,
     agent: str,
     dry_run: bool,
+    closets_col=None,
 ) -> tuple:
     """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
 
     # Skip if already filed
     source_file = str(filepath)
     if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
-        return 0, None
+        return 0, "general"
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return 0, None
+        return 0, "general"
 
     content = content.strip()
     if len(content) < MIN_CHUNK_SIZE:
-        return 0, None
+        return 0, "general"
 
     room = detect_room(filepath, content, rooms, project_path)
     chunks = chunk_text(content, source_file)
 
     if dry_run:
-        print(f"    [DRY RUN] {filepath.name} → room:{room} ({len(chunks)} drawers)")
+        print(f"    [DRY RUN] {filepath.name} -> room:{room} ({len(chunks)} drawers)")
         return len(chunks), room
 
-    drawers_added = 0
-    for chunk in chunks:
-        added = add_drawer(
-            collection=collection,
-            wing=wing,
-            room=room,
-            content=chunk["content"],
-            source_file=source_file,
-            chunk_index=chunk["chunk_index"],
-            agent=agent,
-        )
-        if added:
-            drawers_added += 1
+    # Lock this file so concurrent agents don't interleave delete+insert.
+    # Without the lock, two agents can both pass file_already_mined(),
+    # both delete, and both insert — creating duplicates or losing data.
+    with mine_lock(source_file):
+        # Re-check after acquiring lock — another agent may have just finished
+        if file_already_mined(collection, source_file, check_mtime=True):
+            return 0, room
+
+        # Purge stale drawers for this file before re-inserting the fresh chunks.
+        # Converts modified-file re-mines from upsert-over-existing-IDs (which hits
+        # hnswlib's thread-unsafe updatePoint path and can segfault on macOS ARM
+        # with chromadb 0.6.3) into a clean delete+insert, bypassing the update
+        # path entirely.
+        try:
+            collection.delete(where={"source_file": source_file})
+        except Exception:
+            pass
+
+        drawers_added = 0
+        for chunk in chunks:
+            added = add_drawer(
+                collection=collection,
+                wing=wing,
+                room=room,
+                content=chunk["content"],
+                source_file=source_file,
+                chunk_index=chunk["chunk_index"],
+                agent=agent,
+            )
+            if added:
+                drawers_added += 1
+
+        # Build closet — the searchable index pointing to these drawers.
+        # Purge first: a re-mine (mtime change or normalize_version bump) must
+        # fully replace the prior closets, not append to them.
+        if closets_col and drawers_added > 0:
+            drawer_ids = [
+                f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(c['chunk_index'])).encode()).hexdigest()[:24]}"
+                for c in chunks
+            ]
+            closet_lines = build_closet_lines(source_file, drawer_ids, content, wing, room)
+            closet_id_base = (
+                f"closet_{wing}_{room}_{hashlib.sha256(source_file.encode()).hexdigest()[:24]}"
+            )
+            entities = _extract_entities_for_metadata(content)
+            closet_meta = {
+                "wing": wing,
+                "room": room,
+                "source_file": source_file,
+                "drawer_count": drawers_added,
+                "filed_at": datetime.now().isoformat(),
+                "normalize_version": NORMALIZE_VERSION,
+            }
+            if entities:
+                closet_meta["entities"] = entities
+            purge_file_closets(closets_col, source_file)
+            upsert_closet_lines(closets_col, closet_id_base, closet_lines, closet_meta)
 
     return drawers_added, room
 
@@ -566,12 +789,14 @@ def mine(
         print("  .gitignore: DISABLED")
     if include_ignored:
         print(f"  Include: {', '.join(sorted(normalize_include_paths(include_ignored)))}")
-    print(f"{'─' * 55}\n")
+    print(f"{'-' * 55}\n")
 
     if not dry_run:
         collection = get_collection(palace_path)
+        closets_col = get_closets_collection(palace_path)
     else:
         collection = None
+        closets_col = None
 
     total_drawers = 0
     files_skipped = 0
@@ -586,6 +811,7 @@ def mine(
             rooms=rooms,
             agent=agent,
             dry_run=dry_run,
+            closets_col=closets_col,
         )
         if drawers == 0 and not dry_run:
             files_skipped += 1
@@ -593,7 +819,7 @@ def mine(
             total_drawers += drawers
             room_counts[room] += 1
             if not dry_run:
-                print(f"  ✓ [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+                print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
 
     print(f"\n{'=' * 55}")
     print("  Done.")
@@ -615,23 +841,30 @@ def mine(
 def status(palace_path: str):
     """Show what's been filed in the palace."""
     try:
-        client = chromadb.PersistentClient(path=palace_path)
-        col = client.get_collection("mempalace_drawers")
+        col = get_collection(palace_path, create=False)
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
-    metas = r["metadatas"]
-
-    wing_rooms = defaultdict(lambda: defaultdict(int))
-    for m in metas:
-        wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+    # Count by wing and room — paginate to avoid SQLite "too many SQL
+    # variables" error on large palaces (see #802, #850).
+    total = col.count()
+    wing_rooms: dict = defaultdict(lambda: defaultdict(int))
+    batch_size = 5000
+    offset = 0
+    while offset < total:
+        r = col.get(limit=batch_size, offset=offset, include=["metadatas"])
+        batch = r["metadatas"]
+        if not batch:
+            break
+        for m in batch:
+            m = m or {}
+            wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
+        offset += len(batch)
 
     print(f"\n{'=' * 55}")
-    print(f"  MemPalace Status — {len(metas)} drawers")
+    print(f"  MemPalace Status — {total} drawers")
     print(f"{'=' * 55}\n")
     for wing, rooms in sorted(wing_rooms.items()):
         print(f"  WING: {wing}")
