@@ -17,6 +17,9 @@ concurrency:
   group: projection-drift-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   drift:
     runs-on: ubuntu-latest
@@ -48,6 +51,7 @@ jobs:
         run: |
           mkdir -p .artifacts
           git diff > .artifacts/projection-drift.diff
+          if [ -f .codespaces/projection-integrity.json ]; then cp .codespaces/projection-integrity.json .artifacts/; fi
 
       - name: Upload projection drift artifacts
         if: failure()
@@ -56,4 +60,5 @@ jobs:
           name: mempalace-projection-drift-${{ github.run_id }}
           path: |
             .artifacts/projection-drift.diff
+            .artifacts/projection-integrity.json
           if-no-files-found: warn
