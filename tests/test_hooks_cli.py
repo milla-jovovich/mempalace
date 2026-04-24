@@ -324,6 +324,39 @@ def test_wing_from_transcript_path_lowercases():
     assert _wing_from_transcript_path(path) == "wing_myproject"
 
 
+def test_wing_from_transcript_path_non_projects_layout():
+    """Claude Code encodes any source dir into the project folder name —
+    not just `~/Projects/<x>`. Users with code under `~/dev/`, `~/src/`,
+    `~/code/`, etc., should still get a per-project wing, not the generic
+    ``wing_sessions`` fallback. See #1145 bug 1.
+    """
+    # ~/dev/MyProject/myproject → folder is `-home-user-dev-MyProject-myproject`
+    path = "/home/user/.claude/projects/-home-user-dev-MyProject-myproject/session.jsonl"
+    assert _wing_from_transcript_path(path) == "wing_myproject"
+
+
+def test_wing_from_transcript_path_src_layout():
+    """Another common non-Projects layout: code in ~/src/<app>."""
+    path = "/home/dev/.claude/projects/-home-dev-src-backend-api/session.jsonl"
+    assert _wing_from_transcript_path(path) == "wing_api"
+
+
+def test_wing_from_transcript_path_code_layout():
+    """Another common non-Projects layout: code in ~/code/<app>."""
+    path = "/home/alex/.claude/projects/-home-alex-code-webapp/session.jsonl"
+    assert _wing_from_transcript_path(path) == "wing_webapp"
+
+
+def test_wing_from_transcript_path_bare_folder_no_delimiters_falls_back():
+    """When the parent folder doesn't look like Claude Code's encoded form
+    (no `-` delimiter inside), we can't reliably derive a project — use the
+    generic fallback.
+    """
+    # A bare folder name with no delimiters inside — can't recover a project.
+    path = "/tmp/weird/bare/session.jsonl"
+    assert _wing_from_transcript_path(path) == "wing_sessions"
+
+
 # --- _log ---
 
 

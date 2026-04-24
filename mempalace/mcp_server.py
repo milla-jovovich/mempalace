@@ -995,33 +995,35 @@ def tool_diary_read(agent_name: str, last_n: int = 10, wing: str = ""):
     Read an agent's recent diary entries. Returns the last N entries
     in chronological order — the agent's personal journal.
 
-    When ``wing`` is provided, reads from that wing instead of the
-    agent's default ``wing_<agent_name>`` wing.  This lets hooks
-    direct diary reads to a project-specific wing derived from
-    the transcript path.
+    ``wing`` behavior matches ``mempalace_search`` (#1097):
+    empty-string / whitespace-only / ``None`` means "no wing filter" —
+    return entries from any wing this agent has written to. An explicit
+    non-empty wing scopes reads to that wing only, e.g. for hooks that
+    direct diary reads to a project-specific wing derived from the
+    transcript path. Resolves #1145 bug 2.
     """
     try:
         agent_name = sanitize_name(agent_name, "agent_name")
-        if wing:
-            wing = sanitize_name(wing)
+        wing = _sanitize_optional_name(wing, "wing")
     except ValueError as e:
         return {"error": str(e)}
     last_n = max(1, min(last_n, 100))
-    if not wing:
-        wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     col = _get_collection()
     if not col:
         return _no_palace()
 
     try:
+        # Build filter conditions: agent + diary room always apply; wing is
+        # optional (matches #1097's empty-string semantics for tool_search).
+        conditions = [
+            {"room": "diary"},
+            {"agent": agent_name},
+        ]
+        if wing:
+            conditions.append({"wing": wing})
+        where = conditions[0] if len(conditions) == 1 else {"$and": conditions}
         results = col.get(
-            where={
-                "$and": [
-                    {"wing": wing},
-                    {"room": "diary"},
-                    {"agent": agent_name},
-                ]
-            },
+            where=where,
             include=["documents", "metadatas"],
             limit=10000,
         )

@@ -740,6 +740,75 @@ class TestDiaryTools:
         assert entry1 in contents
         assert entry2 in contents
 
+    def test_diary_read_empty_wing_returns_across_wings(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        """#1145 bug 2: wing="" should mean "no wing filter" (match
+        mempalace_search post-#1097), not the agent's default wing. LLM
+        agents frequently default optional string parameters to "", so the
+        current default-to-agent-wing behavior silently hides entries that
+        were written to named wings (e.g. via the per-project wing
+        derivation added in #659).
+        """
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_diary_read, tool_diary_write
+
+        # Write to a named project wing, not the agent's default wing.
+        w = tool_diary_write(
+            agent_name="ProbeAgent",
+            entry="entry filed into a named wing, should be readable with wing=''",
+            topic="sync",
+            wing="wing_someproject",
+        )
+        assert w["success"] is True
+
+        # Read with wing="" — should return the entry (no wing filter).
+        r = tool_diary_read(agent_name="ProbeAgent", wing="")
+        assert r["total"] == 1, r
+        assert "named wing" in r["entries"][0]["content"]
+
+    def test_diary_read_explicit_wing_still_filters(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        """Explicit wing argument should still filter to that wing only —
+        empty-string fix must not break the normal scoping use case.
+        """
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_diary_read, tool_diary_write
+
+        tool_diary_write(
+            agent_name="ScopeAgent",
+            entry="in wing_a",
+            topic="x",
+            wing="wing_a",
+        )
+        tool_diary_write(
+            agent_name="ScopeAgent",
+            entry="in wing_b",
+            topic="x",
+            wing="wing_b",
+        )
+
+        r_a = tool_diary_read(agent_name="ScopeAgent", wing="wing_a")
+        contents_a = [e["content"] for e in r_a["entries"]]
+        assert r_a["total"] == 1
+        assert "in wing_a" in contents_a
+        assert "in wing_b" not in contents_a
+
+        r_b = tool_diary_read(agent_name="ScopeAgent", wing="wing_b")
+        contents_b = [e["content"] for e in r_b["entries"]]
+        assert r_b["total"] == 1
+        assert "in wing_b" in contents_b
+        assert "in wing_a" not in contents_b
+
+        # And wing="" should see both
+        r_all = tool_diary_read(agent_name="ScopeAgent", wing="")
+        assert r_all["total"] == 2
+
 
 # ── Cache Invalidation (inode/mtime) ──────────────────────────────────
 
