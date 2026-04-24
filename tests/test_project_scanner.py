@@ -32,6 +32,10 @@ GIT_ENV_ALLOWLIST = ("HOME", "SystemRoot", "ComSpec", "TMPDIR", "TEMP", "TMP")
 GIT_EXECUTABLE = shutil.which("git")
 
 
+def _gitdir_marker(path: Path) -> str:
+    return f"gitdir: {path}\n"
+
+
 # ── manifest parsers ────────────────────────────────────────────────────
 
 
@@ -204,10 +208,10 @@ def test_find_git_repos_skips_nested_inside_repo(tmp_path):
 
 
 def test_find_git_repos_detects_git_file_markers(tmp_path):
-    (tmp_path / ".git").write_text("gitdir: /tmp/root.git\n")
+    (tmp_path / ".git").write_text(_gitdir_marker(tmp_path.parent / "root.git"))
     sub = tmp_path / "subproject"
     sub.mkdir()
-    (sub / ".git").write_text("gitdir: /tmp/sub.git\n")
+    (sub / ".git").write_text(_gitdir_marker(tmp_path.parent / "sub.git"))
     repos = find_git_repos(tmp_path)
     assert tmp_path in repos
     assert sub in repos
@@ -311,11 +315,11 @@ def test_scan_manifest_only_no_git(tmp_path):
 
 
 def test_collect_manifest_names_stops_at_git_file_boundary(tmp_path):
-    (tmp_path / ".git").write_text("gitdir: /tmp/root.git\n")
+    (tmp_path / ".git").write_text(_gitdir_marker(tmp_path.parent / "root.git"))
     (tmp_path / "package.json").write_text(json.dumps({"name": "root-name"}))
     nested = tmp_path / "nested"
     nested.mkdir()
-    (nested / ".git").write_text("gitdir: /tmp/nested.git\n")
+    (nested / ".git").write_text(_gitdir_marker(tmp_path.parent / "nested.git"))
     (nested / "package.json").write_text(json.dumps({"name": "nested-name"}))
     manifests = _collect_manifest_names(tmp_path)
     assert [name for _file, name, _dir in manifests] == ["root-name"]

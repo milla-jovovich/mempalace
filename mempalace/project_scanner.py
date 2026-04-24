@@ -171,7 +171,7 @@ MANIFEST_PRIORITY = {
     "go.mod": 3,
 }
 # Sentinel so unknown manifests always sort after the known manifest types above.
-UNKNOWN_MANIFEST_PRIORITY = 999
+UNKNOWN_MANIFEST_PRIORITY = max(MANIFEST_PRIORITY.values()) + 1
 MANIFEST_PARSERS = {
     "package.json": _parse_package_json,
     "pyproject.toml": _parse_pyproject,
