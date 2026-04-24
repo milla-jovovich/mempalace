@@ -15,65 +15,111 @@
       "category": "runtime-status",
       "description": "Show palace health, room counts, collection state, and integration status.",
       "enabled": true,
-      "cli": {"command": "status", "exposure": "public"},
-      "mcp": {"tool": "mempalace_status", "exposure": "public"}
+      "cli": {
+        "command": "status",
+        "exposure": "public"
+      },
+      "mcp": {
+        "tool": "mempalace_status",
+        "exposure": "public"
+      }
     },
     {
       "id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search",
       "category": "retrieval",
       "description": "Search drawers and closets using MemPalace retrieval.",
       "enabled": true,
-      "cli": {"command": "search", "exposure": "public"},
-      "mcp": {"tool": "mempalace_search", "exposure": "public"}
+      "cli": {
+        "command": "search",
+        "exposure": "public"
+      },
+      "mcp": {
+        "tool": "mempalace_search",
+        "exposure": "public"
+      }
     },
     {
       "id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine",
       "category": "ingestion",
       "description": "Mine a project or working directory into palace memory.",
       "enabled": true,
-      "cli": {"command": "mine", "exposure": "public"},
-      "mcp": {"tool": "mempalace_mine", "exposure": "gated"}
+      "cli": {
+        "command": "mine",
+        "exposure": "public"
+      },
+      "mcp": {
+        "tool": "mempalace_mine",
+        "exposure": "gated"
+      }
     },
     {
       "id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/init",
       "category": "bootstrap",
       "description": "Initialize a new MemPalace root and onboarding surface.",
       "enabled": true,
-      "cli": {"command": "init", "exposure": "public"},
-      "mcp": {"tool": "mempalace_init", "exposure": "hidden"}
+      "cli": {
+        "command": "init",
+        "exposure": "public"
+      },
+      "mcp": {
+        "tool": "mempalace_init",
+        "exposure": "hidden"
+      }
     },
     {
       "id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/registry",
       "category": "runtime-registry",
       "description": "Return the projected MemPalace runtime registry, including operations, integration defaults, plugin profiles, and collection identities.",
       "enabled": true,
-      "cli": {"command": "registry", "exposure": "public"},
-      "mcp": {"tool": "mempalace_runtime_registry", "exposure": "public"}
+      "cli": {
+        "command": "registry",
+        "exposure": "public"
+      },
+      "mcp": {
+        "tool": "mempalace_runtime_registry",
+        "exposure": "public"
+      }
     },
     {
       "id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop",
       "category": "hooks",
       "description": "Execute the stop-hook runtime for background save behavior.",
       "enabled": true,
-      "cli": {"command": "hook run --hook stop", "exposure": "internal"},
-      "mcp": {"tool": "mempalace_hook_stop", "exposure": "hidden"}
+      "cli": {
+        "command": "hook run --hook stop",
+        "exposure": "internal"
+      },
+      "mcp": {
+        "tool": "mempalace_hook_stop",
+        "exposure": "hidden"
+      }
     },
     {
       "id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-precompact",
       "category": "hooks",
       "description": "Execute the precompact hook runtime for emergency save behavior.",
       "enabled": true,
-      "cli": {"command": "hook run --hook precompact", "exposure": "internal"},
-      "mcp": {"tool": "mempalace_hook_precompact", "exposure": "hidden"}
+      "cli": {
+        "command": "hook run --hook precompact",
+        "exposure": "internal"
+      },
+      "mcp": {
+        "tool": "mempalace_hook_precompact",
+        "exposure": "hidden"
+      }
     }
   ],
   "plugin_profiles": [
     {
       "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#plugin/claude",
+      "@type": "HookProfile",
       "category": "claude-plugin",
       "path": ".claude-plugin/",
       "enabled": true,
-      "manifest": {"mcpCommand": "mempalace-mcp", "args": []},
+      "manifest": {
+        "mcpCommand": "mempalace-mcp",
+        "args": []
+      },
       "hooks": {
         "stop": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/mempal-stop-hook.sh",
         "precompact": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/mempal-precompact-hook.sh"
@@ -81,10 +127,14 @@
     },
     {
       "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#plugin/codex",
+      "@type": "HookProfile",
       "category": "codex-plugin",
       "path": ".codex-plugin/",
       "enabled": true,
-      "manifest": {"mcpCommand": "mempalace-mcp", "args": []},
+      "manifest": {
+        "mcpCommand": "mempalace-mcp",
+        "args": []
+      },
       "hooks": {
         "stop": "${CODEX_PLUGIN_ROOT}/hooks/mempal-hook.sh stop",
         "precompact": "${CODEX_PLUGIN_ROOT}/hooks/mempal-hook.sh precompact"
@@ -94,18 +144,21 @@
   "collections": [
     {
       "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#collection/drawers",
+      "@type": "CollectionProfile",
       "category": "drawers",
       "collectionName": "mempalace_drawers",
       "description": "Primary verbatim memory collection."
     },
     {
       "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#collection/compressed",
+      "@type": "CollectionProfile",
       "category": "compressed",
       "collectionName": "mempalace_compressed",
       "description": "Compressed memory collection."
     },
     {
       "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#collection/closets",
+      "@type": "CollectionProfile",
       "category": "closets",
       "collectionName": "mempalace_closets",
       "description": "Closet pointer collection."
