@@ -450,6 +450,144 @@ def test_codex_jsonl_payload_not_dict():
     assert result is not None
 
 
+def test_codex_jsonl_normalizes_multi_turn_session(tmp_path):
+    path = tmp_path / "codex-session.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "session_meta", "payload": {"id": "session-123"}}),
+                json.dumps({"type": "response_item", "payload": {"type": "message", "text": "ignore me"}}),
+                json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {"type": "user_message", "message": "What changed in phase 7?"},
+                    }
+                ),
+                json.dumps({"type": "turn_context", "payload": {"cwd": "C:\\Code\\Alexandria"}}),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "agent_message",
+                            "message": "Phase 7 established the context mesh.",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {"type": "user_message", "message": "What comes next?"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "agent_message",
+                            "message": "Phase 8 adds shared memory foundations.",
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+    result = normalize(str(path))
+
+    assert (
+        result
+        == "> What changed in phase 7?\n"
+        "Phase 7 established the context mesh.\n\n"
+        "> What comes next?\n"
+        "Phase 8 adds shared memory foundations.\n"
+    )
+    assert "response_item" not in result
+    assert "task_started" not in result
+
+
+def test_codex_jsonl_normalizes_incomplete_session_to_transcript(tmp_path):
+    path = tmp_path / "codex-incomplete.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "session_meta", "payload": {"id": "session-456"}}),
+                json.dumps({"type": "response_item", "payload": {"type": "message", "text": "ignore me"}}),
+                json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "user_message",
+                            "message": "Use MemPalace first and answer in one sentence.",
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+    result = normalize(str(path))
+
+    assert result == "> Use MemPalace first and answer in one sentence.\n"
+    assert "session_meta" not in result
+
+
+def test_codex_jsonl_requires_session_meta_for_normalize(tmp_path):
+    path = tmp_path / "codex-no-session-meta.jsonl"
+    raw_content = (
+        "\n".join(
+            [
+                json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "Hello"}}),
+                json.dumps(
+                    {"type": "event_msg", "payload": {"type": "agent_message", "message": "Hi there"}}
+                ),
+            ]
+        )
+        + "\n"
+    )
+    path.write_text(raw_content)
+
+    result = normalize(str(path))
+
+    assert result == raw_content
+
+
+def test_codex_jsonl_skips_malformed_lines_and_empty_messages_during_normalize(tmp_path):
+    path = tmp_path / "codex-noisy.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "session_meta", "payload": {"id": "session-789"}}),
+                "this is not valid json",
+                json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": ""}}),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {"type": "user_message", "message": "Summarize the latest handoff."},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "agent_message",
+                            "message": "The latest handoff focused on shared memory.",
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+    result = normalize(str(path))
+
+    assert result == "> Summarize the latest handoff.\nThe latest handoff focused on shared memory.\n"
+
+
 # ── _try_claude_ai_json ───────────────────────────────────────────────
 
 

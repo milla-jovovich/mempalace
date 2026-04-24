@@ -275,7 +275,9 @@ def _try_codex_jsonl(content: str) -> Optional[str]:
         elif payload_type == "agent_message":
             messages.append(("assistant", text))
 
-    if len(messages) >= 2 and has_session_meta:
+    # Keep incomplete-but-real sessions as transcripts instead of falling
+    # back to raw JSONL, which pollutes downstream conversation mining.
+    if messages and has_session_meta:
         return _messages_to_transcript(messages)
     return None
 
