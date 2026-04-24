@@ -1,0 +1,63 @@
+name: semantic-reconciler
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - build/conversion-kit
+
+permissions:
+  contents: read
+
+concurrency:
+  group: semantic-reconciler-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  reconciler-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel hatchling
+          python -m pip install -e .
+
+      - name: Fetch integration refs
+        run: |
+          git fetch origin develop build/conversion-kit --prune
+
+      - name: Run semantic reconciler plan
+        run: |
+          python tools/mempalace_execution_kit/semantic_reconciler.py \
+            --repo-root . \
+            --policy tools/mempalace_execution_kit/reconcile_policy.mempalace.yaml \
+            --mode internal \
+            --action plan \
+            --base-ref build/conversion-kit \
+            --incoming-ref origin/develop
+
+      - name: Upload reconciler artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-reconciler-plan-${{ github.run_id }}
+          path: |
+            .codespaces/reconciliation-report.json
+            .codespaces/reconciliation-plan.md
+            .codespaces/manual-conflicts.json
+          if-no-files-found: warn
