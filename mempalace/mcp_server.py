@@ -57,7 +57,7 @@ from .config import (  # noqa: E402
     sanitize_content,
 )
 from .version import __version__  # noqa: E402
-from .backends.chroma import ChromaBackend, ChromaCollection  # noqa: E402
+from .backends.chroma import ChromaBackend, ChromaCollection, _pin_hnsw_threads  # noqa: E402
 from .query_sanitizer import sanitize_query  # noqa: E402
 from .searcher import search_memories  # noqa: E402
 from .palace_graph import (  # noqa: E402
@@ -217,19 +217,18 @@ def _get_collection(create=False):
     try:
         client = _get_client()
         if create:
-            _collection_cache = ChromaCollection(
-                client.get_or_create_collection(
-                    _config.collection_name, metadata={"hnsw:space": "cosine"}
-                ),
-                palace_path=_config.palace_path,
+            raw_col = client.get_or_create_collection(
+                _config.collection_name,
+                metadata={"hnsw:space": "cosine", "hnsw:num_threads": 1},
             )
+            _pin_hnsw_threads(raw_col)
+            _collection_cache = ChromaCollection(raw_col, palace_path=_config.palace_path)
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
-            _collection_cache = ChromaCollection(
-                client.get_collection(_config.collection_name),
-                palace_path=_config.palace_path,
-            )
+            raw_col = client.get_collection(_config.collection_name)
+            _pin_hnsw_threads(raw_col)
+            _collection_cache = ChromaCollection(raw_col, palace_path=_config.palace_path)
             _metadata_cache = None
             _metadata_cache_time = 0
         return _collection_cache

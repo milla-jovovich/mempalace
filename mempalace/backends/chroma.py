@@ -58,6 +58,44 @@ def _validate_where(where: Optional[dict]) -> None:
                 stack.extend(x for x in v if isinstance(x, dict))
 
 
+def _pin_hnsw_threads(collection) -> None:
+    """Best-effort retrofit: pin ``hnsw:num_threads=1`` on an existing collection.
+
+    Fresh collections set this via ``metadata=`` at creation. Legacy palaces
+    built before that change keep the default (parallel insert) and can hit
+    the HNSW race described in #974/#965 — `ParallelFor` races in
+    `repairConnectionsForUpdate` / `addPoint` corrupt the graph and can
+    produce runaway writes to ``link_lists.bin`` (437 GB observed on one of
+    our palaces; #976 reports ~1.5 TB). ChromaDB's
+    ``collection.modify(configuration=...)`` lets us re-apply
+    ``num_threads=1`` in memory at load time so every new process is protected.
+
+    In chromadb 1.5.x the modified ``configuration_json["hnsw"]`` does not
+    persist to disk across ``PersistentClient`` reopens, so this must run on
+    every ``get_collection`` call, not just once.
+
+    Adopted from @felipetruman's upstream fix in
+    https://github.com/milla-jovovich/mempalace/pull/976.
+    """
+    try:
+        from chromadb.api.collection_configuration import (
+            UpdateCollectionConfiguration,
+            UpdateHNSWConfiguration,
+        )
+    except ImportError:
+        # Older chromadb (pre-1.5) doesn't expose UpdateCollectionConfiguration.
+        logger.debug("_pin_hnsw_threads skipped: chromadb too old", exc_info=True)
+        return
+    try:
+        collection.modify(
+            configuration=UpdateCollectionConfiguration(
+                hnsw=UpdateHNSWConfiguration(num_threads=1)
+            )
+        )
+    except Exception:
+        logger.debug("_pin_hnsw_threads modify failed", exc_info=True)
+
+
 def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> list[str]:
     """Rename HNSW segment dirs whose files are stale vs. chroma.sqlite3.
 
@@ -617,10 +655,12 @@ class ChromaBackend(BaseBackend):
 
         if create:
             collection = client.get_or_create_collection(
-                collection_name, metadata={"hnsw:space": hnsw_space}
+                collection_name,
+                metadata={"hnsw:space": hnsw_space, "hnsw:num_threads": 1},
             )
         else:
             collection = client.get_collection(collection_name)
+        _pin_hnsw_threads(collection)
         return ChromaCollection(collection, palace_path=palace_path)
 
     def close_palace(self, palace) -> None:
@@ -662,7 +702,8 @@ class ChromaBackend(BaseBackend):
     ) -> ChromaCollection:
         """Create (not get-or-create) ``collection_name`` with the given HNSW space."""
         collection = self._client(palace_path).create_collection(
-            collection_name, metadata={"hnsw:space": hnsw_space}
+            collection_name,
+            metadata={"hnsw:space": hnsw_space, "hnsw:num_threads": 1},
         )
         return ChromaCollection(collection, palace_path=palace_path)
 
