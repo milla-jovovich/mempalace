@@ -15,13 +15,14 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
+from .content_hash import ContentHashDB
 from .palace import (
-    NORMALIZE_VERSION,
     SKIP_DIRS,
-    build_closet_lines,
-    file_already_mined,
-    get_closets_collection,
     get_collection,
+    file_already_mined,
+    NORMALIZE_VERSION,
+    build_closet_lines,
+    get_closets_collection,
     mine_lock,
     purge_file_closets,
     upsert_closet_lines,
@@ -589,15 +590,18 @@ def process_file(
     wing: str,
     rooms: list,
     agent: str,
-    dry_run: bool,
+    dry_run: bool = False,
+    hash_db: ContentHashDB = None,
     closets_col=None,
 ) -> tuple:
     """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
 
-    # Skip if already filed
     source_file = str(filepath)
-    if not dry_run and file_already_mined(collection, source_file, check_mtime=True):
-        return 0, "general"
+
+    if file_already_mined(collection, source_file, check_mtime=True) if not dry_run else False:
+        if hash_db and hash_db.check_and_add(filepath):
+            hash_db.record(filepath)
+            return 0, "general"
 
     try:
         content = filepath.read_text(encoding="utf-8", errors="replace")
@@ -793,9 +797,11 @@ def mine(
 
     if not dry_run:
         collection = get_collection(palace_path)
+        hash_db = ContentHashDB(os.path.join(palace_path, "content_hashes.db"))
         closets_col = get_closets_collection(palace_path)
     else:
         collection = None
+        hash_db = None
         closets_col = None
 
     total_drawers = 0
@@ -811,6 +817,7 @@ def mine(
             rooms=rooms,
             agent=agent,
             dry_run=dry_run,
+            hash_db=hash_db,
             closets_col=closets_col,
         )
         if drawers == 0 and not dry_run:
@@ -831,6 +838,10 @@ def mine(
         print(f"    {room:20} {count} files")
     print('\n  Next: mempalace search "what you\'re looking for"')
     print(f"{'=' * 55}\n")
+
+    if not dry_run and hash_db:
+        hash_db.flush()
+        hash_db.close()
 
 
 # =============================================================================
