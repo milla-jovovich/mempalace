@@ -1,0 +1,70 @@
+version: 1
+repo: mempalace
+mode_profiles:
+  internal:
+    prefer_source_of_truth: base
+    supporting_surface_default: incoming
+  external:
+    prefer_source_of_truth: target
+    supporting_surface_default: incoming
+
+classes:
+  semantic_authority:
+    paths:
+      - semantics/hot/**/*.yamlld
+      - semantics/hot/**/*.yaml
+      - semantics/cold/mempalace.binding.graph.jsonld
+      - semantics/contexts/**/*.jsonld
+      - semantics/frames/**/*.jsonld
+      - semantics/shapes/**/*.ttl
+    action: semantic_merge
+
+  derived_projection:
+    paths:
+      - semantics/cold/*.projected.json
+      - semantics/cold/*.projected.jsonld
+      - mempalace/runtime_profile.json
+      - mempalace/cli_registry.json
+      - mempalace/mcp_tool_registry.json
+      - .claude-plugin/.mcp.json
+      - .claude-plugin/plugin.json
+      - .claude-plugin/hooks/hooks.json
+      - .codex-plugin/plugin.json
+      - .codex-plugin/hooks.json
+    action: regenerate
+
+  atomic_runtime:
+    paths:
+      - mempalace/**/*.py
+      - hooks/**/*.sh
+      - .claude-plugin/hooks/*.sh
+      - .codex-plugin/hooks/*.sh
+      - scripts/**/*.sh
+      - tools/**/*.py
+      - pyproject.toml
+    action: structured_merge
+
+  supporting_surface:
+    paths:
+      - docs/**/*
+      - website/**/*
+      - landing/**/*
+      - benchmarks/**/*
+      - examples/**/*
+      - README.md
+      - CHANGELOG.md
+      - CONTRIBUTING.md
+      - .devcontainer/**/*
+      - .github/workflows/*
+      - tests/**/*
+    action: prefer_incoming
+
+generators:
+  - bash scripts/regen_spine.sh
+
+verifiers:
+  - bash scripts/check_projection_drift.sh
+  - bash scripts/validate_runtime.sh
+
+memories:
+  canonical_runtime_registry_id: did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/runtime-registry
