@@ -1,7 +1,70 @@
 {
   "@context": [
     "../contexts/core.context.jsonld",
-    "../contexts/full-stack-unit.context.jsonld"
+    "../contexts/full-stack-unit.context.jsonld",
+    {
+      "l0": {
+        "@id": "https://schema.fleet-to-force.dev/layers#l0",
+        "@container": "@graph"
+      },
+      "l1": {
+        "@id": "https://schema.fleet-to-force.dev/layers#l1",
+        "@container": "@graph"
+      },
+      "l2": {
+        "@id": "https://schema.fleet-to-force.dev/layers#l2",
+        "@container": "@graph"
+      },
+      "l3": {
+        "@id": "https://schema.fleet-to-force.dev/layers#l3",
+        "@container": "@graph"
+      },
+      "Binding": "https://schema.fleet-to-force.dev/binding#Binding",
+      "AtomicImplementation": "https://schema.fleet-to-force.dev/binding#AtomicImplementation",
+      "HostArtifact": "https://schema.fleet-to-force.dev/binding#HostArtifact",
+      "ProjectionView": "https://schema.fleet-to-force.dev/binding#ProjectionView",
+      "DwnProtocol": "https://schema.fleet-to-force.dev/dwn#Protocol",
+      "ObservationStream": "https://schema.fleet-to-force.dev/observation#Stream",
+      "AssemblyArtifact": "https://schema.fleet-to-force.dev/assembly#Artifact",
+      "authority": {
+        "@id": "https://schema.fleet-to-force.dev/core#authority",
+        "@type": "@id"
+      },
+      "protocol": {
+        "@id": "https://schema.fleet-to-force.dev/core#protocol",
+        "@type": "@id"
+      },
+      "permissionPolicy": {
+        "@id": "https://schema.fleet-to-force.dev/core#permissionPolicy",
+        "@type": "@id"
+      },
+      "bindsTo": {
+        "@id": "https://schema.fleet-to-force.dev/core#bindsTo",
+        "@type": "@id"
+      },
+      "realizedBy": {
+        "@id": "https://schema.fleet-to-force.dev/core#realizedBy",
+        "@type": "@id"
+      },
+      "emitsArtifact": {
+        "@id": "https://schema.fleet-to-force.dev/core#emitsArtifact",
+        "@type": "@id"
+      },
+      "observedBy": {
+        "@id": "https://schema.fleet-to-force.dev/core#observedBy",
+        "@type": "@id"
+      },
+      "participatesIn": {
+        "@id": "https://schema.fleet-to-force.dev/core#participatesIn",
+        "@type": "@id"
+      },
+      "pythonModule": "https://schema.fleet-to-force.dev/binding#pythonModule",
+      "pythonSymbol": "https://schema.fleet-to-force.dev/binding#pythonSymbol",
+      "artifactPath": "https://schema.fleet-to-force.dev/binding#artifactPath",
+      "toolName": "https://schema.fleet-to-force.dev/binding#toolName",
+      "commandName": "https://schema.fleet-to-force.dev/binding#commandName",
+      "exposure": "https://schema.fleet-to-force.dev/binding#exposure"
+    }
   ],
   "@graph": [
     {
@@ -10,44 +73,70 @@
       "category": "hooks",
       "description": "Execute the stop-hook runtime for background save behavior.",
       "enabled": true,
-      "l0": [{
-        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l0",
-        "@type": "RuntimeConfig",
-        "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo",
-        "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-stop",
-        "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/hook-internal"
-      }],
-      "l1": [{
-        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l1",
-        "@type": "Binding",
-        "commandName": "hook run --hook stop",
-        "toolName": "mempalace_hook_stop",
-        "exposure": "hidden",
-        "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-stop/python"
-      }],
-      "l2": [{
-        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l2",
-        "@type": "ProjectionView",
-        "participatesIn": [
-          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-save",
-          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/session-boundary"
-        ]
-      }],
-      "l3": [{
-        "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l3",
-        "@type": "ProjectionView",
-        "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-stop-events",
-        "emitsArtifact": [
-          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/claude-hook-manifest",
-          "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/codex-hook-manifest"
-        ]
-      }]
+      "l0": [
+        {
+          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l0",
+          "@type": "RuntimeConfig",
+          "authority": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#repo",
+          "protocol": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-stop",
+          "permissionPolicy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#policy/hook-internal"
+        }
+      ],
+      "l1": [
+        {
+          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l1",
+          "@type": "Binding",
+          "commandName": "hook run --hook stop",
+          "toolName": "mempalace_hook_stop",
+          "exposure": "hidden",
+          "bindsTo": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-stop/python"
+        }
+      ],
+      "l2": [
+        {
+          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l2",
+          "@type": "ProjectionView",
+          "participatesIn": [
+            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/runtime-save",
+            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#workflow/session-boundary"
+          ]
+        }
+      ],
+      "l3": [
+        {
+          "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop/l3",
+          "@type": "ProjectionView",
+          "observedBy": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-stop-events",
+          "emitsArtifact": [
+            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/claude-hook-manifest",
+            "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/codex-hook-manifest"
+          ]
+        }
+      ]
     },
     {
       "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#binding/hook-stop/python",
       "@type": "AtomicImplementation",
       "pythonModule": "mempalace.hooks_cli",
       "pythonSymbol": "hook_stop"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#protocol/hook-stop",
+      "@type": "DwnProtocol"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#stream/hook-stop-events",
+      "@type": "ObservationStream"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/claude-hook-manifest",
+      "@type": "HostArtifact",
+      "artifactPath": ".claude-plugin/hooks/hooks.json"
+    },
+    {
+      "@id": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#artifact/codex-hook-manifest",
+      "@type": "HostArtifact",
+      "artifactPath": ".codex-plugin/hooks.json"
     }
   ]
 }
