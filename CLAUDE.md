@@ -104,6 +104,9 @@ As of 2026-04-24: 14 merged, 7 open, 9 closed. PRs target `develop`. Fork `main`
 | #1087 | open (`MERGEABLE`, 6/6 CI green) | `mempalace purge --wing/--room` CLI — destructive drawer removal (fork-ahead Row 4) |
 | #1094 | open (`CLEAN`, 6/6 CI green) | Coerce `None` metadatas → `{}` at `ChromaCollection.query/.get` boundary (closes #1020) |
 | #1142 | open (filed 2026-04-23) | `docs/RELEASING.md` with `mempalace-mcp` pre-release grep — fulfills #1093's release-checklist proposal, accepted by @bensig 2026-04-23 via email |
+| #1171 | open (filed 2026-04-24, CI green) | Cross-process write lock at `ChromaCollection` adapter — prevents HNSW corruption from concurrent MCP servers + mine subprocesses. Moved to RFC 001 backend seam from mcp_server-only approach. |
+| #1173 | open (filed 2026-04-24, CI green) | Call `quarantine_stale_hnsw()` in `make_client()`; lower threshold 3600→300s (production 0.96h-drift segfault). Complementary to #1062 which covers server startup. |
+| #1177 | open (filed 2026-04-24, CI green) | `.blob_seq_ids_migrated` marker guard — skip `sqlite3.connect()` on already-migrated palaces. Closes #1090. |
 | #659 | **merged** 2026-04-23 | Diary wing parameter (`tool_diary_write` / `tool_diary_read` accept `wing`, hook derives from transcript path) |
 | #661 | **merged** 2026-04-22 | Graph cache with write-invalidation |
 | #673 | **merged** 2026-04-22 | Deterministic hook saves (broader than upstream's #966) — config-flag-gated, strictly safer save semantics |
