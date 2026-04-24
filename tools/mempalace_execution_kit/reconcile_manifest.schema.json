@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schema.fleet-to-force.dev/mempalace/reconcile-manifest.schema.json",
+  "title": "MemPalace Reconciliation Manifest",
+  "type": "object",
+  "required": ["rules"],
+  "properties": {
+    "extends": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "policy": {
+          "type": "string",
+          "enum": ["manual", "keep_current", "prefer_incoming", "regenerate", "drop_incoming"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "policy", "include"],
+        "properties": {
+          "name": {"type": "string"},
+          "policy": {
+            "type": "string",
+            "enum": ["manual", "keep_current", "prefer_incoming", "regenerate", "drop_incoming"]
+          },
+          "include": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1
+          },
+          "exclude": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "notes": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "post_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["run"],
+        "properties": {
+          "name": {"type": "string"},
+          "run": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["run"],
+        "properties": {
+          "name": {"type": "string"},
+          "run": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
