@@ -132,10 +132,19 @@ Usage and tool reference:
 
 ## MCP server
 
-29 MCP tools cover palace reads/writes, knowledge-graph operations,
-cross-wing navigation, drawer management, and agent diaries. Installation
-and the full tool list:
+32 MCP tools cover palace reads/writes, knowledge-graph operations,
+cross-wing navigation, drawer management, agent diaries, and (when Synapse
+is enabled) three optional Synapse retrieval helpers. Installation and the
+full tool list:
 [mempalaceofficial.com/reference/mcp-tools](https://mempalaceofficial.com/reference/mcp-tools.html).
+
+**Synapse (optional retrieval layer)**
+
+| Tool | What |
+|------|------|
+| `mempalace_session_context` | Pinned memories and maintenance hints for session startup |
+| `mempalace_supersede_check` | Scan for drawer pairs where newer content likely supersedes older |
+| `mempalace_consolidate` | Merge drawers into one summary drawer (caller supplies summary text) |
 
 ## Agents
 
@@ -148,6 +157,28 @@ system prompt:
 
 Two Claude Code hooks save periodically and before context compression:
 [mempalaceofficial.com/guide/hooks](https://mempalaceofficial.com/guide/hooks.html).
+
+## File reference
+
+| File | What |
+|------|------|
+| `cli.py` | CLI entry point |
+| `config.py` | Configuration loading and defaults |
+| `normalize.py` | Converts 5 chat formats to standard transcript |
+| `mcp_server.py` | MCP server — 32 tools, AAAK auto-teach, memory protocol |
+| `miner.py` | Project file ingest |
+| `convo_miner.py` | Conversation ingest — chunks by exchange pair |
+| `searcher.py` | Semantic search via ChromaDB |
+| `layers.py` | 4-layer memory stack |
+| `dialect.py` | AAAK index format for closet pointers |
+| `knowledge_graph.py` | Temporal entity-relationship graph (SQLite) |
+| `palace_graph.py` | Room-based navigation graph |
+| `onboarding.py` | Guided setup — generates AAAK bootstrap + wing config |
+| `entity_registry.py` | Entity code registry |
+| `entity_detector.py` | Auto-detect people and projects from content |
+| `split_mega_files.py` | Split concatenated transcripts into per-session files |
+| `hooks/mempal_save_hook.sh` | Auto-save every N messages |
+| `hooks/mempal_precompact_hook.sh` | Emergency save before compaction |
 
 ---
 

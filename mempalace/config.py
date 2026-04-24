@@ -254,6 +254,76 @@ class MempalaceConfig:
         except OSError:
             pass
 
+    @property
+    def synapse_profiles(self) -> dict:
+        """Optional synapse_profiles block in ~/.mempalace/config.json (see also palace-level profiles)."""
+        raw = self._file_config.get("synapse_profiles", {})
+        return raw if isinstance(raw, dict) else {}
+
+    @property
+    def synapse_enabled(self):
+        """Synapse master switch — false disables scoring and retrieval logging."""
+        return self._file_config.get("synapse_enabled", False)
+
+    @property
+    def synapse_ltp_enabled(self):
+        return self._file_config.get("synapse_ltp_enabled", True)
+
+    @property
+    def synapse_tagging_enabled(self):
+        return self._file_config.get("synapse_tagging_enabled", True)
+
+    @property
+    def synapse_association_enabled(self):
+        return self._file_config.get("synapse_association_enabled", False)
+
+    @property
+    def synapse_association_max_boost(self):
+        return self._file_config.get("synapse_association_max_boost", 1.5)
+
+    @property
+    def synapse_association_coefficient(self):
+        return self._file_config.get("synapse_association_coefficient", 0.15)
+
+    @property
+    def synapse_ltp_window_days(self):
+        return self._file_config.get("synapse_ltp_window_days", 30)
+
+    @property
+    def synapse_ltp_max_boost(self):
+        return self._file_config.get("synapse_ltp_max_boost", 2.0)
+
+    @property
+    def synapse_tagging_window_hours(self):
+        return self._file_config.get("synapse_tagging_window_hours", 24)
+
+    @property
+    def synapse_tagging_max_boost(self):
+        return self._file_config.get("synapse_tagging_max_boost", 1.5)
+
+    @property
+    def synapse_log_retrievals(self):
+        return self._file_config.get("synapse_log_retrievals", True)
+
+    @property
+    def synapse_log_retention_days(self):
+        return self._file_config.get("synapse_log_retention_days", 90)
+
+    @property
+    def synapse_consolidation_inactive_days(self):
+        """Days without retrieval before a drawer is a consolidation candidate."""
+        return self._file_config.get("synapse_consolidation_inactive_days", 180)
+
+    @property
+    def synapse_soft_archive_suggestions_enabled(self):
+        """Surface soft-archive move suggestions for inactive drawers (#336)."""
+        return self._file_config.get("synapse_soft_archive_suggestions_enabled", True)
+
+    @property
+    def synapse_soft_archive_target_wing(self):
+        """Suggested wing name for cold-storage moves (nudge only)."""
+        return self._file_config.get("synapse_soft_archive_target_wing", "archive")
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)

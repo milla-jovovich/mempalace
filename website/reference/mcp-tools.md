@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-Detailed parameter schemas for all 29 MCP tools.
+Detailed parameter schemas for all 32 MCP tools.
 
 ## Palace — Read Tools
 
@@ -81,6 +81,50 @@ Returns the AAAK dialect specification.
 **Parameters:** None
 
 **Returns:** `{ aaak_spec: "..." }`
+
+---
+
+## Synapse Tools
+
+Optional retrieval layer. Requires Synapse to be enabled in configuration; when disabled, handlers return empty structures and `synapse_enabled: false`.
+
+### `mempalace_consolidate`
+
+Merge multiple related drawers into a single summary drawer. Source drawers are soft-archived (reversible). **The caller must supply the summary text** — Synapse does not generate or paraphrase content for you.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `drawer_ids` | array of string | **Yes** | Drawer IDs to merge into one consolidated drawer |
+| `summary` | string | **Yes** | Verbatim summary text for the new consolidated drawer |
+| `wing` | string | No | Wing for the new summary drawer |
+| `room` | string | No | Room for the new summary drawer |
+
+**Returns:** Consolidation result from Synapse (e.g. success, new drawer id, archived ids) or `{ error }` if validation fails.
+
+---
+
+### `mempalace_session_context`
+
+Session startup helper: pinned high-importance memories (when the active retrieval profile enables pinned memory), consolidation suggestions, and palace-wide supersede candidates. Call once at the beginning of a session.
+
+**Parameters:** None (behaviour is driven by `MempalaceConfig` and the resolved default **Synapse retrieval profile**, including `pinned_memory` and supersede thresholds.)
+
+**Returns:** `{ synapse_enabled, pinned_memories, pinned_count, pinned_total_tokens, consolidation_suggestions, supersede_suggestions }` — fields may be empty when Synapse is off or profile flags disable them.
+
+---
+
+### `mempalace_supersede_check`
+
+Scan the palace for drawer pairs where a newer drawer likely supersedes an older one (similar content plus a minimum age gap between `filed_at` timestamps). Optional wing filter narrows the scan.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `similarity_threshold` | number | No | Cosine similarity threshold for pairing (default: 0.86) |
+| `min_age_gap_days` | integer | No | Minimum days between the two drawers’ `filed_at` values (default: 7) |
+| `max_candidates` | integer | No | Maximum pairs to return (default: 10) |
+| `wing` | string | No | If set, only drawers in this wing are considered |
+
+**Returns:** `{ candidates, checked, ... }` from Synapse detection, or `{ synapse_enabled: false }` when Synapse is disabled.
 
 ---
 

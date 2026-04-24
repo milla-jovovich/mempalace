@@ -555,6 +555,7 @@ def add_drawer(
             "added_by": agent,
             "filed_at": datetime.now().isoformat(),
             "normalize_version": NORMALIZE_VERSION,
+            "synapse_mark": "new",
         }
         # Store file mtime so we can detect modifications later.
         try:
