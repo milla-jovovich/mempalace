@@ -10,9 +10,39 @@ and file-descriptor level during module import, then restores the real
 stdout in main() before entering the protocol loop.
 """
 
+import os
+import pwd
 import subprocess
 import sys
 import textwrap
+
+# ── HOME isolation workaround (2026-04-24) ────────────────────────────────
+# conftest.py rewrites os.environ["HOME"] to a session tempdir at import
+# time (intentionally, so mempalace module-level initialisations like
+# ``_kg = KnowledgeGraph()`` don't touch the user's real palace).
+#
+# These three tests spawn subprocesses that ``import mempalace.mcp_server``,
+# which transitively imports ``chromadb``. On non-venv installs where
+# chromadb was pip-installed as --user, chromadb lives at
+# ``$HOME/Library/Python/<ver>/site-packages/chromadb/``. With the fake
+# HOME, the child's user-site resolver can't find it → ModuleNotFoundError.
+#
+# CI doesn't hit this because CI installs mempalace into a venv, where
+# site-packages live under $VIRTUAL_ENV, not $HOME.
+#
+# Fix: restore the real HOME (captured from pwd.getpwuid at module load —
+# BEFORE conftest.py's redirection has had any effect on this value) in
+# the env= dict passed to subprocess.run.
+_REAL_HOME = pwd.getpwuid(os.getuid()).pw_dir
+
+
+def _clean_env():
+    """Subprocess env with the real HOME restored so pip user-site
+    packages (chromadb on non-venv installs) resolve correctly. Preserves
+    every other env var from the running pytest process."""
+    env = os.environ.copy()
+    env["HOME"] = _REAL_HOME
+    return env
 
 
 def test_module_import_redirects_stdout_to_stderr():
@@ -37,6 +67,7 @@ def test_module_import_redirects_stdout_to_stderr():
         [sys.executable, "-c", code],
         capture_output=True,
         timeout=60,
+        env=_clean_env(),
     )
     assert result.returncode == 0, f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
 
@@ -63,6 +94,7 @@ def test_restore_stdout_returns_real_stdout():
         [sys.executable, "-c", code],
         capture_output=True,
         timeout=60,
+        env=_clean_env(),
     )
     assert result.returncode == 0, f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
 
@@ -77,6 +109,7 @@ def test_mcp_server_no_stdout_noise_on_clean_exit():
         input=b"",
         capture_output=True,
         timeout=60,
+        env=_clean_env(),
     )
     assert (
         proc.stdout == b""
