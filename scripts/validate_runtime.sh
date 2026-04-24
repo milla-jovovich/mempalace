@@ -16,6 +16,7 @@ print(sys.version)
 PY
 
 "$PYTHON_BIN" -m compileall mempalace >/dev/null
+"$PYTHON_BIN" scripts/write_projection_manifest.py > "$REPORT_DIR/projection-integrity.path"
 
 "$PYTHON_BIN" -m mempalace.cli_ld registry runtime > "$REPORT_DIR/registry.runtime.json"
 "$PYTHON_BIN" -m mempalace.cli_ld registry cli > "$REPORT_DIR/registry.cli.json"
@@ -38,6 +39,8 @@ cli_view = cli_registry_view()
 mcp_view = mcp_tool_registry_view()
 visible_tools = _visible_tools()
 visible_tool_names = [tool.get("name") for tool in visible_tools]
+projection_manifest_path = Path('.codespaces/projection-integrity.json')
+projection_manifest = json.loads(projection_manifest_path.read_text(encoding='utf-8'))
 
 assert sys.version_info[:2] == (3, 13), sys.version
 assert runtime.get("module_entry") == "mempalace.mcp_server_ld", runtime
@@ -45,6 +48,8 @@ assert any(op.get("name") == "registry" for op in cli_view.get("operations", [])
 assert any(tool.get("name") == "mempalace_runtime_registry" for tool in mcp_view.get("tools", [])), mcp_view
 assert "mempalace_runtime_registry" in visible_tool_names, visible_tool_names
 assert "mempalace_search" in visible_tool_names, visible_tool_names
+assert projection_manifest.get("algorithm") == "blake3", projection_manifest
+assert all(entry.get("exists") for entry in projection_manifest.get("tracked_paths", [])), projection_manifest
 
 try:
     git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
@@ -60,6 +65,8 @@ report = {
     "mcp_tool_count": len(mcp_view.get("tools", [])),
     "visible_mcp_wrapper_tools": visible_tool_names,
     "operation_registry_visible_mcp_tools": visible_mcp_tools(),
+    "projection_integrity_algorithm": projection_manifest.get("algorithm"),
+    "projection_integrity_path": str(projection_manifest_path),
 }
 
 report_path = Path('.codespaces/bootstrap-report.json')
