@@ -3,16 +3,10 @@
   "view": "cli-registry",
   "operations": [
     {
-      "name": "init",
-      "description": "Initialize a new MemPalace root and onboarding surface.",
+      "name": "status",
+      "description": "Show palace health, room counts, collection state, and integration status.",
       "exposure": "public",
-      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/init"
-    },
-    {
-      "name": "mine",
-      "description": "Mine a project or working directory into palace memory.",
-      "exposure": "public",
-      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine"
+      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/status"
     },
     {
       "name": "search",
@@ -21,10 +15,16 @@
       "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/search"
     },
     {
-      "name": "status",
-      "description": "Show palace health, room counts, collection state, and integration status.",
+      "name": "mine",
+      "description": "Mine a project or working directory into palace memory.",
       "exposure": "public",
-      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/status"
+      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/mine"
+    },
+    {
+      "name": "init",
+      "description": "Initialize a new MemPalace root and onboarding surface.",
+      "exposure": "public",
+      "capability": "did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/init"
     },
     {
       "name": "registry",
