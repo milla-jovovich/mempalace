@@ -97,18 +97,8 @@ if _args.palace:
 
 _config = MempalaceConfig()
 
-# Lazy per-path KG cache. Import no longer creates the sqlite file as a side
-# effect (see issue #1136). The path is resolved on each tool call so that a
-# multi-tenant host rotating MEMPALACE_PALACE_PATH between calls routes each
-# call to the correct KG file, matching the per-call behavior of _get_client()
-# on the ChromaDB side.
 _kg_by_path: dict[str, KnowledgeGraph] = {}
 _kg_cache_lock = threading.Lock()
-
-# Whether --palace was given at startup. Controls default-path resolution:
-# with the flag, KG follows _config.palace_path per call; without it, KG stays
-# on DEFAULT_KG_PATH regardless of env var (issue #540's territory, out of
-# scope here).
 _palace_flag_given: bool = bool(_args.palace)
 
 
