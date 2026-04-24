@@ -70,6 +70,7 @@ from .palace_graph import (  # noqa: E402
     follow_tunnels,
 )
 
+from .palace import distance_to_similarity, get_embedding_function  # noqa: E402
 from .knowledge_graph import KnowledgeGraph  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
@@ -216,6 +217,7 @@ def _get_collection(create=False):
     global _collection_cache, _metadata_cache, _metadata_cache_time
     try:
         client = _get_client()
+        embedding_function = get_embedding_function()
         if create:
             _collection_cache = ChromaCollection(
                 client.get_or_create_collection(
@@ -225,7 +227,10 @@ def _get_collection(create=False):
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
-            _collection_cache = ChromaCollection(client.get_collection(_config.collection_name))
+            _collection_cache = ChromaCollection(client.get_collection(
+                _config.collection_name,
+                embedding_function=embedding_function,
+            ))
             _metadata_cache = None
             _metadata_cache_time = 0
         return _collection_cache
@@ -453,6 +458,7 @@ def tool_search(
         room=room,
         n_results=limit,
         max_distance=dist,
+        min_similarity=min_similarity,
     )
     # Attach sanitizer metadata for transparency
     if sanitized["was_sanitized"]:
@@ -482,7 +488,7 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
         if results["ids"] and results["ids"][0]:
             for i, drawer_id in enumerate(results["ids"][0]):
                 dist = results["distances"][0][i]
-                similarity = round(1 - dist, 3)
+                similarity = distance_to_similarity(dist)
                 if similarity >= threshold:
                     meta = results["metadatas"][0][i]
                     doc = results["documents"][0][i]
@@ -1387,7 +1393,11 @@ TOOLS = {
                 },
                 "context": {
                     "type": "string",
-                    "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking.",
+                    "description": "Background context for the search (optional). This is NOT used for embedding — only for future re-ranking. Put conversation history or system prompt content here, NOT in query.",
+                },
+                "min_similarity": {
+                    "type": "number",
+                    "description": "Minimum similarity threshold 0.0–1.0 (default 0.0). Use 0.5+ to filter low-quality matches.",
                 },
             },
             "required": ["query"],

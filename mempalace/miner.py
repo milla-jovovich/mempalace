@@ -9,6 +9,7 @@ Stores verbatim chunks as drawers. No summaries. Ever.
 
 import os
 import sys
+import ast
 import hashlib
 import fnmatch
 from pathlib import Path
@@ -397,6 +398,79 @@ def chunk_text(content: str, source_file: str) -> list:
     return chunks
 
 
+def _extract_symbol_source(lines: list[str], node: ast.AST) -> str:
+    """Extract source lines for an AST node using its line number attributes."""
+    start = node.lineno - 1  # type: ignore[attr-defined]
+    end = node.end_lineno    # type: ignore[attr-defined]
+    return "\n".join(lines[start:end])
+
+
+def chunk_python_ast(content: str, source_file: str) -> list:
+    """
+    Parse a Python file with the AST module and emit one chunk per top-level
+    function, class, or method. Falls back to chunk_text() if parsing fails.
+
+    Each returned dict has the same keys as chunk_text() plus optional extras:
+      symbol_type   — "function" | "class" | "method"
+      symbol_name   — bare name of the symbol
+      parent_symbol — class name for methods, None for top-level symbols
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return chunk_text(content, source_file)
+
+    lines = content.splitlines()
+    chunks = []
+    chunk_index = 0
+
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            src = _extract_symbol_source(lines, node)
+            if len(src) >= MIN_CHUNK_SIZE:
+                chunks.append({
+                    "content": src,
+                    "chunk_index": chunk_index,
+                    "symbol_type": "function",
+                    "symbol_name": node.name,
+                    "parent_symbol": None,
+                })
+                chunk_index += 1
+
+        elif isinstance(node, ast.ClassDef):
+            # Emit the full class body as one chunk
+            class_src = _extract_symbol_source(lines, node)
+            if len(class_src) >= MIN_CHUNK_SIZE:
+                chunks.append({
+                    "content": class_src,
+                    "chunk_index": chunk_index,
+                    "symbol_type": "class",
+                    "symbol_name": node.name,
+                    "parent_symbol": None,
+                })
+                chunk_index += 1
+
+            # Also emit each method individually so they are retrievable on their own
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    method_src = _extract_symbol_source(lines, child)
+                    if len(method_src) >= MIN_CHUNK_SIZE:
+                        chunks.append({
+                            "content": method_src,
+                            "chunk_index": chunk_index,
+                            "symbol_type": "method",
+                            "symbol_name": child.name,
+                            "parent_symbol": node.name,
+                        })
+                        chunk_index += 1
+
+    # If AST yielded nothing useful (e.g. pure module-level statements), fall back
+    if not chunks:
+        return chunk_text(content, source_file)
+
+    return chunks
+
+
 # =============================================================================
 # PALACE — ChromaDB operations
 # =============================================================================
@@ -542,7 +616,8 @@ def _extract_entities_for_metadata(content: str) -> str:
 
 
 def add_drawer(
-    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
+    collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str,
+    extra_metadata: dict = None,
 ):
     """Add one drawer to the palace."""
     drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
@@ -567,6 +642,8 @@ def add_drawer(
         entities = _extract_entities_for_metadata(content)
         if entities:
             metadata["entities"] = entities
+        if extra_metadata:
+            metadata.update(extra_metadata)
         collection.upsert(
             documents=[content],
             ids=[drawer_id],
@@ -609,7 +686,7 @@ def process_file(
         return 0, "general"
 
     room = detect_room(filepath, content, rooms, project_path)
-    chunks = chunk_text(content, source_file)
+    chunks = chunk_python_ast(content, source_file) if filepath.suffix.lower() == ".py" else chunk_text(content, source_file)
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} -> room:{room} ({len(chunks)} drawers)")
@@ -635,6 +712,7 @@ def process_file(
 
         drawers_added = 0
         for chunk in chunks:
+            extra = {k: v for k, v in chunk.items() if k not in ("content", "chunk_index")}
             added = add_drawer(
                 collection=collection,
                 wing=wing,
@@ -643,6 +721,7 @@ def process_file(
                 source_file=source_file,
                 chunk_index=chunk["chunk_index"],
                 agent=agent,
+                extra_metadata=extra or None,
             )
             if added:
                 drawers_added += 1

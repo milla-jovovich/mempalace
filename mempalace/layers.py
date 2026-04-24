@@ -24,6 +24,7 @@ from collections import defaultdict
 from .config import MempalaceConfig
 from .palace import get_collection as _get_collection
 from .searcher import _first_or_empty, build_where_filter
+from .palace import distance_to_similarity
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +284,7 @@ class Layer3:
         for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
             meta = meta or {}
             doc = doc or ""
-            similarity = round(1 - dist, 3)
+            similarity = distance_to_similarity(dist)
             wing_name = meta.get("wing", "?")
             room_name = meta.get("room", "?")
             source = Path(meta.get("source_file", "")).name if meta.get("source_file") else ""
@@ -342,7 +343,7 @@ class Layer3:
                     "wing": meta.get("wing", "unknown"),
                     "room": meta.get("room", "unknown"),
                     "source_file": Path(meta.get("source_file", "?")).name,
-                    "similarity": round(1 - dist, 3),
+                    "similarity": distance_to_similarity(dist),
                     "metadata": meta,
                 }
             )

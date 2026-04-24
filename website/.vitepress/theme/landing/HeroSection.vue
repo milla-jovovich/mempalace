@@ -5,12 +5,13 @@
     <div class="hero-inner">
       <div class="hero-copy">
         <h1 class="display">
-          <span class="line">Memory <em class="is-accent">is</em></span>
-          <span class="line line-2"><span class="identity-white">identity.</span></span>
+          <span class="line">Memory is</span>
+          <span class="line line-2">identity.</span>
         </h1>
         <p class="lede">
-          Every conversation, every idea, every small decision&hellip; held somewhere safe.
-          <br><br>Welcome to the future of memory: <span class="mp-blue">MemPalace</span>
+          An AI that forgets cannot know you. MemPalace keeps every word you have
+          shared — verbatim, on your machine, permanent. Designed for total
+          recall.
         </p>
         <form class="waitlist waitlist-hero" data-source="hero" novalidate>
           <div class="waitlist-head">

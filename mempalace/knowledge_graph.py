@@ -58,6 +58,7 @@ class KnowledgeGraph:
             pass
         self._connection = None
         self._lock = threading.Lock()
+        self._local = threading.local()
         self._init_db()
 
     def _init_db(self):
@@ -115,11 +116,13 @@ class KnowledgeGraph:
             conn.execute("ALTER TABLE triples ADD COLUMN adapter_name TEXT")
 
     def _conn(self):
-        if self._connection is None:
-            self._connection = sqlite3.connect(self.db_path, timeout=10, check_same_thread=False)
-            self._connection.execute("PRAGMA journal_mode=WAL")
-            self._connection.row_factory = sqlite3.Row
-        return self._connection
+        conn = getattr(self._local, "connection", None)
+        if conn is None:
+            conn = sqlite3.connect(self.db_path, timeout=10)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.row_factory = sqlite3.Row
+            self._local.connection = conn
+        return conn
 
     def close(self):
         """Close the database connection."""

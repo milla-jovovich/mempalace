@@ -12,6 +12,7 @@ hide drawers the direct path would have found.
 import logging
 import math
 import re
+
 from pathlib import Path
 
 from .palace import get_closets_collection, get_collection
@@ -21,6 +22,7 @@ from .palace import get_closets_collection, get_collection
 _CLOSET_DRAWER_REF_RE = re.compile(r"→([\w,]+)")
 
 logger = logging.getLogger("mempalace_mcp")
+_TOKEN_RE = re.compile(r"[a-z0-9_]+")
 
 
 class SearchError(Exception):
@@ -234,6 +236,34 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
         "drawer_index": chunk_idx,
         "total_drawers": total_drawers,
     }
+
+
+def _query_terms(query: str) -> set[str]:
+    return {token for token in _TOKEN_RE.findall(query.lower()) if len(token) >= 2}
+
+
+def _overlap_score(query_terms: set[str], text: str) -> tuple[int, int]:
+    if not query_terms:
+        return 0, 0
+    text_lower = text.lower()
+    doc_terms = set(_TOKEN_RE.findall(text_lower))
+    overlap = len(query_terms & doc_terms)
+    phrase_bonus = int(any(term in text_lower for term in query_terms))
+    return overlap, phrase_bonus
+
+
+def _rerank_hits(query: str, hits: list[dict]) -> list[dict]:
+    query_terms = _query_terms(query)
+    if not query_terms:
+        return hits
+
+    ranked = []
+    for index, hit in enumerate(hits):
+        overlap, phrase_bonus = _overlap_score(query_terms, hit["text"])
+        ranked.append((overlap, phrase_bonus, hit["similarity"], -index, hit))
+
+    ranked.sort(reverse=True)
+    return [hit for *_scores, hit in ranked]
 
 
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
@@ -496,6 +526,8 @@ def search_memories(
         h.pop("_sort_key", None)
         h.pop("_source_file_full", None)
         h.pop("_chunk_index", None)
+
+    hits = _rerank_hits(query, hits)
 
     return {
         "query": query,
