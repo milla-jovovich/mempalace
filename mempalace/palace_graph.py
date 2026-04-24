@@ -313,8 +313,20 @@ def _save_tunnels(tunnels):
     Writes to ``tunnels.json.tmp`` then ``os.replace``s it into place, so
     a crash mid-write can never leave a partial/empty tunnels.json that
     silently wipes every tunnel on next read.
+
+    Also restricts the parent directory to 0o700 and the file to 0o600 —
+    tunnels reveal cross-wing connections (which projects/people/rooms
+    the user has explicitly linked) and should not be world-readable on
+    shared Linux/multi-user systems. Matches the file-permission pattern
+    established by #814 for the other sensitive palace files.
     """
-    os.makedirs(os.path.dirname(_TUNNEL_FILE), exist_ok=True)
+    parent = os.path.dirname(_TUNNEL_FILE)
+    os.makedirs(parent, exist_ok=True)
+    try:
+        os.chmod(parent, 0o700)
+    except (OSError, NotImplementedError):
+        # Windows / unsupported filesystems — tolerate.
+        pass
     tmp_path = _TUNNEL_FILE + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(tunnels, f, indent=2)
@@ -325,6 +337,10 @@ def _save_tunnels(tunnels):
             # Not all filesystems (or Windows file handles) support fsync — tolerate.
             pass
     os.replace(tmp_path, _TUNNEL_FILE)
+    try:
+        os.chmod(_TUNNEL_FILE, 0o600)
+    except (OSError, NotImplementedError):
+        pass
 
 
 def _endpoint_key(wing: str, room: str) -> str:

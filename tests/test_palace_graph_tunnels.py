@@ -1,5 +1,8 @@
 """Tests for explicit tunnel helpers in mempalace.palace_graph."""
 
+import os
+import stat
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -36,6 +39,33 @@ class TestTunnelStorage:
         ]
         palace_graph._save_tunnels(tunnels)
         assert palace_graph._load_tunnels() == tunnels
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="POSIX file-permission bits only apply on Unix-like systems",
+    )
+    def test_save_tunnels_restricts_permissions(self, tmp_path, monkeypatch):
+        """Regression for #1165 — tunnels.json reveals cross-wing links and
+        must not be world-readable on shared Linux/multi-user systems."""
+        tunnel_file = _use_tmp_tunnel_file(monkeypatch, tmp_path)
+        palace_graph._save_tunnels(
+            [
+                {
+                    "id": "x",
+                    "source": {"wing": "a", "room": "r1"},
+                    "target": {"wing": "b", "room": "r2"},
+                    "label": "",
+                }
+            ]
+        )
+
+        file_mode = stat.S_IMODE(os.stat(tunnel_file).st_mode)
+        assert file_mode == 0o600, f"tunnels.json mode is {oct(file_mode)}, expected 0o600"
+
+        parent_mode = stat.S_IMODE(os.stat(tunnel_file.parent).st_mode)
+        assert (
+            parent_mode == 0o700
+        ), f"tunnels.json parent dir mode is {oct(parent_mode)}, expected 0o700"
 
 
 class TestExplicitTunnels:
