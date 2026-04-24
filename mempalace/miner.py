@@ -26,6 +26,7 @@ from .palace import (
     purge_file_closets,
     upsert_closet_lines,
 )
+from .trust_type import parse_trust_type as _parse_trust_type
 
 READABLE_EXTENSIONS = {
     ".txt",
@@ -556,6 +557,13 @@ def add_drawer(
             "filed_at": datetime.now().isoformat(),
             "normalize_version": NORMALIZE_VERSION,
         }
+        # Classify the writer when the agent string carries a known prefix
+        # (mechanical:<hook> / human:<user> / llm_judge:<model>). See
+        # mempalace.trust_type for the full convention. Unrecognized agent
+        # strings leave trust_type unset — existing callers are unaffected.
+        trust = _parse_trust_type(agent)
+        if trust:
+            metadata["trust_type"] = trust
         # Store file mtime so we can detect modifications later.
         try:
             metadata["source_mtime"] = os.path.getmtime(source_file)
