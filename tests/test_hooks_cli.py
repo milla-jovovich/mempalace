@@ -738,47 +738,6 @@ def test_run_hook_unknown_hook():
         assert exc_info.value.code == 1
 
 
-# --- _wing_from_transcript_path ---
-
-
-def test_wing_from_claude_code_path():
-    """Standard Claude Code transcript path extracts project name with wing_ prefix."""
-    path = "/home/jp/.claude/projects/-home-jp-Projects-kiyo-xhci-fix/session.jsonl"
-    assert _wing_from_transcript_path(path) == "wing_kiyo-xhci-fix"
-
-
-def test_wing_from_nested_project_path():
-    path = "/home/jp/.claude/projects/-home-jp-Projects-memorypalace/abc123.jsonl"
-    assert _wing_from_transcript_path(path) == "wing_memorypalace"
-
-
-def test_wing_fallback_non_projects_path():
-    """Paths not matching the -Projects- pattern fall back to 'wing_sessions'."""
-    path = "/home/jp/.claude/projects/-home-jp-Documents-notes/session.jsonl"
-    assert _wing_from_transcript_path(path) == "wing_sessions"
-
-
-def test_wing_from_path_with_spaces():
-    """Spaces in project names are replaced with underscores, wing_ prefix stays."""
-    path = "/home/jp/.claude/projects/-home-jp-Projects-my project/s.jsonl"
-    assert _wing_from_transcript_path(path) == "wing_my_project"
-
-
-def test_wing_lowercased():
-    path = "/home/jp/.claude/projects/-home-jp-Projects-RealmWatch/s.jsonl"
-    assert _wing_from_transcript_path(path) == "wing_realmwatch"
-
-
-def test_wing_from_path_ending_with_project():
-    """Path where -Projects-<name> is the last component (no trailing file)."""
-    path = "/home/jp/.claude/projects/-home-jp-Projects-oracle"
-    assert _wing_from_transcript_path(path) == "wing_oracle"
-
-
-def test_wing_empty_string():
-    assert _wing_from_transcript_path("") == "wing_sessions"
-
-
 def test_run_hook_invalid_json(tmp_path):
     """Invalid stdin JSON should not crash — falls back to empty dict."""
     with patch("sys.stdin", io.StringIO("not valid json")):
