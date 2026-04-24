@@ -2,7 +2,7 @@
 
 **JP's production fork of [milla-jovovich/mempalace](https://github.com/milla-jovovich/mempalace)**
 
-[![version-shield](https://img.shields.io/badge/version-3.3.3-4dc9f6?style=flat-square&labelColor=0a0e14)](https://github.com/MemPalace/mempalace/releases)
+[![version-shield](https://img.shields.io/badge/version-3.3.4-4dc9f6?style=flat-square&labelColor=0a0e14)](https://github.com/MemPalace/mempalace/releases)
 [![python-shield](https://img.shields.io/badge/python-3.9+-7dd8f8?style=flat-square&labelColor=0a0e14&logo=python&logoColor=7dd8f8)](https://www.python.org/)
 [![license-shield](https://img.shields.io/badge/license-MIT-b0e8ff?style=flat-square&labelColor=0a0e14)](LICENSE)
 

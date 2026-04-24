@@ -49,7 +49,7 @@ def _validate_where(where: Optional[dict]) -> None:
                 stack.extend(x for x in v if isinstance(x, dict))
 
 
-def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> list[str]:
+def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> list[str]:
     """Rename HNSW segment dirs whose files are stale vs. chroma.sqlite3.
 
     When a ChromaDB 1.5.x PersistentClient opens a palace whose on-disk
@@ -73,10 +73,12 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> li
     original directory is renamed, not deleted, so recovery remains
     possible if the heuristic misfires.
 
-    The default threshold (1h) is deliberately conservative — ChromaDB's
-    HNSW flush cadence means legitimate drift is normally on the order of
-    seconds to minutes. A segment that is more than an hour out of date is
-    almost certainly in a "crashed mid-write" state.
+    The default threshold (5 min) is based on ChromaDB's HNSW flush
+    cadence — legitimate drift is normally on the order of seconds to
+    minutes. A segment more than 5 minutes out of date is almost certainly
+    in a "crashed mid-write" or "concurrent-write corrupted" state. The
+    previous 1h threshold was too conservative: 0.96h drift was observed
+    causing segfaults in production.
 
     Args:
         palace_path: path to the palace directory containing ``chroma.sqlite3``
@@ -487,6 +489,7 @@ class ChromaBackend(BaseBackend):
         :meth:`get_collection` which manages caching internally.
         """
         _fix_blob_seq_ids(palace_path)
+        quarantine_stale_hnsw(palace_path)
         return chromadb.PersistentClient(path=palace_path)
 
     @staticmethod
