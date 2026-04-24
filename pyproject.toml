@@ -49,9 +49,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["mempalace"]
-include = [
-  "mempalace/*.json",
-]
+
+[tool.hatch.build.targets.wheel.force-include]
+"mempalace/runtime_profile.json" = "mempalace/runtime_profile.json"
+"mempalace/cli_registry.json" = "mempalace/cli_registry.json"
+"mempalace/mcp_tool_registry.json" = "mempalace/mcp_tool_registry.json"
 
 [tool.ruff]
 line-length = 100
