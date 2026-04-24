@@ -120,8 +120,7 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> li
             os.rename(seg_dir, target)
             moved.append(target)
             logger.warning(
-                "Quarantined stale HNSW segment %s "
-                "(sqlite %.0fs newer than HNSW); renamed to %s",
+                "Quarantined stale HNSW segment %s (sqlite %.0fs newer than HNSW); renamed to %s",
                 seg_dir,
                 sqlite_mtime - hnsw_mtime,
                 target,
@@ -615,6 +614,8 @@ def _normalize_get_collection_args(args, kwargs):
         create = kwargs.pop("create", False)
         if rest:
             create = rest.pop(0)
+        if rest:
+            raise TypeError(f"unexpected positional args: {rest!r}")
         if kwargs:
             raise TypeError(f"unexpected kwargs: {sorted(kwargs)}")
         return (
