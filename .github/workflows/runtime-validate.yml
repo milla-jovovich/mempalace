@@ -17,6 +17,9 @@ concurrency:
   group: runtime-validate-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -54,6 +57,8 @@ jobs:
           name: mempalace-runtime-validation-${{ github.run_id }}
           path: |
             .codespaces/bootstrap-report.json
+            .codespaces/projection-integrity.json
+            .codespaces/projection-integrity.path
             .codespaces/registry.runtime.json
             .codespaces/registry.cli.json
             .codespaces/registry.mcp.json
