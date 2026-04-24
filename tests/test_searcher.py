@@ -191,3 +191,49 @@ class TestSearchCLI:
         assert "[2]" in captured.out
         # Second result renders with fallback '?' values instead of crashing
         assert "second doc" in captured.out
+
+    def test_search_applies_bm25_hybrid_rerank(self, capsys):
+        """CLI search must call the same hybrid rerank that the MCP path uses.
+
+        Regression for a shipping bug where the CLI only consulted ChromaDB
+        cosine distance: a drawer whose body contained every query term still
+        scored Match 0.0 if its embedding happened to be far from the query
+        (e.g. the drawer was a shell-output fragment that embeds as "file
+        tree noise"). Hybrid rerank fixes this by combining BM25 with cosine
+        — lexical matches rise above pure vector noise.
+
+        Simulates: three candidates, all with distance >= 1.0 (cosine = 0);
+        candidate 2 contains every query term. After the fix, candidate 2
+        should rank first and display a non-zero bm25 score.
+        """
+        mock_col = MagicMock()
+        mock_col.query.return_value = {
+            "documents": [
+                [
+                    "unrelated directory listing -rw-rw-r-- file.txt",
+                    "foo bar baz is a multi-word project",
+                    "another unrelated chunk about colors",
+                ]
+            ],
+            "metadatas": [
+                [
+                    {"source_file": "a.md", "wing": "w", "room": "r"},
+                    {"source_file": "b.md", "wing": "w", "room": "r"},
+                    {"source_file": "c.md", "wing": "w", "room": "r"},
+                ]
+            ],
+            "distances": [[1.5, 1.5, 1.5]],
+        }
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
+            search("foo bar baz", "/fake/path")
+        captured = capsys.readouterr()
+        # The lexical match must rank first
+        first_block, _, rest = captured.out.partition("[2]")
+        assert (
+            "b.md" in first_block
+        ), f"expected lexical match 'b.md' at rank 1, got:\n{captured.out}"
+        # And its bm25 score must be > 0, visible to the user
+        assert "bm25=" in first_block
+        assert "bm25=0.0" not in first_block
+        # Cosine reporting still present for transparency
+        assert "cosine=" in first_block

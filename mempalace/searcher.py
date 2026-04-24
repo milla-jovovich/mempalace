@@ -273,6 +273,24 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f'\n  No results found for: "{query}"')
         return
 
+    # Pure-cosine retrieval on the CLI path was missing lexical matches:
+    # a drawer whose text contains every query term can still score distance
+    # >= 1.0 against the natural-language query when the drawer is a
+    # mechanical artifact (directory listing, diff, log fragment) that
+    # embeds as file-tree noise rather than as prose about its subject.
+    # The MCP tool path already hybridizes BM25 with vector sim via
+    # `_hybrid_rank`; do the same here so CLI results match what agents
+    # see via `mempalace_search`.
+    hits = [
+        {
+            "text": doc,
+            "distance": float(dist),
+            "metadata": meta or {},
+        }
+        for doc, meta, dist in zip(docs, metas, dists)
+    ]
+    hits = _hybrid_rank(hits, query)
+
     print(f"\n{'=' * 60}")
     print(f'  Results for: "{query}"')
     if wing:
@@ -281,19 +299,20 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"  Room: {room}")
     print(f"{'=' * 60}\n")
 
-    for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
-        similarity = round(max(0.0, 1 - dist), 3)
-        meta = meta or {}
+    for i, hit in enumerate(hits, 1):
+        vec_sim = round(max(0.0, 1 - hit["distance"]), 3)
+        bm25 = hit.get("bm25_score", 0.0)
+        meta = hit["metadata"]
         source = Path(meta.get("source_file", "?")).name
         wing_name = meta.get("wing", "?")
         room_name = meta.get("room", "?")
 
         print(f"  [{i}] {wing_name} / {room_name}")
         print(f"      Source: {source}")
-        print(f"      Match:  {similarity}")
+        print(f"      Match:  cosine={vec_sim}  bm25={bm25}")
         print()
         # Print the verbatim text, indented
-        for line in doc.strip().split("\n"):
+        for line in hit["text"].strip().split("\n"):
             print(f"      {line}")
         print()
         print(f"  {'─' * 56}")
