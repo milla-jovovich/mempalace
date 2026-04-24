@@ -240,6 +240,13 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     """
     Search the palace. Returns verbatim drawer content.
     Optionally filter by wing (project) or room (aspect).
+
+    Uses the same hybrid BM25 + cosine rerank as ``search_memories`` (the
+    MCP path). Before the 2026-04-24 fix, this CLI path skipped the rerank
+    and returned raw ChromaDB cosine results, giving worse retrieval
+    quality than agents calling the MCP tool on the same query. Fixed by
+    over-fetching (n_results × 3), running ``_hybrid_rank``, and truncating
+    back to n_results for display.
     """
     try:
         col = get_collection(palace_path, create=False)
@@ -253,7 +260,9 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     try:
         kwargs = {
             "query_texts": [query],
-            "n_results": n_results,
+            # Over-fetch so _hybrid_rank has material to reshuffle. Same
+            # pattern as search_memories (line ~348).
+            "n_results": n_results * 3,
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
@@ -273,6 +282,19 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f'\n  No results found for: "{query}"')
         return
 
+    # Build hits in the shape _hybrid_rank expects (text + distance +
+    # passthrough metadata), rerank, then truncate to n_results for display.
+    hits = [
+        {
+            "text": doc,
+            "distance": dist,
+            "metadata": meta or {},
+        }
+        for doc, meta, dist in zip(docs, metas, dists)
+    ]
+    _hybrid_rank(hits, query)
+    hits = hits[:n_results]
+
     print(f"\n{'=' * 60}")
     print(f'  Results for: "{query}"')
     if wing:
@@ -281,12 +303,14 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"  Room: {room}")
     print(f"{'=' * 60}\n")
 
-    for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
+    for i, hit in enumerate(hits, 1):
+        dist = hit.get("distance", 1.0)
         similarity = round(max(0.0, 1 - dist), 3)
-        meta = meta or {}
+        meta = hit.get("metadata", {}) or {}
         source = Path(meta.get("source_file", "?")).name
         wing_name = meta.get("wing", "?")
         room_name = meta.get("room", "?")
+        doc = hit.get("text", "")
 
         print(f"  [{i}] {wing_name} / {room_name}")
         print(f"      Source: {source}")
