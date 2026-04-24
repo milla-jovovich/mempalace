@@ -1,0 +1,59 @@
+name: projection-drift
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - build/conversion-kit
+  pull_request:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: projection-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Upgrade packaging tools
+        run: |
+          python -m pip install --upgrade pip setuptools wheel hatchling
+
+      - name: Install MemPalace editable
+        run: |
+          python -m pip install -e .
+
+      - name: Enforce projection drift
+        run: |
+          bash scripts/check_projection_drift.sh
+
+      - name: Capture projection drift diff on failure
+        if: failure()
+        run: |
+          mkdir -p .artifacts
+          git diff > .artifacts/projection-drift.diff
+
+      - name: Upload projection drift artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mempalace-projection-drift-${{ github.run_id }}
+          path: |
+            .artifacts/projection-drift.diff
+          if-no-files-found: warn
