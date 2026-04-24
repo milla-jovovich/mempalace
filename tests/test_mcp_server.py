@@ -18,7 +18,7 @@ def _patch_mcp_server(monkeypatch, config, kg):
     from mempalace import mcp_server
 
     monkeypatch.setattr(mcp_server, "_config", config)
-    monkeypatch.setattr(mcp_server, "_kg", kg)
+    monkeypatch.setattr(mcp_server, "_get_kg", lambda: kg)
 
 
 def _get_collection(palace_path, create=False):
