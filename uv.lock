@@ -1169,11 +1169,12 @@ wheels = [
 
 [[package]]
 name = "mempalace"
-version = "3.3.2"
+version = "3.3.3"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
     { name = "pyyaml" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.optional-dependencies]
@@ -1206,6 +1207,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.0" },
 ]
 provides-extras = ["dev", "spellcheck"]
 
