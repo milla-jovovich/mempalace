@@ -496,18 +496,44 @@ def _parse_harness_input(data: dict, harness: str) -> dict:
 def _wing_from_transcript_path(transcript_path: str) -> str:
     """Derive a project wing name from a Claude Code transcript path.
 
-    Claude Code stores transcripts at:
-        ~/.claude/projects/-home-<user>-Projects-<project>/session.jsonl
-    We extract <project> and return ``wing_<project>`` to match the
-    AAAK_SPEC convention (``wing_user``, ``wing_agent``, ``wing_code``,
-    ``wing_<project>``…). Falls back to ``wing_sessions``.
+    Claude Code encodes the full source directory path into the project
+    folder name, replacing ``/`` with ``-``. Transcripts live at:
+        ~/.claude/projects/<encoded-folder>/session.jsonl
+
+    We try two strategies in order:
+
+    1. Match ``-Projects-<project>`` if the source lives under
+       ``~/Projects/`` (the most common layout on our fork maintainer's
+       machine — preserving exact existing behavior).
+    2. Fall back to the last ``-``-delimited segment of the encoded
+       folder name — works for any layout (``~/dev/``, ``~/src/``,
+       ``~/code/``, etc.) because that segment is the actual project
+       directory name. Resolves #1145 bug 1.
+
+    Returns ``wing_<project>`` to match the AAAK_SPEC convention; falls
+    back to ``wing_sessions`` when the path doesn't match either pattern.
     """
     # Normalize path separators for cross-platform (Windows backslashes)
     normalized = transcript_path.replace("\\", "/")
+
+    # Strategy 1: explicit `-Projects-<project>` slice (preserves behavior
+    # for code living under ~/Projects/, which is what the existing tests
+    # assert against).
     match = re.search(r"-Projects-([^/]+?)(?:/|$)", normalized)
     if match:
         project = match.group(1).lower().replace(" ", "_")
         return f"wing_{project}"
+
+    # Strategy 2: last `-`-delimited segment of the encoded folder name.
+    # Claude Code's encoding puts the original directory name there
+    # regardless of source layout, so this recovers the project name for
+    # users whose code lives outside ~/Projects/.
+    folder = normalized.rsplit("/", 1)[0].rsplit("/", 1)[-1]
+    if folder.startswith("-") and "-" in folder[1:]:
+        project = folder.rsplit("-", 1)[-1].lower().replace(" ", "_")
+        if project:
+            return f"wing_{project}"
+
     return "wing_sessions"
 
 
