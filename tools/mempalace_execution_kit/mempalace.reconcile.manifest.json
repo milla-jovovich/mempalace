@@ -1,0 +1,68 @@
+{
+  "$schema": "./reconcile_manifest.schema.json",
+  "defaults": {
+    "policy": "manual"
+  },
+  "rules": [
+    {
+      "name": "ld-authority-and-conversion-kernel",
+      "policy": "keep_current",
+      "include": [
+        "semantics/**",
+        "tools/mempalace_execution_kit/**",
+        "scripts/regen_spine.sh",
+        "scripts/check_projection_drift.sh",
+        "scripts/validate_runtime.sh",
+        "scripts/write_projection_manifest.py",
+        ".github/workflows/runtime-validate.yml",
+        ".github/workflows/projection-drift.yml",
+        "mempalace/cli_ld.py",
+        "mempalace/mcp_server_ld.py",
+        "mempalace/integration_profile.py",
+        "mempalace/operation_registry.py",
+        "docs/migration/**"
+      ],
+      "notes": "Preserve the LD authority, conversion kernel, and reconciliation machinery on the current branch."
+    },
+    {
+      "name": "generated-runtime-surfaces",
+      "policy": "regenerate",
+      "include": [
+        "semantics/cold/**",
+        "mempalace/runtime_profile.json",
+        "mempalace/cli_registry.json",
+        "mempalace/mcp_tool_registry.json",
+        ".claude-plugin/.mcp.json",
+        ".claude-plugin/plugin.json",
+        ".claude-plugin/hooks/hooks.json",
+        ".codex-plugin/plugin.json",
+        ".codex-plugin/hooks.json"
+      ],
+      "notes": "Never hand-merge generated runtime surfaces; regenerate them from resolved hot authority."
+    },
+    {
+      "name": "manual-high-risk-overlap",
+      "policy": "manual",
+      "include": [
+        "pyproject.toml",
+        ".devcontainer/**",
+        "hooks/**",
+        "mempalace/config.py",
+        "mempalace/hooks_cli.py"
+      ],
+      "notes": "These surfaces carry high merge risk and require policy-aware human review before resolution."
+    }
+  ],
+  "post_actions": [
+    {
+      "name": "regen-spine",
+      "run": "bash scripts/regen_spine.sh"
+    }
+  ],
+  "verification": [
+    {
+      "name": "runtime-validate",
+      "run": "bash scripts/validate_runtime.sh"
+    }
+  ]
+}
