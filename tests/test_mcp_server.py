@@ -666,6 +666,52 @@ class TestKGTools:
         assert result["entities"] >= 4
 
 
+# ── Date Validation ────────────────────────────────────────────────────
+
+
+class TestDateValidation:
+    def test_kg_query_rejects_invalid_date(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query
+
+        result = tool_kg_query(entity="Max", as_of="not-a-date")
+        assert "error" in result
+
+    def test_kg_query_accepts_valid_date(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query
+
+        result = tool_kg_query(entity="Max", as_of="2026-01-15")
+        assert "error" not in result
+
+    def test_kg_query_accepts_year_month(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_query
+
+        result = tool_kg_query(entity="Max", as_of="2026-01")
+        assert "error" not in result
+
+    def test_kg_add_rejects_invalid_valid_from(self, monkeypatch, config, palace_path, kg):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_kg_add
+
+        result = tool_kg_add(
+            subject="Alice", predicate="likes", object="tea", valid_from="yesterday"
+        )
+        assert result["success"] is False
+        assert "valid_from" in result["error"]
+
+    def test_kg_invalidate_rejects_invalid_ended(self, monkeypatch, config, palace_path, seeded_kg):
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_invalidate
+
+        result = tool_kg_invalidate(
+            subject="Max", predicate="does", object="chess", ended="2026-99-99"
+        )
+        assert result["success"] is False
+        assert "ended" in result["error"]
+
+
 # ── Diary Tools ─────────────────────────────────────────────────────────
 
 

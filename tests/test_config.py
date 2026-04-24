@@ -17,14 +17,22 @@ def test_config_from_file():
     with open(os.path.join(tmpdir, "config.json"), "w") as f:
         json.dump({"palace_path": "/custom/palace"}, f)
     cfg = MempalaceConfig(config_dir=tmpdir)
-    assert cfg.palace_path == "/custom/palace"
+    result = cfg.palace_path
+    # abspath normalizes; on Windows this prefixes a drive letter
+    assert result.replace("\\", "/").endswith("/custom/palace")
+    assert os.path.isabs(result)
 
 
 def test_env_override():
     os.environ["MEMPALACE_PALACE_PATH"] = "/env/palace"
-    cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
-    assert cfg.palace_path == "/env/palace"
-    del os.environ["MEMPALACE_PALACE_PATH"]
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        result = cfg.palace_path
+        # abspath normalizes the env var; on Windows this prefixes a drive letter
+        assert result.replace("\\", "/").endswith("/env/palace")
+        assert os.path.isabs(result)
+    finally:
+        del os.environ["MEMPALACE_PALACE_PATH"]
 
 
 def test_init():

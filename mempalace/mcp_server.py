@@ -21,6 +21,7 @@ Tools (maintenance):
 """
 
 import os
+import re
 import sys
 
 # --- MCP stdio protection (issue #225) -----------------------------------
@@ -92,7 +93,7 @@ def _parse_args():
 _args = _parse_args()
 
 if _args.palace:
-    os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
+    os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(os.path.expanduser(_args.palace))
 
 _config = MempalaceConfig()
 # Only override KG path when --palace is explicitly provided; otherwise use
@@ -288,6 +289,21 @@ def _sanitize_optional_name(value: str = None, field_name: str = "name") -> str:
     if value is None or not value.strip():
         return None
     return sanitize_name(value, field_name)
+
+
+_DATE_RE = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?$")
+
+
+def _validate_date(value: str, field_name: str = "date") -> str:
+    """Validate an optional ISO-8601 date string (YYYY-MM or YYYY-MM-DD).
+
+    Returns the value unchanged if valid or None, raises ValueError otherwise.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _DATE_RE.match(value):
+        raise ValueError(f"{field_name} must be YYYY-MM or YYYY-MM-DD, got: {value!r}")
+    return value
 
 
 # ==================== READ TOOLS ====================
@@ -844,6 +860,7 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
     """Query the knowledge graph for an entity's relationships."""
     try:
         entity = sanitize_kg_value(entity, "entity")
+        as_of = _validate_date(as_of, "as_of")
     except ValueError as e:
         return {"error": str(e)}
     if direction not in ("outgoing", "incoming", "both"):
@@ -860,6 +877,7 @@ def tool_kg_add(
         subject = sanitize_kg_value(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
         object = sanitize_kg_value(object, "object")
+        valid_from = _validate_date(valid_from, "valid_from")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -885,6 +903,7 @@ def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = N
         subject = sanitize_kg_value(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
         object = sanitize_kg_value(object, "object")
+        ended = _validate_date(ended, "ended")
     except ValueError as e:
         return {"success": False, "error": str(e)}
     _wal_log(
