@@ -8,6 +8,7 @@ Supported:
     - ChatGPT conversations.json
     - Claude Code JSONL (with tool_use/tool_result block capture)
     - OpenAI Codex CLI JSONL
+    - Gemini CLI JSON
     - Slack JSON export
     - Plain text (pass through for paragraph chunking)
 
@@ -162,7 +163,7 @@ def _try_normalize_json(content: str) -> Optional[str]:
     except json.JSONDecodeError:
         return None
 
-    for parser in (_try_claude_ai_json, _try_chatgpt_json, _try_slack_json):
+    for parser in (_try_claude_ai_json, _try_chatgpt_json, _try_gemini_json, _try_slack_json):
         normalized = parser(data)
         if normalized:
             return normalized
@@ -365,6 +366,51 @@ def _try_chatgpt_json(data) -> Optional[str]:
                     messages.append(("assistant", text))
             children = node.get("children", [])
             current_id = children[0] if children else None
+    if len(messages) >= 2:
+        return _messages_to_transcript(messages)
+    return None
+
+
+def _try_gemini_json(data) -> Optional[str]:
+    """Gemini CLI session JSON (~/.gemini/tmp/{hash}/chats/session-*.json).
+
+    Sessions are single JSON files with a messages array. User messages have
+    type "user" with content as a list of {text: "..."} blocks. Assistant
+    messages have type "gemini" with content as a plain string.
+    """
+    if not isinstance(data, dict):
+        return None
+    if "sessionId" not in data or "messages" not in data:
+        return None
+    messages_list = data.get("messages", [])
+    if not isinstance(messages_list, list):
+        return None
+
+    messages = []
+    for item in messages_list:
+        if not isinstance(item, dict):
+            continue
+        msg_type = item.get("type", "")
+        content = item.get("content", "")
+        # Gemini user content is [{"text": "..."}] (no "type" key);
+        # assistant content is a plain string.
+        if isinstance(content, str):
+            text = content.strip()
+        elif isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict) and "text" in block:
+                    parts.append(block["text"])
+            text = " ".join(parts).strip()
+        else:
+            text = ""
+        if msg_type == "user" and text:
+            messages.append(("user", text))
+        elif msg_type == "gemini" and text:
+            messages.append(("assistant", text))
+
     if len(messages) >= 2:
         return _messages_to_transcript(messages)
     return None
