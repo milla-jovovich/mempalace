@@ -21,31 +21,41 @@ def test_config_from_file():
 
 
 def test_env_override():
-    os.environ["MEMPALACE_PALACE_PATH"] = "/env/palace"
-    cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
-    assert cfg.palace_path == "/env/palace"
-    del os.environ["MEMPALACE_PALACE_PATH"]
+    raw = "/env/palace"
+    os.environ["MEMPALACE_PALACE_PATH"] = raw
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        # palace_path normalizes with abspath + expanduser to match the
+        # --palace CLI code path. On Unix that's a no-op for "/env/palace";
+        # on Windows abspath prepends the current drive letter.
+        assert cfg.palace_path == os.path.abspath(os.path.expanduser(raw))
+    finally:
+        del os.environ["MEMPALACE_PALACE_PATH"]
 
 
 def test_env_path_expanduser():
-    os.environ["MEMPALACE_PALACE_PATH"] = "~/mempalace-test"
+    raw = os.path.join("~", "mempalace-test")
+    os.environ["MEMPALACE_PALACE_PATH"] = raw
     try:
         cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
         # Tilde must be expanded to match the --palace CLI code path.
-        assert "~" not in cfg.palace_path
+        assert cfg.palace_path == os.path.abspath(os.path.expanduser(raw))
         assert cfg.palace_path.endswith("mempalace-test")
-        assert cfg.palace_path == os.path.expanduser("~/mempalace-test")
     finally:
         del os.environ["MEMPALACE_PALACE_PATH"]
 
 
 def test_env_path_abspath_collapses_traversal():
-    os.environ["MEMPALACE_PALACE_PATH"] = "/tmp/palace/../mempalace-test"
+    # Build a raw path with a .. segment using the platform separator so
+    # the assertion is portable (Windows uses \, POSIX uses /).
+    raw = os.path.join(tempfile.gettempdir(), "palace", "..", "mempalace-test")
+    expected = os.path.abspath(os.path.expanduser(raw))
+    os.environ["MEMPALACE_PALACE_PATH"] = raw
     try:
         cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
         # .. segments must be collapsed, not preserved literally.
         assert ".." not in cfg.palace_path
-        assert cfg.palace_path == "/tmp/mempalace-test"
+        assert cfg.palace_path == expected
     finally:
         del os.environ["MEMPALACE_PALACE_PATH"]
 
@@ -53,12 +63,13 @@ def test_env_path_abspath_collapses_traversal():
 def test_env_path_legacy_alias_normalized():
     # Legacy MEMPAL_PALACE_PATH gets the same normalization treatment.
     os.environ.pop("MEMPALACE_PALACE_PATH", None)
-    os.environ["MEMPAL_PALACE_PATH"] = "~/legacy-alias/../mempalace-test"
+    raw = os.path.join("~", "legacy-alias", "..", "mempalace-test")
+    os.environ["MEMPAL_PALACE_PATH"] = raw
     try:
         cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
         assert "~" not in cfg.palace_path
         assert ".." not in cfg.palace_path
-        assert cfg.palace_path == os.path.expanduser("~/mempalace-test")
+        assert cfg.palace_path == os.path.abspath(os.path.expanduser(raw))
     finally:
         del os.environ["MEMPAL_PALACE_PATH"]
 
