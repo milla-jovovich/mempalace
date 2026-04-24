@@ -22,6 +22,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
+    "blake3>=1.0.5,<2",
     "chromadb>=0.5.0",
     "pyyaml>=6.0,<7",
 ]
@@ -48,6 +49,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["mempalace"]
+include = [
+  "mempalace/*.json",
+]
 
 [tool.ruff]
 line-length = 100
