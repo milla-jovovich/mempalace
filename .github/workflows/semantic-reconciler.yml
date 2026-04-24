@@ -1,4 +1,5 @@
 name: semantic-reconciler
+run-name: semantic-reconciler • ${{ github.ref_name }} • ${{ github.sha }}
 
 on:
   workflow_dispatch:
