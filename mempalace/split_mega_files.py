@@ -259,10 +259,17 @@ def main():
         default=None,
         help="Split a single specific file instead of scanning dir",
     )
+    parser.add_argument(
+        "--palace",
+        type=str,
+        default=None,
+        help="Palace path — split files will be written here (overrides --output-dir if set)",
+    )
     args = parser.parse_args()
 
     src_dir = Path(args.source).expanduser().resolve() if args.source else LUMI_DIR
-    output_dir = args.output_dir or None  # None = same dir as file
+    # --palace overrides --output-dir when both are provided
+    output_dir = args.palace or args.output_dir or None  # None = same dir as file
 
     if args.file:
         files = [Path(args.file)]

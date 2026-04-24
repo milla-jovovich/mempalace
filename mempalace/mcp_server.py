@@ -210,6 +210,30 @@ def _get_client():
         _palace_db_mtime = current_mtime
     return _client_cache
 
+_kg_instance = None
+
+
+def _get_kg() -> KnowledgeGraph:
+    """Lazily initialize the KnowledgeGraph.
+
+    Use KnowledgeGraph's default database path unless the palace path was
+    explicitly overridden via CLI or environment.
+    """
+    global _kg_instance
+    if _kg_instance is None:
+        explicit_palace = False
+        args = globals().get("_args")
+        if getattr(args, "palace", None):
+            explicit_palace = True
+        elif os.environ.get("MEMPALACE_PALACE"):
+            explicit_palace = True
+
+        if explicit_palace:
+            db_path = os.path.join(_config.palace_path, "knowledge_graph.sqlite3")
+            _kg_instance = KnowledgeGraph(db_path=db_path)
+        else:
+            _kg_instance = KnowledgeGraph()
+    return _kg_instance
 
 def _get_collection(create=False):
     """Return the ChromaDB collection, caching the client between calls."""
@@ -330,6 +354,7 @@ def tool_status():
 # ── AAAK Dialect Spec ─────────────────────────────────────────────────────────
 # Included in status response so the AI learns it on first wake-up call.
 # Also available via mempalace_get_aaak_spec tool.
+
 
 PALACE_PROTOCOL = """IMPORTANT — MemPalace Memory Protocol:
 1. ON WAKE-UP: Call mempalace_status to load palace overview + AAAK spec.
@@ -848,7 +873,7 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
         return {"error": str(e)}
     if direction not in ("outgoing", "incoming", "both"):
         return {"error": "direction must be 'outgoing', 'incoming', or 'both'"}
-    results = _kg.query_entity(entity, as_of=as_of, direction=direction)
+    results = _get_kg().query_entity(entity, as_of=as_of, direction=direction)
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
 
 
@@ -873,7 +898,7 @@ def tool_kg_add(
             "source_closet": source_closet,
         },
     )
-    triple_id = _kg.add_triple(
+    triple_id = _get_kg().add_triple(
         subject, predicate, object, valid_from=valid_from, source_closet=source_closet
     )
     return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {object}"}
@@ -891,7 +916,7 @@ def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = N
         "kg_invalidate",
         {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
     )
-    _kg.invalidate(subject, predicate, object, ended=ended)
+    _get_kg().invalidate(subject, predicate, object, ended=ended)
     return {
         "success": True,
         "fact": f"{subject} → {predicate} → {object}",
@@ -906,13 +931,13 @@ def tool_kg_timeline(entity: str = None):
             entity = sanitize_kg_value(entity, "entity")
         except ValueError as e:
             return {"error": str(e)}
-    results = _kg.timeline(entity)
+    results = _get_kg().timeline(entity)
     return {"entity": entity or "all", "timeline": results, "count": len(results)}
 
 
 def tool_kg_stats():
     """Knowledge graph overview: entities, triples, relationship types."""
-    return _kg.stats()
+    return _get_kg().stats()
 
 
 # ==================== AGENT DIARY ====================
