@@ -12,8 +12,6 @@ This test file locks the invariant so a future refactor that drops the
 gets caught at test time rather than silently degrading search quality.
 """
 
-import tempfile
-
 from mempalace.backends.chroma import ChromaBackend
 from mempalace.palace import get_collection
 
@@ -70,13 +68,20 @@ def test_reopening_cosine_palace_preserves_metric(tmp_path):
     _assert_cosine(col, "re-opened palace")
 
 
-def test_fresh_palace_via_full_stack_gets_cosine():
+def test_fresh_palace_via_full_stack_gets_cosine(tmp_path):
     """End-to-end: build a palace with the public API the way a new user
-    would, confirm the resulting collection uses cosine distance."""
-    with tempfile.TemporaryDirectory() as tmp:
-        col = get_collection(tmp, "mempalace_drawers", create=True)
-        _assert_cosine(col, "full-stack new palace")
+    would, confirm the resulting collection uses cosine distance.
 
-        # And the closets collection too
-        closets = get_collection(tmp, "mempalace_closets", create=True)
-        _assert_cosine(closets, "full-stack new closets")
+    Uses the ``tmp_path`` fixture rather than ``tempfile.TemporaryDirectory``
+    so ChromaDB's persistent SQLite file handles aren't asked to release
+    during the test body — pytest cleans the path at session end, by which
+    point the process is exiting and Windows' file-lock contention is
+    moot. Matches the cleanup strategy used by the rest of this file and
+    the project's 80% Windows coverage note in CLAUDE.md.
+    """
+    col = get_collection(str(tmp_path), "mempalace_drawers", create=True)
+    _assert_cosine(col, "full-stack new palace")
+
+    # And the closets collection too
+    closets = get_collection(str(tmp_path), "mempalace_closets", create=True)
+    _assert_cosine(closets, "full-stack new closets")
