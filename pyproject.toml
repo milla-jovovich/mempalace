@@ -3,7 +3,7 @@ name = "mempalace"
 version = "3.3.0"
 description = "Give your AI a memory — mine projects and conversations into a searchable palace. No API key required."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 license = "MIT"
 authors = [
     {name = "milla-jovovich"},
@@ -17,10 +17,7 @@ classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Utilities",
 ]
@@ -54,7 +51,7 @@ packages = ["mempalace"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py313"
 extend-exclude = ["benchmarks"]
 
 [tool.ruff.lint]
