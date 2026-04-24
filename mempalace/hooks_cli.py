@@ -405,6 +405,57 @@ def _save_diary_direct(
         f"|msgs:{len(messages)}|recent:{topics}"
     )
 
+    # Opt-in: route through palace-daemon when PALACE_DAEMON_URL is set.
+    # Lets the daemon queue during /repair mode=rebuild and drain afterward,
+    # with its own themed systemMessage. On any error, fall through to the
+    # direct tool call below — hook never loses a save because the daemon
+    # is down.
+    daemon_url = os.environ.get("PALACE_DAEMON_URL", "").strip().rstrip("/")
+    if daemon_url:
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                f"{daemon_url}/silent-save",
+                data=json.dumps({
+                    "session_id": session_id,
+                    "wing": wing,
+                    "entry": entry,
+                    "topic": "checkpoint",
+                    "agent_name": "session-hook",
+                    "themes": themes,
+                    "message_count": len(messages),
+                }).encode("utf-8"),
+                headers={"content-type": "application/json"},
+                method="POST",
+            )
+            api_key = os.environ.get("PALACE_API_KEY", "").strip()
+            if api_key:
+                req.add_header("x-api-key", api_key)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                daemon_result = json.loads(resp.read().decode("utf-8"))
+            _log(
+                f"Daemon silent-save: queued={daemon_result.get('queued')} "
+                f"count={daemon_result.get('count')}"
+            )
+            try:
+                ack_file = STATE_DIR / "last_checkpoint"
+                ack_file.write_text(
+                    json.dumps({"msgs": len(messages), "ts": now.isoformat()}),
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
+            if toast and not daemon_result.get("queued"):
+                _desktop_toast(f"Checkpoint saved — {len(messages)} messages archived")
+            return {
+                "count": len(messages),
+                "themes": themes,
+                "systemMessage": daemon_result.get("systemMessage"),
+                "queued": daemon_result.get("queued", False),
+            }
+        except Exception as e:
+            _log(f"Daemon silent-save failed ({e}); falling through to direct write")
+
     try:
         from .mcp_server import tool_diary_write
 
@@ -600,16 +651,15 @@ def hook_stop(data: dict, harness: str):
                     last_save_file.write_text(str(exchange_count), encoding="utf-8")
                 except OSError:
                     pass
-                themes = result.get("themes", [])
-                if themes:
-                    tag = " \u2014 " + ", ".join(themes)
-                else:
-                    tag = ""
-                _output(
-                    {
-                        "systemMessage": f"\u2726 {count} memories woven into the palace{tag}",
-                    }
-                )
+                # Prefer the daemon's themed systemMessage when present (it
+                # knows whether the save was queued during a repair); fall
+                # back to the legacy direct-write phrasing otherwise.
+                sys_msg = result.get("systemMessage")
+                if not sys_msg:
+                    themes = result.get("themes", [])
+                    tag = (" \u2014 " + ", ".join(themes)) if themes else ""
+                    sys_msg = f"\u2726 {count} memories woven into the palace{tag}"
+                _output({"systemMessage": sys_msg})
             else:
                 _output({})
         else:
