@@ -46,6 +46,7 @@ import argparse  # noqa: E402  (deferred until after stdio protection above)
 import json  # noqa: E402
 import logging  # noqa: E402
 import hashlib  # noqa: E402
+import threading  # noqa: E402
 import time  # noqa: E402
 from datetime import datetime  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -70,7 +71,7 @@ from .palace_graph import (  # noqa: E402
     follow_tunnels,
 )
 
-from .knowledge_graph import KnowledgeGraph  # noqa: E402
+from .knowledge_graph import KnowledgeGraph, DEFAULT_KG_PATH  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger("mempalace_mcp")
@@ -95,12 +96,39 @@ if _args.palace:
     os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
 
 _config = MempalaceConfig()
-# Only override KG path when --palace is explicitly provided; otherwise use
-# KnowledgeGraph's default (~/.mempalace/knowledge_graph.sqlite3).
-if _args.palace:
-    _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
-else:
-    _kg = KnowledgeGraph()
+
+# Lazy per-path KG cache. Import no longer creates the sqlite file as a side
+# effect (see issue #1136). The path is resolved on each tool call so that a
+# multi-tenant host rotating MEMPALACE_PALACE_PATH between calls routes each
+# call to the correct KG file, matching the per-call behavior of _get_client()
+# on the ChromaDB side.
+_kg_by_path: dict[str, KnowledgeGraph] = {}
+_kg_cache_lock = threading.Lock()
+
+# Whether --palace was given at startup. Controls default-path resolution:
+# with the flag, KG follows _config.palace_path per call; without it, KG stays
+# on DEFAULT_KG_PATH regardless of env var (issue #540's territory, out of
+# scope here).
+_palace_flag_given: bool = bool(_args.palace)
+
+
+def _resolve_kg_path() -> str:
+    if _palace_flag_given:
+        return os.path.join(_config.palace_path, "knowledge_graph.sqlite3")
+    return DEFAULT_KG_PATH
+
+
+def _get_kg() -> KnowledgeGraph:
+    path = os.path.abspath(_resolve_kg_path())
+    kg = _kg_by_path.get(path)
+    if kg is not None:
+        return kg
+    with _kg_cache_lock:
+        kg = _kg_by_path.get(path)
+        if kg is None:
+            kg = KnowledgeGraph(db_path=path)
+            _kg_by_path[path] = kg
+    return kg
 
 
 _client_cache = None
@@ -858,7 +886,7 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
         return {"error": str(e)}
     if direction not in ("outgoing", "incoming", "both"):
         return {"error": "direction must be 'outgoing', 'incoming', or 'both'"}
-    results = _kg.query_entity(entity, as_of=as_of, direction=direction)
+    results = _get_kg().query_entity(entity, as_of=as_of, direction=direction)
     return {"entity": entity, "as_of": as_of, "facts": results, "count": len(results)}
 
 
@@ -883,7 +911,7 @@ def tool_kg_add(
             "source_closet": source_closet,
         },
     )
-    triple_id = _kg.add_triple(
+    triple_id = _get_kg().add_triple(
         subject, predicate, object, valid_from=valid_from, source_closet=source_closet
     )
     return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {object}"}
@@ -901,7 +929,7 @@ def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = N
         "kg_invalidate",
         {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
     )
-    _kg.invalidate(subject, predicate, object, ended=ended)
+    _get_kg().invalidate(subject, predicate, object, ended=ended)
     return {
         "success": True,
         "fact": f"{subject} → {predicate} → {object}",
@@ -916,13 +944,13 @@ def tool_kg_timeline(entity: str = None):
             entity = sanitize_kg_value(entity, "entity")
         except ValueError as e:
             return {"error": str(e)}
-    results = _kg.timeline(entity)
+    results = _get_kg().timeline(entity)
     return {"entity": entity or "all", "timeline": results, "count": len(results)}
 
 
 def tool_kg_stats():
     """Knowledge graph overview: entities, triples, relationship types."""
-    return _kg.stats()
+    return _get_kg().stats()
 
 
 # ==================== AGENT DIARY ====================
