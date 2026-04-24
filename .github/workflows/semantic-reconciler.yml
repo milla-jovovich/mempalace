@@ -8,7 +8,8 @@ on:
       - build/conversion-kit
   pull_request:
     branches:
-      - build/conversion-kit
+      - develop
+      - main
 
 permissions:
   contents: read
