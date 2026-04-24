@@ -83,8 +83,9 @@ def test_collect_contexts_dedupes_identical_lines():
 
 
 def test_collect_contexts_truncates_long_lines():
+    """Legacy truncation check — pass explicit window_chars=240 (new default is 2000)."""
     lines = ["Alice " + ("x" * 1000)]
-    out = _collect_contexts(lines, "Alice")
+    out = _collect_contexts(lines, "Alice", window_chars=240)
     assert len(out[0]) <= 240
 
 

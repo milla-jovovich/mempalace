@@ -29,8 +29,13 @@ from mempalace.llm_client import LLMError, LLMProvider
 
 
 BATCH_SIZE = 25  # candidates per LLM call; tuned for 4B local models
-CONTEXT_LINES_PER_CANDIDATE = 3
-CONTEXT_WINDOW_CHARS = 240  # max chars per context line to keep tokens bounded
+# One rich window per candidate (was 3 × 240 = 720 chars total). A single
+# 2000-char window gives the LLM enough surrounding context to disambiguate
+# ambiguous tokens like "Bash" (shell vs name), "Cost" (noun vs name),
+# "Solen" (unknown vs real person). Same total token cost as 3 short lines
+# but much better signal density.
+CONTEXT_LINES_PER_CANDIDATE = 1
+CONTEXT_WINDOW_CHARS = 2000
 
 # Valid labels the LLM is allowed to return. Anything else is treated as
 # AMBIGUOUS so the user reviews it.
@@ -70,12 +75,18 @@ class RefineResult:
 
 
 def _collect_contexts(
-    corpus_lines: list[str], name: str, max_lines: int = CONTEXT_LINES_PER_CANDIDATE
+    corpus_lines: list[str],
+    name: str,
+    max_lines: int = CONTEXT_LINES_PER_CANDIDATE,
+    window_chars: int = CONTEXT_WINDOW_CHARS,
 ) -> list[str]:
     """Return up to `max_lines` distinct lines from the corpus that mention `name`.
 
     Case-insensitive token-boundary match. Lines are truncated to
-    CONTEXT_WINDOW_CHARS chars to keep token usage bounded.
+    `window_chars` chars to keep token usage bounded. The default
+    `window_chars=2000` gives the LLM a rich disambiguation window.
+    Legacy callers can pass `window_chars=240` for the pre-2026-04-24
+    behavior.
     """
     needle = re.compile(rf"(?<!\w){re.escape(name)}(?!\w)", re.IGNORECASE)
     seen: set[str] = set()
@@ -83,7 +94,7 @@ def _collect_contexts(
     for line in corpus_lines:
         if not needle.search(line):
             continue
-        trimmed = line.strip()[:CONTEXT_WINDOW_CHARS]
+        trimmed = line.strip()[:window_chars]
         if not trimmed or trimmed in seen:
             continue
         seen.add(trimmed)
