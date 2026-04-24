@@ -57,6 +57,18 @@ operations:
       tool: mempalace_init
       exposure: hidden
 
+  - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/registry
+    "@type": Capability
+    category: runtime-registry
+    description: Return the projected MemPalace runtime registry, including operations, integration defaults, plugin profiles, and collection identities.
+    enabled: true
+    cli:
+      command: registry
+      exposure: public
+    mcp:
+      tool: mempalace_runtime_registry
+      exposure: public
+
   - "@id": did:webvh:{SCID}:github.com:Fleet-to-Force:mempalace#op/hook-stop
     "@type": Capability
     category: hooks
