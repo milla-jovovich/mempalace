@@ -18,7 +18,7 @@
       "name": "mempalace-remote",
       "source": "./.claude-plugin-remote",
       "description": "Use a MemPalace install on a remote host over SSH. Same MCP tools and auto-save hooks, proxied to a central palace.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "messelink"
       }
