@@ -458,10 +458,12 @@ def cmd_repair(args):
     offset = 0
     while offset < total:
         batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        if not batch["ids"]:
+            break
         all_ids.extend(batch["ids"])
         all_docs.extend(batch["documents"])
         all_metas.extend(batch["metadatas"])
-        offset += batch_size
+        offset += len(batch["ids"])
     print(f"  Extracted {len(all_ids)} drawers")
 
     # Backup and rebuild

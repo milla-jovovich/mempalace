@@ -254,8 +254,8 @@ def rebuild_index(palace_path=None):
 
     # Back up ONLY the SQLite database, not the bloated HNSW files
     sqlite_path = os.path.join(palace_path, "chroma.sqlite3")
+    backup_path = sqlite_path + ".backup"
     if os.path.exists(sqlite_path):
-        backup_path = sqlite_path + ".backup"
         print(f"  Backing up chroma.sqlite3 ({os.path.getsize(sqlite_path) / 1e6:.0f} MB)...")
         shutil.copy2(sqlite_path, backup_path)
         print(f"  Backup: {backup_path}")
@@ -266,13 +266,25 @@ def rebuild_index(palace_path=None):
     new_col = backend.create_collection(palace_path, COLLECTION_NAME)
 
     filed = 0
-    for i in range(0, len(all_ids), batch_size):
-        batch_ids = all_ids[i : i + batch_size]
-        batch_docs = all_docs[i : i + batch_size]
-        batch_metas = all_metas[i : i + batch_size]
-        new_col.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
-        filed += len(batch_ids)
-        print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
+    try:
+        for i in range(0, len(all_ids), batch_size):
+            batch_ids = all_ids[i : i + batch_size]
+            batch_docs = all_docs[i : i + batch_size]
+            batch_metas = all_metas[i : i + batch_size]
+            new_col.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
+            filed += len(batch_ids)
+            print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
+    except Exception as e:
+        print(f"\n  ERROR during rebuild: {e}")
+        print(f"  Only {filed}/{len(all_ids)} drawers were re-filed.")
+        if os.path.exists(backup_path):
+            print(f"  Restoring from backup: {backup_path}")
+            backend.delete_collection(palace_path, COLLECTION_NAME)
+            shutil.copy2(backup_path, sqlite_path)
+            print("  Backup restored. Palace is back to pre-repair state.")
+        else:
+            print("  No backup available. Re-mine from source files to recover.")
+        raise
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print("  HNSW index is now clean with cosine distance metric.")
