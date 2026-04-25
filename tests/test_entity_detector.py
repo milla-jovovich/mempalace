@@ -235,13 +235,13 @@ def test_detect_entities_empty_files(tmp_path):
     f = tmp_path / "empty.txt"
     f.write_text("")
     result = detect_entities([f])
-    assert result == {"people": [], "projects": [], "uncertain": []}
+    assert result == {"people": [], "projects": [], "topics": [], "uncertain": []}
 
 
 def test_detect_entities_handles_missing_file(tmp_path):
     missing = tmp_path / "nonexistent.txt"
     result = detect_entities([missing])
-    assert result == {"people": [], "projects": [], "uncertain": []}
+    assert result == {"people": [], "projects": [], "topics": [], "uncertain": []}
 
 
 def test_detect_entities_respects_max_files(tmp_path):

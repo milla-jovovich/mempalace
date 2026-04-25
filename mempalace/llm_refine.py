@@ -197,12 +197,22 @@ def _apply_classifications(
     """Merge LLM decisions back into the detected dict.
 
     Returns (new_detected, reclassified_count, dropped_count).
+
+    Topics get their own bucket so the caller can persist them as
+    cross-wing tunnel signal. ``AMBIGUOUS`` still falls back to
+    ``uncertain`` for human review.
     """
     label_to_bucket = {
         "PERSON": "people",
         "PROJECT": "projects",
-        "TOPIC": "uncertain",
+        "TOPIC": "topics",
         "AMBIGUOUS": "uncertain",
+    }
+    bucket_to_type = {
+        "people": "person",
+        "projects": "project",
+        "topics": "topic",
+        "uncertain": "uncertain",
     }
 
     # Index every entity by name for in-place update
@@ -216,6 +226,7 @@ def _apply_classifications(
     new_detected: dict[str, list[dict]] = {
         "people": [],
         "projects": [],
+        "topics": [],
         "uncertain": [],
     }
 
@@ -223,7 +234,7 @@ def _apply_classifications(
         decision = decisions.get(entry["name"])
         if decision is None:
             # No LLM opinion — keep as-is
-            new_detected[old_bucket].append(entry)
+            new_detected.setdefault(old_bucket, []).append(entry)
             continue
 
         label, reason = decision
@@ -245,13 +256,7 @@ def _apply_classifications(
         updated["signals"] = signals
         if target_bucket != old_bucket:
             reclassified += 1
-            updated["type"] = (
-                "person"
-                if target_bucket == "people"
-                else "project"
-                if target_bucket == "projects"
-                else "uncertain"
-            )
+            updated["type"] = bucket_to_type.get(target_bucket, "uncertain")
         new_detected[target_bucket].append(updated)
 
     return new_detected, reclassified, dropped

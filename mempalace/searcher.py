@@ -236,6 +236,42 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
     }
 
 
+def _warn_if_legacy_metric(col) -> None:
+    """Print a one-line notice if the palace was created without
+    ``hnsw:space=cosine``.
+
+    ChromaDB's default is L2 (Euclidean), under which cosine-based
+    similarity interpretation falls apart — distances routinely exceed
+    1.0 and the display ``max(0, 1 - dist)`` floors every result to 0.
+    Legacy palaces (mined before this metadata was consistently set)
+    need ``mempalace repair`` to rebuild with the correct metric.
+
+    The warning fires only for palaces that clearly have the wrong
+    metric; palaces with no metadata table at all (empty dict) also
+    fall under this check since that is the signal of a pre-metadata
+    palace.
+    """
+    try:
+        meta = getattr(col, "metadata", None)
+    except Exception:
+        return
+    if not isinstance(meta, dict):
+        return
+    space = meta.get("hnsw:space")
+    if space == "cosine":
+        return
+    # Either missing or set to something else — both are suspect.
+    import sys as _sys
+
+    detail = f"hnsw:space={space!r}" if space else "no hnsw:space metadata"
+    print(
+        f"\n  NOTICE: this palace was created without cosine distance ({detail}).\n"
+        "          Semantic similarity scores will not be meaningful.\n"
+        "          Run `mempalace repair` to rebuild the index with the correct metric.",
+        file=_sys.stderr,
+    )
+
+
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
     """
     Search the palace. Returns verbatim drawer content.
@@ -247,6 +283,10 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         raise SearchError(f"No palace found at {palace_path}")
+
+    # Alert the user if this palace predates hnsw:space=cosine being set on
+    # creation — their similarity scores will be junk until they run repair.
+    _warn_if_legacy_metric(col)
 
     where = build_where_filter(wing, room)
 
@@ -273,6 +313,20 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f'\n  No results found for: "{query}"')
         return
 
+    # Pure-cosine retrieval on the CLI path was missing lexical matches:
+    # a drawer whose text contains every query term can still score distance
+    # >= 1.0 against the natural-language query when the drawer is a
+    # mechanical artifact (directory listing, diff, log fragment) that
+    # embeds as file-tree noise rather than as prose about its subject.
+    # The MCP tool path already hybridizes BM25 with vector sim via
+    # `_hybrid_rank`; do the same here so CLI results match what agents
+    # see via `mempalace_search`.
+    hits = [
+        {"text": doc, "distance": float(dist), "metadata": meta or {}}
+        for doc, meta, dist in zip(docs, metas, dists)
+    ]
+    hits = _hybrid_rank(hits, query)
+
     print(f"\n{'=' * 60}")
     print(f'  Results for: "{query}"')
     if wing:
@@ -281,19 +335,20 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         print(f"  Room: {room}")
     print(f"{'=' * 60}\n")
 
-    for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
-        similarity = round(max(0.0, 1 - dist), 3)
-        meta = meta or {}
+    for i, hit in enumerate(hits, 1):
+        vec_sim = round(max(0.0, 1 - hit["distance"]), 3)
+        bm25 = hit.get("bm25_score", 0.0)
+        meta = hit["metadata"]
         source = Path(meta.get("source_file", "?")).name
         wing_name = meta.get("wing", "?")
         room_name = meta.get("room", "?")
 
         print(f"  [{i}] {wing_name} / {room_name}")
         print(f"      Source: {source}")
-        print(f"      Match:  {similarity}")
+        print(f"      Match:  cosine={vec_sim}  bm25={bm25}")
         print()
         # Print the verbatim text, indented
-        for line in doc.strip().split("\n"):
+        for line in hit["text"].strip().split("\n"):
             print(f"      {line}")
         print()
         print(f"  {'─' * 56}")

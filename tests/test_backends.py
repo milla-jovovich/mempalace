@@ -16,6 +16,7 @@ from mempalace.backends.chroma import (
     ChromaBackend,
     ChromaCollection,
     _fix_blob_seq_ids,
+    _pin_hnsw_threads,
     quarantine_stale_hnsw,
 )
 
@@ -443,3 +444,52 @@ def test_quarantine_stale_hnsw_skips_already_quarantined(tmp_path):
     moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
     assert moved == []
     assert drift.exists()
+
+
+# ── _pin_hnsw_threads ─────────────────────────────────────────────────────
+
+
+def test_pin_hnsw_threads_retrofits_legacy_collection(tmp_path):
+    """Legacy collections (created without num_threads) get the retrofit applied."""
+    palace_path = tmp_path / "legacy-palace"
+    palace_path.mkdir()
+
+    client = chromadb.PersistentClient(path=str(palace_path))
+    col = client.create_collection(
+        "mempalace_drawers",
+        metadata={"hnsw:space": "cosine"},  # no num_threads — legacy
+    )
+    assert col.configuration_json.get("hnsw", {}).get("num_threads") is None
+
+    _pin_hnsw_threads(col)
+
+    assert col.configuration_json["hnsw"]["num_threads"] == 1
+
+
+def test_pin_hnsw_threads_swallows_all_errors():
+    """Retrofit never raises even when collection.modify explodes."""
+
+    class _ExplodingCollection:
+        def modify(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    _pin_hnsw_threads(_ExplodingCollection())  # must not raise
+
+
+def test_get_collection_applies_retrofit_on_existing_palace(tmp_path):
+    """ChromaBackend.get_collection(create=False) applies the retrofit."""
+    palace_path = tmp_path / "palace"
+    palace_path.mkdir()
+
+    # Simulate a legacy palace: create collection without num_threads
+    bootstrap_client = chromadb.PersistentClient(path=str(palace_path))
+    bootstrap_client.create_collection("mempalace_drawers", metadata={"hnsw:space": "cosine"})
+    del bootstrap_client  # drop reference so a fresh client reopens cleanly
+
+    wrapper = ChromaBackend().get_collection(
+        str(palace_path),
+        collection_name="mempalace_drawers",
+        create=False,
+    )
+
+    assert wrapper._collection.configuration_json["hnsw"]["num_threads"] == 1

@@ -313,8 +313,20 @@ def _save_tunnels(tunnels):
     Writes to ``tunnels.json.tmp`` then ``os.replace``s it into place, so
     a crash mid-write can never leave a partial/empty tunnels.json that
     silently wipes every tunnel on next read.
+
+    Also restricts the parent directory to 0o700 and the file to 0o600 —
+    tunnels reveal cross-wing connections (which projects/people/rooms
+    the user has explicitly linked) and should not be world-readable on
+    shared Linux/multi-user systems. Matches the file-permission pattern
+    established by #814 for the other sensitive palace files.
     """
-    os.makedirs(os.path.dirname(_TUNNEL_FILE), exist_ok=True)
+    parent = os.path.dirname(_TUNNEL_FILE)
+    os.makedirs(parent, exist_ok=True)
+    try:
+        os.chmod(parent, 0o700)
+    except (OSError, NotImplementedError):
+        # Windows / unsupported filesystems — tolerate.
+        pass
     tmp_path = _TUNNEL_FILE + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(tunnels, f, indent=2)
@@ -325,6 +337,10 @@ def _save_tunnels(tunnels):
             # Not all filesystems (or Windows file handles) support fsync — tolerate.
             pass
     os.replace(tmp_path, _TUNNEL_FILE)
+    try:
+        os.chmod(_TUNNEL_FILE, 0o600)
+    except (OSError, NotImplementedError):
+        pass
 
 
 def _endpoint_key(wing: str, room: str) -> str:
@@ -362,6 +378,7 @@ def create_tunnel(
     label: str = "",
     source_drawer_id: str = None,
     target_drawer_id: str = None,
+    kind: str = "explicit",
 ):
     """Create an explicit (symmetric) tunnel between two locations in the palace.
 
@@ -382,6 +399,11 @@ def create_tunnel(
         label: Description of the connection.
         source_drawer_id: Optional specific drawer ID.
         target_drawer_id: Optional specific drawer ID.
+        kind: Tunnel category — ``"explicit"`` (default, user-created link
+            between real rooms) or ``"topic"`` (auto-generated cross-wing
+            topical link where rooms are synthetic ``topic:<name>``
+            identifiers). Preserved on the stored dict so readers can
+            distinguish real-room traversals from topic connections.
 
     Returns:
         The stored tunnel dict.
@@ -401,6 +423,7 @@ def create_tunnel(
         "source": {"wing": source_wing, "room": source_room},
         "target": {"wing": target_wing, "room": target_room},
         "label": label,
+        "kind": kind,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     if source_drawer_id:
@@ -499,3 +522,159 @@ def follow_tunnels(wing: str, room: str, col=None, config=None):
                 pass
 
     return connections
+
+
+# =============================================================================
+# TOPIC TUNNELS — auto-link wings that share confirmed TOPIC labels
+# =============================================================================
+# When two wings have one or more confirmed topics in common (e.g. both
+# discuss "Angular" or "OpenAPI"), drop a symmetric tunnel between them.
+# Topics come from the LLM-refined ``TOPIC`` bucket in the per-project
+# ``entities.json`` and are persisted by wing in
+# ``~/.mempalace/known_entities.json`` under ``topics_by_wing``.
+#
+# Tunnels are created via the existing ``create_tunnel`` API so they share
+# storage and dedup with explicit tunnels. The room is a synthetic
+# ``topic:<original-casing>`` identifier — the ``topic:`` prefix namespaces
+# these tunnels away from literal folder-derived rooms so a wing with an
+# auto-detected "Angular" folder room and a "shared topic: Angular" tunnel
+# remain distinct at ``follow_tunnels`` / ``list_tunnels`` time. The prefix
+# is also visible to any LLM scanning the tunnel list. The ``kind: "topic"``
+# field on the stored dict gives callers a machine-readable discriminator.
+
+TOPIC_ROOM_PREFIX = "topic:"
+
+
+def _normalize_topic(name: str) -> str:
+    """Lowercase + strip topics for case-insensitive overlap detection."""
+    return str(name).strip().lower()
+
+
+def topic_room(name: str) -> str:
+    """Return the synthetic room identifier for a topic tunnel.
+
+    Prefixing avoids collisions with literal folder-derived rooms of the
+    same name (e.g. a wing that has both an "Angular" folder room and an
+    "Angular" topic tunnel).
+    """
+    return f"{TOPIC_ROOM_PREFIX}{name}"
+
+
+def compute_topic_tunnels(
+    topics_by_wing: dict,
+    min_count: int = 1,
+    label_prefix: str = "shared topic",
+) -> list[dict]:
+    """Create tunnels for every pair of wings that share >= ``min_count`` topics.
+
+    Args:
+        topics_by_wing: ``{wing_name: [topic_name, ...]}`` mapping. Topic
+            names are compared case-insensitively; the first observed
+            casing is used for the tunnel room name.
+        min_count: minimum number of overlapping topics required to drop
+            any tunnel between a wing pair. ``1`` means a single shared
+            topic is enough; bumping to e.g. ``2`` requires multiple
+            overlaps and filters out coincidental single-topic links.
+        label_prefix: human-readable string prefixed to the tunnel label.
+
+    Returns:
+        List of tunnel dicts as returned by ``create_tunnel`` — one per
+        (wing_a, wing_b, topic) triple that crossed the threshold. A
+        wing-pair below ``min_count`` produces no tunnels at all (not
+        even for its single shared topic).
+
+    No-op semantics:
+      - empty/None ``topics_by_wing`` returns ``[]``.
+      - wings whose topic list is empty are skipped.
+      - ``min_count <= 0`` is clamped to 1.
+    """
+    if not topics_by_wing:
+        return []
+
+    min_count = max(1, int(min_count))
+
+    # Build a normalized-topic -> first-seen casing map per wing so we
+    # preserve display casing while still doing case-insensitive overlap.
+    wing_topics: dict[str, dict[str, str]] = {}
+    for wing, names in topics_by_wing.items():
+        if not isinstance(wing, str) or not wing.strip():
+            continue
+        if not isinstance(names, (list, tuple)):
+            continue
+        bucket: dict[str, str] = {}
+        for n in names:
+            if not isinstance(n, str):
+                continue
+            key = _normalize_topic(n)
+            if not key:
+                continue
+            bucket.setdefault(key, n.strip())
+        if bucket:
+            wing_topics[wing.strip()] = bucket
+
+    wings = sorted(wing_topics.keys())
+    created: list[dict] = []
+    for i, wa in enumerate(wings):
+        topics_a = wing_topics[wa]
+        for wb in wings[i + 1 :]:
+            topics_b = wing_topics[wb]
+            shared_keys = set(topics_a.keys()) & set(topics_b.keys())
+            if len(shared_keys) < min_count:
+                continue
+            # Stable sort for deterministic tunnel ordering across runs.
+            for key in sorted(shared_keys):
+                # Prefer the casing from whichever wing sorts first — both
+                # are valid; this just keeps the displayed room consistent.
+                topic_name = topics_a[key] if topics_a[key] else topics_b[key]
+                room = topic_room(topic_name)
+                tunnel = create_tunnel(
+                    source_wing=wa,
+                    source_room=room,
+                    target_wing=wb,
+                    target_room=room,
+                    label=f"{label_prefix}: {topic_name}",
+                    kind="topic",
+                )
+                created.append(tunnel)
+    return created
+
+
+def topic_tunnels_for_wing(
+    wing: str,
+    topics_by_wing: dict,
+    min_count: int = 1,
+    label_prefix: str = "shared topic",
+) -> list[dict]:
+    """Compute topic tunnels involving a single wing.
+
+    Used by the miner to incrementally update tunnels for the wing that
+    just finished mining without recomputing pairs that don't involve it.
+    Returns the list of tunnels created or refreshed.
+    """
+    if not topics_by_wing or not isinstance(wing, str) or not wing.strip():
+        return []
+
+    wing = wing.strip()
+    own = topics_by_wing.get(wing)
+    if not isinstance(own, (list, tuple)) or not own:
+        return []
+
+    # Restrict the pair-wise computation to (wing, other) pairs only by
+    # building a 2-wing slice for each other wing. Reusing
+    # ``compute_topic_tunnels`` keeps the threshold and casing logic in
+    # one place.
+    created: list[dict] = []
+    for other, other_topics in topics_by_wing.items():
+        if not isinstance(other, str) or not other.strip() or other == wing:
+            continue
+        if not isinstance(other_topics, (list, tuple)) or not other_topics:
+            continue
+        slice_map = {wing: list(own), other: list(other_topics)}
+        created.extend(
+            compute_topic_tunnels(
+                slice_map,
+                min_count=min_count,
+                label_prefix=label_prefix,
+            )
+        )
+    return created

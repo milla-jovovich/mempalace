@@ -440,7 +440,7 @@ def detect_entities(file_paths: list, max_files: int = 10, languages=("en",)) ->
     candidates = extract_candidates(combined_text, languages=langs)
 
     if not candidates:
-        return {"people": [], "projects": [], "uncertain": []}
+        return {"people": [], "projects": [], "topics": [], "uncertain": []}
 
     # Score and classify each candidate
     people = []
@@ -467,6 +467,7 @@ def detect_entities(file_paths: list, max_files: int = 10, languages=("en",)) ->
     return {
         "people": people[:15],
         "projects": projects[:10],
+        "topics": [],
         "uncertain": uncertain[:8],
     }
 
@@ -489,7 +490,13 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
     """
     Interactive confirmation step.
     User reviews detected entities, removes wrong ones, adds missing ones.
-    Returns confirmed {people: [names], projects: [names]}
+    Returns confirmed {people: [names], projects: [names], topics: [names]}.
+
+    Topics are not surfaced for interactive review — they come from the
+    LLM-refined ``TOPIC`` bucket and are passed through verbatim. They
+    feed cross-wing tunnel computation at mine time (see
+    ``palace_graph.compute_topic_tunnels``); a wrong topic at worst adds
+    a low-traffic tunnel and never alters drawer storage.
 
     Pass yes=True to auto-accept all detected entities without prompting.
     """
@@ -501,18 +508,28 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
     _print_entity_list(detected["people"], "PEOPLE")
     _print_entity_list(detected["projects"], "PROJECTS")
 
+    if detected.get("topics"):
+        _print_entity_list(detected["topics"], "TOPICS (cross-wing tunnel signal)")
+
     if detected["uncertain"]:
         _print_entity_list(detected["uncertain"], "UNCERTAIN (need your call)")
 
     confirmed_people = [e["name"] for e in detected["people"]]
     confirmed_projects = [e["name"] for e in detected["projects"]]
+    confirmed_topics = [e["name"] for e in detected.get("topics", [])]
 
     if yes:
         # Auto-accept: include all detected (skip uncertain — ambiguous without user input)
         print(
-            f"\n  Auto-accepting {len(confirmed_people)} people, {len(confirmed_projects)} projects."
+            f"\n  Auto-accepting {len(confirmed_people)} people, "
+            f"{len(confirmed_projects)} projects, "
+            f"{len(confirmed_topics)} topics."
         )
-        return {"people": confirmed_people, "projects": confirmed_projects}
+        return {
+            "people": confirmed_people,
+            "projects": confirmed_projects,
+            "topics": confirmed_topics,
+        }
 
     print(f"\n{'─' * 58}")
     print("  Options:")
@@ -570,11 +587,14 @@ def confirm_entities(detected: dict, yes: bool = False) -> dict:
     print("  Confirmed:")
     print(f"  People:   {', '.join(confirmed_people) or '(none)'}")
     print(f"  Projects: {', '.join(confirmed_projects) or '(none)'}")
+    if confirmed_topics:
+        print(f"  Topics:   {', '.join(confirmed_topics)}")
     print(f"{'=' * 58}\n")
 
     return {
         "people": confirmed_people,
         "projects": confirmed_projects,
+        "topics": confirmed_topics,
     }
 
 

@@ -558,6 +558,7 @@ def to_detected_dict(
     return {
         "people": people_entries,
         "projects": proj_entries,
+        "topics": [],
         "uncertain": [],
     }
 
@@ -577,7 +578,7 @@ def _merge_detected(primary: dict, secondary: dict, drop_secondary_uncertain: bo
     """
     seen = {e["name"].lower() for cat in primary.values() for e in cat}
     merged = {k: list(v) for k, v in primary.items()}
-    for cat_key in ("people", "projects", "uncertain"):
+    for cat_key in ("people", "projects", "topics", "uncertain"):
         if cat_key == "uncertain" and drop_secondary_uncertain:
             continue
         for e in secondary.get(cat_key, []):
@@ -654,7 +655,7 @@ def discover_entities(
     prose_detected = (
         detect_entities(prose_files, languages=languages)
         if prose_files
-        else {"people": [], "projects": [], "uncertain": []}
+        else {"people": [], "projects": [], "topics": [], "uncertain": []}
     )
 
     # Without LLM refinement, suppress regex "uncertain" noise when real
