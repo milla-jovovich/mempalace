@@ -265,7 +265,7 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
         if where and "Error finding id" in str(e):
             print(
                 "\n  Hint: this palace's HNSW index predates 1.0 and fails on "
-                "filtered queries.\n  Run: mempalace repair <palace_path>"
+                f"filtered queries.\n  Run: mempalace repair {palace_path}"
             )
         print(f"\n  Search error: {e}")
         raise SearchError(f"Search error: {e}") from e
@@ -360,7 +360,7 @@ def search_memories(
         if where and "Error finding id" in str(e):
             return {
                 "error": f"Search error: {e}",
-                "hint": "This palace's HNSW index predates 1.0. Run: mempalace repair <palace_path>",
+                "hint": f"This palace's HNSW index predates 1.0. Run: mempalace repair {palace_path}",
             }
         return {"error": f"Search error: {e}"}
 

@@ -203,7 +203,9 @@ class TestHNSWRepairHint:
     """
 
     def test_cli_filtered_query_hints_repair(self, capsys):
-        """CLI path: filtered search + 'Error finding id' → hint printed."""
+        """CLI path: filtered search + 'Error finding id' → hint printed
+        with the actual palace_path interpolated so it's copy-pasteable.
+        """
         mock_col = MagicMock()
         mock_col.query.side_effect = RuntimeError("Error finding id 1234")
 
@@ -212,10 +214,14 @@ class TestHNSWRepairHint:
                 search("test", "/fake/path", wing="project")
 
         captured = capsys.readouterr()
-        assert "mempalace repair" in captured.out
+        assert "mempalace repair /fake/path" in captured.out
+        # Placeholder must not leak through.
+        assert "<palace_path>" not in captured.out
 
     def test_api_filtered_query_returns_hint(self):
-        """API path: filtered search + 'Error finding id' → dict has hint."""
+        """API path: filtered search + 'Error finding id' → dict has hint
+        with the actual palace_path interpolated.
+        """
         mock_col = MagicMock()
         mock_col.query.side_effect = RuntimeError("Error finding id 1234")
 
@@ -224,7 +230,8 @@ class TestHNSWRepairHint:
 
         assert "error" in result
         assert "hint" in result
-        assert "mempalace repair" in result["hint"]
+        assert "mempalace repair /fake/path" in result["hint"]
+        assert "<palace_path>" not in result["hint"]
 
     def test_unfiltered_query_does_not_hint(self):
         """Guard check: without a wing/room filter the hint must NOT fire,
