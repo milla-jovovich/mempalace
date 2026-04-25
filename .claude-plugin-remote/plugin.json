@@ -10,7 +10,7 @@
   "mcpServers": {
     "mempalace": {
       "command": "ssh",
-      "args": ["${MEMPALACE_REMOTE_HOST}", "mempalace-mcp"]
+      "args": ["${MEMPALACE_REMOTE_HOST}", "${MEMPALACE_REMOTE_MCP_BIN:-mempalace-mcp}"]
     }
   },
   "keywords": [

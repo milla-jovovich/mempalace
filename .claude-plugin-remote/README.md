@@ -18,7 +18,7 @@ The default `mempalace` plugin runs the MCP server and auto-save hooks against a
 
 ## Prerequisites
 
-1. **mempalace installed on the central host** with both `mempalace` and `mempalace-mcp` available on the host's non-interactive SSH `PATH`. See "PATH gotcha" below.
+1. **mempalace installed on the central host.**
 2. **Passwordless SSH key** from client to host. `ssh $HOST true` must succeed without prompts.
 3. **`MEMPALACE_REMOTE_HOST`** env var set in the environment Claude Code launches in (e.g. `~/.bashrc`, `~/.zshrc`, or systemd unit env).
 
@@ -37,6 +37,14 @@ export MEMPALACE_REMOTE_HOST=raindance   # or whatever host alias from ~/.ssh/co
 
 Restart Claude Code. The MCP server should connect, and Stop / PreCompact hooks fire automatically.
 
+## Configuration
+
+| Env var | Required | Default | Description |
+|---|---|---|---|
+| `MEMPALACE_REMOTE_HOST` | yes | — | SSH target — alias from `~/.ssh/config` or fully qualified hostname |
+| `MEMPALACE_REMOTE_BIN` | no | `mempalace` | Path to the `mempalace` CLI on the remote (used by Stop / PreCompact hooks) |
+| `MEMPALACE_REMOTE_MCP_BIN` | no | `mempalace-mcp` | Path to the `mempalace-mcp` server on the remote (used by the MCP client) |
+
 ## Strongly recommended: SSH ControlMaster
 
 Every MCP tool call and every hook fire spawns a fresh `ssh` process. Without connection multiplexing, each pays 200–500 ms of TCP+auth overhead — adding up to seconds per session. Add to client `~/.ssh/config`:
@@ -52,9 +60,16 @@ After this, the second and subsequent SSH calls reuse the master connection (~10
 
 ## PATH gotcha
 
-`ssh host command` runs `command` in a **non-interactive, non-login** shell. On most Linux setups, that shell's `PATH` does **not** include `~/.local/bin` (where `pip install --user` and `pipx` put their binaries). If `mempalace` and `mempalace-mcp` are only on PATH for your interactive shell, the SSH calls will fail with `command not found`.
+`ssh host command` runs `command` in a **non-interactive, non-login** shell. On most Linux setups, that shell's `PATH` does **not** include `~/.local/bin` (where `pip install --user` and `pipx` put their binaries). If `mempalace` and `mempalace-mcp` are only on PATH for your interactive shell, the SSH calls fail with `command not found`.
 
-Fixes, in order of preference:
+The simplest fix is to point the plugin at the full paths on the remote:
+
+```sh
+export MEMPALACE_REMOTE_BIN=/home/youruser/.local/bin/mempalace
+export MEMPALACE_REMOTE_MCP_BIN=/home/youruser/.local/bin/mempalace-mcp
+```
+
+Other options:
 
 1. Install mempalace system-wide on the host so the binaries land in `/usr/local/bin` or `/usr/bin`.
 2. Symlink the binaries into a system PATH directory:
