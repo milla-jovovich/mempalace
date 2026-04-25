@@ -53,6 +53,8 @@ from pathlib import Path  # noqa: E402
 from .config import (  # noqa: E402
     EmbeddingModelMismatchError,
     MempalaceConfig,
+    get_embedding_function,
+    read_collection_metadata,
     sanitize_kg_value,
     sanitize_name,
     sanitize_content,
@@ -213,10 +215,33 @@ def _get_client():
 
 
 def _get_collection(create=False):
-    """Return the ChromaDB collection, caching the client between calls."""
+    """Return the ChromaDB collection, caching the client between calls.
+
+    Reads the embedding model from collection metadata (stamped at init time
+    via ``mempalace init --model``) and instantiates the matching embedding
+    function. Without this, the MCP server would fall back to ChromaDB's
+    built-in (dim 384), which mismatches palaces built with a multilingual
+    model (e.g. e5-base, dim 768) and breaks insert/query.
+
+    Legacy palaces whose metadata lacks ``embedding_model`` are stamped
+    with ``chromadb-default`` on first access — matching the behaviour of
+    ``palace.get_collection()``. Users with non-default legacy palaces must
+    pre-stamp metadata via the matching model name before relying on this.
+    """
     global _collection_cache, _metadata_cache, _metadata_cache_time
     try:
         client = _get_client()
+
+        # Resolve embedding function from stored metadata so MCP and CLI
+        # share the same model. Reading goes through a separate client so
+        # it never disturbs our cached one.
+        existing_meta = read_collection_metadata(
+            _config.palace_path, _config.collection_name
+        )
+        stored_model = (existing_meta or {}).get("embedding_model", "chromadb-default")
+        device = MempalaceConfig.detect_device()
+        ef = get_embedding_function(model_name=stored_model, device=device)
+
         if create:
             # hnsw:num_threads=1 disables ChromaDB's multi-threaded ParallelFor
             # HNSW insert path, which has a race in repairConnectionsForUpdate /
@@ -225,20 +250,51 @@ def _get_collection(create=False):
             # palaces whose collections were created before this fix (the
             # runtime config does not persist cross-process in chromadb 1.5.x,
             # so the retrofit runs every time _get_collection opens a cache).
+            #
+            # embedding_function is derived from the embedding_model stamped
+            # into collection metadata at init time (PR #442). Without
+            # passing it here, ChromaDB silently falls back to its built-in
+            # default (all-MiniLM-L6-v2, dim 384) — so MCP queries against a
+            # palace built with multilingual-e5-base (dim 768) hit a
+            # dimension mismatch instead of the right vector space.
             raw = client.get_or_create_collection(
                 _config.collection_name,
-                metadata={"hnsw:space": "cosine", "hnsw:num_threads": 1},
+                embedding_function=ef,
+                metadata={
+                    "hnsw:space": "cosine",
+                    "hnsw:num_threads": 1,
+                    "embedding_model": stored_model,
+                },
             )
             _pin_hnsw_threads(raw)
             _collection_cache = ChromaCollection(raw)
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
-            raw = client.get_collection(_config.collection_name)
+            raw = client.get_collection(
+                _config.collection_name,
+                embedding_function=ef,
+            )
             _pin_hnsw_threads(raw)
             _collection_cache = ChromaCollection(raw)
             _metadata_cache = None
             _metadata_cache_time = 0
+
+        # Stamp embedding_model into metadata if the collection pre-dates
+        # init-time binding — keeps MCP and palace.get_collection in sync.
+        # Exclude hnsw:* keys from the modify call: ChromaDB rejects re-setting
+        # the distance function via metadata even when the value is unchanged.
+        if (
+            _collection_cache is not None
+            and not (existing_meta or {}).get("embedding_model")
+        ):
+            current_meta = _collection_cache.metadata or {}
+            new_meta = {
+                k: v for k, v in current_meta.items() if not k.startswith("hnsw:")
+            }
+            new_meta["embedding_model"] = stored_model
+            _collection_cache.modify(metadata=new_meta)
+
         return _collection_cache
     except EmbeddingModelMismatchError:
         raise
