@@ -32,21 +32,35 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check reconciler availability
+        id: reconciler
+        run: |
+          if [ -f tools/mempalace_execution_kit/semantic_reconciler.py ] && [ -f tools/mempalace_execution_kit/reconcile_policy.mempalace.yaml ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Semantic reconciler files are not present in this ref; skipping seed-workflow validation."
+          fi
+
       - name: Setup Python 3.13
+        if: steps.reconciler.outputs.available == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
       - name: Install runtime dependencies
+        if: steps.reconciler.outputs.available == 'true'
         run: |
           python -m pip install --upgrade pip setuptools wheel hatchling
           python -m pip install -e .
 
       - name: Fetch integration refs
+        if: steps.reconciler.outputs.available == 'true'
         run: |
           git fetch origin develop build/conversion-kit --prune
 
       - name: Run semantic reconciler plan
+        if: steps.reconciler.outputs.available == 'true'
         run: |
           python tools/mempalace_execution_kit/semantic_reconciler.py \
             --repo-root . \
@@ -57,7 +71,7 @@ jobs:
             --incoming-ref origin/develop
 
       - name: Upload reconciler artifacts
-        if: always()
+        if: always() && steps.reconciler.outputs.available == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: semantic-reconciler-plan-${{ github.run_id }}
