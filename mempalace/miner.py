@@ -9,6 +9,7 @@ Stores verbatim chunks as drawers. No summaries. Ever.
 
 import os
 import sys
+import time
 import hashlib
 import fnmatch
 from pathlib import Path
@@ -633,34 +634,57 @@ def _extract_entities_for_metadata(content: str) -> str:
     return ";".join(capped)
 
 
+def _build_drawer_payload(
+    wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
+) -> tuple:
+    """Build a (drawer_id, content, metadata) triple for a single drawer.
+
+    Shared by :func:`add_drawer` (single-drawer API) and :func:`process_file`
+    (batched per-file upserts). Centralising the drawer ID + metadata
+    construction keeps the two paths in sync — any future metadata additions
+    land in one place.
+    """
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
+    metadata = {
+        "wing": wing,
+        "room": room,
+        "source_file": source_file,
+        "chunk_index": chunk_index,
+        "added_by": agent,
+        "filed_at": datetime.now().isoformat(),
+        "normalize_version": NORMALIZE_VERSION,
+    }
+    # Store file mtime so we can detect modifications later.
+    try:
+        metadata["source_mtime"] = os.path.getmtime(source_file)
+    except OSError:
+        pass
+    # Tag with hall for graph connectivity within wings
+    metadata["hall"] = detect_hall(content)
+    # Tag with entity names for filterable search
+    entities = _extract_entities_for_metadata(content)
+    if entities:
+        metadata["entities"] = entities
+    return drawer_id, content, metadata
+
+
 def add_drawer(
     collection, wing: str, room: str, content: str, source_file: str, chunk_index: int, agent: str
 ):
-    """Add one drawer to the palace."""
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
+    """Add one drawer to the palace.
+
+    Thin single-drawer wrapper around :func:`_build_drawer_payload` + upsert.
+    Kept for callers (tests, external integrations) that file one drawer at
+    a time. The mining hot path uses :func:`process_file` which batches all
+    chunks from one file into a single ``collection.upsert()`` call — see the
+    batching rationale in ``process_file``.
+    """
+    drawer_id, doc, metadata = _build_drawer_payload(
+        wing, room, content, source_file, chunk_index, agent
+    )
     try:
-        metadata = {
-            "wing": wing,
-            "room": room,
-            "source_file": source_file,
-            "chunk_index": chunk_index,
-            "added_by": agent,
-            "filed_at": datetime.now().isoformat(),
-            "normalize_version": NORMALIZE_VERSION,
-        }
-        # Store file mtime so we can detect modifications later.
-        try:
-            metadata["source_mtime"] = os.path.getmtime(source_file)
-        except OSError:
-            pass
-        # Tag with hall for graph connectivity within wings
-        metadata["hall"] = detect_hall(content)
-        # Tag with entity names for filterable search
-        entities = _extract_entities_for_metadata(content)
-        if entities:
-            metadata["entities"] = entities
         collection.upsert(
-            documents=[content],
+            documents=[doc],
             ids=[drawer_id],
             metadatas=[metadata],
         )
@@ -725,10 +749,24 @@ def process_file(
         except Exception:
             pass
 
-        drawers_added = 0
+        # Batch upsert: all chunks from one file go into a single
+        # ``collection.upsert()`` call instead of one call per chunk.
+        #
+        # ChromaDB 1.5.x's Rust compactor crashes under high individual-write
+        # pressure — a typical project mine issues thousands of one-row
+        # upserts, which accumulate write-ahead-log entries faster than the
+        # background compactor can flush them. Symptoms: segfault (exit 139),
+        # "Error in compaction: Failed to apply logs to the metadata segment",
+        # or metadata column type mismatches surfacing on later reads.
+        #
+        # Batching per-file collapses N chunks into 1 WAL entry, which keeps
+        # the compactor's queue bounded. See checkpoint logic in ``mine()``
+        # for the complementary periodic-flush mechanism.
+        batch_ids = []
+        batch_docs = []
+        batch_metas = []
         for chunk in chunks:
-            added = add_drawer(
-                collection=collection,
+            drawer_id, doc, metadata = _build_drawer_payload(
                 wing=wing,
                 room=room,
                 content=chunk["content"],
@@ -736,8 +774,21 @@ def process_file(
                 chunk_index=chunk["chunk_index"],
                 agent=agent,
             )
-            if added:
-                drawers_added += 1
+            batch_ids.append(drawer_id)
+            batch_docs.append(doc)
+            batch_metas.append(metadata)
+
+        drawers_added = 0
+        if batch_ids:
+            try:
+                collection.upsert(
+                    ids=batch_ids,
+                    documents=batch_docs,
+                    metadatas=batch_metas,
+                )
+                drawers_added = len(batch_ids)
+            except Exception:
+                raise
 
         # Build closet — the searchable index pointing to these drawers.
         # Purge first: a re-mine (mtime change or normalize_version bump) must
@@ -894,6 +945,14 @@ def mine(
     files_skipped = 0
     room_counts = defaultdict(int)
 
+    # Periodic checkpoint: release and re-acquire the collection every
+    # ``BATCH_CHECKPOINT`` files. Forces ChromaDB to flush any buffered
+    # write-ahead-log entries and lets the Rust compactor catch up between
+    # batches. Without this, long mines (thousands of files) can still
+    # outrun the compactor even with per-file batching, because the
+    # compactor runs concurrently with writes and falls behind.
+    BATCH_CHECKPOINT = 200
+
     for i, filepath in enumerate(files, 1):
         drawers, room = process_file(
             filepath=filepath,
@@ -912,6 +971,24 @@ def mine(
             room_counts[room] += 1
             if not dry_run:
                 print(f"  + [{i:4}/{len(files)}] {filepath.name[:50]:50} +{drawers}")
+
+        # Checkpoint: flush WAL + give the compactor breathing room.
+        # Skip on the final file — the post-loop release handles that.
+        if not dry_run and i % BATCH_CHECKPOINT == 0 and i < len(files):
+            print(f"\n  [Checkpoint {i}/{len(files)}] Flushing to disk...")
+            collection = None
+            closets_col = None
+            time.sleep(0.2)
+            collection = get_collection(palace_path)
+            closets_col = get_closets_collection(palace_path)
+
+    # Release collection references so the final WAL entries can flush
+    # cleanly before the process exits. Without this, the last few writes
+    # may linger in the compactor's queue and surface as a compaction
+    # error the next time the palace is opened.
+    if not dry_run:
+        collection = None
+        closets_col = None
 
     print(f"\n{'=' * 55}")
     print("  Done.")
