@@ -658,10 +658,24 @@ def search_memories(
     # and closet-first routing hides drawers that direct search would find.
     warnings: list[str] = []
     drawer_results: dict = {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+    # Over-fetch for re-ranking + post-filter survival.
+    #
+    # When kind != "all", _apply_kind_text_filter drops checkpoints
+    # (or non-checkpoints, for kind="checkpoint") from the candidate
+    # pool. On a checkpoint-heavy palace, top-N vector hits are
+    # dominated by CHECKPOINT diary entries (short, word-dense, embed
+    # strongly) — observed 2026-04-25 on the 151K-drawer canonical
+    # palace where top-10 hits were all checkpoints for typical
+    # content queries. Without aggressive over-fetch the post-filter
+    # empties the result set even when substantive content drawers
+    # exist further down the ranking. Pull 20× the requested limit
+    # (capped at 100) when filtering applies; keep the cheaper 3×
+    # over-fetch for kind="all" where no post-filter runs.
+    pull_size = max(n_results * 20, 100) if kind != "all" else n_results * 3
     try:
         dkwargs = {
             "query_texts": [query],
-            "n_results": n_results * 3,  # over-fetch for re-ranking
+            "n_results": pull_size,
             "include": ["documents", "metadatas", "distances"],
         }
         if where:
