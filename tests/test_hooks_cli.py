@@ -445,8 +445,14 @@ def test_maybe_auto_ingest_with_env(tmp_path):
                     mock_popen.assert_called_once()
 
 
-def test_maybe_auto_ingest_with_transcript(tmp_path):
-    """Falls back to transcript directory when MEMPAL_DIR is not set."""
+def test_maybe_auto_ingest_no_mempal_dir_does_not_spawn(tmp_path):
+    """Without MEMPAL_DIR set, _maybe_auto_ingest must NOT mine the transcript dir.
+
+    Regression: the previous transcript-parent fallback caused the regular
+    project miner to re-chunk Claude Code session JSONLs on every hook fire,
+    duplicating work already done by _ingest_transcript in convo mode and
+    producing unbounded palace growth.
+    """
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
     with patch.dict("os.environ", {}, clear=True):
@@ -454,7 +460,7 @@ def test_maybe_auto_ingest_with_transcript(tmp_path):
             with patch("mempalace.hooks_cli._MINE_PID_FILE", tmp_path / "mine.pid"):
                 with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
                     _maybe_auto_ingest(str(transcript))
-                    mock_popen.assert_called_once()
+                    mock_popen.assert_not_called()
 
 
 def test_maybe_auto_ingest_oserror(tmp_path):
@@ -526,12 +532,17 @@ def test_get_mine_dir_mempal_dir(tmp_path):
         assert _get_mine_dir(str(transcript)) == str(mempal_dir)
 
 
-def test_get_mine_dir_transcript_fallback(tmp_path):
-    """Falls back to transcript parent dir when MEMPAL_DIR is not set."""
+def test_get_mine_dir_no_transcript_fallback(tmp_path):
+    """Without MEMPAL_DIR set, _get_mine_dir returns "" even with a transcript path.
+
+    The transcript-parent fallback was removed: it caused the project miner
+    to re-ingest Claude Code session JSONLs that _ingest_transcript already
+    handles in convo mode with dedup.
+    """
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
     with patch.dict("os.environ", {}, clear=True):
-        assert _get_mine_dir(str(transcript)) == str(tmp_path)
+        assert _get_mine_dir(str(transcript)) == ""
 
 
 def test_get_mine_dir_empty():
@@ -609,6 +620,48 @@ def test_stop_hook_oserror_on_write(tmp_path):
     assert "systemMessage" in result
 
 
+def test_stop_hook_does_not_double_mine_transcript(tmp_path):
+    """Regression: silent stop hook must spawn exactly ONE mine subprocess
+    for the transcript, not two.
+
+    Before the fix, every save fired both:
+      1. _ingest_transcript — async `mempalace mine ... --mode convos` (good, dedups)
+      2. _maybe_auto_ingest — async `mempalace mine ...` (bug, no dedup)
+
+    Both fell back to the transcript's parent dir when MEMPAL_DIR was unset,
+    so the second call re-chunked the same Claude Code session JSONLs as
+    project files on every fire. As session JSONLs grew, each fire ingested
+    more, producing unbounded palace growth.
+    """
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
+    )
+    save_result = {"count": SAVE_INTERVAL, "themes": []}
+    with patch.dict("os.environ", {}, clear=True):
+        with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result):
+            with patch("mempalace.hooks_cli._mempalace_python", return_value="/usr/bin/python3"):
+                with patch("mempalace.hooks_cli.subprocess.Popen") as mock_popen:
+                    _capture_hook_output(
+                        hook_stop,
+                        {
+                            "session_id": "doubletest",
+                            "stop_hook_active": False,
+                            "transcript_path": str(transcript),
+                        },
+                        state_dir=tmp_path,
+                    )
+    # Exactly one Popen — the convo-mode mine via _ingest_transcript.
+    assert mock_popen.call_count == 1, (
+        f"expected one mine subprocess, got {mock_popen.call_count}: {mock_popen.call_args_list}"
+    )
+    spawned_cmd = mock_popen.call_args_list[0][0][0]
+    assert "--mode" in spawned_cmd and "convos" in spawned_cmd, (
+        f"the single mine must be the convo-mode dedup'd one, got: {spawned_cmd}"
+    )
+
+
 # --- hook_precompact with MEMPAL_DIR ---
 
 
@@ -656,8 +709,14 @@ def test_precompact_with_timeout(tmp_path):
     assert result == {}
 
 
-def test_precompact_mines_transcript_dir(tmp_path, monkeypatch):
-    """Precompact mines transcript directory when no MEMPAL_DIR."""
+def test_precompact_no_sync_project_mine_without_mempal_dir(tmp_path, monkeypatch):
+    """Precompact must NOT run the synchronous project miner against the
+    transcript's parent dir when MEMPAL_DIR is unset.
+
+    The async convo-mode mine via _ingest_transcript already covers the
+    transcript with dedup; the previous fallback re-chunked the same JSONLs
+    as project files on every fire and produced unbounded palace growth.
+    """
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
     monkeypatch.delenv("MEMPAL_DIR", raising=False)
@@ -668,10 +727,7 @@ def test_precompact_mines_transcript_dir(tmp_path, monkeypatch):
             state_dir=tmp_path,
         )
     assert result == {}
-    mock_run.assert_called_once()
-    # Verify mine dir is the transcript's parent
-    call_args = mock_run.call_args[0][0]
-    assert str(tmp_path) in call_args[-1]
+    mock_run.assert_not_called()
 
 
 # --- run_hook ---

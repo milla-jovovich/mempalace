@@ -198,14 +198,20 @@ def _output(data: dict):
 
 
 def _get_mine_dir(transcript_path: str = "") -> str:
-    """Determine directory to mine from MEMPAL_DIR or transcript path."""
+    """Resolve MEMPAL_DIR to a directory the project miner should ingest.
+
+    Returns the value of ``MEMPAL_DIR`` if it is set and points at an
+    existing directory, otherwise the empty string. ``transcript_path``
+    is accepted for signature stability but no longer used as a fallback:
+    the previous behaviour of mining the transcript's parent directory
+    (``~/.claude/projects/-<project>/``) caused the regular project
+    miner to re-chunk every JSONL session file on every hook fire, with
+    no dedup, since :func:`_ingest_transcript` already covers transcripts
+    in conversation mode. See PR #<this> for the incident.
+    """
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
     if mempal_dir and os.path.isdir(mempal_dir):
         return mempal_dir
-    if transcript_path:
-        path = Path(transcript_path).expanduser()
-        if path.is_file():
-            return str(path.parent)
     return ""
 
 
