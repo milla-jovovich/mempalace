@@ -1,0 +1,6 @@
+{
+  "mempalace": {
+    "command": "ssh",
+    "args": ["${MEMPALACE_REMOTE_HOST}", "mempalace-mcp"]
+  }
+}
