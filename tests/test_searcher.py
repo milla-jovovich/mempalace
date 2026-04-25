@@ -185,6 +185,39 @@ class TestSearchMemories:
         assert any("sqlite+BM25" in w for w in result["warnings"])
 
 
+# ── BM25 internals: None / empty document safety ─────────────────────
+
+
+class TestBM25NoneSafety:
+    """Regression tests for the AttributeError observed in production when
+    Chroma returned ``None`` documents inside a hybrid-rerank pass.
+
+    Trace from the daemon log (2026-04-24 21:07:05):
+        File "mempalace/searcher.py", line 81, in _bm25_scores
+            tokenized = [_tokenize(d) for d in documents]
+        File "mempalace/searcher.py", line 52, in _tokenize
+            return _TOKEN_RE.findall(text.lower())
+        AttributeError: 'NoneType' object has no attribute 'lower'
+    """
+
+    def test_tokenize_handles_none(self):
+        from mempalace.searcher import _tokenize
+        assert _tokenize(None) == []
+
+    def test_tokenize_handles_empty_string(self):
+        from mempalace.searcher import _tokenize
+        assert _tokenize("") == []
+
+    def test_bm25_scores_does_not_crash_on_none_documents(self):
+        """A ``None`` mixed into the corpus must yield score 0.0 for that doc
+        and finite scores for the rest, not raise AttributeError."""
+        from mempalace.searcher import _bm25_scores
+        scores = _bm25_scores("postgres migration", ["postgres migration done", None, "kafka rebalance"])
+        assert len(scores) == 3
+        assert scores[1] == 0.0
+        assert scores[0] > 0.0
+
+
 # ── search() (CLI print function) ─────────────────────────────────────
 
 

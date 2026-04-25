@@ -48,7 +48,14 @@ def _first_or_empty(results, key: str) -> list:
 
 
 def _tokenize(text: str) -> list:
-    """Lowercase + strip to alphanumeric tokens of length ≥ 2."""
+    """Lowercase + strip to alphanumeric tokens of length ≥ 2.
+
+    Tolerates ``None`` documents — Chroma can return ``None`` in the
+    ``documents`` field for drawers without text content, which would
+    otherwise raise ``AttributeError`` mid-rerank.
+    """
+    if not text:
+        return []
     return _TOKEN_RE.findall(text.lower())
 
 
