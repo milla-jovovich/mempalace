@@ -24,6 +24,16 @@ python tools/mempalace_execution_kit/semantic_reconciler.py \
   --incoming-ref develop
 ```
 
+## GitHub Actions validation
+
+The semantic reconciler is also wired through `.github/workflows/semantic-reconciler.yml` for push and pull-request validation.
+
+Expected validation lanes:
+
+- `semantic-reconciler`
+- `runtime-validate`
+- `projection-drift`
+
 ## Outputs
 
 - `.codespaces/reconciliation-report.json`
