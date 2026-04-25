@@ -32,7 +32,7 @@ claude /plugin install mempalace-remote@mempalace
 Then set the host:
 
 ```sh
-export MEMPALACE_REMOTE_HOST=raindance   # or whatever host alias from ~/.ssh/config
+export MEMPALACE_REMOTE_HOST=palace-host   # alias from ~/.ssh/config or hostname
 ```
 
 Restart Claude Code. The MCP server should connect, and Stop / PreCompact hooks fire automatically.
@@ -45,12 +45,12 @@ Restart Claude Code. The MCP server should connect, and Stop / PreCompact hooks 
 | `MEMPALACE_REMOTE_BIN` | no | `mempalace` | Path to the `mempalace` CLI on the remote (used by Stop / PreCompact hooks) |
 | `MEMPALACE_REMOTE_MCP_BIN` | no | `mempalace-mcp` | Path to the `mempalace-mcp` server on the remote (used by the MCP client) |
 
-## Strongly recommended: SSH ControlMaster
+## Optional: SSH ControlMaster
 
-Every MCP tool call and every hook fire spawns a fresh `ssh` process. Without connection multiplexing, each pays 200–500 ms of TCP+auth overhead — adding up to seconds per session. Add to client `~/.ssh/config`:
+Every MCP tool call and every hook fire spawns a fresh `ssh` process. Without connection multiplexing, each pays 200–500 ms of TCP+auth overhead — adding up to seconds per session under heavy use. Add to client `~/.ssh/config`:
 
 ```
-Host raindance
+Host palace-host
     ControlMaster auto
     ControlPath ~/.ssh/cm-%r@%h:%p
     ControlPersist 10m
