@@ -282,9 +282,9 @@ class TestMultiProcessLocking:
             kg = KnowledgeGraph(db_path=db_path)
             stats = kg.stats()
             expected_triples = num_workers * triples_per_worker
-            assert stats["triples"] == expected_triples, (
-                f"Expected {expected_triples} triples, got {stats['triples']}"
-            )
+            assert (
+                stats["triples"] == expected_triples
+            ), f"Expected {expected_triples} triples, got {stats['triples']}"
             kg.close()
 
 
