@@ -238,30 +238,44 @@ class TestCheckpointFilter:
     """
 
     # ── unit: build_where_filter ──────────────────────────────────────
+    #
+    # NOTE: as of 2026-04-25 (commit fixing the chromadb 1.5.x filter-planner
+    # bug, see _apply_kind_text_filter docstring), kind= is enforced
+    # entirely in the post-filter, NOT in the where clause. The where
+    # filter only carries wing/room. This avoids ChromaDB's "Error finding
+    # id" failure mode when $nin/$in is combined with vector queries.
 
-    def test_build_where_excludes_checkpoint_topics_by_default(self):
+    def test_build_where_default_returns_empty(self):
         from mempalace.searcher import build_where_filter
 
         w = build_where_filter()
-        assert w == {"topic": {"$nin": ["checkpoint", "auto-save"]}}
+        assert w == {}
 
-    def test_build_where_kind_checkpoint_returns_only_checkpoint_topics(self):
+    def test_build_where_kind_checkpoint_returns_empty_where(self):
+        """kind= no longer adds metadata clauses — filter is post-only."""
         from mempalace.searcher import build_where_filter
 
         w = build_where_filter(kind="checkpoint")
-        assert w == {"topic": {"$in": ["checkpoint", "auto-save"]}}
+        assert w == {}
 
-    def test_build_where_kind_all_returns_no_topic_filter(self):
+    def test_build_where_kind_all_returns_empty(self):
         from mempalace.searcher import build_where_filter
 
         w = build_where_filter(kind="all")
         assert w == {}
 
-    def test_build_where_kind_combines_with_wing_via_and(self):
+    def test_build_where_with_wing_returns_only_wing(self):
+        """No more $and-with-topic; just the wing clause."""
         from mempalace.searcher import build_where_filter
 
         w = build_where_filter(wing="wing_x", kind="content")
-        assert w == {"$and": [{"wing": "wing_x"}, {"topic": {"$nin": ["checkpoint", "auto-save"]}}]}
+        assert w == {"wing": "wing_x"}
+
+    def test_build_where_with_wing_and_room(self):
+        from mempalace.searcher import build_where_filter
+
+        w = build_where_filter(wing="wing_x", room="room_y", kind="content")
+        assert w == {"$and": [{"wing": "wing_x"}, {"room": "room_y"}]}
 
     def test_build_where_kind_invalid_raises(self):
         from mempalace.searcher import build_where_filter
@@ -269,14 +283,49 @@ class TestCheckpointFilter:
         with pytest.raises(ValueError, match="kind must be"):
             build_where_filter(kind="bogus")
 
-    # ── integration: search_memories text-prefix defense in depth ─────
+    # ── integration: search_memories post-filter coverage ─────────────
+    #
+    # As of 2026-04-25 (filter-planner bug fix): the kind= exclusion is
+    # enforced ENTIRELY in the post-filter. The where-clause no longer
+    # carries a topic clause. Both the topic metadata signal AND the
+    # text-prefix signal must work in the post-filter.
+
+    def test_search_memories_drops_checkpoint_by_topic_metadata(self):
+        """Topic-tagged checkpoint without CHECKPOINT: text prefix —
+        the post-filter must catch it via the topic field. (Previously
+        this case was caught by the where-clause $nin filter; now it's
+        the post-filter's responsibility since the where-clause was
+        removed to avoid the chromadb 1.5.x filter-planner bug.)"""
+        mock_col = MagicMock()
+        mock_col.metadata = {"hnsw:space": "cosine"}
+        mock_col.count.return_value = 2
+        # Two drawers: one tagged topic=checkpoint but text doesn't have
+        # the CHECKPOINT: prefix; one normal content drawer.
+        mock_col.query.return_value = {
+            "documents": [["a session checkpoint stored without prefix", "real content"]],
+            "metadatas": [
+                [
+                    {"source_file": "a.md", "wing": "w", "room": "r", "topic": "checkpoint"},
+                    {"source_file": "b.md", "wing": "w", "room": "r", "topic": "general"},
+                ]
+            ],
+            "distances": [[0.3, 0.4]],
+            "ids": [["d1", "d2"]],
+        }
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
+            result = search_memories("query", "/fake/path")
+        topics = [h.get("topic") for h in result["results"]]
+        # The checkpoint-topic drawer is dropped via topic metadata,
+        # even though its text doesn't have the CHECKPOINT: prefix.
+        assert "checkpoint" not in topics
+        assert "general" in topics
 
     def test_search_memories_default_drops_checkpoint_text_even_with_unknown_topic(self):
         """Legacy palace data may have ``CHECKPOINT:``-prefixed text but
         metadata={} or topic=None (pre-fix data, or callers that bypassed
-        tool_diary_write). The where-clause excludes by topic; the
-        post-filter belt-and-suspenders also drops by text prefix so
-        legacy data doesn't slip through."""
+        tool_diary_write). The post-filter catches both signals — topic
+        metadata AND text prefix — so legacy untagged data is still
+        dropped."""
         mock_col = MagicMock()
         mock_col.metadata = {"hnsw:space": "cosine"}
         mock_col.count.return_value = 2

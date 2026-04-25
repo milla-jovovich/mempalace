@@ -183,24 +183,33 @@ def build_where_filter(
     - ``"all"`` — no topic filter. Preserves pre-2026-04-25 behavior;
       pass when you genuinely want everything including checkpoints.
 
-    The metadata filter handles drawers written with explicit ``topic=``;
-    a parallel text-prefix post-filter in ``search_memories`` catches
-    drawers with missing/None metadata (legacy or partial-write data)
-    so the exclusion is defense-in-depth.
+    Validates ``kind`` against the supported set; raises ``ValueError``
+    otherwise.
+
+    NOTE on the kind= implementation strategy: the topic-based exclusion
+    is enforced *entirely in the post-filter* (``_apply_kind_text_filter``
+    in ``search_memories``), not via a metadata ``where`` clause. We
+    learned on 2026-04-25 that ChromaDB 1.5.x's filter-planner returns
+    ``Internal error: Error finding id`` whenever a ``$nin`` (or ``$in``)
+    operator on metadata is combined with a vector query — every
+    ``kind="content"`` query failed at vector and fell through to the
+    sqlite BM25 fallback, losing semantic recall on the canonical
+    151K-drawer palace. Dropping the metadata clause here avoids the
+    bug entirely; the post-filter checks both ``topic`` metadata AND
+    text-prefix shape, so coverage is the same. Trade-off: we retrieve a
+    few extra candidates that get filtered out client-side. That cost is
+    negligible compared to losing vector search.
     """
+    if kind not in ("content", "checkpoint", "all"):
+        raise ValueError(
+            f"kind must be one of 'content' (default), 'checkpoint', or 'all'; got {kind!r}"
+        )
+
     parts: list[dict] = []
     if wing:
         parts.append({"wing": wing})
     if room:
         parts.append({"room": room})
-    if kind == "content":
-        parts.append({"topic": {"$nin": list(_CHECKPOINT_TOPICS)}})
-    elif kind == "checkpoint":
-        parts.append({"topic": {"$in": list(_CHECKPOINT_TOPICS)}})
-    elif kind != "all":
-        raise ValueError(
-            f"kind must be one of 'content' (default), 'checkpoint', or 'all'; got {kind!r}"
-        )
 
     if not parts:
         return {}
@@ -545,29 +554,45 @@ def _sqlite_fallback_and_scope(
     return available_in_scope, warnings
 
 
+def _is_checkpoint_drawer(hit: dict) -> bool:
+    """A drawer is a Stop-hook checkpoint if either:
+      - its ``topic`` metadata is in ``_CHECKPOINT_TOPICS``, OR
+      - its text starts with the literal ``CHECKPOINT:`` prefix.
+
+    Both signals matter: well-tagged drawers have the topic metadata;
+    legacy data with ``metadata=None`` or a missing topic field still
+    carries the text-prefix signature so we can catch it anyway.
+    """
+    if hit.get("topic") in _CHECKPOINT_TOPICS:
+        return True
+    return (hit.get("text") or "").startswith("CHECKPOINT:")
+
+
 def _apply_kind_text_filter(scored: list, kind: str) -> list:
-    """Defense-in-depth post-filter for the checkpoint-text exclusion.
+    """Sole filter point for the kind= exclusion (no longer
+    defense-in-depth — it's the only line of defense, by design).
 
-    The where-clause already filters by ``topic`` metadata, but legacy
-    palace data may have ``CHECKPOINT:``-prefixed text with
-    ``metadata=None`` or a missing topic field — that slips past the
-    where filter. This belt-and-suspenders pass uses the text prefix to
-    catch the rest.
+    Earlier versions tried to filter via a ChromaDB metadata
+    ``where`` clause (``$nin`` / ``$in`` on ``topic``) AND post-filter,
+    as belt-and-suspenders. We learned on 2026-04-25 that ChromaDB
+    1.5.x's filter-planner returns ``Internal error: Error finding id``
+    whenever ``$nin`` / ``$in`` is combined with a vector query, so the
+    where-clause path was breaking 100% of ``kind="content"`` vector
+    queries on the canonical palace. Removing the where-clause and
+    relying on this post-filter alone dodges the bug structurally.
 
-    For ``kind="checkpoint"``, the symmetric direction: also *include*
-    any drawer whose text starts with ``CHECKPOINT:`` even if its
-    metadata didn't tag it, so audit/recovery callers see every
-    checkpoint we can identify.
+    For ``kind="content"``: drop any hit that looks like a checkpoint
+    by either signal (topic metadata or text prefix).
+
+    For ``kind="checkpoint"``: keep only hits that look like checkpoints
+    by either signal. Falls back to unfiltered if the filter would empty
+    the result set entirely (so audit callers don't see "0 results"
+    when there are clearly drawers retrieved).
     """
     if kind == "content":
-        return [h for h in scored if not (h.get("text") or "").startswith("CHECKPOINT:")]
+        return [h for h in scored if not _is_checkpoint_drawer(h)]
     if kind == "checkpoint":
-        included = [
-            h
-            for h in scored
-            if (h.get("text") or "").startswith("CHECKPOINT:")
-            or h.get("topic") in _CHECKPOINT_TOPICS
-        ]
+        included = [h for h in scored if _is_checkpoint_drawer(h)]
         return included or scored  # fall back to unfiltered if filter empties everything
     return scored  # kind == "all" — no filter
 
