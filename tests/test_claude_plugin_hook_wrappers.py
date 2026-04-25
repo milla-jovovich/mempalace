@@ -58,6 +58,7 @@ def _run_hook(
 
     env = os.environ.copy()
     env["PATH"] = str(bin_dir)
+    env.pop("MEMPALACE_PYTHON", None)
 
     return subprocess.run(
         [BASH, _shell_path(PLUGIN_HOOKS_DIR / script_name)],
