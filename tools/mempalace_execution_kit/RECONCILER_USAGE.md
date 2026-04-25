@@ -34,6 +34,8 @@ Expected validation lanes:
 - `runtime-validate`
 - `projection-drift`
 
+The workflow files must exist on `develop` for GitHub to recognize the lanes, while the conversion-kit branch supplies the executable reconciler/runtime/drift surfaces.
+
 ## Outputs
 
 - `.codespaces/reconciliation-report.json`
