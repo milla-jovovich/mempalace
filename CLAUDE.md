@@ -49,7 +49,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 17. **feat: configurable chunking parameters** — `chunk_size` (800), `chunk_overlap` (100), `min_chunk_size` (50) written to `config.json` and exposed via `MempalaceConfig` properties.
 18. ~~**fix: PID file guard prevents stacking mine processes**~~ — **merged upstream via #1023 in v3.3.2.** Includes the Windows `os.kill` → `OpenProcess` cross-platform fix. No longer fork-ahead.
 19. **fix: `.claude-plugin/` venv-aware Python resolution** — hooks (`mempal-stop-hook.sh`, `mempal-precompact-hook.sh`) and `.mcp.json` resolve Python in this order: `MEMPALACE_PYTHON` env → `$PLUGIN_ROOT/venv/bin/python3` → system `python3`. Upstream's `5fe0c1c` + `be9214a` (fatkobra) and `9f5b8f5` (Pim) regressed to PATH-only lookups and bare `"mempalace-mcp"` command, which break editable dev installs where `mempalace`/`mempalace-mcp` only live in the repo venv. Documented here so future `upstream/develop` merges surface the conflict rather than silently re-regress. Attempted via #1115 on 2026-04-22; withdrew 2026-04-23 as premature pending #1069 arbitration — CI correctly caught the #942 PATH-only contract violation. Re-submit after bensig's direction on #1069.
-20. **fix: `_tokenize` None-document guard** (commit `a3a7132`, 2026-04-24) — `searcher.py:50` short-circuits to `[]` when document text is `None`, preventing `AttributeError: 'NoneType' object has no attribute 'lower'` during `_hybrid_rank → _bm25_scores → _tokenize`. Observed in production daemon log on 2026-04-24 21:07:05. Closes the gap left by upstream's #999 None-metadata audit, which covered metadata read loops but not the BM25 reranker helpers. Three regression tests in `TestBM25NoneSafety`. Upstream PR pending.
+20. **fix: `_tokenize` None-document guard** (commit `a3a7132`, 2026-04-24) — `searcher.py:50` short-circuits to `[]` when document text is `None`, preventing `AttributeError: 'NoneType' object has no attribute 'lower'` during `_hybrid_rank → _bm25_scores → _tokenize`. Observed in production daemon log on 2026-04-24 21:07:05. Closes the gap left by upstream's #999 None-metadata audit, which covered metadata read loops but not the BM25 reranker helpers. Three regression tests in `TestBM25NoneSafety`. Filed as #1198 on 2026-04-24.
 
 ### Merged into upstream (post-v3.3.1)
 
@@ -94,7 +94,7 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 ## Upstream PRs
 
-As of 2026-04-24: 14 merged, 7 open, 9 closed. PRs target `develop`. Fork `main` tracks `upstream/develop`.
+As of 2026-04-25: 14 merged, 7 open (including #1198), 10 closed (added #1171). PRs target `develop`. Fork `main` tracks `upstream/develop` (synced 2026-04-25).
 
 | PR | Status | Description |
 |----|--------|-------------|
@@ -105,9 +105,10 @@ As of 2026-04-24: 14 merged, 7 open, 9 closed. PRs target `develop`. Fork `main`
 | #1087 | open (`MERGEABLE`, 6/6 CI green) | `mempalace purge --wing/--room` CLI — destructive drawer removal (fork-ahead Row 4) |
 | #1094 | open (`CLEAN`, 6/6 CI green) | Coerce `None` metadatas → `{}` at `ChromaCollection.query/.get` boundary (closes #1020) |
 | #1142 | open (filed 2026-04-23) | `docs/RELEASING.md` with `mempalace-mcp` pre-release grep — fulfills #1093's release-checklist proposal, accepted by @bensig 2026-04-23 via email |
-| #1171 | open (filed 2026-04-24, CI green) | Cross-process write lock at `ChromaCollection` adapter — prevents HNSW corruption from concurrent MCP servers + mine subprocesses. Moved to RFC 001 backend seam from mcp_server-only approach. |
 | #1173 | open (filed 2026-04-24, CI green) | Call `quarantine_stale_hnsw()` in `make_client()`; lower threshold 3600→300s (production 0.96h-drift segfault). Complementary to #1062 which covers server startup. |
 | #1177 | open (filed 2026-04-24, CI green) | `.blob_seq_ids_migrated` marker guard — skip `sqlite3.connect()` on already-migrated palaces. Closes #1090. |
+| #1198 | open (filed 2026-04-24) | `_tokenize` None-document guard — closes the gap upstream's #999 None-metadata audit left in BM25 helpers. Three regression tests in `TestBM25NoneSafety`. |
+| #1171 | **closed** 2026-04-25 | Cross-process write lock at `ChromaCollection` adapter — superseded by [#976](https://github.com/MemPalace/mempalace/pull/976) (`mine_global_lock` at the right layer) plus this fork's daemon-strict architecture. |
 | #659 | **merged** 2026-04-23 | Diary wing parameter (`tool_diary_write` / `tool_diary_read` accept `wing`, hook derives from transcript path) |
 | #661 | **merged** 2026-04-22 | Graph cache with write-invalidation |
 | #673 | **merged** 2026-04-22 | Deterministic hook saves (broader than upstream's #966) — config-flag-gated, strictly safer save semantics |
