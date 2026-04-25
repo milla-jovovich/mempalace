@@ -1,6 +1,5 @@
 {
   "mempalace": {
-    "command": "ssh",
-    "args": ["--", "${MEMPALACE_REMOTE_HOST}", "${MEMPALACE_REMOTE_MCP_BIN:-mempalace-mcp}"]
+    "command": "${CLAUDE_PLUGIN_ROOT}/bin/mempalace-mcp-ssh.sh"
   }
 }
