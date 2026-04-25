@@ -18,9 +18,11 @@ Usage:
     mempalace migrate --dry-run                # show what would be migrated
 """
 
+import gc
 import os
 import shutil
 import sqlite3
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -134,6 +136,81 @@ def confirm_destructive_action(
     return True
 
 
+def _release_chroma_handles(*objs, delay_seconds: float = 0.25) -> None:
+    """Best-effort Chroma handle release before filesystem swaps on Windows."""
+    systems = []
+    for obj in objs:
+        if obj is None:
+            continue
+
+        candidates = [
+            obj,
+            getattr(obj, "_collection", None),
+            getattr(getattr(obj, "_collection", None), "_client", None),
+            getattr(obj, "_client", None),
+        ]
+        clients = getattr(obj, "_clients", None)
+        if isinstance(clients, dict):
+            candidates.extend(clients.values())
+            try:
+                clients.clear()
+            except Exception:
+                pass
+
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            system = getattr(candidate, "_system", None)
+            if system is not None and system not in systems:
+                systems.append(system)
+
+            close_method = getattr(candidate, "close", None)
+            if callable(close_method):
+                try:
+                    close_method()
+                except Exception:
+                    pass
+
+            clear_method = getattr(candidate, "clear_system_cache", None)
+            if callable(clear_method):
+                try:
+                    clear_method()
+                except Exception:
+                    pass
+
+    for system in reversed(systems):
+        stop_method = getattr(system, "stop", None)
+        if callable(stop_method):
+            try:
+                stop_method()
+            except Exception:
+                pass
+
+    gc.collect()
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
+
+
+def _replace_palace_dir(
+    temp_palace: str, palace_path: str, retries: int = 8, delay_seconds: float = 0.5
+) -> None:
+    """Replace the palace directory, retrying while Windows releases SQLite handles."""
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            if os.path.exists(palace_path):
+                shutil.rmtree(palace_path)
+            shutil.move(temp_palace, palace_path)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            if attempt == retries:
+                break
+            print(f"  Waiting for filesystem handles to release ({attempt}/{retries - 1})...")
+            _release_chroma_handles(delay_seconds=delay_seconds)
+    raise last_error
+
+
 def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
     """Migrate a palace to the currently installed ChromaDB version."""
     from .backends.chroma import ChromaBackend
@@ -159,15 +236,22 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
     print(f"  Target:    ChromaDB {target_version}")
 
     # Try reading with current chromadb first
+    read_backend = None
+    read_collection = None
     try:
-        col = ChromaBackend().get_collection(palace_path, "mempalace_drawers")
-        count = col.count()
+        read_backend = ChromaBackend()
+        read_collection = read_backend.get_collection(palace_path, "mempalace_drawers")
+        count = read_collection.count()
         print(f"\n  Palace is already readable by chromadb {target_version}.")
         print(f"  {count} drawers found. No migration needed.")
         return True
     except Exception:
         print(f"\n  Palace is NOT readable by chromadb {target_version}.")
         print("  Extracting from SQLite directly...")
+    finally:
+        _release_chroma_handles(read_collection, read_backend)
+        read_collection = None
+        read_backend = None
 
     # Extract all drawers via raw SQL
     drawers = extract_drawers_from_sqlite(db_path)
@@ -228,13 +312,13 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
 
     # Verify before swapping
     final_count = col.count()
-    del col
-    del fresh_backend
+    _release_chroma_handles(col, fresh_backend, delay_seconds=0.5)
+    col = None
+    fresh_backend = None
 
     # Swap: remove old palace, move new one into place
     print("  Swapping old palace for migrated version...")
-    shutil.rmtree(palace_path)
-    shutil.move(temp_palace, palace_path)
+    _replace_palace_dir(temp_palace, palace_path)
 
     print("\n  Migration complete.")
     print(f"  Drawers migrated: {final_count}")
