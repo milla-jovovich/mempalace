@@ -263,8 +263,19 @@ def _spawn_mine(cmd: list) -> None:
     _MINE_PID_FILE.write_text(str(proc.pid))
 
 
+def _daemon_strict() -> bool:
+    """When PALACE_DAEMON_URL is set and STRICT mode is on, skip all local writes."""
+    return (
+        os.environ.get("PALACE_DAEMON_URL", "").strip() != ""
+        and os.environ.get("PALACE_DAEMON_STRICT", "1") != "0"
+    )
+
+
 def _maybe_auto_ingest(transcript_path: str = ""):
     """Run mempalace mine in background if a mine directory is available."""
+    if _daemon_strict():
+        _log("Skipping auto-ingest: PALACE_DAEMON_URL set, daemon owns writes")
+        return
     mine_dir = _get_mine_dir(transcript_path)
     if not mine_dir:
         return
@@ -279,6 +290,9 @@ def _maybe_auto_ingest(transcript_path: str = ""):
 
 def _mine_sync(transcript_path: str = ""):
     """Run mempalace mine synchronously (for precompact -- data must land first)."""
+    if _daemon_strict():
+        _log("Skipping sync mine: PALACE_DAEMON_URL set, daemon owns writes")
+        return
     mine_dir = _get_mine_dir(transcript_path)
     if not mine_dir:
         return
@@ -454,7 +468,18 @@ def _save_diary_direct(
                 "queued": daemon_result.get("queued", False),
             }
         except Exception as e:
-            _log(f"Daemon silent-save failed ({e}); falling through to direct write")
+            _log(f"Daemon silent-save failed ({e})")
+            # Strict mode: when PALACE_DAEMON_URL is set, NEVER fall through to direct write.
+            # Daemon is single source of truth; concurrent local writes corrupt SQLite under
+            # Syncthing replication. Drop the save and surface the error instead.
+            if os.environ.get("PALACE_DAEMON_STRICT", "1") != "0":
+                return {
+                    "count": 0,
+                    "themes": themes,
+                    "systemMessage": f"⚠ Save dropped — daemon at {daemon_url} unreachable: {e}",
+                    "queued": False,
+                }
+            _log("PALACE_DAEMON_STRICT=0 — falling through to direct write")
 
     try:
         from .mcp_server import tool_diary_write

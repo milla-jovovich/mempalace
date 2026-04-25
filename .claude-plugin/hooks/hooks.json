@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/mempal-precompact-hook.sh"
+            "command": "PALACE_DAEMON_URL=http://disks.jphe.in:8085 PALACE_API_KEY=adb43b99effac3aced2c82de54827850c6da1fbf4a5e473e1938529b27c08ab3 bash ${CLAUDE_PLUGIN_ROOT}/hooks/mempal-precompact-hook.sh"
           }
         ]
       }
