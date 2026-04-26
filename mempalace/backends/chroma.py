@@ -624,6 +624,20 @@ class ChromaBackend(BaseBackend):
     # Public static helpers (legacy; prefer :meth:`get_collection`)
     # ------------------------------------------------------------------
 
+    # Per-process record of palaces that have already had quarantine_stale_hnsw
+    # invoked at least once. The proactive drift check is a *cold-start*
+    # protection — it catches HNSW segments that arrived stale relative to
+    # ``chroma.sqlite3`` (e.g. cross-machine replication, partial restore,
+    # crashed-mid-write). Once a long-running process has opened the palace
+    # cleanly, re-firing on every reconnect is a *runtime thrash*: the
+    # daemon's own writes bump sqlite mtime but HNSW flushes batch on
+    # chromadb's internal cadence, so the mtime gap naturally exceeds the
+    # threshold under steady write load even though nothing is corrupt.
+    # Real runtime drift is still handled — palace-daemon's ``_auto_repair``
+    # calls :func:`quarantine_stale_hnsw` directly on observed HNSW errors,
+    # which bypasses this gate.
+    _quarantined_paths: set[str] = set()
+
     @staticmethod
     def make_client(palace_path: str):
         """Create a fresh ``PersistentClient`` (fixes BLOB seq_ids first).
@@ -631,9 +645,15 @@ class ChromaBackend(BaseBackend):
         Deprecated-ish: exposed for legacy long-lived callers that manage their
         own client cache. New code should obtain a collection through
         :meth:`get_collection` which manages caching internally.
+
+        Quarantines stale HNSW segments **once per palace per process**. See
+        :attr:`_quarantined_paths` for the rationale (cold-start protection
+        vs. runtime thrash on steady-write daemons).
         """
         _fix_blob_seq_ids(palace_path)
-        quarantine_stale_hnsw(palace_path)
+        if palace_path not in ChromaBackend._quarantined_paths:
+            quarantine_stale_hnsw(palace_path)
+            ChromaBackend._quarantined_paths.add(palace_path)
         return chromadb.PersistentClient(path=palace_path)
 
     @staticmethod

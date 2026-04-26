@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from pathlib import Path
 
 import chromadb
 import pytest
@@ -444,6 +445,69 @@ def test_quarantine_stale_hnsw_skips_already_quarantined(tmp_path):
     moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
     assert moved == []
     assert drift.exists()
+
+
+# ── make_client cold-start gate ──────────────────────────────────────────
+
+
+def test_make_client_quarantines_only_on_first_call_per_palace(tmp_path, monkeypatch):
+    """Quarantine fires on first ``make_client()`` for a palace, then is
+    skipped on subsequent calls — prevents runtime thrash where a daemon's
+    own steady writes bump ``chroma.sqlite3`` faster than HNSW flushes,
+    making the mtime heuristic falsely trigger every reconnect."""
+    from mempalace.backends.chroma import ChromaBackend
+
+    palace_path = str(tmp_path / "palace")
+    os.makedirs(palace_path, exist_ok=True)
+    (Path(palace_path) / "chroma.sqlite3").write_text("")
+
+    # Reset the per-process cache so this test is independent of others.
+    monkeypatch.setattr(ChromaBackend, "_quarantined_paths", set())
+
+    calls: list[str] = []
+
+    def _spy(path, stale_seconds=300.0):
+        calls.append(path)
+        return []
+
+    monkeypatch.setattr("mempalace.backends.chroma.quarantine_stale_hnsw", _spy)
+
+    ChromaBackend.make_client(palace_path)
+    ChromaBackend.make_client(palace_path)
+    ChromaBackend.make_client(palace_path)
+
+    assert calls == [palace_path], (
+        "quarantine_stale_hnsw should fire once per palace per process, not on every reconnect"
+    )
+
+
+def test_make_client_quarantines_each_palace_independently(tmp_path, monkeypatch):
+    """Two distinct palaces each get one quarantine attempt — the gate is
+    keyed by palace path, not global."""
+    from mempalace.backends.chroma import ChromaBackend
+
+    palace_a = str(tmp_path / "palace_a")
+    palace_b = str(tmp_path / "palace_b")
+    for p in (palace_a, palace_b):
+        os.makedirs(p, exist_ok=True)
+        (Path(p) / "chroma.sqlite3").write_text("")
+
+    monkeypatch.setattr(ChromaBackend, "_quarantined_paths", set())
+
+    calls: list[str] = []
+
+    def _spy(path, stale_seconds=300.0):
+        calls.append(path)
+        return []
+
+    monkeypatch.setattr("mempalace.backends.chroma.quarantine_stale_hnsw", _spy)
+
+    ChromaBackend.make_client(palace_a)
+    ChromaBackend.make_client(palace_b)
+    ChromaBackend.make_client(palace_a)  # already gated
+    ChromaBackend.make_client(palace_b)  # already gated
+
+    assert calls == [palace_a, palace_b]
 
 
 # ── _pin_hnsw_threads ─────────────────────────────────────────────────────
