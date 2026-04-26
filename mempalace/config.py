@@ -1,19 +1,21 @@
 """
 MemPalace configuration system.
 
-Priority: env vars > config file (~/.mempalace/config.json) > defaults
+Global settings live in ~/.mempalace/config.json (MempalaceConfig).
+Per-palace settings (embedding model, chunk size) are stored in ChromaDB collection metadata,
+bound at init time and changeable only via re-mine.
 """
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
 
+logger = logging.getLogger("mempalace")
+
 
 # ── Input validation ──────────────────────────────────────────────────────────
-# Shared sanitizers for wing/room/entity names. Prevents path traversal,
-# excessively long strings, and special characters that could cause issues
-# in file paths, SQLite, or ChromaDB metadata.
 
 MAX_NAME_LENGTH = 128
 _SAFE_NAME_RE = re.compile(r"^(?:[^\W_]|[^\W_][\w .'-]{0,126}[^\W_])$")
@@ -32,15 +34,12 @@ def sanitize_name(value: str, field_name: str = "name") -> str:
     if len(value) > MAX_NAME_LENGTH:
         raise ValueError(f"{field_name} exceeds maximum length of {MAX_NAME_LENGTH} characters")
 
-    # Block path traversal
     if ".." in value or "/" in value or "\\" in value:
         raise ValueError(f"{field_name} contains invalid path characters")
 
-    # Block null bytes
     if "\x00" in value:
         raise ValueError(f"{field_name} contains null bytes")
 
-    # Enforce safe character set
     if not _SAFE_NAME_RE.match(value):
         raise ValueError(f"{field_name} contains invalid characters")
 
@@ -84,6 +83,8 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
+DEFAULT_CHUNK_SIZE = 450
+DEFAULT_CHUNK_OVERLAP = 50
 
 DEFAULT_TOPIC_WINGS = [
     "emotions",
@@ -137,18 +138,12 @@ DEFAULT_HALL_KEYWORDS = {
 
 
 class MempalaceConfig:
-    """Configuration manager for MemPalace.
+    """Global configuration manager for MemPalace.
 
     Load order: env vars > config file > defaults.
     """
 
     def __init__(self, config_dir=None):
-        """Initialize config.
-
-        Args:
-            config_dir: Override config directory (useful for testing).
-                        Defaults to ~/.mempalace.
-        """
         self._config_dir = (
             Path(config_dir) if config_dir else Path(os.path.expanduser("~/.mempalace"))
         )
@@ -165,7 +160,6 @@ class MempalaceConfig:
 
     @property
     def palace_path(self):
-        """Path to the memory palace data directory."""
         env_val = os.environ.get("MEMPALACE_PALACE_PATH") or os.environ.get("MEMPAL_PALACE_PATH")
         if env_val:
             # Normalize: expand ~ and collapse .. to match the CLI --palace
@@ -176,12 +170,10 @@ class MempalaceConfig:
 
     @property
     def collection_name(self):
-        """ChromaDB collection name."""
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
 
     @property
     def people_map(self):
-        """Mapping of name variants to canonical names."""
         if self._people_map_file.exists():
             try:
                 with open(self._people_map_file, "r") as f:
@@ -192,12 +184,10 @@ class MempalaceConfig:
 
     @property
     def topic_wings(self):
-        """List of topic wing names."""
         return self._file_config.get("topic_wings", DEFAULT_TOPIC_WINGS)
 
     @property
     def hall_keywords(self):
-        """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
     @property
@@ -300,14 +290,28 @@ class MempalaceConfig:
         except OSError:
             pass
 
+    @staticmethod
+    def detect_device() -> str:
+        """Auto-detect the best available device for embedding inference."""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return "cuda"
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                import platform
+                if platform.machine() == "arm64":
+                    return "mps"
+        except ImportError:
+            pass
+        return "cpu"
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)
-        # Restrict directory permissions to owner only (Unix)
         try:
             self._config_dir.chmod(0o700)
         except (OSError, NotImplementedError):
-            pass  # Windows doesn't support Unix permissions
+            pass
         if not self._config_file.exists():
             default_config = {
                 "palace_path": DEFAULT_PALACE_PATH,
@@ -317,7 +321,6 @@ class MempalaceConfig:
             }
             with open(self._config_file, "w") as f:
                 json.dump(default_config, f, indent=2)
-            # Restrict config file to owner read/write only
             try:
                 self._config_file.chmod(0o600)
             except (OSError, NotImplementedError):
@@ -325,11 +328,6 @@ class MempalaceConfig:
         return self._config_file
 
     def save_people_map(self, people_map):
-        """Write people_map.json to config directory.
-
-        Args:
-            people_map: Dict mapping name variants to canonical names.
-        """
         self._config_dir.mkdir(parents=True, exist_ok=True)
         with open(self._people_map_file, "w") as f:
             json.dump(people_map, f, indent=2)
@@ -338,3 +336,115 @@ class MempalaceConfig:
         except (OSError, NotImplementedError):
             pass
         return self._people_map_file
+
+
+# ── Embedding function cache ─────────────────────────────────────────────────
+
+_embedding_cache: dict = {}
+
+_DEFAULT_MODEL_FOR_DEVICE = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+class EmbeddingModelMismatchError(Exception):
+    """Raised when palace was created with a different embedding model."""
+
+    def __init__(self, stored_model: str, current_model: str):
+        self.stored_model = stored_model
+        self.current_model = current_model
+        super().__init__(
+            f"Embedding model mismatch.\n"
+            f"Palace was created with: {stored_model}\n"
+            f"Currently configured:    {current_model}\n\n"
+            f"To switch models, re-mine your palace:\n"
+            f"  mempalace re-mine --model {current_model}\n\n"
+            f"Or use --force to bypass this check."
+        )
+
+
+def get_embedding_model_name(palace_path: str = None) -> str:
+    """Return the canonical model identity for a palace.
+
+    Reads from collection metadata if palace exists, otherwise returns 'chromadb-default'.
+    """
+    if palace_path:
+        meta = read_collection_metadata(palace_path)
+        if meta.get("embedding_model"):
+            return meta["embedding_model"]
+    return "chromadb-default"
+
+
+def get_embedding_function(model_name: str = None, device: str = None):
+    """Return the configured ChromaDB embedding function.
+
+    Args:
+        model_name: Explicit model name, or None / 'chromadb-default' for ChromaDB default.
+        device: Device for SentenceTransformerEmbeddingFunction ('cpu', 'mps', 'cuda').
+
+    The result is cached by (model_name, device) so models are only loaded once per process.
+    """
+    effective_model = model_name
+    effective_device = device
+
+    # If device is set but no model, use the default model on that device
+    if not effective_model and effective_device:
+        effective_model = _DEFAULT_MODEL_FOR_DEVICE
+
+    # Normalize: None and 'chromadb-default' both mean "use ChromaDB default"
+    if not effective_model or effective_model == "chromadb-default":
+        effective_model = None
+
+    cache_key = (effective_model, effective_device)
+    if cache_key in _embedding_cache:
+        return _embedding_cache[cache_key]
+
+    if not effective_model:
+        try:
+            from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+            ef = DefaultEmbeddingFunction()
+        except Exception:
+            ef = None
+        _embedding_cache[cache_key] = ef
+        return ef
+
+    try:
+        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+
+        kwargs = {"model_name": effective_model}
+        if effective_device:
+            kwargs["device"] = effective_device
+
+        ef = SentenceTransformerEmbeddingFunction(**kwargs)
+        logger.info(
+            "Using embedding model: %s (device=%s)",
+            effective_model,
+            effective_device or "default",
+        )
+    except Exception:
+        logger.warning(
+            "sentence-transformers not installed — falling back to ChromaDB default. "
+            "Install with: pip install mempalace[multilingual]"
+        )
+        try:
+            from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+            ef = DefaultEmbeddingFunction()
+        except Exception:
+            ef = None
+
+    _embedding_cache[cache_key] = ef
+    return ef
+
+
+def read_collection_metadata(palace_path: str, collection_name: str = "mempalace_drawers") -> dict:
+    """Read collection metadata without instantiating the embedding function.
+
+    Returns the metadata dict, or empty dict if the collection doesn't exist.
+    """
+    if not os.path.isdir(palace_path):
+        return {}
+    try:
+        import chromadb
+        client = chromadb.PersistentClient(path=palace_path)
+        col = client.get_collection(collection_name)
+        return col.metadata or {}
+    except Exception:
+        return {}

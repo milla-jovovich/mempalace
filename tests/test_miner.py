@@ -374,7 +374,7 @@ def test_status_handles_none_metadata_without_crash(tmp_path, capsys):
                 "metadatas": [{"wing": "proj", "room": "r"}, None],
             }
 
-    with patch("mempalace.miner.get_collection", return_value=FakeCol()):
+    with patch("mempalace.palace.get_collection", return_value=FakeCol()):
         status(str(tmp_path))
 
     out = capsys.readouterr().out
@@ -405,7 +405,7 @@ def test_process_file_uses_bounded_upsert_batches(tmp_path, monkeypatch):
     chunks = [{"content": f"chunk {i} " * 20, "chunk_index": i} for i in range(5)]
     col = FakeCol()
     monkeypatch.setattr(miner, "DRAWER_UPSERT_BATCH_SIZE", 2)
-    monkeypatch.setattr(miner, "chunk_text", lambda content, source_file: chunks)
+    monkeypatch.setattr(miner, "chunk_text", lambda content, source_file, **kwargs: chunks)
     monkeypatch.setattr(miner, "detect_hall", lambda content: "code")
     monkeypatch.setattr(miner, "_extract_entities_for_metadata", lambda content: "")
 

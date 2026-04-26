@@ -33,7 +33,8 @@ import shlex
 import argparse
 from pathlib import Path
 
-from .config import MempalaceConfig
+from .config import MempalaceConfig, read_collection_metadata
+from .palace import get_collection as _palace_get_collection
 from .version import __version__
 
 
@@ -153,10 +154,31 @@ def cmd_init(args):
     detect_rooms_local(project_dir=args.dir, yes=getattr(args, "yes", False))
     cfg.init()
 
-    # Pass 3: protect git repos from accidentally committing per-project files
+    # Pass 3: stamp the embedding model into the palace collection metadata
+    # at init time (PR #442). Once written, every reader that goes through
+    # palace.get_collection() picks up the same model — silent fallback to
+    # all-MiniLM-L6-v2 against multilingual vectors is no longer possible.
+    palace_path = (
+        os.path.expanduser(args.palace) if getattr(args, "palace", None) else cfg.palace_path
+    )
+    model = getattr(args, "model", None) or "chromadb-default"
+    chunk_size = getattr(args, "chunk_size", None)
+    chunk_overlap = getattr(args, "chunk_overlap", None)
+    _palace_get_collection(
+        palace_path,
+        model=model,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    print(f"\n  Palace initialized: {palace_path}")
+    print(f"  Embedding model: {model}")
+    if chunk_size:
+        print(f"  Chunk size: {chunk_size}")
+
+    # Pass 4: protect git repos from accidentally committing per-project files
     _ensure_mempalace_files_gitignored(args.dir)
 
-    # Pass 4: offer to run mine immediately. The directory just had its
+    # Pass 5: offer to run mine immediately. The directory just had its
     # rooms + entities set up, so 99% of users will mine next anyway —
     # asking here removes the "remember to type the next command" friction.
     # `--auto-mine` skips the prompt and mines automatically; `--yes` is
@@ -256,8 +278,6 @@ def _maybe_run_mine_after_init(args, cfg) -> None:
     except Exception as e:
         print(f"\n  ERROR: mine failed: {e}", file=sys.stderr)
         sys.exit(1)
-
-
 def cmd_mine(args):
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     include_ignored = []
@@ -368,8 +388,6 @@ def cmd_split(args):
     from .split_mega_files import main as split_main
     import sys
 
-    # Rebuild argv for split_mega_files argparse
-    # Expand ~ and resolve to absolute path so split_mega_files sees a real path
     argv = ["--source", str(Path(args.dir).expanduser().resolve())]
     if args.output_dir:
         argv += ["--output-dir", args.output_dir]
@@ -402,7 +420,142 @@ def cmd_status(args):
     from .miner import status
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+
+    col_meta = read_collection_metadata(palace_path)
+    if col_meta:
+        print(f"\n  Palace config (from collection metadata):")
+        print(f"    Embedding model: {col_meta.get('embedding_model', 'unknown')}")
+        if "chunk_size" in col_meta:
+            print(f"    Chunk size: {col_meta['chunk_size']}")
+        if "chunk_overlap" in col_meta:
+            print(f"    Chunk overlap: {col_meta['chunk_overlap']}")
+
     status(palace_path=palace_path)
+
+
+def _extract_source_files(palace_path: str) -> set:
+    """Extract all unique source_file paths from palace metadata."""
+    from .palace import get_collection, iter_all_metadatas
+
+    try:
+        col = get_collection(palace_path, force=True)
+    except Exception:
+        return set()
+
+    sources = set()
+    for meta in iter_all_metadatas(col):
+        sf = meta.get("source_file")
+        if sf:
+            sources.add(sf)
+    return sources
+
+
+def cmd_remine(args):
+    """Re-mine palace with a new or current embedding model."""
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+
+    if not os.path.isdir(palace_path):
+        print(f"\n  No palace found at {palace_path}")
+        return
+
+    # Determine target model
+    col_meta = read_collection_metadata(palace_path)
+    new_model = getattr(args, "model", None)
+    if new_model:
+        target_model = new_model
+    else:
+        target_model = col_meta.get("embedding_model", "chromadb-default")
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Re-mine")
+    print(f"{'=' * 55}\n")
+    print(f"  Palace: {palace_path}")
+    print(f"  Target model: {target_model}")
+    if new_model and col_meta.get("embedding_model") and col_meta["embedding_model"] != new_model:
+        print(f"  Previous model: {col_meta['embedding_model']}")
+
+    # Step 1: Extract source files
+    print("\n  Extracting source file paths from existing drawers...")
+    sources = _extract_source_files(palace_path)
+
+    if not sources:
+        print("  No drawers found. Nothing to re-mine.")
+        return
+
+    # Step 2: Partition into existing vs missing
+    existing = {s for s in sources if os.path.isfile(s)}
+    missing = sources - existing
+
+    print(f"  Found {len(sources)} unique source files.")
+    print(f"    Still exist: {len(existing)}")
+    print(f"    Missing:     {len(missing)}")
+
+    if missing:
+        print("\n  Missing files (will be skipped):")
+        for f in sorted(missing)[:20]:
+            print(f"    - {f}")
+        if len(missing) > 20:
+            print(f"    ... and {len(missing) - 20} more")
+
+    if not existing:
+        print("\n  No source files found on disk. Nothing to re-mine.")
+        return
+
+    if args.dry_run:
+        print(f"\n  (dry run — would re-mine {len(existing)} files)")
+        return
+
+    # Step 3: Backup palace before destructive operation
+    import shutil
+    import chromadb
+
+    backup_path = palace_path.rstrip(os.sep) + ".pre-remine-backup"
+    if os.path.exists(backup_path):
+        shutil.rmtree(backup_path)
+    print(f"\n  Backing up to {backup_path}...")
+    shutil.copytree(palace_path, backup_path)
+
+    # Step 4: Drop and re-create with new model in metadata
+    print("  Dropping existing collection...")
+    client = chromadb.PersistentClient(path=palace_path)
+    client.delete_collection("mempalace_drawers")
+
+    chunk_size = getattr(args, "chunk_size", None)
+    chunk_overlap = getattr(args, "chunk_overlap", None)
+    _palace_get_collection(
+        palace_path,
+        model=target_model,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    print(f"  Created collection with model: {target_model}")
+
+    # Step 5: Re-mine with exact file list
+    print("  Re-mining...")
+
+    from .miner import mine
+    from collections import defaultdict
+
+    dir_files = defaultdict(list)
+    for f in sorted(existing):
+        dir_files[os.path.dirname(f)].append(f)
+
+    for source_dir, file_list in sorted(dir_files.items()):
+        if os.path.isdir(source_dir):
+            print(f"\n  Mining: {source_dir} ({len(file_list)} files)")
+            mine(
+                project_dir=source_dir,
+                palace_path=palace_path,
+                source_files=file_list,
+            )
+
+    print(f"\n{'=' * 55}")
+    print(f"  Re-mine complete. Model: {target_model}")
+    if missing:
+        print(f"  Skipped {len(missing)} missing source files.")
+    print(f"  Backup saved at {backup_path}")
+    print(f"{'=' * 55}\n")
 
 
 def cmd_repair(args):
@@ -430,9 +583,12 @@ def cmd_repair(args):
 
     backend = ChromaBackend()
 
-    # Try to read existing drawers
+    # Try to read existing drawers. ``force=True`` lets repair through even
+    # when the stamped embedding_model in metadata can't be loaded (the whole
+    # point of repair is recovering broken palaces) — palace.get_collection
+    # logs the mismatch instead of raising.
     try:
-        col = backend.get_collection(palace_path, "mempalace_drawers")
+        col = _palace_get_collection(palace_path, force=True)
         total = col.count()
         print(f"  Drawers found: {total}")
     except Exception as e:
@@ -481,8 +637,12 @@ def cmd_repair(args):
     shutil.copytree(palace_path, backup_path)
 
     print("  Rebuilding collection...")
+    # Drop the existing collection through the backend (which handles
+    # client cache invalidation) and let palace.get_collection rebuild it
+    # — this re-reads the embedding_model stamp and returns a collection
+    # bound to the same EF, so vectors stay compatible across repair.
     backend.delete_collection(palace_path, "mempalace_drawers")
-    new_col = backend.create_collection(palace_path, "mempalace_drawers")
+    new_col = _palace_get_collection(palace_path)
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
@@ -540,7 +700,6 @@ def cmd_compress(args):
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
 
-    # Load dialect (with optional entity config)
     config_path = args.config
     if not config_path:
         for candidate in ["entities.json", os.path.join(palace_path, "entities.json")]:
@@ -554,16 +713,17 @@ def cmd_compress(args):
     else:
         dialect = Dialect()
 
-    # Connect to palace
+    # Connect to palace through palace.get_collection so the EF bound at
+    # init time (PR #442) is reapplied — querying compressed entries with
+    # the wrong EF would return junk neighbours.
     backend = ChromaBackend()
     try:
-        col = backend.get_collection(palace_path, "mempalace_drawers")
+        col = _palace_get_collection(palace_path)
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         sys.exit(1)
 
-    # Query drawers in batches to avoid SQLite variable limit (~999)
     where = {"wing": args.wing} if args.wing else None
     _BATCH = 500
     docs, metas, ids = [], [], []
@@ -629,10 +789,12 @@ def cmd_compress(args):
             print(f"    {compressed}")
             print()
 
-    # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
-            comp_col = backend.get_or_create_collection(palace_path, "mempalace_compressed")
+            # Sister collection for compressed entries — also needs the
+            # EF bound to the palace's embedding_model so the AAAK summary
+            # vectors live in the same space.
+            comp_col = _palace_get_collection(palace_path, "mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
                 comp_meta["compression_ratio"] = round(stats["size_ratio"], 1)
@@ -649,9 +811,7 @@ def cmd_compress(args):
             print(f"  Error storing compressed drawers: {e}")
             sys.exit(1)
 
-    # Summary
     ratio = total_original / max(total_compressed, 1)
-    # Estimate tokens from char count (~3.8 chars/token for English text)
     orig_tokens = max(1, int(total_original / 3.8))
     comp_tokens = max(1, int(total_compressed / 3.8))
     print(f"  Total: {orig_tokens:,}t -> {comp_tokens:,}t ({ratio:.1f}x compression)")
@@ -681,7 +841,7 @@ def main():
     sub = parser.add_subparsers(dest="command")
 
     # init
-    p_init = sub.add_parser("init", help="Detect rooms from your folder structure")
+    p_init = sub.add_parser("init", help="Detect rooms and initialize palace config")
     p_init.add_argument("dir", help="Project directory to set up")
     p_init.add_argument(
         "--yes",
@@ -742,6 +902,18 @@ def main():
             "API key for the provider. For anthropic, defaults to $ANTHROPIC_API_KEY; "
             "for openai-compat, defaults to $OPENAI_API_KEY."
         ),
+    )
+    p_init.add_argument(
+        "--model", default=None,
+        help="Embedding model to bind to this palace (default: chromadb-default)",
+    )
+    p_init.add_argument(
+        "--chunk-size", type=int, default=None,
+        help="Chunk size in characters (default: 450)",
+    )
+    p_init.add_argument(
+        "--chunk-overlap", type=int, default=None,
+        help="Chunk overlap in characters (default: 50)",
     )
 
     # mine
@@ -896,6 +1068,27 @@ def main():
 
     sub.add_parser("status", help="Show what's been filed")
 
+    # re-mine
+    p_remine = sub.add_parser(
+        "re-mine",
+        help="Re-mine palace with a new embedding model",
+    )
+    p_remine.add_argument(
+        "--model", default=None,
+        help="New embedding model (default: keep current palace model)",
+    )
+    p_remine.add_argument(
+        "--chunk-size", type=int, default=None,
+        help="New chunk size in characters",
+    )
+    p_remine.add_argument(
+        "--chunk-overlap", type=int, default=None,
+        help="New chunk overlap in characters",
+    )
+    p_remine.add_argument(
+        "--dry-run", action="store_true", help="Show what would be re-mined without doing it"
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -931,6 +1124,7 @@ def main():
         "repair": cmd_repair,
         "migrate": cmd_migrate,
         "status": cmd_status,
+        "re-mine": cmd_remine,
     }
     dispatch[args.command](args)
 
