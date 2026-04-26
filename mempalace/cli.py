@@ -34,10 +34,142 @@ import argparse
 from pathlib import Path
 
 from .config import MempalaceConfig
+from .corpus_origin import detect_origin_heuristic, detect_origin_llm
+from .llm_client import LLMError, get_provider
 from .version import __version__
 
 
 _MEMPALACE_PROJECT_FILES = ("mempalace.yaml", "entities.json")
+
+# Pass 0 corpus-origin sampling caps. Tier 1 reads FULL file content (no
+# front-bias sampling) but bounds total memory on enormous corpora. Tier 2
+# trims to a smaller view because LLM context windows are finite.
+_PASS_ZERO_MAX_FILES = 30
+_PASS_ZERO_PER_FILE_CAP = 100_000  # 100KB per file is generous for prose
+_PASS_ZERO_TOTAL_CAP = 5_000_000  # 5MB total ceiling — bounds memory
+_PASS_ZERO_LLM_PER_SAMPLE = 2_000  # for Tier 2 LLM call only
+_PASS_ZERO_LLM_MAX_SAMPLES = 20  # Igor's review §4 illustrative cap
+
+
+def _gather_origin_samples(project_dir) -> list:
+    """Collect Tier-1 samples for corpus-origin detection.
+
+    Reads FULL file content (capped at ``_PASS_ZERO_PER_FILE_CAP`` per file
+    and ``_PASS_ZERO_TOTAL_CAP`` overall). No front-bias sampling — AI
+    signal that lives past the first N chars of a file must still trip
+    detection, so we read the whole file up to the cap.
+
+    Skips mempalace's own per-project artifacts (``entities.json``,
+    ``mempalace.yaml``) so a re-run of ``mempalace init`` produces the
+    same classification result it did on the first run. Without this
+    filter, the first run writes entities.json into the corpus, the
+    second run picks it up as a sample, and the Tier-1 density math
+    drifts (different total_chars). That makes init non-idempotent.
+
+    Returns a list of strings (one per readable file). Empty list when
+    the project has no readable text.
+    """
+    from .entity_detector import scan_for_detection
+
+    files = scan_for_detection(project_dir, max_files=_PASS_ZERO_MAX_FILES)
+    samples: list = []
+    total_chars = 0
+    for filepath in files:
+        if filepath.name in _MEMPALACE_PROJECT_FILES:
+            continue
+        if total_chars >= _PASS_ZERO_TOTAL_CAP:
+            break
+        try:
+            with open(filepath, encoding="utf-8", errors="replace") as f:
+                content = f.read(_PASS_ZERO_PER_FILE_CAP)
+        except OSError:
+            continue
+        if not content:
+            continue
+        samples.append(content)
+        total_chars += len(content)
+    return samples
+
+
+def _trim_samples_for_llm(samples: list) -> list:
+    """Reduce Tier-1 full-content samples to LLM-friendly size.
+
+    Tier 2 hits an LLM with a finite context window — we trim each sample
+    to ``_PASS_ZERO_LLM_PER_SAMPLE`` chars and cap the overall sample
+    count at ``_PASS_ZERO_LLM_MAX_SAMPLES``.
+    """
+    return [s[:_PASS_ZERO_LLM_PER_SAMPLE] for s in samples[:_PASS_ZERO_LLM_MAX_SAMPLES]]
+
+
+def _run_pass_zero(project_dir, palace_dir, llm_provider) -> dict:
+    """Pass 0: detect whether the corpus is AI-dialogue and persist the
+    result to ``<palace>/.mempalace/origin.json``.
+
+    Returns the wrapped result dict (same shape as origin.json) on success,
+    or ``None`` when there are no readable samples to detect from. The
+    return value is what cmd_init forwards to ``discover_entities`` via
+    the ``corpus_origin`` kwarg.
+
+    File-write failures (e.g. read-only palace) are caught and reported on
+    stderr; init never blocks on them.
+    """
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    samples = _gather_origin_samples(project_dir)
+    if not samples:
+        print("  Skipping corpus-origin detection — no readable samples.")
+        return None
+
+    # Tier 1 — always runs. Cheap regex grep, no API.
+    result = detect_origin_heuristic(samples)
+
+    # Tier 2 — runs only when an LLM provider is available. The provider
+    # contract is best-effort: corpus_origin internally falls back to a
+    # conservative default on transport/parse failure, so we don't need a
+    # try/except here, but we still keep one for any unforeseen exception.
+    if llm_provider is not None:
+        try:
+            llm_result = detect_origin_llm(_trim_samples_for_llm(samples), llm_provider)
+            # LLM-tier result wins on platform/persona/user fields; keep the
+            # heuristic evidence appended so the on-disk record retains the
+            # cheap-tier signal trail.
+            llm_result.evidence = list(llm_result.evidence) + [
+                f"Tier-1 heuristic: {e}" for e in result.evidence
+            ]
+            result = llm_result
+        except Exception as exc:  # noqa: BLE001 — never block init on LLM failure
+            print(f"  LLM corpus-origin tier failed ({exc}); using heuristic only.")
+
+    wrapped = {
+        "schema_version": 1,
+        "detected_at": datetime.now(timezone.utc).isoformat(),
+        "result": result.to_dict(),
+    }
+
+    origin_path = Path(palace_dir).expanduser() / ".mempalace" / "origin.json"
+    try:
+        origin_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(origin_path, "w", encoding="utf-8") as f:
+            json.dump(wrapped, f, indent=2, ensure_ascii=False)
+    except OSError as exc:
+        print(f"  Could not write {origin_path}: {exc}", file=sys.stderr)
+        # Return the wrapped dict anyway so the in-memory pipeline still
+        # benefits from the detection result this run.
+        return wrapped
+
+    # Banner — one line, two-space indent matching existing init style.
+    res = result
+    if res.likely_ai_dialogue:
+        platform = res.primary_platform or "AI dialogue (platform unidentified)"
+        user = res.user_name or "—"
+        agents = ", ".join(res.agent_persona_names) if res.agent_persona_names else "—"
+        print(f"  Detected: {platform} (user: {user}, agents: {agents})")
+    else:
+        print(f"  Corpus origin: not AI-dialogue (confidence: {res.confidence:.2f})")
+
+    return wrapped
 
 
 def _ensure_mempalace_files_gitignored(project_dir) -> bool:
@@ -86,29 +218,46 @@ def cmd_init(args):
         languages = cfg.entity_languages
     languages_tuple = tuple(languages)
 
-    # Optional phase-2 LLM provider (opt-in via --llm).
+    # Phase 1 §2: --llm is now ON by default. --no-llm is the explicit
+    # opt-out. Provider precedence is unchanged (Ollama localhost first,
+    # then openai-compat, then anthropic). Per Igor's spec: "never block
+    # init on a missing LLM" — when no provider responds, print a one-line
+    # message pointing at --no-llm and fall through to heuristics-only.
     llm_provider = None
-    if getattr(args, "llm", False):
-        from .llm_client import LLMError, get_provider
-
+    if not getattr(args, "no_llm", False):
+        provider_name = getattr(args, "llm_provider", "ollama") or "ollama"
+        provider_model = getattr(args, "llm_model", "gemma4:e4b") or "gemma4:e4b"
         try:
-            llm_provider = get_provider(
-                name=args.llm_provider,
-                model=args.llm_model,
-                endpoint=args.llm_endpoint,
-                api_key=args.llm_api_key,
+            candidate = get_provider(
+                name=provider_name,
+                model=provider_model,
+                endpoint=getattr(args, "llm_endpoint", None),
+                api_key=getattr(args, "llm_api_key", None),
             )
+            ok, msg = candidate.check_available()
+            if ok:
+                llm_provider = candidate
+                print(f"  LLM enabled: {provider_name}/{provider_model}")
+            else:
+                print(
+                    f"  No LLM provider reachable ({msg}). "
+                    f"Running heuristics-only — pass --no-llm to silence this."
+                )
         except LLMError as e:
-            print(f"  ERROR: {e}", file=sys.stderr)
-            sys.exit(2)
-        ok, msg = llm_provider.check_available()
-        if not ok:
             print(
-                f"  ERROR: LLM provider '{args.llm_provider}' unavailable: {msg}",
-                file=sys.stderr,
+                f"  LLM init failed ({e}). "
+                f"Running heuristics-only — pass --no-llm to silence this."
             )
-            sys.exit(2)
-        print(f"  LLM refinement enabled: {args.llm_provider}/{args.llm_model}")
+
+    # Pass 0: detect whether the corpus is AI-dialogue. Writes
+    # <palace>/.mempalace/origin.json and supplies corpus context to the
+    # entity classifier so it can correctly handle agent persona names
+    # (e.g. "Echo", "Sparrow") without misclassifying them as people.
+    corpus_origin = _run_pass_zero(
+        project_dir=args.dir,
+        palace_dir=cfg.palace_path,
+        llm_provider=llm_provider,
+    )
 
     # Pass 1: discover entities — manifests + git authors first, prose detection
     # as supplement for names mentioned only in docs/notes. Optional phase-2
@@ -116,7 +265,12 @@ def cmd_init(args):
     print(f"\n  Scanning for entities in: {args.dir}")
     if languages_tuple != ("en",):
         print(f"  Languages: {', '.join(languages_tuple)}")
-    detected = discover_entities(args.dir, languages=languages_tuple, llm_provider=llm_provider)
+    detected = discover_entities(
+        args.dir,
+        languages=languages_tuple,
+        llm_provider=llm_provider,
+        corpus_origin=corpus_origin,
+    )
     total = (
         len(detected["people"])
         + len(detected["projects"])
@@ -263,6 +417,17 @@ def cmd_mine(args):
     include_ignored = []
     for raw in args.include_ignored or []:
         include_ignored.extend(part.strip() for part in raw.split(",") if part.strip())
+
+    # Phase 1 §7: --redetect-origin re-runs corpus_origin on the current
+    # corpus state and overwrites <palace>/.mempalace/origin.json before
+    # mining proceeds. Heuristic-only by design — full LLM detection lives
+    # on `mempalace init --llm`.
+    if getattr(args, "redetect_origin", False):
+        _run_pass_zero(
+            project_dir=args.dir,
+            palace_dir=palace_path,
+            llm_provider=None,
+        )
 
     if args.mode == "convos":
         from .convo_miner import mine_convos
@@ -710,10 +875,18 @@ def main():
         "--llm",
         action="store_true",
         help=(
-            "Enable LLM-assisted entity refinement (opt-in, local-first). "
-            "Runs after manifest/git/regex detection, asking the configured "
-            "provider to reclassify ambiguous candidates. "
-            "Ctrl-C during refinement returns partial results."
+            "DEPRECATED — LLM-assisted entity refinement is now ON by default. "
+            "This flag is preserved for backward compatibility; pass --no-llm "
+            "to opt out instead."
+        ),
+    )
+    p_init.add_argument(
+        "--no-llm",
+        action="store_true",
+        help=(
+            "Disable LLM-assisted entity refinement. Run init in heuristics-only "
+            "mode (no provider acquisition, no LLM calls). Use when running "
+            "without a local LLM and you don't want the graceful-fallback message."
         ),
     )
     p_init.add_argument(
@@ -771,6 +944,17 @@ def main():
         help="Your name — recorded on every drawer (default: mempalace)",
     )
     p_mine.add_argument("--limit", type=int, default=0, help="Max files to process (0 = all)")
+    p_mine.add_argument(
+        "--redetect-origin",
+        action="store_true",
+        help=(
+            "Re-run corpus_origin detection on this directory and overwrite "
+            "<palace>/.mempalace/origin.json. Useful when the corpus has grown "
+            "since `mempalace init` and the stored origin may be stale. "
+            "Heuristic-only (no LLM call) — re-run `mempalace init --llm` for "
+            "Tier 2 refinement."
+        ),
+    )
     p_mine.add_argument(
         "--dry-run", action="store_true", help="Show what would be filed without filing"
     )

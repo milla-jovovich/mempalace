@@ -127,6 +127,11 @@ def test_cmd_init_with_entities(mock_config_cls, tmp_path):
         patch("mempalace.entity_detector.detect_entities", return_value=detected),
         patch("mempalace.entity_detector.confirm_entities", return_value=confirmed),
         patch("mempalace.room_detector_local.detect_rooms_local"),
+        # Pass 0 (corpus_origin) needs real file IO; this test mocks
+        # builtins.open globally for the entities.json write, which would
+        # break Pass 0's file-reading path. Patch Pass 0 out — a separate
+        # suite (tests/test_phase1_integration.py) covers it directly.
+        patch("mempalace.cli._run_pass_zero", return_value=None),
         patch("builtins.open", MagicMock()),
         patch("mempalace.cli._maybe_run_mine_after_init"),
     ):
