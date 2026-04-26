@@ -655,6 +655,7 @@ def tool_add_drawer(
         # See mempalace.trust_type for the mechanical:/human:/llm_judge:
         # convention. Unclassified agents leave trust_type unset.
         from .trust_type import parse_trust_type as _parse_trust_type
+
         trust = _parse_trust_type(added_by)
         if trust:
             metadata["trust_type"] = trust
