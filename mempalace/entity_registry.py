@@ -16,6 +16,7 @@ Usage:
 """
 
 import json
+import os
 import re
 import urllib.request
 import urllib.parse
@@ -320,11 +321,21 @@ class EntityRegistry:
             self._path.parent.chmod(0o700)
         except (OSError, NotImplementedError):
             pass
-        self._path.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
+        # Atomic write: serialize to a sibling temp file in the same dir
+        # (so os.replace stays on one filesystem), fsync, then rename over
+        # the target. A crash mid-write leaves the previous registry intact
+        # instead of a half-written file or an empty file from the truncate.
+        payload = json.dumps(self._data, indent=2)
+        tmp_path = self._path.with_name(self._path.name + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
         try:
-            self._path.chmod(0o600)
+            tmp_path.chmod(0o600)
         except (OSError, NotImplementedError):
             pass
+        os.replace(tmp_path, self._path)
 
     @staticmethod
     def _empty() -> dict:
