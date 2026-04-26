@@ -120,11 +120,14 @@ def ingest_diaries(
             continue
         date_str = date_match.group(1)
 
-        # Skip if content hasn't changed
+        # Skip if content hasn't changed. Hash the text so same-length edits
+        # (e.g. typo fix "teh" -> "the") still trigger re-ingest. Length alone
+        # would silently keep the stale drawer, violating verbatim recall.
         state_key = f"{wing}|{diary_path.name}"
-        prev_size = state.get(state_key, {}).get("size", 0)
-        curr_size = len(text)
-        if curr_size == prev_size and not force:
+        curr_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        prev_entry = state.get(state_key, {})
+        prev_hash = prev_entry.get("sha256")
+        if prev_hash == curr_hash and not force:
             continue
 
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -152,7 +155,7 @@ def ingest_diaries(
             )
 
             entries = _split_entries(text)
-            prev_entry_count = state.get(state_key, {}).get("entry_count", 0)
+            prev_entry_count = prev_entry.get("entry_count", 0)
             new_entries = entries if force else entries[prev_entry_count:]
 
             if new_entries:
@@ -183,7 +186,7 @@ def ingest_diaries(
                     closets_created += n
 
             state[state_key] = {
-                "size": curr_size,
+                "sha256": curr_hash,
                 "entry_count": len(entries),
                 "ingested_at": now_iso,
             }
