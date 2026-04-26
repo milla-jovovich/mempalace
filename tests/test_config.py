@@ -174,12 +174,16 @@ def test_kg_value_rejects_over_length():
 # --- sanitize_iso_date ---
 
 
-def test_iso_date_accepts_year_only():
-    assert sanitize_iso_date("2026") == "2026"
+def test_iso_date_rejects_year_only():
+    # Partial dates re-introduce silent empty result sets via lexicographic
+    # TEXT comparison in KG queries (e.g. "2026-01-01" <= "2026" is False).
+    with pytest.raises(ValueError):
+        sanitize_iso_date("2026")
 
 
-def test_iso_date_accepts_year_month():
-    assert sanitize_iso_date("2026-03") == "2026-03"
+def test_iso_date_rejects_year_month():
+    with pytest.raises(ValueError):
+        sanitize_iso_date("2026-03")
 
 
 def test_iso_date_accepts_full_date():

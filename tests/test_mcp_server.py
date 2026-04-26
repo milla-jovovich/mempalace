@@ -702,14 +702,21 @@ class TestKGTools:
         assert result["success"] is False
         assert "ended" in result["error"]
 
-    def test_kg_query_accepts_partial_iso_dates(self, monkeypatch, config, palace_path, seeded_kg):
+    def test_kg_query_rejects_partial_iso_dates(self, monkeypatch, config, palace_path, seeded_kg):
         _patch_mcp_server(monkeypatch, config, seeded_kg)
         from mempalace.mcp_server import tool_kg_query
 
-        # YYYY and YYYY-MM are valid ISO-8601 forms — must not be rejected.
-        for value in ("2026", "2026-03", "2026-03-15"):
+        # Partial ISO dates are rejected: KG queries compare TEXT dates
+        # lexicographically, so "2026-01-01" <= "2026" is False, which
+        # silently excludes facts. Reject at the boundary — only YYYY-MM-DD
+        # produces correct results.
+        for value in ("2026", "2026-03"):
             result = tool_kg_query(entity="Max", as_of=value)
-            assert "error" not in result, f"rejected valid date {value!r}: {result}"
+            assert "error" in result, f"accepted partial date {value!r}: {result}"
+
+        # Full ISO-8601 dates still pass.
+        result = tool_kg_query(entity="Max", as_of="2026-03-15")
+        assert "error" not in result, f"rejected valid date: {result}"
 
 
 # ── Diary Tools ─────────────────────────────────────────────────────────
