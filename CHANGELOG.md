@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [3.3.4] — 2026-04-25
+
+### Bug Fixes
+
+- **Search similarity formula now grades the full cosine-distance range.** `searcher.search`, `searcher.search_memories`, and `tool_check_duplicate` previously mapped chromadb cosine distance to similarity via `max(0, 1 - dist)`. Cosine distance lives in `[0, 2]`; that formula collapsed every distance ≥ 1.0 to similarity 0.0, so orthogonal and opposite drawers looked identical to callers ranking or gating on the field. New formula: `max(0, (2 - dist) / 2)` — distance 0.0 → 1.0, distance 1.0 → 0.5, distance 2.0 → 0.0. (RFC-0028 §4.1)
+- **Diary `agent_name` filter is now case-insensitive.** ChromaDB metadata equality is exact-match. Pre-fix, `tool_diary_write` stored the `agent` metadata as the caller passed it (e.g. `"Fox"`) while `tool_diary_read` queried with whatever case it was given (e.g. `"fox"`), silently returning zero entries. Both sides now lowercase the `agent` value at the metadata boundary. The original-cased name is still echoed on the write response. Pre-fix entries with mixed-case `agent` are unreachable until the operator runs a one-shot migration; new entries round-trip cleanly. (RFC-0028 §4.2)
+- **Search response `created_at` falls back to legacy palaces.** The response builder reads `meta.get("filed_at", meta.get("created_at", "unknown"))` so legacy palaces written before the `filed_at` rename keep a usable timestamp instead of returning the literal string `"unknown"`. (RFC-0028 §4.4)
+
+### Improvements
+
+- **`mempalace_list_drawers` accepts `preview_chars`.** The per-drawer `content_preview` slice was hardcoded at 200 characters with no override, forcing callers into a follow-up `mempalace_get_drawer` round-trip whenever the relevant content sat past the slice. New `preview_chars` parameter (default 200, range 50..2000) right-sizes the preview without re-fetching. The MCP TOOLS descriptor declares the new parameter so LLM-side callers see it in the tool's input schema. (RFC-0028 §4.3)
+- **`mempalace_status` lean mode (default).** Pre-fix, `tool_status` always returned the entire `PALACE_PROTOCOL` prose, the `AAAK_SPEC` dialect, the per-room dict (130 rows in a mature palace), and `palace_path` — ~6KB on every call. New `full: bool = False` parameter; default lean payload (`total_drawers`, per-wing counts, `rooms_count` integer, `lean: True` marker) is well under 2KB. `full=True` returns the historical shape minus the inline `aaak_dialect` duplicate (which lives in `mempalace_get_aaak_spec` only). (RFC-0028 §4.5)
+
+### Documentation
+
+- **`mempalace_memories_filed_away` contract clarified; `mempalace_last_checkpoint` alias added.** The tool name suggested a drawer-count query, but the handler actually checks whether a recent SessionStop checkpoint event exists and returns the message count from that one event. Docstring and MCP TOOLS descriptor now state explicitly: "NOT a drawer-count query — for palace size use `mempalace_status`." A `mempalace_last_checkpoint` alias points at the same handler with a clearer name; the legacy name is preserved for back-compat. Behaviour unchanged. (RFC-0028 §4.6)
+
+---
+
 ## [3.3.3] — 2026-04-23
 
 ### Bug Fixes
