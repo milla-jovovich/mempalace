@@ -990,6 +990,12 @@ def tool_diary_write(
     try:
         agent_name = sanitize_name(agent_name, "agent_name")
         entry = sanitize_content(entry)
+        # Topic is stored raw into ChromaDB metadata — sanitize for the same
+        # null-byte / path-traversal / size guards as agent_name (upstream
+        # PR #936 / commit 5bf8260, fork-side merge restored 2026-04-26).
+        # Sanitization is non-mangling for `_CHECKPOINT_TOPICS` values, so
+        # the checkpoint-routing check below is unaffected.
+        topic = sanitize_name(topic, "topic")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
