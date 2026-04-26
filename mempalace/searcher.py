@@ -282,7 +282,12 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     print(f"{'=' * 60}\n")
 
     for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
-        similarity = round(max(0.0, 1 - dist), 3)
+        # Cosine distance lives in [0, 2] (0 = identical, 2 = opposite). Map to a
+        # [0, 1] similarity that grades the entire range — distance 1.0 (orthogonal)
+        # is similarity 0.5, not 0.0. The previous `max(0.0, 1 - dist)` clamped
+        # everything past distance=1.0 to zero, hiding the difference between
+        # weakly-related and unrelated drawers.
+        similarity = round(max(0.0, (2.0 - dist) / 2.0), 3)
         meta = meta or {}
         source = Path(meta.get("source_file", "?")).name
         wing_name = meta.get("wing", "?")
@@ -414,8 +419,11 @@ def search_memories(
             "wing": meta.get("wing", "unknown"),
             "room": meta.get("room", "unknown"),
             "source_file": Path(source).name if source else "?",
-            "created_at": meta.get("filed_at", "unknown"),
-            "similarity": round(max(0.0, 1 - effective_dist), 3),
+            "created_at": meta.get("filed_at", meta.get("created_at", "unknown")),
+            # Cosine similarity over the full [0, 2] cosine-distance range.
+            # See note above on the CLI search path: `(2 - dist) / 2` keeps the
+            # [0.0, 1.0] envelope while preserving signal for distance > 1.0.
+            "similarity": round(max(0.0, (2.0 - effective_dist) / 2.0), 3),
             "distance": round(dist, 4),
             "effective_distance": round(effective_dist, 4),
             "closet_boost": round(boost, 3),

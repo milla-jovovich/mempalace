@@ -482,7 +482,12 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
         if results["ids"] and results["ids"][0]:
             for i, drawer_id in enumerate(results["ids"][0]):
                 dist = results["distances"][0][i]
-                similarity = round(1 - dist, 3)
+                # Match the searcher cosine-distance → similarity convention:
+                # distance ∈ [0, 2], similarity = (2 - dist) / 2 ∈ [0, 1].
+                # Old `1 - dist` collapsed similarities for orthogonal vectors
+                # to 0 and clamped negatives, masking near-duplicates whose
+                # cosine distance crossed 1.0.
+                similarity = round(max(0.0, (2.0 - dist) / 2.0), 3)
                 if similarity >= threshold:
                     meta = results["metadatas"][0][i]
                     doc = results["documents"][0][i]
