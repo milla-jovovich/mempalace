@@ -406,7 +406,12 @@ def cmd_status(args):
 
 
 def cmd_repair(args):
-    """Rebuild palace vector index from SQLite metadata."""
+    """Rebuild palace vector index from SQLite metadata.
+
+    ``--mode hnsw`` dispatches to the segment-level rebuild path
+    (:func:`mempalace.repair.rebuild_hnsw_segment`); the legacy default
+    mode rebuilds the whole collection via re-embed.
+    """
     import shutil
     from .backends.chroma import ChromaBackend
     from .migrate import confirm_destructive_action, contains_palace_database
@@ -415,6 +420,25 @@ def cmd_repair(args):
     palace_path = os.path.abspath(
         os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     )
+
+    if getattr(args, "mode", "legacy") == "hnsw":
+        if not getattr(args, "segment", None):
+            print("  --mode hnsw requires --segment <uuid>")
+            return
+        from .repair import rebuild_hnsw_segment
+
+        rebuild_hnsw_segment(
+            palace_path,
+            segment=args.segment,
+            max_elements=getattr(args, "max_elements", None),
+            backup=getattr(args, "backup", True),
+            purge_queue=getattr(args, "purge_queue", False),
+            quarantine_orphans=getattr(args, "quarantine_orphans", False),
+            dry_run=getattr(args, "dry_run", False),
+            assume_yes=getattr(args, "yes", False),
+        )
+        return
+
     db_path = os.path.join(palace_path, "chroma.sqlite3")
 
     if not os.path.isdir(palace_path):
@@ -888,7 +912,10 @@ def main():
     # repair
     p_repair = sub.add_parser(
         "repair",
-        help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
+        help=(
+            "Rebuild palace vector index (legacy mode) or a single HNSW segment "
+            "(--mode hnsw, issue #1046)"
+        ),
     )
     p_repair.add_argument(
         "--yes", action="store_true", help="Skip confirmation for destructive changes"
@@ -902,6 +929,44 @@ def main():
             "either matches or can't be read. Use only after independently confirming "
             "the palace really contains that count."
         ),
+    )
+    p_repair.add_argument(
+        "--mode",
+        choices=["legacy", "hnsw"],
+        default="legacy",
+        help="legacy: full-palace rebuild (default). hnsw: rebuild one segment from data_level0.bin",
+    )
+    p_repair.add_argument(
+        "--segment",
+        default=None,
+        help="Segment UUID under <palace>/<uuid>/ (required when --mode hnsw)",
+    )
+    p_repair.add_argument(
+        "--max-elements",
+        type=int,
+        default=None,
+        help="HNSW max_elements for new index (default: max(count*1.3, 200_000))",
+    )
+    p_repair.add_argument(
+        "--backup",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Back up SQLite + data_level0.bin + pickle before swap (default: on)",
+    )
+    p_repair.add_argument(
+        "--purge-queue",
+        action="store_true",
+        help="Clear the embeddings_queue rows for this segment's collection after rebuild",
+    )
+    p_repair.add_argument(
+        "--quarantine-orphans",
+        action="store_true",
+        help="Append dropped UUIDs + orphan HNSW labels to quarantined_orphans.json",
+    )
+    p_repair.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print rebuild report and exit without mutation (--mode hnsw only)",
     )
 
     # mcp
