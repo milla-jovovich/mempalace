@@ -17,6 +17,7 @@ No external graph DB needed — built from ChromaDB metadata.
 
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -26,6 +27,8 @@ from datetime import datetime, timezone
 from .config import MempalaceConfig
 from .palace import get_collection as _get_palace_collection
 from .palace import mine_lock
+
+logger = logging.getLogger("mempalace_mcp")
 
 # Module-level graph cache with TTL and write-invalidation.
 # Warm cache serves build_graph() in O(1); invalidate_graph_cache() clears on writes.
@@ -519,7 +522,7 @@ def follow_tunnels(wing: str, room: str, col=None, config=None):
                     if did and did in drawer_map:
                         c["drawer_preview"] = drawer_map[did][:300]
             except Exception:
-                pass
+                logger.debug("Drawer preview hydration failed", exc_info=True)
 
     return connections
 

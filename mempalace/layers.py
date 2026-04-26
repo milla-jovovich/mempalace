@@ -155,7 +155,7 @@ class Layer1:
             lines.append(room_line)
             total_len += len(room_line)
 
-            for imp, meta, doc in entries:
+            for _imp, meta, doc in entries:
                 source = Path(meta.get("source_file", "")).name if meta.get("source_file") else ""
 
                 # Truncate doc to keep L1 compact

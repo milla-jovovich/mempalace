@@ -227,7 +227,7 @@ def _expand_with_neighbors(drawers_col, matched_doc: str, matched_meta: dict, ra
         all_meta = drawers_col.get(where={"source_file": src}, include=["metadatas"])
         total_drawers = len(all_meta.ids) if all_meta.ids else None
     except Exception:
-        pass
+        logger.debug("total_drawers lookup failed for %s", src, exc_info=True)
 
     return {
         "text": combined_text,
@@ -279,10 +279,10 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     """
     try:
         col = get_collection(palace_path, create=False)
-    except Exception:
+    except Exception as e:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
-        raise SearchError(f"No palace found at {palace_path}")
+        raise SearchError(f"No palace found at {palace_path}") from e
 
     # Alert the user if this palace predates hnsw:space=cosine being set on
     # creation — their similarity scores will be junk until they run repair.
@@ -433,7 +433,8 @@ def search_memories(
             if source and source not in closet_boost_by_source:
                 closet_boost_by_source[source] = (rank, cdist, cdoc[:200])
     except Exception:
-        pass  # no closets yet — hybrid degrades to pure drawer search
+        # No closets yet — hybrid degrades to pure drawer search.
+        logger.debug("Closet collection unavailable; using drawer-only search", exc_info=True)
 
     # Rank-based boost. The ordinal signal ("which closet matched best") is
     # more reliable than absolute distance on narrative content, where
@@ -508,6 +509,7 @@ def search_memories(
                 include=["documents", "metadatas"],
             )
         except Exception:
+            logger.debug("Neighbor fetch failed for %s", full_source, exc_info=True)
             continue
         docs = source_drawers.documents
         metas_ = source_drawers.metadatas
