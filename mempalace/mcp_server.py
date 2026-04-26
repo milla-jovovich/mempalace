@@ -293,7 +293,21 @@ def _sanitize_optional_name(value: str = None, field_name: str = "name") -> str:
 # ==================== READ TOOLS ====================
 
 
-def tool_status():
+def tool_status(full: bool = False):
+    """Palace overview.
+
+    Default (``full=False``) returns a lean payload — total drawer count,
+    per-wing counts, and a single ``rooms_count`` integer. Most workflows
+    only need to confirm the palace is alive and roughly how big it is;
+    the full payload (130 rooms × name + count, the entire palace
+    protocol prose, the AAAK dialect spec) is wasted budget on every call.
+
+    ``full=True`` returns the historical shape minus the ``aaak_dialect``
+    field (the AAAK spec is now reachable only via ``get_aaak_spec``;
+    duplicating it inside ``status`` doubled payload size whenever an
+    LLM caller noticed it). The protocol prose stays in the full payload
+    because it doubles as a wake-up nudge for first-call agents.
+    """
     # Use create=True only when a palace DB already exists on disk -- this
     # bootstraps the ChromaDB collection on a valid-but-empty palace without
     # accidentally creating a palace in a non-existent directory (#830).
@@ -302,16 +316,8 @@ def tool_status():
     if not col:
         return _no_palace()
     count = col.count()
-    wings = {}
-    rooms = {}
-    result = {
-        "total_drawers": count,
-        "wings": wings,
-        "rooms": rooms,
-        "palace_path": _config.palace_path,
-        "protocol": PALACE_PROTOCOL,
-        "aaak_dialect": AAAK_SPEC,
-    }
+    wings: dict = {}
+    rooms: dict = {}
     try:
         all_meta = _get_cached_metadata(col)
         for m in all_meta:
@@ -320,9 +326,32 @@ def tool_status():
             r = m.get("room", "unknown")
             wings[w] = wings.get(w, 0) + 1
             rooms[r] = rooms.get(r, 0) + 1
+        meta_error = None
     except Exception as e:
         logger.exception("tool_status metadata fetch failed")
-        result["error"] = str(e)
+        meta_error = str(e)
+
+    if not full:
+        result = {
+            "total_drawers": count,
+            "wings": wings,
+            "rooms_count": len(rooms),
+            "lean": True,
+        }
+        if meta_error is not None:
+            result["error"] = meta_error
+            result["partial"] = True
+        return result
+
+    result = {
+        "total_drawers": count,
+        "wings": wings,
+        "rooms": rooms,
+        "palace_path": _config.palace_path,
+        "protocol": PALACE_PROTOCOL,
+    }
+    if meta_error is not None:
+        result["error"] = meta_error
         result["partial"] = True
     return result
 
@@ -1203,8 +1232,16 @@ def tool_reconnect():
 
 TOOLS = {
     "mempalace_status": {
-        "description": "Palace overview — total drawers, wing and room counts",
-        "input_schema": {"type": "object", "properties": {}},
+        "description": "Palace overview. Default (full=false) returns lean counts: total_drawers, per-wing counts, rooms_count. Pass full=true for the historical shape with palace_path, the wake-up protocol, and the per-room dict. The AAAK dialect lives in mempalace_get_aaak_spec only and is no longer duplicated inside status.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "full": {
+                    "type": "boolean",
+                    "description": "false (default) returns a lean counts-only payload; true returns the full overview with palace_path, protocol prose, and the per-room dict.",
+                },
+            },
+        },
         "handler": tool_status,
     },
     "mempalace_list_wings": {
