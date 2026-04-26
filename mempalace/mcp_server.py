@@ -730,10 +730,23 @@ def tool_get_drawer(drawer_id: str):
         return {"error": str(e)}
 
 
-def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offset: int = 0):
-    """List drawers with pagination. Optional wing/room filter."""
+def tool_list_drawers(
+    wing: str = None,
+    room: str = None,
+    limit: int = 20,
+    offset: int = 0,
+    preview_chars: int = 200,
+):
+    """List drawers with pagination. Optional wing/room filter.
+
+    ``preview_chars`` controls the per-drawer ``content_preview`` slice. The
+    pre-fix value was hardcoded at 200 characters with no override, so callers
+    had to chase a follow-up ``mempalace_get_drawer`` for any drawer whose
+    relevant content sat past the slice. Range: 50..2000.
+    """
     limit = max(1, min(limit, _MAX_RESULTS))
     offset = max(0, offset)
+    preview_chars = max(50, min(preview_chars, 2000))
     try:
         wing = _sanitize_optional_name(wing, "wing")
         room = _sanitize_optional_name(room, "room")
@@ -768,7 +781,9 @@ def tool_list_drawers(wing: str = None, room: str = None, limit: int = 20, offse
                     "drawer_id": did,
                     "wing": meta.get("wing", ""),
                     "room": meta.get("room", ""),
-                    "content_preview": doc[:200] + "..." if len(doc) > 200 else doc,
+                    "content_preview": (
+                        doc[:preview_chars] + "..." if len(doc) > preview_chars else doc
+                    ),
                 }
             )
         return {
@@ -1481,7 +1496,7 @@ TOOLS = {
         "handler": tool_get_drawer,
     },
     "mempalace_list_drawers": {
-        "description": "List drawers with pagination. Optional wing/room filter. Returns IDs, wings, rooms, and content previews.",
+        "description": "List drawers with pagination. Optional wing/room filter. Returns IDs, wings, rooms, and content previews. Use preview_chars to widen the per-drawer preview when 200 chars isn't enough to recognize the drawer.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1497,6 +1512,12 @@ TOOLS = {
                     "type": "integer",
                     "description": "Offset for pagination (default 0)",
                     "minimum": 0,
+                },
+                "preview_chars": {
+                    "type": "integer",
+                    "description": "Per-drawer content_preview length in characters (default 200, min 50, max 2000). Widen this when 200 chars isn't enough context to recognize a drawer without a follow-up get_drawer call.",
+                    "minimum": 50,
+                    "maximum": 2000,
                 },
             },
         },
