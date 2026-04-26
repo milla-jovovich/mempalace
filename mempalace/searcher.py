@@ -442,7 +442,8 @@ def search_memories(
     CLOSET_DISTANCE_CAP = 1.5  # cosine dist > 1.5 = too weak to use as signal
 
     scored: list = []
-    for doc, meta, dist in zip(
+    for drawer_id, doc, meta, dist in zip(
+        _first_or_empty(drawer_results, "ids"),
         _first_or_empty(drawer_results, "documents"),
         _first_or_empty(drawer_results, "metadatas"),
         _first_or_empty(drawer_results, "distances"),
@@ -465,6 +466,7 @@ def search_memories(
 
         effective_dist = dist - boost
         entry = {
+            "drawer_id": drawer_id,
             "text": doc,
             "wing": meta.get("wing", "unknown"),
             "room": meta.get("room", "unknown"),
