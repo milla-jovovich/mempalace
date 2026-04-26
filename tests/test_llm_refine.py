@@ -272,7 +272,9 @@ def test_apply_classifications_appends_reason_signal():
     assert any("spoken of by name" in s for s in new["people"][0]["signals"])
 
 
-def test_apply_classifications_topic_goes_to_uncertain():
+def test_apply_classifications_topic_goes_to_topics_bucket():
+    """TOPIC classifications now route to a dedicated ``topics`` bucket so the
+    miner can use them as cross-wing tunnel signal (issue #1180)."""
     detected = {
         "people": [],
         "projects": [
@@ -289,8 +291,32 @@ def test_apply_classifications_topic_goes_to_uncertain():
     decisions = {"Paris": ("TOPIC", "city, not a project")}
     new, reclass, _ = _apply_classifications(detected, decisions)
     assert len(new["projects"]) == 0
+    assert len(new["uncertain"]) == 0
+    assert len(new["topics"]) == 1
+    assert new["topics"][0]["name"] == "Paris"
+    assert new["topics"][0]["type"] == "topic"
+    assert reclass == 1
+
+
+def test_apply_classifications_ambiguous_still_goes_to_uncertain():
+    detected = {
+        "people": [],
+        "projects": [
+            {
+                "name": "Foo",
+                "type": "project",
+                "confidence": 0.7,
+                "frequency": 5,
+                "signals": ["regex"],
+            }
+        ],
+        "uncertain": [],
+    }
+    decisions = {"Foo": ("AMBIGUOUS", "context insufficient")}
+    new, reclass, _ = _apply_classifications(detected, decisions)
+    assert len(new["projects"]) == 0
     assert len(new["uncertain"]) == 1
-    assert new["uncertain"][0]["name"] == "Paris"
+    assert new["uncertain"][0]["name"] == "Foo"
     assert reclass == 1
 
 
@@ -469,7 +495,9 @@ def test_refine_entities_refines_high_confidence_regex_projects():
     assert provider.call_count == 1
     assert result.reclassified == 1
     assert result.merged["projects"] == []
-    assert result.merged["uncertain"][0]["name"] == "OpenAPI"
+    # TOPIC labels go to the dedicated ``topics`` bucket so the miner can
+    # use them for cross-wing tunnel computation (issue #1180).
+    assert result.merged["topics"][0]["name"] == "OpenAPI"
 
 
 def test_refine_entities_refines_regex_people_but_skips_git_people():

@@ -201,13 +201,143 @@ def prune_corrupt(palace_path=None, confirm=False):
     print(f"  Collection size: {before:,} → {after:,}")
 
 
-def rebuild_index(palace_path=None):
+# ChromaDB's ``collection.get()`` enforces an internal default ``limit``
+# of 10 000 rows when the caller does not pass one. We pass an explicit
+# ``limit=batch_size`` below, but the underlying segment also caps reads
+# during stale/quarantined-HNSW recovery flows: extraction silently stops
+# at exactly 10 000 even on palaces with many more rows. Refusing to
+# overwrite when this exact value comes back is the simplest signal we
+# can detect without depending on chromadb internals.
+CHROMADB_DEFAULT_GET_LIMIT = 10_000
+
+
+class TruncationDetected(Exception):
+    """Raised by :func:`check_extraction_safety` when extraction looks short.
+
+    Carries the human-readable abort message so callers (CLI ``cmd_repair``,
+    ``rebuild_index``) can print and exit consistently without re-deriving
+    the wording.
+    """
+
+    def __init__(self, message: str, sqlite_count: "int | None", extracted: int):
+        super().__init__(message)
+        self.message = message
+        self.sqlite_count = sqlite_count
+        self.extracted = extracted
+
+
+def check_extraction_safety(
+    palace_path: str, extracted: int, confirm_truncation_ok: bool = False
+) -> None:
+    """Cross-check that ``extracted`` matches the SQLite ground truth.
+
+    Two signals trip the guard:
+
+    1. **Strong** — ``chroma.sqlite3`` reports more drawers than were
+       extracted. This is the user-reported #1208 case: 67 580 on disk,
+       10 000 came back through the chromadb collection layer, repair
+       would have destroyed the difference.
+    2. **Weak** — extracted count equals exactly ``CHROMADB_DEFAULT_GET_LIMIT``
+       AND the SQLite check couldn't run (schema drift, locked file).
+       Hitting the chromadb default ``get()`` cap exactly is suspicious
+       enough to refuse without explicit acknowledgement.
+
+    Raises :class:`TruncationDetected` with a printable message when the
+    guard fires. Does nothing on safe extractions or when
+    ``confirm_truncation_ok`` is set.
+    """
+    if confirm_truncation_ok:
+        return
+
+    sqlite_count = sqlite_drawer_count(palace_path)
+    cap_signal = extracted == CHROMADB_DEFAULT_GET_LIMIT
+
+    if sqlite_count is not None and sqlite_count > extracted:
+        loss = sqlite_count - extracted
+        pct = 100 * loss / sqlite_count
+        message = (
+            f"\n  ABORT: chroma.sqlite3 reports {sqlite_count:,} drawers but only {extracted:,}\n"
+            "  came back through the chromadb collection layer. The segment metadata is\n"
+            "  stale (often after manual HNSW quarantine) — proceeding would silently\n"
+            f"  destroy {loss:,} drawers (~{pct:.0f}%).\n"
+            "\n"
+            "  Recovery options:\n"
+            "    1. Restore from your most recent palace backup, then re-mine.\n"
+            "    2. Direct-extract from chroma.sqlite3 (rows are still on disk) and\n"
+            "       rebuild the palace from source files.\n"
+            "    3. If you have independently confirmed the palace really contains only\n"
+            f"       {extracted:,} drawers, re-run with --confirm-truncation-ok.\n"
+        )
+        raise TruncationDetected(message, sqlite_count, extracted)
+
+    if cap_signal and sqlite_count is None:
+        message = (
+            f"\n  ABORT: extracted exactly {CHROMADB_DEFAULT_GET_LIMIT:,} drawers, which matches\n"
+            "  ChromaDB's internal default get() limit. The on-disk SQLite count couldn't\n"
+            "  be cross-checked from this Python context, so we can't tell whether the\n"
+            f"  palace genuinely holds {CHROMADB_DEFAULT_GET_LIMIT:,} rows or whether extraction was\n"
+            "  silently capped. Refusing to overwrite the palace.\n"
+            "\n"
+            "  If you have independently confirmed (e.g. via direct sqlite3 query) that\n"
+            f"  the palace really contains exactly {CHROMADB_DEFAULT_GET_LIMIT:,} drawers, re-run with\n"
+            "  --confirm-truncation-ok.\n"
+        )
+        raise TruncationDetected(message, sqlite_count, extracted)
+
+
+def sqlite_drawer_count(palace_path: str) -> "int | None":
+    """Count rows in ``chroma.sqlite3.embeddings`` for the drawers collection.
+
+    Used as an independent ground-truth check against the chromadb
+    collection-layer ``count()`` / ``get()``: when the on-disk SQLite
+    row count exceeds the extraction count, the segment metadata is
+    stale and repair would destroy the difference.
+
+    Returns ``None`` when the schema isn't readable (chromadb version
+    drift, missing tables, locked file). Callers treat ``None`` as
+    "unknown" and fall back to the cap-detection check.
+    """
+    sqlite_path = os.path.join(palace_path, "chroma.sqlite3")
+    if not os.path.exists(sqlite_path):
+        return None
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+        try:
+            row = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM embeddings e
+                JOIN segments s ON e.segment_id = s.id
+                JOIN collections c ON s.collection = c.id
+                WHERE c.name = ?
+                """,
+                (COLLECTION_NAME,),
+            ).fetchone()
+            return int(row[0]) if row and row[0] is not None else None
+        finally:
+            conn.close()
+    except Exception:
+        # chromadb schema differs by version (segments / collections column
+        # names occasionally rename). Silent fallback is correct here —
+        # the cap-detection check still catches the user-reported case.
+        return None
+
+
+def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     """Rebuild the HNSW index from scratch.
 
     1. Extract all drawers via ChromaDB get()
-    2. Back up ONLY chroma.sqlite3 (not the bloated HNSW files)
-    3. Delete and recreate the collection with hnsw:space=cosine
-    4. Upsert all drawers back
+    2. Cross-check against the SQLite ground truth (#1208 guard)
+    3. Back up ONLY chroma.sqlite3 (not the bloated HNSW files)
+    4. Delete and recreate the collection with hnsw:space=cosine
+    5. Upsert all drawers back
+
+    ``confirm_truncation_ok`` overrides the safety guard from step 2.
+    Set to ``True`` only when you have independently verified that the
+    palace genuinely contains exactly the extracted number of drawers
+    (typically only a concern for palaces sized at exactly 10 000 rows).
     """
     palace_path = palace_path or _get_palace_path()
 
@@ -252,10 +382,20 @@ def rebuild_index(palace_path=None):
         offset += len(batch["ids"])
     print(f"  Extracted {len(all_ids)} drawers")
 
+    # ── #1208 guard ──────────────────────────────────────────────────
+    # Refuse to ``delete_collection`` + rebuild when extraction looks
+    # short of the SQLite ground truth (or when extraction == chromadb
+    # default get() cap and the SQLite check couldn't run).
+    try:
+        check_extraction_safety(palace_path, len(all_ids), confirm_truncation_ok)
+    except TruncationDetected as e:
+        print(e.message)
+        return
+
     # Back up ONLY the SQLite database, not the bloated HNSW files
     sqlite_path = os.path.join(palace_path, "chroma.sqlite3")
+    backup_path = sqlite_path + ".backup"
     if os.path.exists(sqlite_path):
-        backup_path = sqlite_path + ".backup"
         print(f"  Backing up chroma.sqlite3 ({os.path.getsize(sqlite_path) / 1e6:.0f} MB)...")
         shutil.copy2(sqlite_path, backup_path)
         print(f"  Backup: {backup_path}")
@@ -266,13 +406,25 @@ def rebuild_index(palace_path=None):
     new_col = backend.create_collection(palace_path, COLLECTION_NAME)
 
     filed = 0
-    for i in range(0, len(all_ids), batch_size):
-        batch_ids = all_ids[i : i + batch_size]
-        batch_docs = all_docs[i : i + batch_size]
-        batch_metas = all_metas[i : i + batch_size]
-        new_col.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
-        filed += len(batch_ids)
-        print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
+    try:
+        for i in range(0, len(all_ids), batch_size):
+            batch_ids = all_ids[i : i + batch_size]
+            batch_docs = all_docs[i : i + batch_size]
+            batch_metas = all_metas[i : i + batch_size]
+            new_col.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
+            filed += len(batch_ids)
+            print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
+    except Exception as e:
+        print(f"\n  ERROR during rebuild: {e}")
+        print(f"  Only {filed}/{len(all_ids)} drawers were re-filed.")
+        if os.path.exists(backup_path):
+            print(f"  Restoring from backup: {backup_path}")
+            backend.delete_collection(palace_path, COLLECTION_NAME)
+            shutil.copy2(backup_path, sqlite_path)
+            print("  Backup restored. Palace is back to pre-repair state.")
+        else:
+            print("  No backup available. Re-mine from source files to recover.")
+        raise
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print("  HNSW index is now clean with cosine distance metric.")

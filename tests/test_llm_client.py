@@ -325,3 +325,104 @@ def test_anthropic_no_key_raises_on_classify(monkeypatch):
     p = AnthropicProvider(model="claude-haiku")
     with pytest.raises(LLMError, match="requires ANTHROPIC_API_KEY"):
         p.classify("s", "u")
+
+
+# ── is_external_service property (issue #24 — privacy warning support) ──
+#
+# `is_external_service` is True when this provider's endpoint sends data
+# off the user's machine/network. Used by mempalace init to print a
+# privacy warning before first run when an external API will receive
+# folder content. URL-based heuristic: localhost, 127.x, ::1, .local,
+# RFC1918 (10/8, 192.168/16, 172.16-31/12), and IPv6 ULA (fc/fd::) are
+# all treated as local. Everything else is treated as external.
+
+
+def test_ollama_provider_default_endpoint_is_local():
+    """OllamaProvider's default endpoint is http://localhost:11434, which
+    must be classified as local — no privacy warning fires for the
+    typical user running Ollama on their own machine."""
+    p = OllamaProvider(model="gemma4:e4b")
+    assert p.is_external_service is False, (
+        f"Default OllamaProvider endpoint must be local; got "
+        f"is_external_service={p.is_external_service} for endpoint={p.endpoint}"
+    )
+
+
+def test_openai_compat_provider_localhost_endpoint_is_local():
+    """LM Studio / llama.cpp server / vLLM commonly bind to localhost.
+    Those setups must NOT trigger the external-API warning."""
+    p = OpenAICompatProvider(model="any", endpoint="http://localhost:1234")
+    assert p.is_external_service is False
+    p_127 = OpenAICompatProvider(model="any", endpoint="http://127.0.0.1:8000")
+    assert p_127.is_external_service is False
+    p_lan = OpenAICompatProvider(model="any", endpoint="http://192.168.1.50:1234")
+    assert p_lan.is_external_service is False, "LAN (RFC1918) endpoints must be local"
+
+
+def test_openai_compat_provider_cloud_endpoint_is_external():
+    """A user pointing openai-compat at OpenAI's hosted API or any other
+    non-local endpoint MUST trigger the external warning."""
+    p = OpenAICompatProvider(model="gpt-4o", endpoint="https://api.openai.com")
+    assert p.is_external_service is True, (
+        f"https://api.openai.com must be classified external; got "
+        f"is_external_service={p.is_external_service}"
+    )
+
+
+def test_anthropic_provider_default_endpoint_is_external():
+    """AnthropicProvider's default endpoint is https://api.anthropic.com,
+    which is always external by definition. The privacy warning MUST
+    fire by default for users who pass --llm-provider anthropic."""
+    p = AnthropicProvider(model="claude-haiku-4-5", api_key="sk-test")
+    assert p.is_external_service is True, (
+        f"Default AnthropicProvider endpoint must be external; got "
+        f"is_external_service={p.is_external_service} for endpoint={p.endpoint}"
+    )
+
+
+# ── Tailscale CGNAT range (issue #25 follow-up to #24) ──────────────────
+#
+# Tailscale assigns addresses in 100.64.0.0/10 (CGNAT range): first octet
+# always 100, second octet 64-127 inclusive. Users running LM Studio /
+# Ollama / any local LLM accessible via Tailscale would currently
+# (post-#24, pre-#25) get a wrong privacy warning because the heuristic
+# doesn't recognize CGNAT as private. These tests pin the fix.
+
+
+def test_openai_compat_provider_tailscale_cgnat_endpoint_is_local():
+    """Tailscale CGNAT range (100.64.0.0/10) — IPs where the first octet
+    is 100 AND the second octet is 64-127 inclusive — must be classified
+    as local. Tailscale users running LM Studio on their Tailnet should
+    not trigger the external-API warning.
+    """
+    cases = [
+        ("http://100.64.0.1:1234", "start of CGNAT"),
+        ("http://100.100.50.50:1234", "middle of CGNAT (typical Tailscale assignment)"),
+        ("http://100.127.255.254:1234", "near end of CGNAT"),
+    ]
+    for endpoint, label in cases:
+        p = OpenAICompatProvider(model="any", endpoint=endpoint)
+        assert p.is_external_service is False, (
+            f"Tailscale CGNAT address {endpoint} ({label}) must be classified "
+            f"local; got is_external_service={p.is_external_service}"
+        )
+
+
+def test_openai_compat_provider_outside_tailscale_cgnat_is_external():
+    """Addresses in 100.x.x.x that fall OUTSIDE the CGNAT range
+    (100.64.0.0 - 100.127.255.255) are public IPs in regular allocated
+    space and must remain classified as external. Specifically: anything
+    where the second octet is < 64 or > 127.
+    """
+    cases = [
+        ("http://100.0.0.1:1234", "below CGNAT (public)"),
+        ("http://100.63.255.255:1234", "just below CGNAT (boundary)"),
+        ("http://100.128.0.0:1234", "just above CGNAT (boundary)"),
+        ("http://100.255.255.255:1234", "well above CGNAT"),
+    ]
+    for endpoint, label in cases:
+        p = OpenAICompatProvider(model="any", endpoint=endpoint)
+        assert p.is_external_service is True, (
+            f"Address {endpoint} ({label}) is OUTSIDE Tailscale CGNAT and "
+            f"should remain external; got is_external_service={p.is_external_service}"
+        )

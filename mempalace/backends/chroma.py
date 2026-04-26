@@ -4,6 +4,7 @@ import datetime as _dt
 import logging
 import os
 import sqlite3
+from pathlib import Path
 from typing import Any, Optional
 
 import chromadb
@@ -49,41 +50,105 @@ def _validate_where(where: Optional[dict]) -> None:
                 stack.extend(x for x in v if isinstance(x, dict))
 
 
-def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> list[str]:
-    """Rename HNSW segment dirs whose files are stale vs. chroma.sqlite3.
+def _segment_appears_healthy(seg_dir: str) -> bool:
+    """Return True if a chromadb HNSW segment dir looks intact.
 
-    When a ChromaDB 1.5.x PersistentClient opens a palace whose on-disk
-    HNSW segment is significantly older than ``chroma.sqlite3``, the Rust
-    graph-walk can dereference dangling neighbor pointers for entries that
-    exist in the metadata segment but not in the HNSW index, and segfault
-    in a background thread on the next ``count()`` or ``query(...)`` call.
+    Sniff-tests the chromadb-written segment metadata file
+    (``index_metadata.pickle``) for its expected format bytes without
+    parsing it. ChromaDB writes that file after a successful HNSW flush;
+    a complete write starts with byte ``0x80`` and ends with byte
+    ``0x2e`` (the protocol/terminator byte sequence chromadb serializes
+    with). If both bytes are present and the file is non-trivially sized,
+    chromadb will load the segment cleanly even when its on-disk mtime
+    trails ``chroma.sqlite3`` — which is the *steady state* under
+    chromadb 1.5.x's async batched flush, not corruption.
 
-    This is the same failure mode reported at #823 (semantic search stale
+    A missing metadata file is treated as "fresh / never-flushed" and
+    considered healthy. Renaming an empty dir orphans nothing, and a
+    real corruption case manifests as a present-but-malformed file or a
+    chromadb load error caught downstream by palace-daemon's
+    ``_auto_repair`` retry path.
+
+    Deliberately format-sniffs only; never deserializes. Deserialization
+    can execute arbitrary code, and the byte-sniff is sufficient to
+    distinguish a complete write from truncation, zero-fill, or
+    partial-flush corruption.
+
+    Assumes pickle protocol >= 2 (``0x80`` PROTO marker). Matches what
+    chromadb writes today; if a future chromadb version emits protocol
+    0/1 segments, this check would start returning False on healthy
+    files and quarantine_stale_hnsw would conservatively rename them
+    out of the way (lazy rebuild on next open recovers).
+    """
+    meta_path = os.path.join(seg_dir, "index_metadata.pickle")
+    if not os.path.isfile(meta_path):
+        # No metadata file yet — segment hasn't flushed (fresh / empty).
+        # Renaming would orphan nothing; consider healthy.
+        return True
+    try:
+        size = os.path.getsize(meta_path)
+        # A real chromadb metadata file is at least tens of bytes; a
+        # smaller-than-floor file is almost certainly truncated.
+        if size < 16:
+            return False
+        with open(meta_path, "rb") as f:
+            head = f.read(2)
+            f.seek(-1, 2)  # last byte
+            tail = f.read(1)
+    except OSError:
+        return False
+    return len(head) == 2 and head[0] == 0x80 and tail == b"\x2e"
+
+
+def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> list[str]:
+    """Rename HNSW segment dirs that are both stale-by-mtime AND fail an
+    integrity sniff-test.
+
+    Catches the segfault failure mode from #823 (semantic search stale
     after ``add_drawer``), observed at neo-cortex-mcp#2 (SIGSEGV on
     ``count()`` with chromadb 1.5.5), and acknowledged as by-design at
-    chroma-core/chroma#2594. On one fork palace (135K drawers), the drift
-    caused a 65–85% crash rate on fresh-process opens; fresh-process
-    crash rate dropped to 0% after the segment dir was renamed out of the
-    way and ChromaDB rebuilt lazily.
+    chroma-core/chroma#2594. Renaming a corrupt segment lets chromadb
+    rebuild lazily on next open instead of segfaulting.
 
-    Heuristic: if ``chroma.sqlite3`` is more than ``stale_seconds`` newer
-    than the segment's ``data_level0.bin``, the segment is considered
-    suspect and renamed to ``<uuid>.drift-<timestamp>``. ChromaDB reopens
-    cleanly without it and writes fresh index files on next use. The
-    original directory is renamed, not deleted, so recovery remains
-    possible if the heuristic misfires.
+    Two-stage check:
 
-    The default threshold (1h) is deliberately conservative — ChromaDB's
-    HNSW flush cadence means legitimate drift is normally on the order of
-    seconds to minutes. A segment that is more than an hour out of date is
-    almost certainly in a "crashed mid-write" state.
+    1. **mtime gate.** If ``chroma.sqlite3`` is less than
+       ``stale_seconds`` newer than the segment's ``data_level0.bin``,
+       skip — chromadb is in normal write-path territory.
+
+    2. **Integrity gate** (``_segment_appears_healthy``). Even when the
+       mtime gap exceeds the threshold, a segment whose
+       ``index_metadata.pickle`` passes a format sniff-test is healthy:
+       chromadb 1.5.x flushes HNSW state asynchronously and a clean
+       shutdown does NOT force-flush, so the on-disk HNSW is *always*
+       somewhat older than ``chroma.sqlite3``. Production observation
+       (2026-04-26 disks daemon): three of three segments quarantined
+       on every cold start, with 538-557s gaps, leaving the 151K-drawer
+       palace with vector_ranked=0 until rebuild. Renaming a healthy
+       segment based on mtime alone destroys a valid index — chromadb
+       creates an empty replacement, orphaning every drawer in sqlite
+       from vector recall until the operator runs ``mempalace repair
+       --mode rebuild`` (15+ min on a 151K palace).
+
+    Only segments that pass stage 1 (suspiciously stale) AND fail stage
+    2 (metadata file truncated, zero-filled, or absent-with-data) are
+    renamed to ``<uuid>.drift-<timestamp>``. The original directory is
+    renamed, not deleted, so recovery remains possible if the heuristic
+    misfires.
+
+    The default threshold (5 min) is advisory under daemon-strict; the
+    integrity gate is what actually distinguishes corruption from flush
+    lag. The threshold still matters for the cross-machine replication
+    case (#823), where it bounds how stale a Syncthing-replicated
+    segment can be before we look harder at it.
 
     Args:
         palace_path: path to the palace directory containing ``chroma.sqlite3``
-        stale_seconds: minimum mtime gap to treat a segment as stale
+        stale_seconds: minimum mtime gap to *consider* a segment for quarantine
 
     Returns:
-        List of paths that were quarantined (empty if nothing drifted).
+        List of paths that were quarantined (empty if nothing actually
+        looked corrupt).
     """
     db_path = os.path.join(palace_path, "chroma.sqlite3")
     if not os.path.isfile(db_path):
@@ -114,20 +179,68 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 3600.0) -> li
             continue
         if sqlite_mtime - hnsw_mtime < stale_seconds:
             continue
+
+        # Stage 2: integrity gate. mtime drift is necessary but not
+        # sufficient — chromadb's async flush makes drift the steady-
+        # state condition. A healthy segment metadata file proves
+        # chromadb can open the segment without segfault; don't
+        # quarantine a healthy index.
+        if _segment_appears_healthy(seg_dir):
+            logger.info(
+                "HNSW mtime gap %.0fs on %s exceeds threshold but segment "
+                "metadata file is intact — flush-lag, not corruption. "
+                "Leaving in place.",
+                sqlite_mtime - hnsw_mtime,
+                seg_dir,
+            )
+            continue
+
         stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         target = f"{seg_dir}.drift-{stamp}"
         try:
             os.rename(seg_dir, target)
             moved.append(target)
             logger.warning(
-                "Quarantined stale HNSW segment %s (sqlite %.0fs newer than HNSW); renamed to %s",
+                "Quarantined corrupt HNSW segment %s (sqlite %.0fs newer than HNSW, integrity check failed); renamed to %s",
                 seg_dir,
                 sqlite_mtime - hnsw_mtime,
                 target,
             )
         except OSError:
-            logger.exception("Failed to quarantine stale HNSW segment %s", seg_dir)
+            logger.exception("Failed to quarantine corrupt HNSW segment %s", seg_dir)
     return moved
+
+
+def _pin_hnsw_threads(collection) -> None:
+    """Best-effort retrofit: pin ``hnsw:num_threads=1`` on an existing collection.
+
+    Fresh collections set this via ``metadata=`` at creation. Legacy palaces
+    built before that change keep the default (parallel insert) and can hit
+    the HNSW race described in #974/#965. ChromaDB's
+    ``collection.modify(configuration=...)`` lets us re-apply ``num_threads=1``
+    in memory at load time so every new process is protected.
+
+    Note: in chromadb 1.5.x the modified ``configuration_json["hnsw"]`` does
+    not persist to disk across ``PersistentClient`` reopens, so this must
+    run on every ``get_collection`` call, not just once.
+    """
+    try:
+        from chromadb.api.collection_configuration import (
+            UpdateCollectionConfiguration,
+            UpdateHNSWConfiguration,
+        )
+    except ImportError:
+        logger.debug("_pin_hnsw_threads skipped: chromadb too old", exc_info=True)
+        return
+    try:
+        collection.modify(
+            configuration=UpdateCollectionConfiguration(hnsw=UpdateHNSWConfiguration(num_threads=1))
+        )
+    except Exception:
+        logger.debug("_pin_hnsw_threads modify failed", exc_info=True)
+
+
+_BLOB_FIX_MARKER = ".blob_seq_ids_migrated"
 
 
 def _fix_blob_seq_ids(palace_path: str) -> None:
@@ -139,9 +252,18 @@ def _fix_blob_seq_ids(palace_path: str) -> None:
     type INTEGER) is not compatible with SQL type BLOB".
 
     Must run BEFORE PersistentClient is created (the compactor fires on init).
+
+    Opening a Python sqlite3 connection against a ChromaDB 1.5.x WAL-mode
+    database leaves state that segfaults the next PersistentClient call. After
+    the migration has run once successfully, a marker file is written so
+    subsequent opens skip the sqlite connection entirely. Already-migrated
+    palaces can touch the marker manually to opt into the fast path.
     """
     db_path = os.path.join(palace_path, "chroma.sqlite3")
     if not os.path.isfile(db_path):
+        return
+    marker = os.path.join(palace_path, _BLOB_FIX_MARKER)
+    if os.path.isfile(marker):
         return
     try:
         with sqlite3.connect(db_path) as conn:
@@ -160,6 +282,14 @@ def _fix_blob_seq_ids(palace_path: str) -> None:
             conn.commit()
     except Exception:
         logger.exception("Could not fix BLOB seq_ids in %s", db_path)
+        return
+    # Write marker whether or not rows needed migration — the palace is now
+    # confirmed to be in the INTEGER-seq_id state and future opens can skip the
+    # sqlite3.connect() entirely.
+    try:
+        Path(marker).touch()
+    except OSError:
+        logger.exception("Could not write migration marker %s", marker)
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +498,18 @@ class ChromaCollection(BaseCollection):
     def count(self):
         return self._collection.count()
 
+    @property
+    def metadata(self) -> dict:
+        """Pass-through to the underlying ChromaDB collection's metadata.
+
+        Used by the searcher to detect legacy palaces that were created
+        without ``hnsw:space=cosine`` and therefore silently use L2
+        distance, which breaks cosine-based similarity interpretation.
+        Returns ``{}`` when metadata is absent so callers can do a plain
+        ``.get("hnsw:space")`` without None-checks.
+        """
+        return self._collection.metadata or {}
+
 
 # ---------------------------------------------------------------------------
 # Backend
@@ -404,6 +546,23 @@ class ChromaBackend(BaseBackend):
         # palace_path -> (inode, mtime) of chroma.sqlite3 at cache time.
         self._freshness: dict[str, tuple[int, float]] = {}
         self._closed = False
+
+    @staticmethod
+    def _resolve_embedding_function():
+        """Return the EF for the user's ``embedding_device`` setting.
+
+        Both ``get_collection`` and ``get_or_create_collection`` must receive
+        the EF explicitly — ChromaDB 1.x does not persist it with the
+        collection, so a reader that omits the argument silently gets the
+        library default and its queries won't match the writer's vectors.
+        """
+        try:
+            from ..embedding import get_embedding_function
+
+            return get_embedding_function()
+        except Exception:
+            logger.exception("Failed to build embedding function; using chromadb default")
+            return None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -477,6 +636,28 @@ class ChromaBackend(BaseBackend):
     # Public static helpers (legacy; prefer :meth:`get_collection`)
     # ------------------------------------------------------------------
 
+    # Per-process record of palaces that have already had quarantine_stale_hnsw
+    # invoked at least once. The proactive drift check is a *cold-start*
+    # protection — it catches HNSW segments that arrived stale relative to
+    # ``chroma.sqlite3`` (e.g. cross-machine replication, partial restore,
+    # crashed-mid-write). Once a long-running process has opened the palace
+    # cleanly, re-firing on every reconnect is a *runtime thrash*: the
+    # daemon's own writes bump sqlite mtime but HNSW flushes batch on
+    # chromadb's internal cadence, so the mtime gap naturally exceeds the
+    # threshold under steady write load even though nothing is corrupt.
+    # Real runtime drift is still handled — palace-daemon's ``_auto_repair``
+    # calls :func:`quarantine_stale_hnsw` directly on observed HNSW errors,
+    # which bypasses this gate.
+    #
+    # Thread-safety: this set is mutated without a lock. Two concurrent
+    # ``make_client()`` calls for the same palace can both pass the
+    # membership check and both invoke ``quarantine_stale_hnsw``. That's
+    # safe because the function is idempotent (mtime check + timestamped
+    # rename of distinct directories), so the worst-case race produces
+    # one redundant rename attempt that no-ops. Idempotency is the
+    # safety property; locking would add cost without correctness gain.
+    _quarantined_paths: set[str] = set()
+
     @staticmethod
     def make_client(palace_path: str):
         """Create a fresh ``PersistentClient`` (fixes BLOB seq_ids first).
@@ -484,8 +665,15 @@ class ChromaBackend(BaseBackend):
         Deprecated-ish: exposed for legacy long-lived callers that manage their
         own client cache. New code should obtain a collection through
         :meth:`get_collection` which manages caching internally.
+
+        Quarantines stale HNSW segments **once per palace per process**. See
+        :attr:`_quarantined_paths` for the rationale (cold-start protection
+        vs. runtime thrash on steady-write daemons).
         """
         _fix_blob_seq_ids(palace_path)
+        if palace_path not in ChromaBackend._quarantined_paths:
+            quarantine_stale_hnsw(palace_path)
+            ChromaBackend._quarantined_paths.add(palace_path)
         return chromadb.PersistentClient(path=palace_path)
 
     @staticmethod
@@ -532,12 +720,18 @@ class ChromaBackend(BaseBackend):
         if options and isinstance(options, dict):
             hnsw_space = options.get("hnsw_space", hnsw_space)
 
+        ef = self._resolve_embedding_function()
+        ef_kwargs = {"embedding_function": ef} if ef is not None else {}
+
         if create:
             collection = client.get_or_create_collection(
-                collection_name, metadata={"hnsw:space": hnsw_space}
+                collection_name,
+                metadata={"hnsw:space": hnsw_space, "hnsw:num_threads": 1},
+                **ef_kwargs,
             )
         else:
-            collection = client.get_collection(collection_name)
+            collection = client.get_collection(collection_name, **ef_kwargs)
+        _pin_hnsw_threads(collection)
         return ChromaCollection(collection)
 
     def close_palace(self, palace) -> None:
@@ -578,8 +772,12 @@ class ChromaBackend(BaseBackend):
         self, palace_path: str, collection_name: str, hnsw_space: str = "cosine"
     ) -> ChromaCollection:
         """Create (not get-or-create) ``collection_name`` with the given HNSW space."""
+        ef = self._resolve_embedding_function()
+        ef_kwargs = {"embedding_function": ef} if ef is not None else {}
         collection = self._client(palace_path).create_collection(
-            collection_name, metadata={"hnsw:space": hnsw_space}
+            collection_name,
+            metadata={"hnsw:space": hnsw_space, "hnsw:num_threads": 1},
+            **ef_kwargs,
         )
         return ChromaCollection(collection)
 

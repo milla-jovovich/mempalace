@@ -254,3 +254,123 @@ def test_rebuild_index_error_reading(mock_backend_cls, mock_shutil, tmp_path):
 
     repair.rebuild_index(palace_path=str(tmp_path))
     mock_backend.delete_collection.assert_not_called()
+
+
+# ── #1208 truncation safety ───────────────────────────────────────────
+
+
+def test_check_extraction_safety_passes_when_counts_match(tmp_path):
+    """SQLite reports same count as extracted → no exception."""
+    with patch("mempalace.repair.sqlite_drawer_count", return_value=500):
+        repair.check_extraction_safety(str(tmp_path), 500)
+
+
+def test_check_extraction_safety_passes_when_sqlite_unreadable_and_under_cap(tmp_path):
+    """SQLite check fails (None) but extraction is well under the cap → safe."""
+    with patch("mempalace.repair.sqlite_drawer_count", return_value=None):
+        repair.check_extraction_safety(str(tmp_path), 5_000)
+
+
+def test_check_extraction_safety_aborts_when_sqlite_higher(tmp_path):
+    """SQLite reports more than extracted — the user-reported #1208 case."""
+    with patch("mempalace.repair.sqlite_drawer_count", return_value=67_580):
+        try:
+            repair.check_extraction_safety(str(tmp_path), 10_000)
+        except repair.TruncationDetected as e:
+            assert e.sqlite_count == 67_580
+            assert e.extracted == 10_000
+            assert "67,580" in e.message
+            assert "10,000" in e.message
+            assert "57,580" in e.message  # the loss number
+        else:
+            raise AssertionError("expected TruncationDetected")
+
+
+def test_check_extraction_safety_aborts_when_unreadable_and_at_cap(tmp_path):
+    """SQLite unreadable but extraction == default get() cap → suspicious."""
+    with patch("mempalace.repair.sqlite_drawer_count", return_value=None):
+        try:
+            repair.check_extraction_safety(str(tmp_path), repair.CHROMADB_DEFAULT_GET_LIMIT)
+        except repair.TruncationDetected as e:
+            assert e.sqlite_count is None
+            assert e.extracted == repair.CHROMADB_DEFAULT_GET_LIMIT
+            assert "10,000" in e.message
+        else:
+            raise AssertionError("expected TruncationDetected")
+
+
+def test_check_extraction_safety_override_skips_check(tmp_path):
+    """``confirm_truncation_ok=True`` short-circuits both signals."""
+    with patch("mempalace.repair.sqlite_drawer_count", return_value=99_999):
+        # Would normally abort — override allows through
+        repair.check_extraction_safety(str(tmp_path), 10_000, confirm_truncation_ok=True)
+
+
+def test_sqlite_drawer_count_returns_none_on_missing_file(tmp_path):
+    """Palace dir exists but no chroma.sqlite3 → None, not crash."""
+    assert repair.sqlite_drawer_count(str(tmp_path)) is None
+
+
+def test_sqlite_drawer_count_returns_none_on_unreadable_schema(tmp_path):
+    """File exists but isn't a chromadb sqlite → None, not crash."""
+    sqlite_path = os.path.join(str(tmp_path), "chroma.sqlite3")
+    with open(sqlite_path, "wb") as f:
+        f.write(b"not a sqlite file at all")
+    assert repair.sqlite_drawer_count(str(tmp_path)) is None
+
+
+@patch("mempalace.repair.shutil")
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_aborts_on_truncation_signal(mock_backend_cls, mock_shutil, tmp_path):
+    """rebuild_index honors the safety guard: SQLite says 67k, get() returns
+    10k → no delete_collection, no upsert, no backup."""
+    mock_backend = MagicMock()
+    mock_col = MagicMock()
+    mock_col.count.return_value = 10_000
+    # Single page comes back with 10_000 ids
+    mock_col.get.side_effect = [
+        {
+            "ids": [f"id{i}" for i in range(10_000)],
+            "documents": ["x"] * 10_000,
+            "metadatas": [{}] * 10_000,
+        },
+        {"ids": [], "documents": [], "metadatas": []},
+    ]
+    mock_backend.get_collection.return_value = mock_col
+    mock_backend_cls.return_value = mock_backend
+
+    with patch("mempalace.repair.sqlite_drawer_count", return_value=67_580):
+        repair.rebuild_index(palace_path=str(tmp_path))
+
+    # Guard fired: nothing destructive happened
+    mock_backend.delete_collection.assert_not_called()
+    mock_backend.create_collection.assert_not_called()
+    mock_shutil.copy2.assert_not_called()
+
+
+@patch("mempalace.repair.shutil")
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_proceeds_with_override(mock_backend_cls, mock_shutil, tmp_path):
+    """Override flag lets repair proceed even when the guard would fire."""
+    mock_backend = MagicMock()
+    mock_col = MagicMock()
+    mock_col.count.return_value = 10_000
+    mock_col.get.side_effect = [
+        {
+            "ids": [f"id{i}" for i in range(10_000)],
+            "documents": ["x"] * 10_000,
+            "metadatas": [{}] * 10_000,
+        },
+        {"ids": [], "documents": [], "metadatas": []},
+    ]
+    mock_new_col = MagicMock()
+    mock_backend.get_collection.return_value = mock_col
+    mock_backend.create_collection.return_value = mock_new_col
+    mock_backend_cls.return_value = mock_backend
+
+    with patch("mempalace.repair.sqlite_drawer_count", return_value=67_580):
+        repair.rebuild_index(palace_path=str(tmp_path), confirm_truncation_ok=True)
+
+    mock_backend.delete_collection.assert_called_once()
+    mock_backend.create_collection.assert_called_once()
+    mock_new_col.upsert.assert_called()
