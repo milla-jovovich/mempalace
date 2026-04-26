@@ -78,13 +78,15 @@ step "5/5  verify new code is loaded"
 # venv (proves Syncthing + restart picked up new code, not just a stale
 # import). Update this list as new public surface lands.
 ssh "$HOST" "~/.local/share/palace-daemon/venv/bin/python -c '
-from mempalace.backends.chroma import ChromaBackend
+from mempalace.backends.chroma import ChromaBackend, _segment_appears_healthy
 from mempalace.palace import _SESSION_RECOVERY_COLLECTION, get_session_recovery_collection
 from mempalace.mcp_server import tool_session_recovery_read
-assert hasattr(ChromaBackend, \"_quarantined_paths\"), \"HNSW gate fix not loaded\"
+from mempalace.migrate import migrate_checkpoints_to_recovery
+from mempalace.miner import add_drawers, _build_drawer
+assert hasattr(ChromaBackend, \"_quarantined_paths\"), \"HNSW cold-start gate not loaded\"
 assert _SESSION_RECOVERY_COLLECTION == \"mempalace_session_recovery\"
 print(\"OK\")
 '" >/dev/null 2>&1 || fail "post-restart import check failed (see ssh log)"
-ok "post-restart imports include today's fork-ahead surface"
+ok "post-restart imports include today's fork-ahead surface (gate, integrity, recovery, migrate, batch)"
 
 printf '\n\033[1;32m✦ mempalace deploy complete: %s on %s\033[0m\n' "$local_sha" "$URL"

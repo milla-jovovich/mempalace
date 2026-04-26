@@ -12,7 +12,7 @@ Fork of [MemPalace](https://github.com/milla-jovovich/mempalace), tracking `upst
 
 What this fork adds that you won't get from upstream yet: a **deterministic silent-save hook architecture** (zero data loss, `systemMessage` notification, daemon-strict mode that skips local writes when `PALACE_DAEMON_URL` is set), **ChromaDB 1.5.x hardening** (`quarantine_stale_hnsw` drift recovery, segfault-trigger guards, 8-site `None`-metadata safety), **search that never silently misses** (`search_memories` returns warnings + sqlite BM25 top-up + `available_in_scope` so callers can see what they aren't getting), and **`kind=`-filtered search** that excludes Stop-hook auto-save checkpoints by default — discovered via the 2026-04-25 RLM smoke test, which surfaced that checkpoint diary entries (high word-density session summaries) were dominating retrieval and producing confident-but-misleading answers. Full list below.
 
-1366 tests pass on `main` · [Discussion #1017](https://github.com/MemPalace/mempalace/discussions/1017) introduces the fork upstream · [Issues on this repo](https://github.com/jphein/mempalace/issues) for fork-specific feedback.
+1372 tests pass on `main` · [Discussion #1017](https://github.com/MemPalace/mempalace/discussions/1017) introduces the fork upstream · [Issues on this repo](https://github.com/jphein/mempalace/issues) for fork-specific feedback.
 
 ## Fork change queue
 

@@ -722,12 +722,36 @@ def hook_session_start(data: dict, harness: str):
 
 
 def hook_precompact(data: dict, harness: str):
-    """Precompact hook: mine transcript synchronously, then allow compaction."""
+    """Precompact hook: write a session-recovery checkpoint, mine the
+    transcript synchronously, then allow compaction.
+
+    Session-recovery write parallels ``hook_stop``'s ``_save_diary_direct``
+    so a context-compaction event leaves a "where we were" marker in the
+    dedicated ``mempalace_session_recovery`` collection — queryable later
+    via ``mempalace_session_recovery_read`` by session_id. This isn't a
+    summary of context; it's a timestamped event of "context boundary
+    crossed at message N" so an operator can find the last marker before
+    compaction lost in-context state.
+    """
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
     transcript_path = parsed["transcript_path"]
 
     _log(f"PRE-COMPACT triggered for session {session_id}")
+
+    # Write a recovery marker before mining + compacting. Failure here is
+    # non-fatal; the mine + compaction must still proceed.
+    if transcript_path:
+        try:
+            project_wing = _wing_from_transcript_path(transcript_path)
+            _save_diary_direct(
+                transcript_path,
+                session_id,
+                wing=project_wing,
+                toast=False,
+            )
+        except Exception as e:
+            _log(f"PreCompact recovery-write failed (non-fatal): {e}")
 
     # Capture tool output via our normalize path before compaction loses it
     if transcript_path:

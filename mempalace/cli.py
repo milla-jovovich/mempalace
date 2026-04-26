@@ -539,14 +539,38 @@ def cmd_status(args):
 
 
 def cmd_repair(args):
-    """Rebuild palace vector index from SQLite metadata."""
+    """Rebuild palace vector index, or reorganize derivative drawers."""
     import shutil
     from .backends.chroma import ChromaBackend
-    from .migrate import confirm_destructive_action, contains_palace_database
+    from .migrate import (
+        confirm_destructive_action,
+        contains_palace_database,
+        migrate_checkpoints_to_recovery,
+    )
 
     palace_path = os.path.abspath(
         os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
     )
+
+    # mode=reorganize: move topic=checkpoint drawers from main → recovery.
+    # Non-destructive, idempotent. Designed to run on first daemon startup
+    # post-upgrade to land the checkpoint-collection split (phase D).
+    if getattr(args, "mode", "rebuild") == "reorganize":
+        if not os.path.isdir(palace_path) or not contains_palace_database(palace_path):
+            print(f"\n  No palace database found at {palace_path}")
+            return
+        print(f"\n{'=' * 55}")
+        print("  MemPalace Reorganize — checkpoint → session-recovery")
+        print(f"{'=' * 55}\n")
+        print(f"  Palace: {palace_path}")
+        moved = migrate_checkpoints_to_recovery(palace_path)
+        if moved == 0:
+            print("  Nothing to move — palace is already reorganized.")
+        else:
+            print(f"  Moved {moved} checkpoint drawer(s) to mempalace_session_recovery.")
+            print("  mempalace_search now queries content-only.")
+        print(f"\n{'=' * 55}\n")
+        return
     db_path = os.path.join(palace_path, "chroma.sqlite3")
 
     if not os.path.isdir(palace_path):
@@ -1014,10 +1038,24 @@ def main():
         instructions_sub.add_parser(instr_name, help=f"Output {instr_name} instructions")
 
     # repair
-    sub.add_parser(
+    p_repair = sub.add_parser(
         "repair",
         help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
-    ).add_argument("--yes", action="store_true", help="Skip confirmation for destructive changes")
+    )
+    p_repair.add_argument(
+        "--yes", action="store_true", help="Skip confirmation for destructive changes"
+    )
+    p_repair.add_argument(
+        "--mode",
+        choices=["rebuild", "reorganize"],
+        default="rebuild",
+        help=(
+            "rebuild: extract + re-upsert all drawers to repair HNSW index. "
+            "reorganize: move existing topic=checkpoint drawers from the main "
+            "collection into mempalace_session_recovery (idempotent; safe to "
+            "re-run)."
+        ),
+    )
 
     # mcp
     sub.add_parser(
