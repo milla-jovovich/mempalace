@@ -385,36 +385,104 @@ def test_fix_blob_seq_ids_noop_without_database(tmp_path):
 # ── quarantine_stale_hnsw ─────────────────────────────────────────────────
 
 
-def _make_palace_with_segment(tmp_path, hnsw_mtime, sqlite_mtime):
-    """Helper: build a palace dir with one HNSW segment + sqlite at given mtimes."""
+# Marker bytes for the chromadb segment metadata file. A complete
+# write begins with PROTO opcode (0x80) and ends with STOP opcode
+# (0x2e); _segment_appears_healthy sniffs these bytes without parsing
+# the file.
+_HEALTHY_META = b"\x80\x04" + b"\x00" * 32 + b"\x2e"
+_CORRUPT_META = b"\x00" * 64
+
+
+def _make_palace_with_segment(
+    tmp_path, hnsw_mtime, sqlite_mtime, meta_bytes=_HEALTHY_META
+):
+    """Helper: build a palace dir with one HNSW segment + sqlite at given
+    mtimes. ``meta_bytes`` controls whether the segment looks healthy
+    (default), corrupt (``_CORRUPT_META``), or has no metadata file at
+    all (``None``)."""
     palace = tmp_path / "palace"
     palace.mkdir()
     (palace / "chroma.sqlite3").write_text("")
     seg = palace / "abcd-1234-5678"
     seg.mkdir()
     (seg / "data_level0.bin").write_text("")
+    if meta_bytes is not None:
+        (seg / "index_metadata.pickle").write_bytes(meta_bytes)
     os.utime(seg / "data_level0.bin", (hnsw_mtime, hnsw_mtime))
     os.utime(palace / "chroma.sqlite3", (sqlite_mtime, sqlite_mtime))
     return palace, seg
 
 
-def test_quarantine_stale_hnsw_renames_drifted_segment(tmp_path):
-    """Segment whose data_level0.bin is 2h older than sqlite gets renamed."""
+def test_quarantine_stale_hnsw_renames_corrupt_segment(tmp_path):
+    """Segment with stale mtime AND a malformed metadata file gets renamed."""
     now = 1_700_000_000.0
-    palace, seg = _make_palace_with_segment(tmp_path, hnsw_mtime=now - 7200, sqlite_mtime=now)
+    palace, seg = _make_palace_with_segment(
+        tmp_path,
+        hnsw_mtime=now - 7200,
+        sqlite_mtime=now,
+        meta_bytes=_CORRUPT_META,
+    )
     moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
     assert len(moved) == 1
     assert ".drift-" in moved[0]
     assert not seg.exists()
-    # the renamed directory still exists and contains the original file
     renamed = list(palace.iterdir())
     drift_dirs = [p for p in renamed if ".drift-" in p.name]
     assert len(drift_dirs) == 1
     assert (drift_dirs[0] / "data_level0.bin").exists()
 
 
+def test_quarantine_stale_hnsw_leaves_healthy_segment_with_drift_alone(tmp_path):
+    """Segment with stale mtime but a complete metadata file is NOT
+    renamed — this is the chromadb-1.5.x async-flush steady state, not
+    corruption. Production case at 06:24 PDT 2026-04-26: cold-start
+    quarantine renamed three healthy segments after a clean shutdown,
+    leaving 151K-drawer palace with vector_ranked=0."""
+    now = 1_700_000_000.0
+    palace, seg = _make_palace_with_segment(
+        tmp_path,
+        hnsw_mtime=now - 7200,
+        sqlite_mtime=now,
+        meta_bytes=_HEALTHY_META,
+    )
+    moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
+    assert moved == []
+    assert seg.exists()
+
+
+def test_quarantine_stale_hnsw_leaves_segment_without_metadata_alone(tmp_path):
+    """Segment with no metadata file is treated as fresh / never-flushed
+    and not quarantined — renaming an empty dir orphans nothing."""
+    now = 1_700_000_000.0
+    palace, seg = _make_palace_with_segment(
+        tmp_path,
+        hnsw_mtime=now - 7200,
+        sqlite_mtime=now,
+        meta_bytes=None,
+    )
+    moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
+    assert moved == []
+    assert seg.exists()
+
+
+def test_quarantine_stale_hnsw_renames_truncated_metadata(tmp_path):
+    """Segment with a truncated (under-floor-size) metadata file is
+    quarantined — shape of a partial-flush during process kill."""
+    now = 1_700_000_000.0
+    palace, seg = _make_palace_with_segment(
+        tmp_path,
+        hnsw_mtime=now - 7200,
+        sqlite_mtime=now,
+        meta_bytes=b"\x80\x04",
+    )
+    moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
+    assert len(moved) == 1
+    assert ".drift-" in moved[0]
+
+
 def test_quarantine_stale_hnsw_leaves_fresh_segment_alone(tmp_path):
-    """Segment with recent mtime vs sqlite is not touched."""
+    """Segment with recent mtime vs sqlite is not touched (mtime gate
+    short-circuits before integrity gate)."""
     now = 1_700_000_000.0
     palace, seg = _make_palace_with_segment(tmp_path, hnsw_mtime=now - 10, sqlite_mtime=now)
     moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
