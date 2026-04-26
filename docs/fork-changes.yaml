@@ -24,6 +24,57 @@
 
 entries:
 
+  - id: cherry-pick-1094
+    date: 2026-04-26
+    bucket: Changed
+    commit: 43d728d
+    area: Reliability
+    summary: "Cherry-pick #1094 — coerce None metadatas at chromadb boundary"
+    body: |
+      Fork main was carrying the per-site ``meta = meta or {}`` guards
+      from #999 in eight read paths but didn't have the boundary
+      coercion that closes the issue once for all callers. The typed
+      ``QueryResult``/``GetResult`` contract declares
+      ``metadatas: list[dict]``, never ``list[Optional[dict]]`` — so
+      every call site that forgot the per-site guard was a latent
+      ``AttributeError``. #1094 (open upstream, jp-authored) coerces
+      at ``ChromaCollection.query()`` / ``.get()`` so downstream
+      callers always receive ``list[dict]``. Per-site guards retained
+      as belt-and-suspenders for paths that might bypass the typed
+      wrappers. Three same-family fork-ahead PRs (#1198, #1201, #1083
+      review) all pointed at gaps that would have been impossible if
+      this pattern had been in place.
+    tests: "6 in test_backends.py (mixed/all-None inner lists, padding regression, get-without-metadatas)"
+    pr: 1094
+    pr_state: OPEN
+    files:
+      - mempalace/backends/chroma.py
+      - tests/test_backends.py
+
+  - id: cherry-pick-1087-rewrite
+    date: 2026-04-26
+    bucket: Changed
+    commit: 366a9ad
+    area: CLI
+    summary: "Cherry-pick #1087 rewrite — collection.delete(where=) instead of nuke-and-rebuild"
+    body: |
+      Fork main had been carrying ``cmd_purge``'s nuke-and-rebuild
+      shape (extract survivors, ``shutil.rmtree``, recreate, re-insert).
+      Cherry-picked the post-review rewrite from PR #1087's branch:
+      ``ChromaBackend.get_collection`` + ``col.delete(where=...)``.
+      The race in #521 is on the upsert path
+      (``updatePoint`` / ``repairConnectionsForUpdate``) — filter-delete
+      doesn't reach it. Five fixes from @igorls's review now apply to
+      our own purge: embedding function preserved, no rmtree window,
+      routes through the backend, ``confirm_destructive_action`` reused,
+      end-to-end test covers the embedding-fn-survival path.
+    tests: "5 in test_cli.py (TestCmdPurge + e2e)"
+    pr: 1087
+    pr_state: OPEN
+    files:
+      - mempalace/cli.py
+      - tests/test_cli.py
+
   - id: doc-canonical-source
     date: 2026-04-26
     bucket: Added

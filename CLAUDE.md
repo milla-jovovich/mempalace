@@ -65,6 +65,10 @@ Ruff for linting (`ruff check`), line length 100, target Python 3.9.
 
 28. **feat: canonical YAML manifest + renderer for fork-ahead docs** (commit `5a01aec`, 2026-04-26) — `docs/fork-changes.yaml` is now the canonical source for the fork-ahead narrative. `scripts/render-docs.py` regenerates `FORK_CHANGELOG.md` from it; the README fork-change-queue table, this file's row inventory (rows 1–28), and `scratch/promises.md` are still hand-maintained but planned for marker-based render insertion in a follow-on commit. `scripts/check-docs.sh` extended with a render-parity check (calls `render-docs.py --check`) plus the existing test-count / commit-hash / upstream-PR-state checks. Researched towncrier, scriv, git-cliff, antsibull-changelog before going custom — none do single-source → multi-target render in this shape (keep-a-changelog#230 has been asking for this since 2018). Documentation workflow now lives in the **Documentation maintenance** section above.
 
+### Closed by jphein-with-triage (this fork's maintainer-granted perms)
+
+- **#622** (auto-memory conflict) closed 2026-04-26 — architectural concern fully resolved by #673 (silent saves, default since v3.3.0); the LLM is no longer in the save path so there's nothing to compete with auto-memory.
+
 ### Merged into upstream (post-v3.3.1)
 
 - epsilon mtime comparison (upstream PR #610, merged 2026-04-12 by Arnold Wender — their threshold is 0.001, ours was 0.01, semantically equivalent)
@@ -116,7 +120,7 @@ As of 2026-04-25: 14 merged, 8 open (including #1198 + #1201), 10 closed (added 
 | #1005 | open (CI green all platforms, Dialectician-acked, waiting maintainer) | Warnings + sqlite BM25 top-up when vector underdelivers (never silent miss) |
 | #1024 | open (CI green all platforms, qodo-acked, waiting maintainer) | Configurable chunk_size, chunk_overlap, min_chunk_size |
 | #1086 | open (`MERGEABLE`) | `mempalace export` CLI wrapper for `export_palace()` (fork-ahead Row 1) |
-| #1087 | open (`MERGEABLE`, 6/6 CI green) | `mempalace purge --wing/--room` CLI — destructive drawer removal (fork-ahead Row 4) |
+| #1087 | open, **rewritten 2026-04-26** per @igorls's review | `mempalace purge --wing/--room` CLI. Rewrite (commit `e9a59de`) replaces nuke-and-rebuild with `collection.delete(where=...)` after tracing #521's stack — the race is on the upsert path, not delete-by-where. Preserves embedding fn, no rmtree window, routes through `ChromaBackend`, reuses `confirm_destructive_action`. End-to-end test added. |
 | #1094 | open (`CLEAN`, 6/6 CI green) | Coerce `None` metadatas → `{}` at `ChromaCollection.query/.get` boundary (closes #1020) |
 | #1142 | open (filed 2026-04-23) | `docs/RELEASING.md` with `mempalace-mcp` pre-release grep — fulfills #1093's release-checklist proposal, accepted by @bensig 2026-04-23 via email |
 | #1173 | **bensig-approved 2026-04-26 then force-pushed 2 safety commits** — `mergeable=CONFLICTING` after develop moved | Call `quarantine_stale_hnsw()` in `make_client()`; lower threshold 3600→300s. Cold-start gate (`70c4bc6`) + integrity sniff-test (`645ba20`) cherry-picked onto the PR branch after production cold-start destroyed three healthy 253MB segments. Approval was on the original 1-commit shape; needs re-review + rebase against develop. |

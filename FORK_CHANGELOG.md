@@ -86,6 +86,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   *Files:* `scripts/deploy.sh`
 
 
+### Changed
+
+
+- **Cherry-pick #1094 — coerce None metadatas at chromadb boundary** ([`43d728d`](https://github.com/jphein/mempalace/commit/43d728d))
+  Fork main was carrying the per-site ``meta = meta or {}`` guards
+  from #999 in eight read paths but didn't have the boundary
+  coercion that closes the issue once for all callers. The typed
+  ``QueryResult``/``GetResult`` contract declares
+  ``metadatas: list[dict]``, never ``list[Optional[dict]]`` — so
+  every call site that forgot the per-site guard was a latent
+  ``AttributeError``. #1094 (open upstream, jp-authored) coerces
+  at ``ChromaCollection.query()`` / ``.get()`` so downstream
+  callers always receive ``list[dict]``. Per-site guards retained
+  as belt-and-suspenders for paths that might bypass the typed
+  wrappers. Three same-family fork-ahead PRs (#1198, #1201, #1083
+  review) all pointed at gaps that would have been impossible if
+  this pattern had been in place.
+
+  *Tests:* 6 in test_backends.py (mixed/all-None inner lists, padding regression, get-without-metadatas)
+  *Upstream:* [PR #1094](https://github.com/MemPalace/mempalace/pull/1094) (OPEN)
+  *Files:* `mempalace/backends/chroma.py`, `tests/test_backends.py`
+
+
+- **Cherry-pick #1087 rewrite — collection.delete(where=) instead of nuke-and-rebuild** ([`366a9ad`](https://github.com/jphein/mempalace/commit/366a9ad))
+  Fork main had been carrying ``cmd_purge``'s nuke-and-rebuild
+  shape (extract survivors, ``shutil.rmtree``, recreate, re-insert).
+  Cherry-picked the post-review rewrite from PR #1087's branch:
+  ``ChromaBackend.get_collection`` + ``col.delete(where=...)``.
+  The race in #521 is on the upsert path
+  (``updatePoint`` / ``repairConnectionsForUpdate``) — filter-delete
+  doesn't reach it. Five fixes from @igorls's review now apply to
+  our own purge: embedding function preserved, no rmtree window,
+  routes through the backend, ``confirm_destructive_action`` reused,
+  end-to-end test covers the embedding-fn-survival path.
+
+  *Tests:* 5 in test_cli.py (TestCmdPurge + e2e)
+  *Upstream:* [PR #1087](https://github.com/MemPalace/mempalace/pull/1087) (OPEN)
+  *Files:* `mempalace/cli.py`, `tests/test_cli.py`
+
+
 ### Fixed
 
 
