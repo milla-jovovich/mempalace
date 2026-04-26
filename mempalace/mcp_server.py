@@ -154,7 +154,7 @@ def _wal_log(operation: str, params: dict, result: dict = None):
     try:
         fd = os.open(str(_WAL_FILE), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, default=str) + "\n")
+            f.write(json.dumps(entry, default=str, ensure_ascii=False) + "\n")
     except Exception as e:
         logger.error(f"WAL write failed: {e}")
 
@@ -1689,7 +1689,11 @@ def handle_request(request):
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                "result": {
+                    "content": [
+                        {"type": "text", "text": json.dumps(result, indent=2, ensure_ascii=False)}
+                    ]
+                },
             }
         except Exception:
             logger.exception(f"Tool error in {tool_name}")
@@ -1736,7 +1740,7 @@ def main():
             request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
+                sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
                 sys.stdout.flush()
         except KeyboardInterrupt:
             break
