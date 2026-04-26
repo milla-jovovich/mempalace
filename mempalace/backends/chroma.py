@@ -7,6 +7,7 @@ import sqlite3
 from typing import Any, Optional
 
 import chromadb
+from chromadb.config import Settings
 
 from .base import (
     BaseBackend,
@@ -19,6 +20,10 @@ from .base import (
     UnsupportedFilterError,
     _IncludeSpec,
 )
+
+#: Shared ChromaDB settings that silence the posthog telemetry spam
+#: (see https://github.com/MemPalace/mempalace/issues/458).
+CHROMA_SETTINGS = Settings(anonymized_telemetry=False)
 
 logger = logging.getLogger(__name__)
 
@@ -523,7 +528,7 @@ class ChromaBackend(BaseBackend):
 
         if cached is None or inode_changed or mtime_changed or mtime_appeared:
             _fix_blob_seq_ids(palace_path)
-            cached = chromadb.PersistentClient(path=palace_path)
+            cached = chromadb.PersistentClient(path=palace_path, settings=CHROMA_SETTINGS)
             self._clients[palace_path] = cached
             # Re-stat after the client constructor runs: chromadb creates
             # chroma.sqlite3 lazily, so the stat captured before the call
@@ -544,7 +549,7 @@ class ChromaBackend(BaseBackend):
         :meth:`get_collection` which manages caching internally.
         """
         _fix_blob_seq_ids(palace_path)
-        return chromadb.PersistentClient(path=palace_path)
+        return chromadb.PersistentClient(path=palace_path, settings=CHROMA_SETTINGS)
 
     @staticmethod
     def backend_version() -> str:
