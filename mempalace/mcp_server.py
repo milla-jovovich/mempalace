@@ -1172,7 +1172,19 @@ def tool_hook_settings(silent_save: bool = None, desktop_toast: bool = None):
 
 
 def tool_memories_filed_away():
-    """Acknowledge the latest silent checkpoint. Returns a short summary."""
+    """Return whether a recent SessionStop checkpoint was filed.
+
+    NOT a drawer-count query. The function checks for an ack file written
+    by the silent-save hook on each SessionStop and returns the count of
+    *messages in that one checkpoint event* (or ``count: 0`` and
+    ``status: "quiet"`` if no recent checkpoint exists). The value never
+    reflects how many drawers the palace contains.
+
+    For palace size use ``mempalace_status`` (in either lean or full
+    mode). For checkpoint inspection prefer the ``mempalace_last_checkpoint``
+    alias — same handler, clearer name. The legacy
+    ``mempalace_memories_filed_away`` name is preserved for back-compat.
+    """
     state_dir = Path.home() / ".mempalace" / "hook_state"
     ack_file = state_dir / "last_checkpoint"
     if not ack_file.is_file():
@@ -1653,7 +1665,16 @@ TOOLS = {
         "handler": tool_hook_settings,
     },
     "mempalace_memories_filed_away": {
-        "description": "Check if a recent palace checkpoint was saved. Returns message count and timestamp.",
+        "description": "Check whether a recent SessionStop checkpoint was filed. Returns the message count from that one checkpoint event (or status='quiet' / count=0 if no recent checkpoint exists). NOT a drawer-count query — for palace size use mempalace_status. The mempalace_last_checkpoint alias points at the same handler with a clearer name.",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_memories_filed_away,
+    },
+    # Alias for the same handler — clearer name surfaces what the tool
+    # actually does (checkpoint-presence probe, not drawer count). The
+    # legacy ``mempalace_memories_filed_away`` name is preserved above
+    # so existing callers keep working.
+    "mempalace_last_checkpoint": {
+        "description": "Return whether a recent SessionStop checkpoint was filed. Returns message count + timestamp from that one checkpoint event (or status='quiet' / count=0 if no recent checkpoint). NOT a drawer-count query — for palace size use mempalace_status. Same handler as mempalace_memories_filed_away (legacy name).",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_memories_filed_away,
     },
