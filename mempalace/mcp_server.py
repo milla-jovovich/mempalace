@@ -945,10 +945,17 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
+    # Normalize agent_name to lowercase for the metadata filter. ChromaDB
+    # metadata equality is exact-match, so writes with `"Fox"` and reads
+    # with `"fox"` previously produced 0 matches even though the wing-
+    # derivation already lowercased. Lowercase the read side too (below)
+    # for symmetry. The original cased name is preserved on the call's
+    # response so the caller still sees what they sent.
+    agent_meta = agent_name.lower()
     if wing:
         wing = sanitize_name(wing)
     else:
-        wing = f"wing_{agent_name.lower().replace(' ', '_')}"
+        wing = f"wing_{agent_meta.replace(' ', '_')}"
     room = "diary"
     col = _get_collection(create=True)
     if not col:
@@ -985,7 +992,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
                     "hall": "hall_diary",
                     "topic": topic,
                     "type": "diary_entry",
-                    "agent": agent_name,
+                    "agent": agent_meta,
                     "filed_at": now.isoformat(),
                     "date": now.strftime("%Y-%m-%d"),
                 }
@@ -1028,7 +1035,15 @@ def tool_diary_read(agent_name: str, last_n: int = 10, wing: str = ""):
     # Build filter: always scope by agent + room=diary. Wing is optional —
     # when empty, return entries across all wings for this agent (matches
     # the #1097 empty-string-as-no-filter convention for LLM ergonomics).
-    conditions = [{"room": "diary"}, {"agent": agent_name}]
+    #
+    # Lowercase the agent filter to match the write-side normalization. Entries
+    # written before this fix kept whatever case the caller sent; pre-fix
+    # diary entries with mixed-case `agent` metadata are unreachable until
+    # the operator runs a one-shot migration. New entries are forward-
+    # consistent — `tool_diary_write("Fox", ...)` and `tool_diary_read("fox")`
+    # round-trip cleanly.
+    agent_filter = agent_name.lower()
+    conditions = [{"room": "diary"}, {"agent": agent_filter}]
     if wing:
         conditions.insert(0, {"wing": wing})
 
