@@ -66,6 +66,16 @@ def test_load_config_uses_defaults_when_yaml_missing():
         shutil.rmtree(tmpdir)
 
 
+def test_scan_project_skips_mempalace_generated_files():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        project_root = Path(tmpdir).resolve()
+        write_file(project_root / "entities.json", '{"people": [], "projects": []}')
+        write_file(project_root / "mempalace.yaml", "wing: test\nrooms: []\n")
+        write_file(project_root / "notes.md", "real user content\n" * 10)
+
+        assert scanned_files(project_root) == ["notes.md"]
+
+
 def test_scan_project_respects_gitignore():
     tmpdir = tempfile.mkdtemp()
     try:

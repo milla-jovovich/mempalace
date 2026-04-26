@@ -168,7 +168,10 @@ class MempalaceConfig:
         """Path to the memory palace data directory."""
         env_val = os.environ.get("MEMPALACE_PALACE_PATH") or os.environ.get("MEMPAL_PALACE_PATH")
         if env_val:
-            return env_val
+            # Normalize: expand ~ and collapse .. to match the CLI --palace
+            # code path (mcp_server.py:62) and prevent surprise redirection
+            # when the env var contains unresolved components.
+            return os.path.abspath(os.path.expanduser(env_val))
         return self._file_config.get("palace_path", DEFAULT_PALACE_PATH)
 
     @property

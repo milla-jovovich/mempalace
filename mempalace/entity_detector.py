@@ -113,6 +113,23 @@ SKIP_DIRS = {
     ".next",
     "coverage",
     ".mempalace",
+    ".terraform",
+    "vendor",
+    "target",
+}
+
+# Files whose content is boilerplate prose — poisons entity detection.
+# Matched by stem (case-insensitive), with or without an extension.
+SKIP_FILENAMES = {
+    "license",
+    "licence",
+    "copying",
+    "copyright",
+    "notice",
+    "authors",
+    "patents",
+    "third_party_notices",
+    "third-party-notices",
 }
 
 
@@ -193,7 +210,7 @@ def _build_patterns(name: str, languages: tuple = ("en",)) -> dict:
         "person_verbs": _compile_each(sources["person_verb_patterns"]),
         "project_verbs": _compile_each(sources["project_verb_patterns"]),
         "direct": direct_compiled,
-        "versioned": re.compile(rf"\b{n}[-v]\w+", re.IGNORECASE),
+        "versioned": re.compile(rf"\b{n}[-_]v?\d+(?:\.\d+)*\b", re.IGNORECASE),
         "code_ref": re.compile(rf"\b{n}\.(py|js|ts|yaml|yml|json|sh)\b", re.IGNORECASE),
     }
 
@@ -227,12 +244,19 @@ def score_entity(name: str, text: str, lines: list, languages=("en",)) -> dict:
 
     # --- Person signals ---
 
-    # Dialogue markers (strong signal)
+    # Dialogue markers (strong signal).
+    # The bare `^NAME:\s` colon-prefix pattern matches metadata lines like
+    # `Created: 2026-04-21`, so we require >= 2 hits for it to count as dialogue
+    # (real speaker markers repeat; single-line metadata doesn't).
     for rx in patterns["dialogue"]:
         matches = len(rx.findall(text))
-        if matches > 0:
-            person_score += matches * 3
-            person_signals.append(f"dialogue marker ({matches}x)")
+        if matches == 0:
+            continue
+        is_bare_colon = rx.pattern.endswith(r":\s") and not rx.pattern.endswith(r"[:\s]")
+        if is_bare_colon and matches < 2:
+            continue
+        person_score += matches * 3
+        person_signals.append(f"dialogue marker ({matches}x)")
 
     # Person verbs
     for rx in patterns["person_verbs"]:
@@ -328,17 +352,28 @@ def classify_entity(name: str, frequency: int, scores: dict) -> dict:
             signal_categories.add("addressed")
 
     has_two_signal_types = len(signal_categories) >= 2
-    _ = signal_categories - {"pronoun"}  # reserved for future thresholds
+    # Single-category pronoun signal still classifies as person when the
+    # evidence is overwhelming — a diary's main character is referenced
+    # with pronouns, not dialogue markers. Require both: many pronoun hits
+    # AND a high pronoun-to-frequency ratio so common sentence-start words
+    # (Never, Before, etc.) with incidental pronoun proximity don't qualify.
+    pronoun_hits = 0
+    for s in scores["person_signals"]:
+        m = re.search(r"pronoun nearby \((\d+)x\)", s)
+        if m:
+            pronoun_hits = int(m.group(1))
+            break
+    strong_pronoun_signal = pronoun_hits >= 5 and frequency > 0 and pronoun_hits / frequency >= 0.2
 
-    if person_ratio >= 0.7 and has_two_signal_types and ps >= 5:
+    if person_ratio >= 0.7 and (has_two_signal_types and ps >= 5 or strong_pronoun_signal):
         entity_type = "person"
         confidence = min(0.99, 0.5 + person_ratio * 0.5)
         signals = scores["person_signals"] or [f"appears {frequency}x"]
-    elif person_ratio >= 0.7 and (not has_two_signal_types or ps < 5):
-        # Pronoun-only match — downgrade to uncertain
+    elif person_ratio >= 0.7:
+        # Weak single-category person signal — downgrade to uncertain
         entity_type = "uncertain"
         confidence = 0.4
-        signals = scores["person_signals"] + [f"appears {frequency}x — pronoun-only match"]
+        signals = scores["person_signals"] + [f"appears {frequency}x — weak person signal"]
     elif person_ratio <= 0.3:
         entity_type = "project"
         confidence = min(0.99, 0.5 + (1 - person_ratio) * 0.5)
@@ -560,6 +595,8 @@ def scan_for_detection(project_dir: str, max_files: int = 10) -> list:
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for filename in filenames:
             filepath = Path(root) / filename
+            if filepath.stem.lower() in SKIP_FILENAMES:
+                continue
             ext = filepath.suffix.lower()
             if ext in PROSE_EXTENSIONS:
                 prose_files.append(filepath)
