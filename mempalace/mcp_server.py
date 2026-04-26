@@ -2,7 +2,7 @@
 """
 MemPalace MCP Server — read/write palace access for Claude Code
 ================================================================
-Install: claude mcp add mempalace -- python -m mempalace.mcp_server [--palace /path/to/palace]
+Install: claude mcp add mempalace -- mempalace-mcp [--palace /path/to/palace]
 
 Tools (read):
   mempalace_status          — total drawers, wing/room breakdown
@@ -643,19 +643,26 @@ def tool_add_drawer(
         pass
 
     try:
+        metadata = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file or "",
+            "chunk_index": 0,
+            "added_by": added_by,
+            "filed_at": datetime.now().isoformat(),
+        }
+        # Auto-populate trust_type when added_by carries a known prefix.
+        # See mempalace.trust_type for the mechanical:/human:/llm_judge:
+        # convention. Unclassified agents leave trust_type unset.
+        from .trust_type import parse_trust_type as _parse_trust_type
+        trust = _parse_trust_type(added_by)
+        if trust:
+            metadata["trust_type"] = trust
+
         col.upsert(
             ids=[drawer_id],
             documents=[content],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file or "",
-                    "chunk_index": 0,
-                    "added_by": added_by,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
+            metadatas=[metadata],
         )
         _metadata_cache = None
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
