@@ -1,0 +1,28 @@
+services:
+  mempalace:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MEMPALACE_VERSION: 3.3.0
+    container_name: mempalace
+    restart: unless-stopped
+    environment:
+      MEMPALACE_PALACE_PATH: /data/palace
+    volumes:
+      - mempalace-data:/data
+      - mempalace-config:/root/.mempalace
+    stdin_open: true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /root/.cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import mempalace; print('ok')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  mempalace-data:
+  mempalace-config:

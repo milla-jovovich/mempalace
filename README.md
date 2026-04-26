@@ -66,6 +66,7 @@ mempalace wake-up
 
 For Claude Code, Gemini CLI, MCP-compatible tools, and local models, see
 [mempalaceofficial.com/guide/getting-started](https://mempalaceofficial.com/guide/getting-started.html).
+For a minimal Docker/Compose deployment, see [examples/docker/README.md](examples/docker/README.md).
 
 ---
 
