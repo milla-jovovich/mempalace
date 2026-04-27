@@ -66,6 +66,7 @@ def _register_file(collection, source_file: str, wing: str, agent: str):
     ChromaDB on the first pass.
     """
     sentinel_id = f"_reg_{hashlib.sha256(source_file.encode()).hexdigest()[:24]}"
+    _now = datetime.now()
     collection.upsert(
         documents=[f"[registry] {source_file}"],
         ids=[sentinel_id],
@@ -75,7 +76,8 @@ def _register_file(collection, source_file: str, wing: str, agent: str):
                 "room": "_registry",
                 "source_file": source_file,
                 "added_by": agent,
-                "filed_at": datetime.now().isoformat(),
+                "filed_at": _now.isoformat(),
+                "filed_at_ts": _now.timestamp(),
                 "ingest_mode": "registry",
                 "normalize_version": NORMALIZE_VERSION,
             }
@@ -331,6 +333,7 @@ def _file_chunks_locked(collection, source_file, chunks, wing, room, agent, extr
                 room_counts_delta[chunk_room] += 1
             drawer_id = f"drawer_{wing}_{chunk_room}_{hashlib.sha256((source_file + str(chunk['chunk_index'])).encode()).hexdigest()[:24]}"
             try:
+                _now = datetime.now()
                 collection.upsert(
                     documents=[chunk["content"]],
                     ids=[drawer_id],
@@ -342,7 +345,8 @@ def _file_chunks_locked(collection, source_file, chunks, wing, room, agent, extr
                             "source_file": source_file,
                             "chunk_index": chunk["chunk_index"],
                             "added_by": agent,
-                            "filed_at": datetime.now().isoformat(),
+                            "filed_at": _now.isoformat(),
+                            "filed_at_ts": _now.timestamp(),
                             "ingest_mode": "convos",
                             "extract_mode": extract_mode,
                             "normalize_version": NORMALIZE_VERSION,

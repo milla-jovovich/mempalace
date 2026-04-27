@@ -539,13 +539,15 @@ def add_drawer(
     """Add one drawer to the palace."""
     drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256((source_file + str(chunk_index)).encode()).hexdigest()[:24]}"
     try:
+        _now = datetime.now()
         metadata = {
             "wing": wing,
             "room": room,
             "source_file": source_file,
             "chunk_index": chunk_index,
             "added_by": agent,
-            "filed_at": datetime.now().isoformat(),
+            "filed_at": _now.isoformat(),
+            "filed_at_ts": _now.timestamp(),
             "normalize_version": NORMALIZE_VERSION,
         }
         # Store file mtime so we can detect modifications later.
@@ -652,12 +654,14 @@ def process_file(
                 f"closet_{wing}_{room}_{hashlib.sha256(source_file.encode()).hexdigest()[:24]}"
             )
             entities = _extract_entities_for_metadata(content)
+            _closet_now = datetime.now()
             closet_meta = {
                 "wing": wing,
                 "room": room,
                 "source_file": source_file,
                 "drawer_count": drawers_added,
-                "filed_at": datetime.now().isoformat(),
+                "filed_at": _closet_now.isoformat(),
+                "filed_at_ts": _closet_now.timestamp(),
                 "normalize_version": NORMALIZE_VERSION,
             }
             if entities:

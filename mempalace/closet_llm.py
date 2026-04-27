@@ -281,6 +281,7 @@ def regenerate_closets(
         # purge+upsert cycle and leaves mixed regex/LLM lines.
         with mine_lock(source):
             purge_file_closets(closets_col, source)
+            _now = datetime.now()
             upsert_closet_lines(
                 closets_col,
                 closet_id_base,
@@ -290,7 +291,8 @@ def regenerate_closets(
                     "room": r,
                     "source_file": source,
                     "generated_by": f"llm:{cfg.model}",
-                    "filed_at": datetime.now().isoformat(),
+                    "filed_at": _now.isoformat(),
+                    "filed_at_ts": _now.timestamp(),
                     "entities": entities,
                     # Stamp so the miner's stale-drawer gate doesn't treat
                     # LLM closets as leftovers and rebuild over them next run.

@@ -639,6 +639,7 @@ def tool_add_drawer(
         pass
 
     try:
+        _now = datetime.now()
         col.upsert(
             ids=[drawer_id],
             documents=[content],
@@ -649,7 +650,8 @@ def tool_add_drawer(
                     "source_file": source_file or "",
                     "chunk_index": 0,
                     "added_by": added_by,
-                    "filed_at": datetime.now().isoformat(),
+                    "filed_at": _now.isoformat(),
+                    "filed_at_ts": _now.timestamp(),
                 }
             ],
         )
@@ -967,6 +969,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
                     "type": "diary_entry",
                     "agent": agent_name,
                     "filed_at": now.isoformat(),
+                    "filed_at_ts": now.timestamp(),
                     "date": now.strftime("%Y-%m-%d"),
                 }
             ],

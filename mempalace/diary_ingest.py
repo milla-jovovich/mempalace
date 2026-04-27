@@ -127,7 +127,9 @@ def ingest_diaries(
         if curr_size == prev_size and not force:
             continue
 
-        now_iso = datetime.now(timezone.utc).isoformat()
+        _now = datetime.now(timezone.utc)
+        now_iso = _now.isoformat()
+        now_ts = _now.timestamp()
         drawer_id = _diary_drawer_id(wing, date_str)
         entities = _extract_entities_for_metadata(text)
         source_file = str(diary_path)
@@ -142,6 +144,7 @@ def ingest_diaries(
                 "source_file": source_file,
                 "source_session": "daily_diary",
                 "filed_at": now_iso,
+                "filed_at_ts": now_ts,
             }
             if entities:
                 drawer_meta["entities"] = entities
@@ -172,6 +175,7 @@ def ingest_diaries(
                         "room": "daily",
                         "source_file": source_file,
                         "filed_at": now_iso,
+                        "filed_at_ts": now_ts,
                     }
                     if entities:
                         closet_meta["entities"] = entities
