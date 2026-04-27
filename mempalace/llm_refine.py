@@ -197,12 +197,22 @@ def _apply_classifications(
     """Merge LLM decisions back into the detected dict.
 
     Returns (new_detected, reclassified_count, dropped_count).
+
+    Topics get their own bucket so the caller can persist them as
+    cross-wing tunnel signal. ``AMBIGUOUS`` still falls back to
+    ``uncertain`` for human review.
     """
     label_to_bucket = {
         "PERSON": "people",
         "PROJECT": "projects",
-        "TOPIC": "uncertain",
+        "TOPIC": "topics",
         "AMBIGUOUS": "uncertain",
+    }
+    bucket_to_type = {
+        "people": "person",
+        "projects": "project",
+        "topics": "topic",
+        "uncertain": "uncertain",
     }
 
     # Index every entity by name for in-place update
@@ -216,6 +226,7 @@ def _apply_classifications(
     new_detected: dict[str, list[dict]] = {
         "people": [],
         "projects": [],
+        "topics": [],
         "uncertain": [],
     }
 
@@ -223,7 +234,7 @@ def _apply_classifications(
         decision = decisions.get(entry["name"])
         if decision is None:
             # No LLM opinion — keep as-is
-            new_detected[old_bucket].append(entry)
+            new_detected.setdefault(old_bucket, []).append(entry)
             continue
 
         label, reason = decision
@@ -245,16 +256,56 @@ def _apply_classifications(
         updated["signals"] = signals
         if target_bucket != old_bucket:
             reclassified += 1
-            updated["type"] = (
-                "person"
-                if target_bucket == "people"
-                else "project"
-                if target_bucket == "projects"
-                else "uncertain"
-            )
+            updated["type"] = bucket_to_type.get(target_bucket, "uncertain")
         new_detected[target_bucket].append(updated)
 
     return new_detected, reclassified, dropped
+
+
+def _build_corpus_origin_preamble(corpus_origin: dict | None) -> str:
+    """Build a system-prompt preamble carrying corpus-origin context.
+
+    When the corpus has been identified as AI-dialogue with known persona
+    names, this preamble lets the LLM disambiguate ambiguous candidates
+    with knowledge that this is AI-dialogue. It does NOT add a new label
+    or change the classification schema — the post-refine sweep in
+    project_scanner.discover_entities still moves persona names into
+    ``agent_personas``. The preamble is purely classification context for
+    the OTHER candidates (ambiguous, common-word) that benefit from
+    knowing the corpus shape.
+
+    Returns ``""`` when no usable origin context is available, so callers
+    can concatenate unconditionally without changing the v3.3.3 prompt
+    shape for opt-out paths.
+    """
+    if not corpus_origin:
+        return ""
+    result = corpus_origin.get("result") or {}
+    if not result.get("likely_ai_dialogue"):
+        return ""
+
+    lines = ["\n\nCORPUS CONTEXT (corpus-origin detection):"]
+    platform = result.get("primary_platform")
+    if platform:
+        lines.append(f"- This corpus is AI-dialogue from {platform}.")
+    user_name = result.get("user_name")
+    if user_name:
+        lines.append(
+            f"- The corpus author (the human user) is named '{user_name}'. "
+            f"Treat this name as PERSON."
+        )
+    personas = result.get("agent_persona_names") or []
+    if personas:
+        lines.append(
+            "- The user has assigned these persona names to AI agents in "
+            f"this corpus: {', '.join(personas)}."
+        )
+        lines.append(
+            "- Persona names refer to AI agents, not biological people. "
+            "Classify them as PERSON (a downstream step tags them as "
+            "agent personas)."
+        )
+    return "\n".join(lines)
 
 
 def _is_authoritative_person(entry: dict) -> bool:
@@ -287,6 +338,7 @@ def refine_entities(
     batch_size: int = BATCH_SIZE,
     show_progress: bool = True,
     allow_project_promotions: bool = True,
+    corpus_origin: dict | None = None,
 ) -> RefineResult:
     """Reclassify detected entities using the LLM provider.
 
@@ -349,12 +401,14 @@ def refine_entities(
     completed = 0
     cancelled = False
 
+    system_prompt = SYSTEM_PROMPT + _build_corpus_origin_preamble(corpus_origin)
+
     for idx, batch in enumerate(batches, 1):
         if show_progress and batch:
             _print_progress(idx - 1, len(batches), batch[0][0])
         user_prompt = _build_user_prompt(batch)
         try:
-            resp = provider.classify(SYSTEM_PROMPT, user_prompt, json_mode=True)
+            resp = provider.classify(system_prompt, user_prompt, json_mode=True)
         except KeyboardInterrupt:
             cancelled = True
             break

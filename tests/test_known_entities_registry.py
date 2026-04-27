@@ -206,3 +206,71 @@ def test_populated_registry_improves_miner_recall(temp_registry):
     # All four registered entities should land in the metadata string
     for expected in ("Julia Grib", "Kevin Heifner", "hyperion-history", "mempalace"):
         assert expected in tagged, f"expected '{expected}' in metadata {tagged!r}"
+
+
+# ── topics_by_wing — cross-wing tunnel signal source (issue #1180) ──
+
+
+def test_topics_persisted_under_topics_by_wing(temp_registry):
+    miner.add_to_known_entities(
+        {"people": ["Alice"], "topics": ["Angular", "OpenAPI"]},
+        wing="wing_alpha",
+    )
+    data = json.loads(temp_registry.read_text())
+    # Topics also stored as a flat list (existing-style aggregate).
+    assert "Angular" in data["topics"]
+    # And recorded by wing for tunnel computation.
+    assert data["topics_by_wing"]["wing_alpha"] == ["Angular", "OpenAPI"]
+
+
+def test_topics_by_wing_replaces_on_reinit(temp_registry):
+    """Re-running init for the same wing should reflect the latest list,
+    not accumulate stale topics indefinitely."""
+    miner.add_to_known_entities({"topics": ["Angular", "OpenAPI"]}, wing="wing_alpha")
+    miner.add_to_known_entities({"topics": ["OpenAPI", "Postgres"]}, wing="wing_alpha")
+    data = json.loads(temp_registry.read_text())
+    assert data["topics_by_wing"]["wing_alpha"] == ["OpenAPI", "Postgres"]
+
+
+def test_topics_by_wing_multiple_wings_coexist(temp_registry):
+    miner.add_to_known_entities({"topics": ["foo"]}, wing="wing_a")
+    miner.add_to_known_entities({"topics": ["foo", "bar"]}, wing="wing_b")
+    data = json.loads(temp_registry.read_text())
+    assert data["topics_by_wing"] == {"wing_a": ["foo"], "wing_b": ["foo", "bar"]}
+
+
+def test_topics_by_wing_skipped_without_wing(temp_registry):
+    miner.add_to_known_entities({"topics": ["foo"]})
+    data = json.loads(temp_registry.read_text())
+    # No wing → no topics_by_wing entry, but topics list still saved.
+    assert "topics_by_wing" not in data
+    assert data["topics"] == ["foo"]
+
+
+def test_topics_by_wing_dedupes_case_insensitive(temp_registry):
+    miner.add_to_known_entities({"topics": ["OpenAPI", "openapi", "OPENAPI"]}, wing="wing_a")
+    data = json.loads(temp_registry.read_text())
+    # Only one entry, casing of the first observed name preserved.
+    assert data["topics_by_wing"]["wing_a"] == ["OpenAPI"]
+
+
+def test_get_topics_by_wing_reads_registry(temp_registry):
+    miner.add_to_known_entities({"topics": ["foo"]}, wing="wing_a")
+    miner.add_to_known_entities({"topics": ["foo", "bar"]}, wing="wing_b")
+    result = miner.get_topics_by_wing()
+    assert result == {"wing_a": ["foo"], "wing_b": ["foo", "bar"]}
+
+
+def test_get_topics_by_wing_empty_when_missing(temp_registry):
+    miner.add_to_known_entities({"people": ["Alice"]})
+    assert miner.get_topics_by_wing() == {}
+
+
+def test_topics_by_wing_does_not_pollute_known_names(temp_registry):
+    """Wing names in topics_by_wing must NOT leak into the flat known-names
+    set used by ``_extract_entities_for_metadata`` — only the topic strings
+    themselves should be recognized."""
+    miner.add_to_known_entities({"topics": ["Angular"]}, wing="wing_super_secret_project")
+    known = miner._load_known_entities()
+    assert "Angular" in known
+    assert "wing_super_secret_project" not in known
