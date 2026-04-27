@@ -45,9 +45,23 @@ Architecture, concepts, and mining flows:
 
 ## Install
 
+MemPalace is a CLI, so install it in an isolated environment with
+[`pipx`](https://pipx.pypa.io/) (or `uv tool`). This avoids PEP 668
+errors on Debian/Ubuntu/Homebrew Pythons and keeps mempalace's deps
+(`chromadb`, `numpy`, `grpcio`, …) from conflicting with anything else
+in your global site-packages.
+
 ```bash
-pip install mempalace
+pipx install mempalace            # recommended — or: uv tool install mempalace
 mempalace init ~/projects/myapp
+```
+
+Prefer plain `pip` only inside an activated virtualenv where you
+explicitly want `import mempalace` available:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install mempalace
 ```
 
 ## Quickstart
