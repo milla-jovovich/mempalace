@@ -446,7 +446,7 @@ def test_maybe_auto_ingest_with_env(tmp_path):
                     mock_popen.assert_called_once()
                     cmd = mock_popen.call_args[0][0]
                     assert "mine" in cmd
-                    assert str(mempal_dir) in cmd
+                    assert str(mempal_dir.resolve()) in cmd
                     assert cmd[cmd.index("--mode") + 1] == "projects"
 
 
@@ -462,7 +462,7 @@ def test_maybe_auto_ingest_with_transcript(tmp_path):
                     mock_popen.assert_called_once()
                     cmd = mock_popen.call_args[0][0]
                     assert "mine" in cmd
-                    assert str(tmp_path) in cmd
+                    assert str(tmp_path.resolve()) in cmd
                     assert cmd[cmd.index("--mode") + 1] == "convos"
 
 
@@ -477,7 +477,7 @@ def test_mine_sync_with_transcript_uses_convos_mode(tmp_path):
                 mock_run.assert_called_once()
                 cmd = mock_run.call_args[0][0]
                 assert "mine" in cmd
-                assert str(tmp_path) in cmd
+                assert str(tmp_path.resolve()) in cmd
                 assert cmd[cmd.index("--mode") + 1] == "convos"
 
 
@@ -554,13 +554,32 @@ def test_mine_already_running_corrupt_file(tmp_path):
 
 
 def test_get_mine_dir_mempal_dir(tmp_path):
-    """MEMPAL_DIR takes priority and is treated as projects mode."""
+    """MEMPAL_DIR takes priority, is expanded/resolved, and is treated as projects mode."""
     mempal_dir = tmp_path / "project"
     mempal_dir.mkdir()
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
     with patch.dict("os.environ", {"MEMPAL_DIR": str(mempal_dir)}):
-        assert _get_mine_dir(str(transcript)) == (str(mempal_dir), "projects")
+        result_dir, result_mode = _get_mine_dir(str(transcript))
+        assert Path(result_dir).resolve() == mempal_dir.resolve()
+        assert result_mode == "projects"
+
+
+def test_get_mine_dir_mempal_dir_tilde(tmp_path):
+    """MEMPAL_DIR with a tilde prefix is expanded correctly."""
+    mempal_dir = tmp_path / "project"
+    mempal_dir.mkdir()
+    home = Path.home()
+    # Build a ~-relative path only if tmp_path is inside home
+    try:
+        rel = mempal_dir.relative_to(home)
+    except ValueError:
+        pytest.skip("tmp_path is not under home, cannot build ~-relative path")
+    tilde_path = "~/" + str(rel)
+    with patch.dict("os.environ", {"MEMPAL_DIR": tilde_path}):
+        result_dir, result_mode = _get_mine_dir("")
+        assert Path(result_dir).resolve() == mempal_dir.resolve()
+        assert result_mode == "projects"
 
 
 def test_get_mine_dir_transcript_fallback(tmp_path):
@@ -568,7 +587,27 @@ def test_get_mine_dir_transcript_fallback(tmp_path):
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
     with patch.dict("os.environ", {}, clear=True):
-        assert _get_mine_dir(str(transcript)) == (str(tmp_path), "convos")
+        result_dir, result_mode = _get_mine_dir(str(transcript))
+        assert Path(result_dir).resolve() == tmp_path.resolve()
+        assert result_mode == "convos"
+
+
+def test_get_mine_dir_transcript_path_traversal_rejected(tmp_path):
+    """Transcript paths with '..' components are rejected and return no dir."""
+    with patch.dict("os.environ", {}, clear=True):
+        result_dir, result_mode = _get_mine_dir("../../etc/passwd")
+        assert result_dir == ""
+        assert result_mode == "projects"
+
+
+def test_get_mine_dir_transcript_non_jsonl_rejected(tmp_path):
+    """Transcript paths without .jsonl/.json extension are rejected."""
+    bad = tmp_path / "notes.txt"
+    bad.write_text("content")
+    with patch.dict("os.environ", {}, clear=True):
+        result_dir, result_mode = _get_mine_dir(str(bad))
+        assert result_dir == ""
+        assert result_mode == "projects"
 
 
 def test_get_mine_dir_empty():
@@ -706,9 +745,9 @@ def test_precompact_mines_transcript_dir(tmp_path, monkeypatch):
         )
     assert result == {}
     mock_run.assert_called_once()
-    # Mine dir is the transcript's parent and mode is convos for JSONL.
+    # Mine dir is the transcript's parent (resolved) and mode is convos for JSONL.
     call_args = mock_run.call_args[0][0]
-    assert str(tmp_path) in call_args
+    assert str(tmp_path.resolve()) in call_args
     assert call_args[call_args.index("--mode") + 1] == "convos"
 
 

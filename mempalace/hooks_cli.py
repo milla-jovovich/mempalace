@@ -210,12 +210,13 @@ def _get_mine_dir(transcript_path: str = "") -> tuple[str, str]:
     code.
     """
     mempal_dir = os.environ.get("MEMPAL_DIR", "")
-    if mempal_dir and os.path.isdir(mempal_dir):
-        return mempal_dir, "projects"
-    if transcript_path:
-        path = Path(transcript_path).expanduser()
-        if path.is_file():
-            return str(path.parent), "convos"
+    if mempal_dir:
+        resolved = Path(mempal_dir).expanduser().resolve()
+        if resolved.is_dir():
+            return str(resolved), "projects"
+    path = _validate_transcript_path(transcript_path)
+    if path is not None and path.is_file():
+        return str(path.parent), "convos"
     return "", "projects"
 
 
