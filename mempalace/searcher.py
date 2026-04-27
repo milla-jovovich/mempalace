@@ -442,9 +442,13 @@ def search_memories(
     CLOSET_DISTANCE_CAP = 1.5  # cosine dist > 1.5 = too weak to use as signal
 
     scored: list = []
+    ids = _first_or_empty(drawer_results, "ids")
+    docs = _first_or_empty(drawer_results, "documents")
+    if not ids and docs:
+        ids = [None] * len(docs)
     for drawer_id, doc, meta, dist in zip(
-        _first_or_empty(drawer_results, "ids"),
-        _first_or_empty(drawer_results, "documents"),
+        ids,
+        docs,
         _first_or_empty(drawer_results, "metadatas"),
         _first_or_empty(drawer_results, "distances"),
     ):
