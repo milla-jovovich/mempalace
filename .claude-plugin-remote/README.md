@@ -86,6 +86,12 @@ Don't enable both plugins on the same machine. Both register an MCP server named
 - Central host that owns the palace → `mempalace`
 - Remote client that uses the host's palace → `mempalace-remote`
 
+## Windows clients
+
+The MCP wrapper (`bin/mempalace-mcp-ssh.sh`) and the hook scripts are bash. Windows doesn't ship bash, so install Git Bash or WSL and make sure `bash` is on the PATH that Claude Code launches in. Without it, the MCP server fails to start and the auto-save hooks silently no-op.
+
+OpenSSH client ships with Windows 10+ (1809), so once `bash` is available the SSH plumbing works.
+
 ## Limitations
 
 - If the central host is unreachable, MCP tool calls fail and hooks log SSH errors after every assistant turn. There's no offline cache or queue.
