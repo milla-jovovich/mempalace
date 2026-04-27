@@ -14,6 +14,7 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
+from typing import Optional
 
 from .normalize import normalize
 from .palace import (
@@ -376,6 +377,60 @@ def _file_chunks_locked(collection, source_file, chunks, wing, room, agent, extr
     return drawers_added, room_counts_delta, False
 
 
+def _is_ai_tool_path(path: Path) -> bool:
+    """Return True when `path` lives inside a known AI-tool storage dir.
+
+    Detected paths (exact-segment match — substrings like `.gemini-backup`
+    or `.codex-archive` do NOT match):
+      - any segment ``.codex`` (Codex CLI sessions / archives)
+      - any segment ``.gemini`` (Gemini CLI sessions under ~/.gemini/tmp/...)
+      - the consecutive segment pair ``.claude/projects`` (Claude Code).
+        ``.claude`` alone is NOT matched — that is the settings/config dir,
+        not a conversation source.
+
+    Used by ``_resolve_wing`` to default the destination wing to
+    ``wing_api`` when the user hasn't passed an explicit ``--wing``.
+    """
+    try:
+        parts = path.resolve().parts
+    except (OSError, RuntimeError):
+        return False
+
+    if ".codex" in parts:
+        return True
+    if ".gemini" in parts:
+        return True
+    for i in range(len(parts) - 1):
+        if parts[i] == ".claude" and parts[i + 1] == "projects":
+            return True
+    return False
+
+
+def _resolve_wing(convo_path: Path, wing: Optional[str]) -> str:
+    """Determine the destination wing for ``mine_convos``.
+
+    Precedence (first match wins):
+
+      1. Explicit ``wing`` argument from the user — always wins, even on
+         an AI-tool path. Empty string is treated as "no wing".
+      2. AI-tool path detection — defaults to ``wing_api`` so Claude
+         Code / Codex / Gemini conversations group under a single wing
+         dedicated to API-sourced content.
+      3. Basename fallback — sanitized via ``config.normalize_wing_name``
+         (lowercase, spaces/hyphens collapsed to underscores). Shared
+         single source of truth with ``cmd_init``,
+         ``room_detector_local``, and ``miner.load_config`` so all
+         wing-slug producers stay in sync (per #1194 consolidation).
+    """
+    from .config import normalize_wing_name
+
+    if wing:
+        return wing
+    if _is_ai_tool_path(convo_path):
+        return "wing_api"
+    return normalize_wing_name(convo_path.name)
+
+
 def mine_convos(
     convo_dir: str,
     palace_path: str,
@@ -393,10 +448,7 @@ def mine_convos(
     """
 
     convo_path = Path(convo_dir).expanduser().resolve()
-    if not wing:
-        from .config import normalize_wing_name
-
-        wing = normalize_wing_name(convo_path.name)
+    wing = _resolve_wing(convo_path, wing)
 
     files = scan_convos(convo_dir)
     if limit > 0:
