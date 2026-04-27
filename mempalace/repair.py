@@ -6,8 +6,9 @@ When ChromaDB's HNSW index accumulates duplicate entries (from repeated
 add() calls with the same ID), link_lists.bin can grow unbounded —
 terabytes on large palaces — eventually causing segfaults.
 
-This module provides three operations:
+This module provides four operations:
 
+  status  — compare sqlite vs HNSW element counts (read-only health check)
   scan    — find every corrupt/unfetchable ID in the palace
   prune   — delete only the corrupt IDs (surgical)
   rebuild — extract all drawers, delete the collection, recreate with
@@ -17,6 +18,7 @@ The rebuild backs up ONLY chroma.sqlite3 (the source of truth), not the
 full palace directory — so it works even when link_lists.bin is bloated.
 
 Usage (standalone):
+    python -m mempalace.repair status
     python -m mempalace.repair scan [--wing X]
     python -m mempalace.repair prune --confirm
     python -m mempalace.repair rebuild
@@ -32,7 +34,7 @@ import os
 import shutil
 import time
 
-from .backends.chroma import ChromaBackend
+from .backends.chroma import ChromaBackend, hnsw_capacity_status
 
 
 COLLECTION_NAME = "mempalace_drawers"
@@ -431,9 +433,62 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     print(f"\n{'=' * 55}\n")
 
 
+def status(palace_path=None) -> dict:
+    """Read-only health check: compare sqlite vs HNSW element counts.
+
+    Catches the #1222 failure mode where chromadb's HNSW segment freezes
+    at a stale ``max_elements`` while sqlite keeps accumulating rows.
+    Once the divergence is large enough, every tool call segfaults when
+    chromadb tries to load the undersized HNSW. Running ``mempalace
+    repair-status`` *before* opening the segment lets the operator
+    discover the problem without crashing the MCP server.
+
+    The check itself never opens a chromadb client and never imports
+    hnswlib — it reads ``chroma.sqlite3`` and ``index_metadata.pickle``
+    directly via :func:`mempalace.backends.chroma.hnsw_capacity_status`.
+
+    Returns the capacity-status dict (also printed). Returns a dict with
+    ``status="unknown"`` when no palace exists at the given path.
+    """
+    palace_path = palace_path or _get_palace_path()
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Repair — Status")
+    print(f"{'=' * 55}\n")
+    print(f"  Palace: {palace_path}")
+
+    if not os.path.isdir(palace_path):
+        print("  No palace found.\n")
+        return {"status": "unknown", "message": "no palace at path"}
+
+    drawers = hnsw_capacity_status(palace_path, "mempalace_drawers")
+    closets = hnsw_capacity_status(palace_path, "mempalace_closets")
+
+    for label, info in (("drawers", drawers), ("closets", closets)):
+        print(f"\n  [{label}]")
+        if info["sqlite_count"] is None:
+            print("    sqlite count:   (unreadable)")
+        else:
+            print(f"    sqlite count:   {info['sqlite_count']:,}")
+        if info["hnsw_count"] is None:
+            print("    hnsw count:     (no flushed metadata yet)")
+        else:
+            print(f"    hnsw count:     {info['hnsw_count']:,}")
+        if info["divergence"] is not None:
+            print(f"    divergence:     {info['divergence']:,}")
+        marker = "DIVERGED" if info["diverged"] else info["status"].upper()
+        print(f"    status:         {marker}")
+        if info["message"]:
+            print(f"    note:           {info['message']}")
+
+    if drawers["diverged"] or closets["diverged"]:
+        print("\n  Recommended: run `mempalace repair` to rebuild the index.")
+    print()
+    return {"drawers": drawers, "closets": closets}
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="MemPalace repair tools")
-    p.add_argument("command", choices=["scan", "prune", "rebuild"])
+    p.add_argument("command", choices=["status", "scan", "prune", "rebuild"])
     p.add_argument("--palace", default=None, help="Palace directory path")
     p.add_argument("--wing", default=None, help="Scan only this wing")
     p.add_argument("--confirm", action="store_true", help="Actually delete corrupt IDs")
@@ -441,7 +496,9 @@ if __name__ == "__main__":
 
     path = os.path.expanduser(args.palace) if args.palace else None
 
-    if args.command == "scan":
+    if args.command == "status":
+        status(palace_path=path)
+    elif args.command == "scan":
         scan_palace(palace_path=path, only_wing=args.wing)
     elif args.command == "prune":
         prune_corrupt(palace_path=path, confirm=args.confirm)

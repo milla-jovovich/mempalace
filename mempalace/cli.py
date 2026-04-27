@@ -607,6 +607,14 @@ def cmd_status(args):
     status(palace_path=palace_path)
 
 
+def cmd_repair_status(args):
+    """Read-only HNSW capacity health check (#1222)."""
+    from .repair import status as repair_status
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    repair_status(palace_path=palace_path)
+
+
 def cmd_repair(args):
     """Rebuild palace vector index from SQLite metadata."""
     import shutil
@@ -1125,6 +1133,12 @@ def main():
         ),
     )
 
+    # repair-status — read-only HNSW capacity health check (#1222)
+    sub.add_parser(
+        "repair-status",
+        help="Compare sqlite vs HNSW element counts (read-only; never opens a chromadb client)",
+    )
+
     # mcp
     sub.add_parser(
         "mcp",
@@ -1181,6 +1195,7 @@ def main():
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
+        "repair-status": cmd_repair_status,
         "migrate": cmd_migrate,
         "status": cmd_status,
     }

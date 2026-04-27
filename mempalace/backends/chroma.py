@@ -211,6 +211,272 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
     return moved
 
 
+def _vector_segment_id(palace_path: str, collection_name: str) -> Optional[str]:
+    """Return the VECTOR segment UUID for ``collection_name`` or ``None``.
+
+    Reads ``chroma.sqlite3`` directly so we never have to load a segment
+    that may segfault on open (#1222 is exactly this case).
+    """
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = conn.execute(
+                """
+                SELECT s.id
+                FROM segments s
+                JOIN collections c ON s.collection = c.id
+                WHERE c.name = ? AND s.scope = 'VECTOR'
+                LIMIT 1
+                """,
+                (collection_name,),
+            ).fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+
+class _PersistentDataStub:
+    """Minimal stand-in for chromadb's ``PersistentData`` during safe unpickling.
+
+    Accepts any constructor args so pickle's REDUCE opcode succeeds,
+    captures ``__setstate__`` into ``__dict__``. Only used by
+    :func:`_hnsw_element_count` — never persisted, never re-pickled.
+    """
+
+    def __init__(self, *args, **kwargs):
+        # Some chromadb versions pickle PersistentData by passing init args
+        # positionally via REDUCE. We don't care about reconstructing the
+        # object faithfully — we only need the id_to_label dict — so swallow
+        # all positional args and re-expose the relevant attributes via
+        # __setstate__ or __dict__ population further down.
+        pass
+
+    def __setstate__(self, state):
+        if isinstance(state, dict):
+            self.__dict__.update(state)
+        elif isinstance(state, tuple) and len(state) == 2 and isinstance(state[1], dict):
+            # (slot_state, dict_state) two-tuple form — only the dict part has
+            # the named attributes we care about.
+            self.__dict__.update(state[1])
+
+
+class _SafePersistentDataUnpickler:
+    """Whitelist-only unpickler for ``index_metadata.pickle``.
+
+    Allows only ``PersistentData`` from chromadb's HNSW module; everything
+    else raises ``UnpicklingError``. Standard container types (dict, list,
+    tuple, str, int, float) are handled by the pickle machinery itself
+    and don't need allowlisting via ``find_class`` — only constructed
+    classes do.
+
+    This is the same trust model chromadb uses (it pickles its own files),
+    but with a tight class allowlist so a tampered file can't instantiate
+    arbitrary classes during deserialization.
+    """
+
+    _ALLOWED = frozenset(
+        {
+            (
+                "chromadb.segment.impl.vector.local_persistent_hnsw",
+                "PersistentData",
+            ),
+        }
+    )
+
+    @classmethod
+    def load(cls, path: str):
+        import pickle
+
+        class _Restricted(pickle.Unpickler):
+            def find_class(self, module: str, name: str):
+                if (module, name) in cls._ALLOWED:
+                    return _PersistentDataStub
+                raise pickle.UnpicklingError(f"disallowed class: {module}.{name}")
+
+        with open(path, "rb") as f:
+            return _Restricted(f).load()
+
+
+def _hnsw_element_count(palace_path: str, segment_id: str) -> Optional[int]:
+    """Return the element count chromadb thinks the HNSW segment holds.
+
+    Reads ``index_metadata.pickle`` via a tight-allowlist unpickler and
+    counts ``id_to_label`` entries. This is the count chromadb consults
+    when sizing/loading the HNSW index on next open — distinct from
+    hnswlib's internal ``cur_element_count`` in the binary files. For
+    #1222's divergence check this is the number that matters, because it
+    is what gets compared against ``count() * resize_factor`` when
+    chromadb decides whether to resize HNSW on load.
+
+    Uses :class:`_SafePersistentDataUnpickler` rather than chromadb's own
+    ``PersistentData.load_from_file`` so the probe works even when
+    ``hnswlib`` is not installed (chromadb's persistent_hnsw module
+    imports hnswlib at module load — a probe that requires hnswlib would
+    refuse to run in environments where the segfault risk is moot
+    anyway). The allowlisted unpickler is also the safer default: the
+    pickle file is owned by the same user, but a tighter trust boundary
+    costs us nothing.
+
+    Returns ``None`` when the file is absent (fresh / never-flushed
+    segment) or the unpickle fails. Callers treat ``None`` as "unknown".
+    """
+    pickle_path = os.path.join(palace_path, segment_id, "index_metadata.pickle")
+    if not os.path.isfile(pickle_path):
+        return None
+    try:
+        pd = _SafePersistentDataUnpickler.load(pickle_path)
+        # ChromaDB serializes PersistentData differently across versions:
+        # 1.5.x writes a plain dict via ``__reduce_ex__``; older versions
+        # pickled the class instance and rely on ``__setstate__`` to
+        # populate ``__dict__``. Handle both shapes.
+        if isinstance(pd, dict):
+            id_to_label = pd.get("id_to_label")
+        else:
+            id_to_label = getattr(pd, "id_to_label", None)
+        if isinstance(id_to_label, dict):
+            return len(id_to_label)
+        return None
+    except Exception:
+        logger.debug("_hnsw_element_count failed for %s", pickle_path, exc_info=True)
+        return None
+
+
+# Divergence threshold: chromadb's HNSW flushes asynchronously, so HNSW
+# typically lags sqlite by up to ``sync_threshold`` (default 1000) records
+# under active write load — that's the *brute-force batch* that hasn't
+# been compacted into HNSW yet, plus the un-persisted tail beyond the
+# last sync. Two synchronization windows worth (2 × sync_threshold = 2000)
+# is a safe steady-state ceiling; anything past that is real divergence,
+# not flush-lag.
+#
+# The #1222 case was 176 613 missing out of 192 997 (91% gone) — orders
+# of magnitude past 2000. A typical post-mine palace shows a few hundred
+# to ~1000 missing, well under threshold.
+_HNSW_DIVERGENCE_ABSOLUTE = 2000
+_HNSW_DIVERGENCE_FRACTION = 0.10
+
+
+def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_drawers") -> dict:
+    """Compare sqlite embedding count against HNSW element count.
+
+    The #1222 failure mode: ``max_elements`` froze at 16 384 while sqlite
+    accumulated 192 997 embeddings. Every subsequent tool call segfaulted
+    when chromadb tried to load the undersized HNSW. This probe runs
+    *before* anything touches the segment so we can warn (or fall back to
+    BM25) instead of crashing.
+
+    Returns a dict with:
+
+    * ``segment_id``       — VECTOR segment UUID, or ``None`` if no palace
+    * ``sqlite_count``     — embeddings present in chroma.sqlite3
+    * ``hnsw_count``       — elements chromadb's pickle knows about
+    * ``divergence``       — ``sqlite_count - hnsw_count`` when both known
+    * ``diverged``         — True when divergence exceeds the threshold
+    * ``status``           — ``"ok"`` | ``"diverged"`` | ``"unknown"``
+    * ``message``          — human-readable summary
+
+    Never raises — a probe that throws would defeat the point.
+    """
+    out: dict[str, Any] = {
+        "segment_id": None,
+        "sqlite_count": None,
+        "hnsw_count": None,
+        "divergence": None,
+        "diverged": False,
+        "status": "unknown",
+        "message": "",
+    }
+
+    try:
+        seg_id = _vector_segment_id(palace_path, collection_name)
+        out["segment_id"] = seg_id
+
+        sqlite_count = _sqlite_embedding_count(palace_path, collection_name)
+        out["sqlite_count"] = sqlite_count
+
+        if seg_id is None or sqlite_count is None:
+            out["message"] = "palace state unreadable; skipping HNSW capacity check"
+            return out
+
+        hnsw_count = _hnsw_element_count(palace_path, seg_id)
+        out["hnsw_count"] = hnsw_count
+
+        if hnsw_count is None:
+            # No pickle yet — segment hasn't persisted metadata. Could be
+            # fresh-but-unflushed (normal) or interrupted-mid-flush (bad).
+            # We can't distinguish without the pickle, so only flag
+            # divergence when sqlite holds clearly more than two flush
+            # windows worth — same threshold as the with-pickle path.
+            if sqlite_count > _HNSW_DIVERGENCE_ABSOLUTE:
+                out["status"] = "diverged"
+                out["diverged"] = True
+                out["divergence"] = sqlite_count
+                out["message"] = (
+                    f"sqlite holds {sqlite_count:,} embeddings but the HNSW segment "
+                    "has never flushed metadata — vector search will return nothing "
+                    "until the segment is rebuilt. Run `mempalace repair`."
+                )
+            else:
+                out["message"] = "HNSW segment metadata not yet flushed; skipping"
+            return out
+
+        divergence = sqlite_count - hnsw_count
+        out["divergence"] = divergence
+        threshold = max(_HNSW_DIVERGENCE_ABSOLUTE, int(sqlite_count * _HNSW_DIVERGENCE_FRACTION))
+        if divergence > threshold:
+            out["status"] = "diverged"
+            out["diverged"] = True
+            pct = 100.0 * divergence / max(sqlite_count, 1)
+            out["message"] = (
+                f"HNSW index holds {hnsw_count:,} elements but sqlite has "
+                f"{sqlite_count:,} embeddings — {divergence:,} drawers ({pct:.0f}%) "
+                "are invisible to vector search. Run `mempalace repair` to rebuild."
+            )
+        else:
+            out["status"] = "ok"
+            out["message"] = (
+                f"HNSW {hnsw_count:,} / sqlite {sqlite_count:,} (within flush-lag tolerance)"
+            )
+    except Exception:
+        logger.debug("hnsw_capacity_status failed", exc_info=True)
+        out["message"] = "HNSW capacity probe raised; skipping"
+    return out
+
+
+def _sqlite_embedding_count(palace_path: str, collection_name: str) -> Optional[int]:
+    """Count rows in chroma.sqlite3.embeddings for ``collection_name``.
+
+    Mirrors :func:`mempalace.repair.sqlite_drawer_count` but kept in this
+    module so the backend probe doesn't pull in the repair CLI module.
+    """
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM embeddings e
+                JOIN segments s ON e.segment_id = s.id
+                JOIN collections c ON s.collection = c.id
+                WHERE c.name = ?
+                """,
+                (collection_name,),
+            ).fetchone()
+            return int(row[0]) if row and row[0] is not None else None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+
 def _pin_hnsw_threads(collection) -> None:
     """Best-effort retrofit: pin ``hnsw:num_threads=1`` on an existing collection.
 
