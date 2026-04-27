@@ -292,7 +292,15 @@ def load_config(project_dir: str) -> dict:
         if legacy_path.exists():
             config_path = legacy_path
         else:
-            wing_name = resolved_project_dir.name
+            from .config import normalize_wing_name
+
+            # Normalize the dirname-derived fallback wing the same way
+            # ``cmd_init`` and ``room_detector_local`` do — otherwise a
+            # hyphenated project mined without a yaml file lands under a
+            # raw-name wing while ``topics_by_wing`` was keyed under the
+            # normalized slug, silently dropping every topic tunnel
+            # (the no-yaml branch of issue #1194).
+            wing_name = normalize_wing_name(resolved_project_dir.name)
             print(
                 f"  No mempalace.yaml found in {resolved_project_dir} "
                 f"— using auto-detected defaults (wing='{wing_name}'). "

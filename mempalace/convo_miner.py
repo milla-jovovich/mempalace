@@ -432,7 +432,9 @@ def mine_convos(
 
     convo_path = Path(convo_dir).expanduser().resolve()
     if not wing:
-        wing = convo_path.name.lower().replace(" ", "_").replace("-", "_")
+        from .config import normalize_wing_name
+
+        wing = normalize_wing_name(convo_path.name)
 
     files = scan_convos(convo_dir)
     if limit > 0:

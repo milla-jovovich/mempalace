@@ -329,13 +329,14 @@ def cmd_init(args):
                 json.dump(confirmed, f, indent=2, ensure_ascii=False)
             print(f"  Entities saved: {entities_path}")
 
+            from .config import normalize_wing_name
             from .miner import add_to_known_entities
 
-            # Wing matches the default produced by ``room_detector_local``
-            # (folder basename) and the miner fallback in ``load_config``.
-            # Used by the topics_by_wing map so cross-wing tunnels can be
-            # computed at mine time.
-            wing = project_path.name
+            # Match the slug ``room_detector_local`` writes into
+            # ``mempalace.yaml`` so the miner's tunnel lookup hits the
+            # same key in ``topics_by_wing`` at mine time (issue #1194 —
+            # without this, hyphenated dirnames silently lose tunnels).
+            wing = normalize_wing_name(project_path.name)
             registry_path = add_to_known_entities(confirmed, wing=wing)
             print(f"  Registry updated: {registry_path}")
     else:
@@ -707,6 +708,14 @@ def cmd_status(args):
     status(palace_path=palace_path)
 
 
+def cmd_repair_status(args):
+    """Read-only HNSW capacity health check (#1222)."""
+    from .repair import status as repair_status
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    repair_status(palace_path=palace_path)
+
+
 def cmd_repair(args):
     """Rebuild palace vector index, or reorganize derivative drawers."""
     import shutil
@@ -741,6 +750,20 @@ def cmd_repair(args):
             print("  mempalace_search now queries content-only.")
         print(f"\n{'=' * 55}\n")
         return
+
+    if getattr(args, "mode", "legacy") == "max-seq-id":
+        from .repair import repair_max_seq_id
+
+        repair_max_seq_id(
+            palace_path,
+            segment=getattr(args, "segment", None),
+            from_sidecar=getattr(args, "from_sidecar", None),
+            backup=getattr(args, "backup", True),
+            dry_run=getattr(args, "dry_run", False),
+            assume_yes=getattr(args, "yes", False),
+        )
+        return
+
     db_path = os.path.join(palace_path, "chroma.sqlite3")
 
     if not os.path.isdir(palace_path):
@@ -1248,20 +1271,24 @@ def main():
     # repair
     p_repair = sub.add_parser(
         "repair",
-        help="Rebuild palace vector index from stored data (fixes segfaults after corruption)",
+        help=(
+            "Rebuild palace vector index (legacy mode) or un-poison max_seq_id rows "
+            "(--mode max-seq-id)"
+        ),
     )
     p_repair.add_argument(
         "--yes", action="store_true", help="Skip confirmation for destructive changes"
     )
     p_repair.add_argument(
         "--mode",
-        choices=["rebuild", "reorganize"],
-        default="rebuild",
+        choices=["rebuild", "legacy", "reorganize", "max-seq-id"],
+        default="legacy",
         help=(
-            "rebuild: extract + re-upsert all drawers to repair HNSW index. "
+            "rebuild/legacy: full-palace HNSW rebuild via extract + re-upsert (default; "
+            "rebuild and legacy are synonyms). "
             "reorganize: move existing topic=checkpoint drawers from the main "
-            "collection into mempalace_session_recovery (idempotent; safe to "
-            "re-run)."
+            "collection into mempalace_session_recovery (idempotent; safe to re-run). "
+            "max-seq-id: un-poison max_seq_id rows corrupted by the legacy 0.6.x shim."
         ),
     )
     p_repair.add_argument(
@@ -1273,6 +1300,36 @@ def main():
             "either matches or can't be read. Use only after independently confirming "
             "the palace really contains that count."
         ),
+    )
+    p_repair.add_argument(
+        "--segment",
+        default=None,
+        help="Segment UUID filter for --mode max-seq-id (repairs only that segment).",
+    )
+    p_repair.add_argument(
+        "--from-sidecar",
+        default=None,
+        help=(
+            "Path to a pre-corruption chroma.sqlite3 sidecar (for --mode max-seq-id); "
+            "clean values are copied from its max_seq_id table verbatim."
+        ),
+    )
+    p_repair.add_argument(
+        "--backup",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Back up SQLite before mutation (default: on)",
+    )
+    p_repair.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print detected poisoned rows and exit without mutation (--mode max-seq-id only)",
+    )
+
+    # repair-status — read-only HNSW capacity health check (#1222)
+    sub.add_parser(
+        "repair-status",
+        help="Compare sqlite vs HNSW element counts (read-only; never opens a chromadb client)",
     )
 
     # mcp
@@ -1340,6 +1397,7 @@ def main():
         "compress": cmd_compress,
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
+        "repair-status": cmd_repair_status,
         "migrate": cmd_migrate,
         "purge": cmd_purge,
         "status": cmd_status,

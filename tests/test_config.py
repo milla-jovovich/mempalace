@@ -3,7 +3,7 @@ import json
 import tempfile
 
 import pytest
-from mempalace.config import MempalaceConfig, sanitize_kg_value, sanitize_name
+from mempalace.config import MempalaceConfig, normalize_wing_name, sanitize_kg_value, sanitize_name
 
 
 def test_default_config():
@@ -108,6 +108,25 @@ def test_init():
     cfg = MempalaceConfig(config_dir=tmpdir)
     cfg.init()
     assert os.path.exists(os.path.join(tmpdir, "config.json"))
+
+
+# --- normalize_wing_name ---
+
+
+def test_normalize_wing_name_hyphen():
+    assert normalize_wing_name("mempal-private") == "mempal_private"
+
+
+def test_normalize_wing_name_space():
+    assert normalize_wing_name("My Project") == "my_project"
+
+
+def test_normalize_wing_name_already_clean():
+    assert normalize_wing_name("memorymark") == "memorymark"
+
+
+def test_normalize_wing_name_mixed():
+    assert normalize_wing_name("My-Cool App") == "my_cool_app"
 
 
 # --- sanitize_name ---

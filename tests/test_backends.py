@@ -437,17 +437,50 @@ def test_chroma_backend_creates_collection_with_cosine_distance(tmp_path):
     assert col.metadata.get("hnsw:space") == "cosine"
 
 
+def test_chroma_backend_sets_hnsw_bloat_guard_on_creation(tmp_path):
+    """The HNSW guard from #344 must land on freshly-created collection metadata.
+
+    Without batch_size + sync_threshold, mining ~10K+ drawers triggers the
+    resize+persist drift that bloats link_lists.bin into hundreds of GB sparse
+    and segfaults `status` / `search` / `repair`. The guard belongs at
+    collection-creation time so every fresh palace gets it without needing
+    a runtime retrofit. Asserting both keys land on the persisted metadata
+    also covers the #1161 "config silently dropped" concern at CI time.
+    """
+    palace_path = tmp_path / "palace"
+
+    ChromaBackend().get_collection(
+        str(palace_path),
+        collection_name="mempalace_drawers",
+        create=True,
+    )
+
+    client = chromadb.PersistentClient(path=str(palace_path))
+    col = client.get_collection("mempalace_drawers")
+    assert col.metadata.get("hnsw:batch_size") == 50_000
+    assert col.metadata.get("hnsw:sync_threshold") == 50_000
+
+
+def test_chroma_backend_create_collection_sets_hnsw_bloat_guard(tmp_path):
+    """Same guard must apply via the legacy create_collection() path."""
+    palace_path = tmp_path / "palace"
+
+    ChromaBackend().create_collection(str(palace_path), "mempalace_drawers")
+
+    client = chromadb.PersistentClient(path=str(palace_path))
+    col = client.get_collection("mempalace_drawers")
+    assert col.metadata.get("hnsw:batch_size") == 50_000
+    assert col.metadata.get("hnsw:sync_threshold") == 50_000
+
+
 def test_fix_blob_seq_ids_converts_blobs_to_integers(tmp_path):
     """Simulate a ChromaDB 0.6.x database with BLOB seq_ids and verify repair."""
     db_path = tmp_path / "chroma.sqlite3"
     conn = sqlite3.connect(str(db_path))
     conn.execute("CREATE TABLE embeddings (rowid INTEGER PRIMARY KEY, seq_id)")
-    conn.execute("CREATE TABLE max_seq_id (rowid INTEGER PRIMARY KEY, seq_id)")
-    # Insert BLOB seq_ids like ChromaDB 0.6.x would
+    # Insert BLOB seq_id like ChromaDB 0.6.x would
     blob_42 = (42).to_bytes(8, byteorder="big")
-    blob_99 = (99).to_bytes(8, byteorder="big")
     conn.execute("INSERT INTO embeddings (seq_id) VALUES (?)", (blob_42,))
-    conn.execute("INSERT INTO max_seq_id (seq_id) VALUES (?)", (blob_99,))
     conn.commit()
     conn.close()
 
@@ -456,8 +489,6 @@ def test_fix_blob_seq_ids_converts_blobs_to_integers(tmp_path):
     conn = sqlite3.connect(str(db_path))
     row = conn.execute("SELECT seq_id, typeof(seq_id) FROM embeddings").fetchone()
     assert row == (42, "integer")
-    row = conn.execute("SELECT seq_id, typeof(seq_id) FROM max_seq_id").fetchone()
-    assert row == (99, "integer")
     conn.close()
 
 
@@ -481,6 +512,71 @@ def test_fix_blob_seq_ids_noop_without_blobs(tmp_path):
 def test_fix_blob_seq_ids_noop_without_database(tmp_path):
     """No error when palace has no chroma.sqlite3."""
     _fix_blob_seq_ids(str(tmp_path))  # should not raise
+
+
+def test_fix_blob_seq_ids_does_not_touch_max_seq_id(tmp_path):
+    """chromadb 1.5.x owns max_seq_id; the shim must not interpret its BLOBs.
+
+    Regression guard for the 2026-04-20 incident: the old shim ran
+    int.from_bytes(..., 'big') over chromadb 1.5.x's native
+    b'\\x11\\x11' + ASCII-digit BLOB, producing a ~1.23e18 integer that
+    silently suppressed every subsequent embeddings_queue write.
+    """
+    db_path = tmp_path / "chroma.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE embeddings (rowid INTEGER PRIMARY KEY, seq_id)")
+    conn.execute("CREATE TABLE max_seq_id (rowid INTEGER PRIMARY KEY, seq_id)")
+    sysdb10_blob = b"\x11\x11502607"
+    conn.execute("INSERT INTO max_seq_id (seq_id) VALUES (?)", (sysdb10_blob,))
+    conn.commit()
+    conn.close()
+
+    _fix_blob_seq_ids(str(tmp_path))
+
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute("SELECT seq_id, typeof(seq_id) FROM max_seq_id").fetchone()
+    assert row == (sysdb10_blob, "blob")
+    conn.close()
+
+
+def test_fix_blob_seq_ids_skips_sysdb10_prefix_in_embeddings(tmp_path):
+    """Defense-in-depth: sysdb-10 prefix in embeddings.seq_id is skipped."""
+    db_path = tmp_path / "chroma.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE embeddings (rowid INTEGER PRIMARY KEY, seq_id)")
+    sysdb10_blob = b"\x11\x11502607"
+    conn.execute("INSERT INTO embeddings (seq_id) VALUES (?)", (sysdb10_blob,))
+    conn.commit()
+    conn.close()
+
+    _fix_blob_seq_ids(str(tmp_path))
+
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute("SELECT seq_id, typeof(seq_id) FROM embeddings").fetchone()
+    # Still a BLOB — not converted to 1.23e18.
+    assert row == (sysdb10_blob, "blob")
+    conn.close()
+
+
+def test_fix_blob_seq_ids_still_converts_legacy_blobs_in_embeddings(tmp_path):
+    """Regression guard: pure big-endian u64 BLOBs still convert for genuine 0.6.x."""
+    db_path = tmp_path / "chroma.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE embeddings (rowid INTEGER PRIMARY KEY, seq_id)")
+    conn.execute("INSERT INTO embeddings (seq_id) VALUES (?)", ((42).to_bytes(8, "big"),))
+    conn.execute("INSERT INTO embeddings (seq_id) VALUES (?)", (b"\x11\x11502607",))
+    conn.execute("INSERT INTO embeddings (seq_id) VALUES (?)", ((7).to_bytes(8, "big"),))
+    conn.commit()
+    conn.close()
+
+    _fix_blob_seq_ids(str(tmp_path))
+
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute("SELECT seq_id, typeof(seq_id) FROM embeddings ORDER BY rowid").fetchall()
+    assert rows[0] == (42, "integer")
+    assert rows[1] == (b"\x11\x11502607", "blob")  # sysdb-10 row left alone
+    assert rows[2] == (7, "integer")
+    conn.close()
 
 
 def test_fix_blob_seq_ids_writes_marker_after_blob_path(tmp_path):

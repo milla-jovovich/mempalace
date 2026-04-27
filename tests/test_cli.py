@@ -251,6 +251,43 @@ def test_cmd_init_with_entities(mock_config_cls, tmp_path):
 
 
 @patch("mempalace.cli.MempalaceConfig")
+def test_cmd_init_normalizes_wing_name_for_topics_registry(mock_config_cls, tmp_path):
+    """Regression for #1194: hyphenated dir names must be normalized to the
+    same slug ``mempalace.yaml`` uses, otherwise ``topics_by_wing`` keys
+    miss the miner's lookup at mine time and tunnels are silently dropped.
+    """
+    project = tmp_path / "my-cool-app"
+    project.mkdir()
+    fake_files = [project / "a.txt"]
+    detected = {
+        "people": [{"name": "Alice"}],
+        "projects": [],
+        "topics": [{"name": "Bun"}],
+        "uncertain": [],
+    }
+    confirmed = {"people": ["Alice"], "projects": [], "topics": ["Bun"]}
+    args = argparse.Namespace(dir=str(project), yes=True)
+    with (
+        patch("mempalace.entity_detector.scan_for_detection", return_value=fake_files),
+        patch("mempalace.entity_detector.detect_entities", return_value=detected),
+        patch("mempalace.entity_detector.confirm_entities", return_value=confirmed),
+        patch("mempalace.miner.add_to_known_entities") as mock_register,
+        patch("mempalace.room_detector_local.detect_rooms_local"),
+        patch("builtins.open", MagicMock()),
+        patch("mempalace.cli._maybe_run_mine_after_init"),
+        # Pass-zero corpus-origin detection runs unconditionally inside
+        # cmd_init now (#1221 / #1223). It accesses MempalaceConfig fields
+        # that don't survive MagicMock stringification, so stub it out —
+        # this test only cares about the wing-slug write to the registry.
+        patch("mempalace.cli._run_pass_zero", return_value=None),
+    ):
+        mock_register.return_value = "/tmp/known_entities.json"
+        cmd_init(args)
+        mock_register.assert_called_once()
+        assert mock_register.call_args.kwargs["wing"] == "my_cool_app"
+
+
+@patch("mempalace.cli.MempalaceConfig")
 def test_cmd_init_with_entities_zero_total(mock_config_cls, tmp_path, capsys):
     """When entities detected but total is 0, prints 'No entities' message."""
     fake_files = [tmp_path / "a.txt"]

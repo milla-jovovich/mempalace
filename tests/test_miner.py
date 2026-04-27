@@ -77,6 +77,24 @@ def test_load_config_uses_defaults_when_yaml_missing():
         shutil.rmtree(tmpdir)
 
 
+def test_load_config_no_yaml_normalizes_hyphenated_wing():
+    """Fallback wing name is normalized so it matches topics_by_wing keys.
+
+    Regression for the no-yaml branch of #1194: ``cmd_init`` writes
+    ``topics_by_wing`` under the normalized slug, so the miner's
+    fallback wing must use the same normalization or the tunnel lookup
+    misses every key for hyphenated dirnames.
+    """
+    parent = tempfile.mkdtemp()
+    try:
+        project_root = Path(parent) / "my-cool-app"
+        project_root.mkdir()
+        config = load_config(str(project_root))
+        assert config["wing"] == "my_cool_app"
+    finally:
+        shutil.rmtree(parent)
+
+
 def test_scan_project_skips_mempalace_generated_files():
     with tempfile.TemporaryDirectory() as tmpdir:
         project_root = Path(tmpdir).resolve()

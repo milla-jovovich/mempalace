@@ -19,6 +19,16 @@ MAX_NAME_LENGTH = 128
 _SAFE_NAME_RE = re.compile(r"^(?:[^\W_]|[^\W_][\w .'-]{0,126}[^\W_])$")
 
 
+def normalize_wing_name(name: str) -> str:
+    """Lower-case + collapse separators (`-`, ` `) to `_` for wing slugs.
+
+    The same rule is applied by ``init`` when persisting `topics_by_wing`
+    and when writing `mempalace.yaml`, so the miner's lookup matches at
+    mine time regardless of the source dirname.
+    """
+    return name.lower().replace(" ", "_").replace("-", "_")
+
+
 def sanitize_name(value: str, field_name: str = "name") -> str:
     """Validate and sanitize a wing/room/entity name.
 
