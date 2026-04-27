@@ -601,6 +601,17 @@ def cmd_migrate(args):
     )
 
 
+def cmd_export(args):
+    """Export palace drawers as browsable markdown files."""
+    from .exporter import export_palace
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    output_dir = os.path.expanduser(args.output)
+    print(f"  Exporting palace to {output_dir}...")
+    export_palace(palace_path=palace_path, output_dir=output_dir)
+    print("  Done.")
+
+
 def cmd_status(args):
     from .miner import status
 
@@ -1213,6 +1224,16 @@ def main():
 
     sub.add_parser("status", help="Show what's been filed")
 
+    # export
+    p_export = sub.add_parser(
+        "export",
+        help="Export palace as browsable markdown files (one file per room)",
+    )
+    p_export.add_argument(
+        "-o", "--output", required=True, help="Output directory for markdown files"
+    )
+    p_export.add_argument("--palace", help="Path to palace directory (default: from config)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -1248,6 +1269,7 @@ def main():
         "repair": cmd_repair,
         "repair-status": cmd_repair_status,
         "migrate": cmd_migrate,
+        "export": cmd_export,
         "status": cmd_status,
     }
     dispatch[args.command](args)
