@@ -8,7 +8,7 @@
 
 ---
 
-This fork tracks `upstream/develop` through the 2026-04-27 sync and runs in production on a 151,478-drawer palace behind [palace-daemon](https://github.com/jphein/palace-daemon) at `disks.jphe.in:8085`. It carries 17 fork-ahead changes that compose with — not replace — bensig's release direction; four landed upstream on 2026-04-26 (#1173, #1177, #1198, #1201). 1,510 tests pass on `main`. The new things here are *what we've learned*, not just what we've fixed.
+This fork tracks `upstream/develop` through the 2026-04-27 sync and runs in production on a 151,478-drawer palace behind [palace-daemon](https://github.com/jphein/palace-daemon) at `disks.jphe.in:8085`. It carries 16 fork-ahead changes that compose with — not replace — bensig's release direction; four landed upstream on 2026-04-26 (#1173, #1177, #1198, #1201). 1,500 tests pass on `main`. The new things here are *what we've learned*, not just what we've fixed.
 
 ## What just shipped
 
@@ -54,7 +54,7 @@ The deeper read on local-first AI memory: the sovereignty argument lands in cour
 
 Three bands of work, all instances of the principles above. Detail rows in the [appendix](#fork-change-inventory) at the bottom.
 
-- **Structural retrieval fixes (Principle 1, Principle 2).** Multi-collection split moves Stop-hook checkpoints to a dedicated `mempalace_session_recovery` collection — physically absent from `mempalace_search`, queryable via the new `mempalace_session_recovery_read` MCP tool. PreCompact incorporated. Auto-migrates on first daemon restart. The transitional `kind=` filter and over-fetch hack become deletable next release. `drawer_id` surfacing on every search/diary/recovery hit so callers can build citation popovers and follow-ups.
+- **Structural retrieval fixes (Principle 1, Principle 2).** Multi-collection split moves Stop-hook checkpoints to a dedicated `mempalace_session_recovery` collection — physically absent from `mempalace_search`, queryable via the new `mempalace_session_recovery_read` MCP tool. PreCompact incorporated. Auto-migrates on first daemon restart. The transitional `kind=` filter and over-fetch hack are gone (2026-04-27) — the structural fix made them inert. `drawer_id` surfacing on every search/diary/recovery hit so callers can build citation popovers and follow-ups.
 - **Single-writer architecture (Principle 3).** [palace-daemon](https://github.com/jphein/palace-daemon) is the only process that opens the palace; clients connect over HTTP. ChromaDB 1.5.x's HNSW concurrency hazards (`#974`/`#965`/`#823` family) become structurally impossible. Cold-start integrity sniff-test on segment metadata files prevents `quarantine_stale_hnsw` from destroying healthy indexes during async-flush lag. Cherry-pick of upstream [#1085](https://github.com/MemPalace/mempalace/pull/1085) for 10–30× mining speedup; cherry-pick of upstream-PR-#1094 for boundary-level None-metadata coercion that closes a per-site-guard family.
 - **Deterministic hook saves (Principles 1+2+3 compose).** Silent saves bypass auto-memory conflicts entirely — the LLM is no longer in the save path, so `decision: "block"` race conditions and Claude's auto-memory winning over MCP tools both go away. Save marker advances only after confirmed write. `systemMessage` notification surfaces results. PreCompact writes a recovery-collection marker before mining + compaction so context-boundary events leave a queryable timestamp.
 
@@ -100,7 +100,7 @@ A Stop hook fires every 15 messages in Claude Code, writes directly to `mempalac
 
 When the HNSW index is genuinely degraded (rare, post-fix), the same call returns `warnings: ["vector search returned 0 of 5 requested; filled 5 from sqlite+BM25 keyword match"]` with hits tagged `"matched_via": "sqlite_bm25_fallback"` — data is never silently hidden.
 
-After the 2026-04-26 migration, the example queries from a week ago all return content rather than checkpoint word-soup. `kind=all` is now equivalent to `kind=content` in practice; the parameter survives one more release as a safety net, then retires.
+After the 2026-04-26 migration, the example queries from a week ago all return content rather than checkpoint word-soup. The `kind=` parameter retired 2026-04-27 — the structural split made it inert.
 
 ## Architectural principles
 
@@ -296,7 +296,7 @@ python -m venv venv && source venv/bin/activate
 pip install -e ".[dev]"
 
 # Develop
-python -m pytest tests/ -q              # 1510 tests (benchmarks deselected)
+python -m pytest tests/ -q              # 1500 tests (benchmarks deselected)
 mempalace status                         # palace health
 ruff check . && ruff format --check .    # lint + format
 
@@ -321,7 +321,6 @@ The canonical source is [`docs/fork-changes.yaml`](docs/fork-changes.yaml); [`FO
 | **Search** | Move Stop-hook auto-save checkpoints to dedicated `mempalace_session_recovery` ChromaDB collection (Principle 1+2). **Phases A–E shipped 2026-04-25 → 2026-04-26**: collection adapter, write routing, new `mempalace_session_recovery_read` MCP tool, migration (idempotent, ID/metadata-preserving), PreCompact incorporation, palace-daemon `lifespan` auto-migrate. Canonical 151K palace migrated 667 checkpoints on 2026-04-26 10:24:09 PDT. Cat 9 A/B re-run shows **632/3 → 974/1267 token convergence**. | PR pending — fork commits [`e266365`](https://github.com/jphein/mempalace/commit/e266365) (A–C) → [`42817d7`](https://github.com/jphein/mempalace/commit/42817d7) (D + PreCompact); palace-daemon [`034023c`](https://github.com/jphein/palace-daemon/commit/034023c) (E); 18 new tests | `palace.py`, `mcp_server.py`, `migrate.py`, `cli.py`, `hooks_cli.py` |
 | **Search** | Surface `drawer_id` in `mempalace_search` results, `mempalace_diary_read` entries, and `mempalace_session_recovery_read` payload. ChromaDB primary key was returned but never plumbed into the result-building loop. Defensive zip-with-id-pad for test mocks. | PR pending — fork commit [`9a8bb77`](https://github.com/jphein/mempalace/commit/9a8bb77); upstream [#1219](https://github.com/MemPalace/mempalace/pull/1219) (@pepo72) is the narrower searcher-only equivalent. | `searcher.py`, `mcp_server.py`, `tests/...`, `website/reference/mcp-tools.md` |
 | **Reliability** | `hook_precompact` writes a session-recovery checkpoint marker before mining + compaction. Mirrors `hook_stop`'s `_save_diary_direct` call; same routing path (recovery collection, queryable by `session_id`). | Bundled with phase D in [`42817d7`](https://github.com/jphein/mempalace/commit/42817d7) | `mempalace/hooks_cli.py` |
-| **Search** | `kind=` filter on `search_memories` excludes Stop-hook checkpoints by default. Three values: `"content"` (default), `"checkpoint"`, `"all"`. Post-filter only (chromadb 1.5.x `$nin`/`$in` filter-planner bug); over-fetch `max(n*20, 100)` for non-`"all"`. **Transitional** — becomes deletable next release after the structural split (above) ships. | PR pending — fork commits `8d02835` → `f9f5cc4` | `searcher.py`, `mcp_server.py` |
 | **Performance** | Cherry-picked upstream [#1085](https://github.com/MemPalace/mempalace/pull/1085) (@midweste) — batch ChromaDB inserts in miner. New `_build_drawer()` + `add_drawers()`. Reported 10–30× mining speedup. | Cherry-pick of open #1085 — fork commit [`6be6fff`](https://github.com/jphein/mempalace/commit/6be6fff). Becomes a no-op when #1085 merges. | `mempalace/miner.py` |
 | **Reliability** | Cherry-picked upstream [#1094](https://github.com/MemPalace/mempalace/pull/1094) — coerce None metadatas at chromadb boundary. Closes the per-site-guard family of None-metadata bugs (#999, #1198, #1201) at one site instead of N. | Cherry-pick of open #1094 — fork commit [`43d728d`](https://github.com/jphein/mempalace/commit/43d728d) | `backends/chroma.py`, `tests/test_backends.py` |
 | **CLI** | `mempalace purge --wing/--room` via `collection.delete(where=...)`. Earlier nuke-and-rebuild draft predicated on #521's race; @igorls's review traced the stack — race is on the upsert path, not delete-by-where. Simpler version preserves embedding fn, no rmtree window, routes through `ChromaBackend`. | [#1087](https://github.com/MemPalace/mempalace/pull/1087), rewritten 2026-04-26 per review | `cli.py`, `tests/test_cli.py` |

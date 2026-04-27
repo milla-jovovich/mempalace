@@ -78,6 +78,13 @@ def get_closets_collection(palace_path: str, create: bool = True):
 # ``docs/superpowers/specs/2026-04-25-checkpoint-collection-split.md``.
 _SESSION_RECOVERY_COLLECTION = "mempalace_session_recovery"
 
+# Topic values whose drawers belong in ``_SESSION_RECOVERY_COLLECTION``
+# rather than the searchable main collection. ``checkpoint`` is canonical;
+# ``auto-save`` is a legacy synonym from older palace-daemon hook clients.
+# Used by write-side routing in ``tool_diary_write`` and by the data
+# migration in ``migrate_checkpoints_to_recovery``.
+_CHECKPOINT_TOPICS = ("checkpoint", "auto-save")
+
 
 def get_session_recovery_collection(palace_path: str, create: bool = True):
     """Get the session-recovery collection — Stop-hook checkpoint storage."""

@@ -65,7 +65,8 @@ from .backends.chroma import (  # noqa: E402
     hnsw_capacity_status,
 )
 from .query_sanitizer import sanitize_query  # noqa: E402
-from .searcher import _CHECKPOINT_TOPICS, search_memories  # noqa: E402
+from .palace import _CHECKPOINT_TOPICS  # noqa: E402
+from .searcher import search_memories  # noqa: E402
 from .palace import _SESSION_RECOVERY_COLLECTION  # noqa: E402
 from .palace_graph import (  # noqa: E402
     traverse,
@@ -618,7 +619,6 @@ def tool_search(
     max_distance: float = 1.5,
     min_similarity: float = None,
     context: str = None,
-    kind: str = "content",
 ):
     limit = max(1, min(limit, _MAX_RESULTS))
     try:
@@ -626,9 +626,6 @@ def tool_search(
         room = _sanitize_optional_name(room, "room")
     except ValueError as e:
         return {"error": str(e)}
-    if kind not in ("content", "checkpoint", "all"):
-        return {"error": f"kind must be 'content', 'checkpoint', or 'all'; got {kind!r}"}
-    # Backwards compat: accept old name
     # Backwards compat: convert old similarity scale (higher=stricter) to
     # distance scale (lower=stricter). Similarity 0.8 → distance 0.2.
     dist = (1.0 - min_similarity) if min_similarity is not None else max_distance
@@ -646,7 +643,6 @@ def tool_search(
         room=room,
         n_results=limit,
         max_distance=dist,
-        kind=kind,
         vector_disabled=_vector_disabled,
     )
     if _vector_disabled:
@@ -1742,11 +1738,6 @@ TOOLS = {
                 "context": {
                     "type": "string",
                     "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking.",
-                },
-                "kind": {
-                    "type": "string",
-                    "enum": ["content", "checkpoint", "all"],
-                    "description": "What kind of drawers to return. 'content' (default) excludes Stop-hook auto-save checkpoints which are session-summary noise that drown out real content under vector similarity. 'checkpoint' returns only checkpoints (recovery/audit). 'all' disables the filter (pre-2026-04-25 behavior).",
                 },
             },
             "required": ["query"],

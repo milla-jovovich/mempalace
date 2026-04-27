@@ -246,9 +246,7 @@ class Layer2:
         except Exception:
             return "No palace found."
 
-        where = build_where_filter(
-            wing, room, kind="all"
-        )  # preserve pre-2026-04-25 layers behavior; revisit later
+        where = build_where_filter(wing, room)
 
         kwargs = {"include": ["documents", "metadatas"], "limit": n_results}
         if where:
@@ -305,9 +303,7 @@ class Layer3:
         except Exception:
             return "No palace found."
 
-        where = build_where_filter(
-            wing, room, kind="all"
-        )  # preserve pre-2026-04-25 layers behavior; revisit later
+        where = build_where_filter(wing, room)
 
         kwargs = {
             "query_texts": [query],
@@ -358,9 +354,7 @@ class Layer3:
         except Exception:
             return []
 
-        where = build_where_filter(
-            wing, room, kind="all"
-        )  # preserve pre-2026-04-25 layers behavior; revisit later
+        where = build_where_filter(wing, room)
 
         kwargs = {
             "query_texts": [query],

@@ -25,6 +25,8 @@ import sqlite3
 from collections import defaultdict
 from datetime import datetime
 
+from .palace import _CHECKPOINT_TOPICS
+
 
 def _restore_stale_palace(palace_path: str, stale_path: str) -> None:
     """Roll back a failed swap.
@@ -293,12 +295,6 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
 # checkpoints) that wreck vector ranking. See spec at
 # docs/superpowers/specs/2026-04-25-checkpoint-collection-split.md.
 # ---------------------------------------------------------------------------
-
-# Topic values whose drawers belong in the session-recovery collection,
-# not the searchable main collection. Mirrors searcher._CHECKPOINT_TOPICS;
-# kept duplicated here to avoid pulling the searcher import into the
-# migrate module (which is loaded by CLI repair-mode dispatch).
-_CHECKPOINT_TOPICS = ("checkpoint", "auto-save")
 
 
 def migrate_checkpoints_to_recovery(palace_path: str, batch_size: int = 1000) -> int:

@@ -158,55 +158,11 @@ def _hybrid_rank(
     return results
 
 
-_CHECKPOINT_TOPICS = ("checkpoint", "auto-save")
-"""Topic values that mark a drawer as an auto-saved Stop-hook checkpoint
-rather than user/agent content. ``checkpoint`` is canonical;
-``auto-save`` is a legacy synonym from older palace-daemon hook clients
-that wrote with the alternate name. Both are excluded from default
-content search and included by ``kind='checkpoint'`` lookups."""
-
-
 def build_where_filter(
     wing: str = None,
     room: str = None,
-    kind: str = "content",
 ) -> dict:
-    """Build ChromaDB where filter for wing/room/kind filtering.
-
-    ``kind`` selects what *kind* of drawer to return:
-
-    - ``"content"`` (default) — actual user/agent content. Excludes
-      Stop-hook checkpoint drawers (``topic`` in ``_CHECKPOINT_TOPICS``).
-      This is the right default for retrieval-then-grounding because
-      checkpoints are session-summary noise that drown out content
-      under vector similarity.
-    - ``"checkpoint"`` — only Stop-hook checkpoint drawers. Useful for
-      session recovery, hook debugging, audit.
-    - ``"all"`` — no topic filter. Preserves pre-2026-04-25 behavior;
-      pass when you genuinely want everything including checkpoints.
-
-    Validates ``kind`` against the supported set; raises ``ValueError``
-    otherwise.
-
-    NOTE on the kind= implementation strategy: the topic-based exclusion
-    is enforced *entirely in the post-filter* (``_apply_kind_text_filter``
-    in ``search_memories``), not via a metadata ``where`` clause. We
-    learned on 2026-04-25 that ChromaDB 1.5.x's filter-planner returns
-    ``Internal error: Error finding id`` whenever a ``$nin`` (or ``$in``)
-    operator on metadata is combined with a vector query — every
-    ``kind="content"`` query failed at vector and fell through to the
-    sqlite BM25 fallback, losing semantic recall on the canonical
-    151K-drawer palace. Dropping the metadata clause here avoids the
-    bug entirely; the post-filter checks both ``topic`` metadata AND
-    text-prefix shape, so coverage is the same. Trade-off: we retrieve a
-    few extra candidates that get filtered out client-side. That cost is
-    negligible compared to losing vector search.
-    """
-    if kind not in ("content", "checkpoint", "all"):
-        raise ValueError(
-            f"kind must be one of 'content' (default), 'checkpoint', or 'all'; got {kind!r}"
-        )
-
+    """Build ChromaDB where filter for wing/room filtering."""
     parts: list[dict] = []
     if wing:
         parts.append({"wing": wing})
@@ -340,18 +296,16 @@ def search(
     wing: str = None,
     room: str = None,
     n_results: int = 5,
-    kind: str = "content",
 ):
     """
     Search the palace. Returns verbatim drawer content.
-    Optionally filter by wing (project), room (aspect), or kind
-    (``"content"``, ``"checkpoint"``, ``"all"`` — see ``search_memories``).
+    Optionally filter by wing (project) or room (aspect).
 
     Delegates to ``search_memories`` so CLI and MCP callers share the same
     hybrid ranking, sqlite-BM25 fallback, and scope-aware warnings.
     """
     result = search_memories(
-        query, palace_path, wing=wing, room=room, n_results=n_results, kind=kind
+        query, palace_path, wing=wing, room=room, n_results=n_results
     )
     if "error" in result and not result.get("results"):
         # Preserve the palace path in the printed error so the user sees
@@ -563,49 +517,6 @@ def _sqlite_fallback_and_scope(
     return available_in_scope, warnings
 
 
-def _is_checkpoint_drawer(hit: dict) -> bool:
-    """A drawer is a Stop-hook checkpoint if either:
-      - its ``topic`` metadata is in ``_CHECKPOINT_TOPICS``, OR
-      - its text starts with the literal ``CHECKPOINT:`` prefix.
-
-    Both signals matter: well-tagged drawers have the topic metadata;
-    legacy data with ``metadata=None`` or a missing topic field still
-    carries the text-prefix signature so we can catch it anyway.
-    """
-    if hit.get("topic") in _CHECKPOINT_TOPICS:
-        return True
-    return (hit.get("text") or "").startswith("CHECKPOINT:")
-
-
-def _apply_kind_text_filter(scored: list, kind: str) -> list:
-    """Sole filter point for the kind= exclusion (no longer
-    defense-in-depth — it's the only line of defense, by design).
-
-    Earlier versions tried to filter via a ChromaDB metadata
-    ``where`` clause (``$nin`` / ``$in`` on ``topic``) AND post-filter,
-    as belt-and-suspenders. We learned on 2026-04-25 that ChromaDB
-    1.5.x's filter-planner returns ``Internal error: Error finding id``
-    whenever ``$nin`` / ``$in`` is combined with a vector query, so the
-    where-clause path was breaking 100% of ``kind="content"`` vector
-    queries on the canonical palace. Removing the where-clause and
-    relying on this post-filter alone dodges the bug structurally.
-
-    For ``kind="content"``: drop any hit that looks like a checkpoint
-    by either signal (topic metadata or text prefix).
-
-    For ``kind="checkpoint"``: keep only hits that look like checkpoints
-    by either signal. Falls back to unfiltered if the filter would empty
-    the result set entirely (so audit callers don't see "0 results"
-    when there are clearly drawers retrieved).
-    """
-    if kind == "content":
-        return [h for h in scored if not _is_checkpoint_drawer(h)]
-    if kind == "checkpoint":
-        included = [h for h in scored if _is_checkpoint_drawer(h)]
-        return included or scored  # fall back to unfiltered if filter empties everything
-    return scored  # kind == "all" — no filter
-
-
 def _bm25_only_via_sqlite(
     query: str,
     palace_path: str,
@@ -793,7 +704,6 @@ def search_memories(
     room: str = None,
     n_results: int = 5,
     max_distance: float = 0.0,
-    kind: str = "content",
     vector_disabled: bool = False,
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
@@ -814,11 +724,6 @@ def search_memories(
             cosine distance (hnsw:space=cosine) — 0 = identical, 2 = opposite.
             Results with distance > this value are filtered out. A value of
             0.0 disables filtering. Typical useful range: 0.3–1.0.
-        kind: What kind of drawers to return. ``"content"`` (default) excludes
-            Stop-hook auto-save checkpoint drawers — these are session-summary
-            noise that drown out actual content under vector similarity.
-            ``"checkpoint"`` returns only checkpoints (recovery/audit).
-            ``"all"`` disables the filter entirely.
         vector_disabled: When True, route to the sqlite-only BM25 fallback
             (#1222). Set by the MCP server when the HNSW capacity probe
             detects a divergence that would segfault chromadb on segment
@@ -850,7 +755,7 @@ def search_memories(
     # it one layer up so the same warning surface stays live.)
     _warn_if_legacy_metric(drawers_col)
 
-    where = build_where_filter(wing, room, kind=kind)
+    where = build_where_filter(wing, room)
 
     # Hybrid retrieval: always query drawers directly (the floor), then use
     # closet hits to boost rankings. Closets are a ranking SIGNAL, never a
@@ -861,20 +766,9 @@ def search_memories(
     # and closet-first routing hides drawers that direct search would find.
     warnings: list[str] = []
     drawer_results: dict = {"documents": [[]], "metadatas": [[]], "distances": [[]]}
-    # Over-fetch for re-ranking + post-filter survival.
-    #
-    # When kind != "all", _apply_kind_text_filter drops checkpoints
-    # (or non-checkpoints, for kind="checkpoint") from the candidate
-    # pool. On a checkpoint-heavy palace, top-N vector hits are
-    # dominated by CHECKPOINT diary entries (short, word-dense, embed
-    # strongly) — observed 2026-04-25 on the 151K-drawer canonical
-    # palace where top-10 hits were all checkpoints for typical
-    # content queries. Without aggressive over-fetch the post-filter
-    # empties the result set even when substantive content drawers
-    # exist further down the ranking. Pull 20× the requested limit
-    # (capped at 100) when filtering applies; keep the cheaper 3×
-    # over-fetch for kind="all" where no post-filter runs.
-    pull_size = max(n_results * 20, 100) if kind != "all" else n_results * 3
+    # Over-fetch 3× the requested limit so re-ranking with closet boosts
+    # has enough candidates to reorder.
+    pull_size = n_results * 3
     try:
         dkwargs = {
             "query_texts": [query],
@@ -979,7 +873,6 @@ def search_memories(
         scored.append(entry)
 
     scored.sort(key=lambda h: h["_sort_key"])
-    scored = _apply_kind_text_filter(scored, kind)
     hits = scored[:n_results]
 
     # Drawer-grep enrichment: for closet-boosted hits whose source has
