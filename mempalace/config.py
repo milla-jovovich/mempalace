@@ -211,6 +211,21 @@ class MempalaceConfig:
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
     @property
+    def chunk_size(self):
+        """Characters per drawer chunk."""
+        return self._file_config.get("chunk_size", 800)
+
+    @property
+    def chunk_overlap(self):
+        """Overlap between adjacent chunks."""
+        return self._file_config.get("chunk_overlap", 100)
+
+    @property
+    def min_chunk_size(self):
+        """Minimum chunk size — skip smaller chunks."""
+        return self._file_config.get("min_chunk_size", 50)
+
+    @property
     def entity_languages(self):
         """Languages whose entity-detection patterns should be applied.
 

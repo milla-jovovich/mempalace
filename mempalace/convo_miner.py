@@ -96,25 +96,47 @@ def _register_file(collection, source_file: str, wing: str, agent: str):
 # =============================================================================
 
 
-def chunk_exchanges(content: str) -> list:
+def chunk_exchanges(
+    content: str,
+    chunk_size: int = None,
+    min_chunk_size: int = None,
+) -> list:
     """
     Chunk by exchange pair: one > turn + AI response = one unit.
     Falls back to paragraph chunking if no > markers.
+
+    Optional params override module-level defaults when provided.
+
+    Raises ``ValueError`` if ``chunk_size`` is not a positive integer or
+    ``min_chunk_size`` is negative. A non-positive ``chunk_size`` would
+    cause ``_chunk_by_exchange`` below to loop forever — ``content[:0]``
+    is empty, ``content[0:]`` is the whole string, and the remainder
+    never shrinks.
     """
+    if chunk_size is None:
+        chunk_size = CHUNK_SIZE
+    if min_chunk_size is None:
+        min_chunk_size = MIN_CHUNK_SIZE
+
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be > 0, got {chunk_size}")
+    if min_chunk_size < 0:
+        raise ValueError(f"min_chunk_size must be >= 0, got {min_chunk_size}")
+
     lines = content.split("\n")
     quote_lines = sum(1 for line in lines if line.strip().startswith(">"))
 
     if quote_lines >= 3:
-        return _chunk_by_exchange(lines)
+        return _chunk_by_exchange(lines, chunk_size, min_chunk_size)
     else:
-        return _chunk_by_paragraph(content)
+        return _chunk_by_paragraph(content, min_chunk_size)
 
 
-def _chunk_by_exchange(lines: list) -> list:
+def _chunk_by_exchange(lines: list, chunk_size: int, min_chunk_size: int) -> list:
     """One user turn (>) + the AI response that follows = one or more chunks.
 
     The full AI response is preserved verbatim.  When the combined
-    user-turn + response exceeds CHUNK_SIZE the response is split across
+    user-turn + response exceeds chunk_size the response is split across
     consecutive drawers so nothing is silently discarded.
     """
     chunks = []
@@ -138,20 +160,20 @@ def _chunk_by_exchange(lines: list) -> list:
             ai_response = " ".join(ai_lines)
             content = f"{user_turn}\n{ai_response}" if ai_response else user_turn
 
-            # Split into multiple drawers when the exchange exceeds CHUNK_SIZE
-            if len(content) > CHUNK_SIZE:
+            # Split into multiple drawers when the exchange exceeds chunk_size
+            if len(content) > chunk_size:
                 # First chunk: user turn + as much response as fits
-                first_part = content[:CHUNK_SIZE]
-                if len(first_part.strip()) > MIN_CHUNK_SIZE:
+                first_part = content[:chunk_size]
+                if len(first_part.strip()) > min_chunk_size:
                     chunks.append({"content": first_part, "chunk_index": len(chunks)})
-                # Remaining response in CHUNK_SIZE-sized continuation drawers
-                remainder = content[CHUNK_SIZE:]
+                # Remaining response in chunk_size-sized continuation drawers
+                remainder = content[chunk_size:]
                 while remainder:
-                    part = remainder[:CHUNK_SIZE]
-                    remainder = remainder[CHUNK_SIZE:]
-                    if len(part.strip()) > MIN_CHUNK_SIZE:
+                    part = remainder[:chunk_size]
+                    remainder = remainder[chunk_size:]
+                    if len(part.strip()) > min_chunk_size:
                         chunks.append({"content": part, "chunk_index": len(chunks)})
-            elif len(content.strip()) > MIN_CHUNK_SIZE:
+            elif len(content.strip()) > min_chunk_size:
                 chunks.append(
                     {
                         "content": content,
@@ -164,7 +186,7 @@ def _chunk_by_exchange(lines: list) -> list:
     return chunks
 
 
-def _chunk_by_paragraph(content: str) -> list:
+def _chunk_by_paragraph(content: str, min_chunk_size: int) -> list:
     """Fallback: chunk by paragraph breaks."""
     chunks = []
     paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
@@ -174,12 +196,12 @@ def _chunk_by_paragraph(content: str) -> list:
         lines = content.split("\n")
         for i in range(0, len(lines), 25):
             group = "\n".join(lines[i : i + 25]).strip()
-            if len(group) > MIN_CHUNK_SIZE:
+            if len(group) > min_chunk_size:
                 chunks.append({"content": group, "chunk_index": len(chunks)})
         return chunks
 
     for para in paragraphs:
-        if len(para) > MIN_CHUNK_SIZE:
+        if len(para) > min_chunk_size:
             chunks.append({"content": para, "chunk_index": len(chunks)})
 
     return chunks
@@ -390,7 +412,23 @@ def mine_convos(
     extract_mode:
         "exchange" — default exchange-pair chunking (Q+A = one unit)
         "general"  — general extractor: decisions, preferences, milestones, problems, emotions
+
+    Chunking parameters (chunk_size, min_chunk_size) are read from
+    MempalaceConfig so `config.json` governs both this path and the
+    project-file miner in `miner.py`. `min_chunk_size` preserves
+    convo_miner's stricter default (30) when not explicitly set in
+    config.json, so a user who never touches chunking keeps the
+    existing behavior.
     """
+    from .config import MempalaceConfig
+
+    palace_config = MempalaceConfig()
+    cfg_chunk_size = palace_config.chunk_size
+    # Only override convo_miner's MIN_CHUNK_SIZE when the user has set
+    # min_chunk_size explicitly — default MempalaceConfig returns miner.py's
+    # 50, which would drop legitimate short conversation exchanges.
+    raw_min = palace_config._file_config.get("min_chunk_size")
+    cfg_min_chunk_size = raw_min if raw_min is not None else MIN_CHUNK_SIZE
 
     convo_path = Path(convo_dir).expanduser().resolve()
     if not wing:
@@ -435,7 +473,7 @@ def mine_convos(
                 _register_file(collection, source_file, wing, agent)
             continue
 
-        if not content or len(content.strip()) < MIN_CHUNK_SIZE:
+        if not content or len(content.strip()) < cfg_min_chunk_size:
             if not dry_run:
                 _register_file(collection, source_file, wing, agent)
             continue
@@ -447,7 +485,11 @@ def mine_convos(
             chunks = extract_memories(content)
             # Each chunk already has memory_type; use it as the room name
         else:
-            chunks = chunk_exchanges(content)
+            chunks = chunk_exchanges(
+                content,
+                chunk_size=cfg_chunk_size,
+                min_chunk_size=cfg_min_chunk_size,
+            )
 
         if not chunks:
             if not dry_run:

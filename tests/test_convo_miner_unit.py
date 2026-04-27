@@ -2,6 +2,8 @@
 
 import contextlib
 
+import pytest
+
 from mempalace.convo_miner import (
     _file_chunks_locked,
     chunk_exchanges,
@@ -48,6 +50,39 @@ class TestChunkExchanges:
     def test_short_content_skipped(self):
         chunks = chunk_exchanges("> hi\nbye")
         # Too short to produce chunks (below MIN_CHUNK_SIZE)
+        assert isinstance(chunks, list)
+
+    def test_chunk_size_zero_raises_valueerror(self):
+        """Reject chunk_size == 0 explicitly.
+
+        Without this guard, `_chunk_by_exchange` enters an infinite loop:
+        content[:0] is empty, content[0:] is the whole string, and the
+        remainder never shrinks.
+        """
+        content = (
+            "> What is memory?\nMemory is persistence.\n\n" * 4  # force the split branch
+        )
+        with pytest.raises(ValueError, match="chunk_size must be > 0"):
+            chunk_exchanges(content, chunk_size=0)
+
+    def test_chunk_size_negative_raises_valueerror(self):
+        """Reject chunk_size < 0. Negative slicing would also loop forever
+        (content[:-1] → all but last, remainder[-1:] → last char repeated)."""
+        content = "> hi\nsome response text here that is long enough to chunk\n\n" * 4
+        with pytest.raises(ValueError, match="chunk_size must be > 0"):
+            chunk_exchanges(content, chunk_size=-10)
+
+    def test_min_chunk_size_negative_raises_valueerror(self):
+        """Reject min_chunk_size < 0. A negative threshold silently
+        breaks the `if len(part.strip()) > min_chunk_size` gate — every
+        chunk including empty ones gets appended."""
+        with pytest.raises(ValueError, match="min_chunk_size must be >= 0"):
+            chunk_exchanges("> hi\nbye", min_chunk_size=-1)
+
+    def test_min_chunk_size_zero_allowed(self):
+        """min_chunk_size == 0 is legal — means 'accept any non-empty chunk'."""
+        content = "> What is memory?\nMemory is persistence of information.\n" * 3
+        chunks = chunk_exchanges(content, min_chunk_size=0)
         assert isinstance(chunks, list)
 
     def test_long_ai_response_not_truncated(self):

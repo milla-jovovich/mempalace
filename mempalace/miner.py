@@ -368,12 +368,27 @@ def detect_room(filepath: Path, content: str, rooms: list, project_path: Path) -
 # =============================================================================
 
 
-def chunk_text(content: str, source_file: str) -> list:
+def chunk_text(
+    content: str,
+    source_file: str,
+    chunk_size: int = None,
+    chunk_overlap: int = None,
+    min_chunk_size: int = None,
+) -> list:
     """
     Split content into drawer-sized chunks.
     Tries to split on paragraph/line boundaries.
     Returns list of {"content": str, "chunk_index": int}
+
+    Optional params override module-level defaults when provided.
     """
+    if chunk_size is None:
+        chunk_size = CHUNK_SIZE
+    if chunk_overlap is None:
+        chunk_overlap = CHUNK_OVERLAP
+    if min_chunk_size is None:
+        min_chunk_size = MIN_CHUNK_SIZE
+
     # Clean up
     content = content.strip()
     if not content:
@@ -384,20 +399,20 @@ def chunk_text(content: str, source_file: str) -> list:
     chunk_index = 0
 
     while start < len(content):
-        end = min(start + CHUNK_SIZE, len(content))
+        end = min(start + chunk_size, len(content))
 
         # Try to break at paragraph boundary
         if end < len(content):
             newline_pos = content.rfind("\n\n", start, end)
-            if newline_pos > start + CHUNK_SIZE // 2:
+            if newline_pos > start + chunk_size // 2:
                 end = newline_pos
             else:
                 newline_pos = content.rfind("\n", start, end)
-                if newline_pos > start + CHUNK_SIZE // 2:
+                if newline_pos > start + chunk_size // 2:
                     end = newline_pos
 
         chunk = content[start:end].strip()
-        if len(chunk) >= MIN_CHUNK_SIZE:
+        if len(chunk) >= min_chunk_size:
             chunks.append(
                 {
                     "content": chunk,
@@ -406,7 +421,7 @@ def chunk_text(content: str, source_file: str) -> list:
             )
             chunk_index += 1
 
-        start = end - CHUNK_OVERLAP if end < len(content) else end
+        start = end - chunk_overlap if end < len(content) else end
 
     return chunks
 
@@ -802,8 +817,12 @@ def process_file(
     agent: str,
     dry_run: bool,
     closets_col=None,
+    chunk_size: int = None,
+    chunk_overlap: int = None,
+    min_chunk_size: int = None,
 ) -> tuple:
     """Read, chunk, route, and file one file. Returns (drawer_count, room_name)."""
+    effective_min = min_chunk_size if min_chunk_size is not None else MIN_CHUNK_SIZE
 
     # Skip if already filed
     source_file = str(filepath)
@@ -816,11 +835,17 @@ def process_file(
         return 0, "general"
 
     content = content.strip()
-    if len(content) < MIN_CHUNK_SIZE:
+    if len(content) < effective_min:
         return 0, "general"
 
     room = detect_room(filepath, content, rooms, project_path)
-    chunks = chunk_text(content, source_file)
+    chunks = chunk_text(
+        content,
+        source_file,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        min_chunk_size=min_chunk_size,
+    )
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} -> room:{room} ({len(chunks)} drawers)")
@@ -1002,7 +1027,6 @@ def mine(
     prompt) avoids walking the tree twice. When ``None`` (the default),
     ``mine`` walks the tree itself just like before.
     """
-
     if dry_run:
         return _mine_impl(
             project_dir,
@@ -1049,8 +1073,15 @@ def _mine_impl(
     include_ignored: list = None,
     files: list = None,
 ):
+    from .config import MempalaceConfig
+
     project_path = Path(project_dir).expanduser().resolve()
     config = load_config(project_dir)
+    palace_config = MempalaceConfig()
+
+    cfg_chunk_size = palace_config.chunk_size
+    cfg_chunk_overlap = palace_config.chunk_overlap
+    cfg_min_chunk_size = palace_config.min_chunk_size
 
     wing = wing_override or config["wing"]
     rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
@@ -1107,6 +1138,9 @@ def _mine_impl(
                     agent=agent,
                     dry_run=dry_run,
                     closets_col=closets_col,
+                    chunk_size=cfg_chunk_size,
+                    chunk_overlap=cfg_chunk_overlap,
+                    min_chunk_size=cfg_min_chunk_size,
                 )
             except KeyboardInterrupt:
                 # Re-raise so the outer handler prints the summary; we
