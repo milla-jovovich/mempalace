@@ -56,6 +56,9 @@ AI memory system. Store everything, find anything. Local, free, no API key.
     mempalace mine <dir> --mode convos    Mine conversation exports
     mempalace search "query"              Search your memories
     mempalace split <dir>                 Split large transcript files
+    mempalace delete drawer ...           Delete one drawer or a filtered set of drawers
+    mempalace delete room ...             Delete a room and its drawers
+    mempalace delete wing ...             Delete a wing and all drawers
     mempalace wake-up                     Load palace into context
     mempalace compress                    Compress palace storage
     mempalace status                      Show palace status
@@ -63,6 +66,50 @@ AI memory system. Store everything, find anything. Local, free, no API key.
     mempalace mcp                         Show MCP setup command
     mempalace hook run                    Run hook logic (for harness integration)
     mempalace instructions <name>         Output skill instructions
+
+### Delete Commands (Detailed)
+
+Delete a single drawer by ID:
+
+    mempalace delete drawer --id <drawer-id>
+
+Delete drawers by filters:
+
+    mempalace delete drawer --wing <wing> --all --yes
+    mempalace delete drawer --wing <wing> --room <room> --all --yes
+    mempalace delete drawer --wing <wing> --room <room> --dry-run
+
+Delete a room and all drawers in that room:
+
+    mempalace delete room --name <room> --wing <wing> --yes
+    mempalace delete room --name <room> --dry-run
+    mempalace delete room --name <room> --all --yes
+
+Delete every room:
+
+    mempalace delete room --all --yes
+
+If you omit --wing for delete room --name <room> and the room exists in more than one wing:
+
+    - Interactive terminal: MemPalace prompts you to choose a wing.
+    - Non-interactive mode: the command exits and asks for --wing.
+
+Delete a wing and all drawers in that wing:
+
+    mempalace delete wing --name <wing> --yes
+    mempalace delete wing --name <wing> --dry-run
+
+Delete all wings:
+
+    mempalace delete wing --all
+
+Safety behavior:
+
+- Use --dry-run to preview deletions without deleting anything.
+- Bulk deletes require --yes.
+- For drawer filter deletes, use --all when multiple drawers match.
+- delete wing --all uses an interactive confirmation prompt before deleting every wing.
+- In non-interactive shells, delete wing --all fails safely instead of guessing.
 
 ---
 
