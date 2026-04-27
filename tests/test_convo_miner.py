@@ -5,7 +5,11 @@ from pathlib import Path
 
 import chromadb
 
-from mempalace.convo_miner import mine_convos
+from mempalace.convo_miner import (
+    _is_ai_tool_path,
+    _resolve_wing,
+    mine_convos,
+)
 from mempalace.palace import file_already_mined
 
 
@@ -158,3 +162,123 @@ def test_mine_convos_rebuilds_stale_drawers_after_schema_bump(capsys):
         del col, client
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ── _is_ai_tool_path / _resolve_wing — wing_api auto-routing ───────────
+#
+# When a user runs `mempalace mine --mode convos` against a directory
+# inside a known AI-tool storage path (Claude Code's
+# ~/.claude/projects/, OpenAI Codex's ~/.codex/, Google Gemini CLI's
+# ~/.gemini/), the wing auto-defaults to "wing_api" rather than the
+# directory basename. This keeps API-sourced conversations grouped
+# under a single dedicated wing for visibility and privacy isolation.
+#
+# Explicit user-passed --wing always wins. Unrelated directories use
+# the existing basename fallback unchanged.
+
+
+def test_is_ai_tool_path_claude_projects_subdir(tmp_path):
+    """A subdirectory inside ~/.claude/projects/ is an AI tool path."""
+    target = tmp_path / ".claude" / "projects" / "-Users-test-myapp"
+    target.mkdir(parents=True)
+    assert _is_ai_tool_path(target) is True
+
+
+def test_is_ai_tool_path_claude_projects_root(tmp_path):
+    """The ~/.claude/projects/ directory itself is an AI tool path."""
+    target = tmp_path / ".claude" / "projects"
+    target.mkdir(parents=True)
+    assert _is_ai_tool_path(target) is True
+
+
+def test_is_ai_tool_path_codex_root(tmp_path):
+    target = tmp_path / ".codex"
+    target.mkdir()
+    assert _is_ai_tool_path(target) is True
+
+
+def test_is_ai_tool_path_codex_sessions(tmp_path):
+    """Codex stores sessions under ~/.codex/sessions/YYYY/MM/DD/."""
+    target = tmp_path / ".codex" / "sessions" / "2026" / "04" / "26"
+    target.mkdir(parents=True)
+    assert _is_ai_tool_path(target) is True
+
+
+def test_is_ai_tool_path_gemini_root(tmp_path):
+    target = tmp_path / ".gemini"
+    target.mkdir()
+    assert _is_ai_tool_path(target) is True
+
+
+def test_is_ai_tool_path_gemini_chats(tmp_path):
+    """Gemini stores sessions under ~/.gemini/tmp/<hash>/chats/."""
+    target = tmp_path / ".gemini" / "tmp" / "abc123" / "chats"
+    target.mkdir(parents=True)
+    assert _is_ai_tool_path(target) is True
+
+
+def test_is_ai_tool_path_dotclaude_without_projects_not_matched(tmp_path):
+    """`.claude/` alone (without `/projects`) is the settings dir, not a
+    conversation source — it MUST NOT auto-route to wing_api."""
+    target = tmp_path / ".claude"
+    target.mkdir()
+    assert _is_ai_tool_path(target) is False
+
+
+def test_is_ai_tool_path_unrelated_directory(tmp_path):
+    target = tmp_path / "Documents" / "myproject"
+    target.mkdir(parents=True)
+    assert _is_ai_tool_path(target) is False
+
+
+def test_is_ai_tool_path_substring_no_false_positive(tmp_path):
+    """A directory NAMED like `.gemini-backup` or `.codex-archive` is NOT
+    a real AI tool path. We use exact-segment match, not substring."""
+    a = tmp_path / ".gemini-backup"
+    a.mkdir()
+    b = tmp_path / ".codex-archive"
+    b.mkdir()
+    assert _is_ai_tool_path(a) is False
+    assert _is_ai_tool_path(b) is False
+
+
+def test_resolve_wing_explicit_wins_over_auto_detection(tmp_path):
+    """User-passed --wing always wins, even on an AI tool path."""
+    target = tmp_path / ".claude" / "projects" / "-Users-x"
+    target.mkdir(parents=True)
+    assert _resolve_wing(target, wing="my_custom_wing") == "my_custom_wing"
+
+
+def test_resolve_wing_claude_projects_auto_routes_to_wing_api(tmp_path):
+    target = tmp_path / ".claude" / "projects" / "-Users-test-myapp"
+    target.mkdir(parents=True)
+    assert _resolve_wing(target, wing=None) == "wing_api"
+
+
+def test_resolve_wing_codex_auto_routes_to_wing_api(tmp_path):
+    target = tmp_path / ".codex" / "sessions" / "2026"
+    target.mkdir(parents=True)
+    assert _resolve_wing(target, wing=None) == "wing_api"
+
+
+def test_resolve_wing_gemini_auto_routes_to_wing_api(tmp_path):
+    target = tmp_path / ".gemini" / "tmp" / "abc" / "chats"
+    target.mkdir(parents=True)
+    assert _resolve_wing(target, wing=None) == "wing_api"
+
+
+def test_resolve_wing_unrelated_dir_uses_basename_fallback(tmp_path):
+    """Existing behavior preserved: arbitrary directories use the
+    sanitized basename as the wing."""
+    target = tmp_path / "MyProject Folder"
+    target.mkdir()
+    # Spaces become underscores, hyphens become underscores, lowercased.
+    assert _resolve_wing(target, wing=None) == "myproject_folder"
+
+
+def test_resolve_wing_empty_string_treated_as_no_wing(tmp_path):
+    """An empty string for wing should behave like None — fall through to
+    auto-detection / basename. Mirrors the original `if not wing:` guard."""
+    target = tmp_path / ".gemini" / "tmp"
+    target.mkdir(parents=True)
+    assert _resolve_wing(target, wing="") == "wing_api"
