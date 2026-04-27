@@ -45,10 +45,10 @@
 # stop_hook_active=true so we let it through. No infinite loop.
 #
 # === MEMPALACE CLI ===
-# This repo uses: mempalace mine <dir>
-# or:            mempalace mine <dir> --mode convos
-# Set MEMPAL_DIR below if you want the hook to auto-ingest after blocking.
-# Leave blank to rely on the AI's own save instructions.
+# The hook ALWAYS mines the active conversation transcript automatically
+# (via `mempalace mine <transcript-dir> --mode convos`). MEMPAL_DIR is an
+# *additional*, optional target for project files — it does not replace
+# the conversation mine.
 #
 # === CONFIGURATION ===
 
@@ -56,31 +56,76 @@ SAVE_INTERVAL=15  # Save every N human messages (adjust to taste)
 STATE_DIR="$HOME/.mempalace/hook_state"
 mkdir -p "$STATE_DIR"
 
-# Optional: set to the directory you want auto-ingested on each save trigger.
-# Example: MEMPAL_DIR="$HOME/conversations"
-# Leave empty to skip auto-ingest (AI handles saving via the block reason).
+# Optional: project directory (code / notes / docs) to also mine each
+# save trigger. Mined with `--mode projects`. The conversation transcript
+# is always mined regardless — this is purely additive.
+# Example: MEMPAL_DIR="$HOME/projects/my_app"
 MEMPAL_DIR=""
+
+# Resolve the Python interpreter the hook should use.
+#
+# Why this is nontrivial: GUI-launched Claude Code on macOS (or any harness
+# that doesn't inherit the user's shell PATH) may find a `python3` on PATH
+# that lacks mempalace — e.g. /usr/bin/python3 while the user installed
+# mempalace into a venv or pyenv. Users in that situation can point the
+# hook at the right interpreter by exporting MEMPAL_PYTHON.
+#
+# Resolution order (first hit wins):
+#   1. $MEMPAL_PYTHON          — explicit user override (absolute path)
+#   2. $(command -v python3)   — first python3 on the hook's PATH
+#   3. bare "python3"          — last-resort fallback (hope the PATH has it)
+MEMPAL_PYTHON_BIN="${MEMPAL_PYTHON:-}"
+if [ -z "$MEMPAL_PYTHON_BIN" ] || [ ! -x "$MEMPAL_PYTHON_BIN" ]; then
+    MEMPAL_PYTHON_BIN="$(command -v python3 2>/dev/null || echo python3)"
+fi
 
 # Read JSON input from stdin
 INPUT=$(cat)
 
 # Parse all fields in a single Python call (3x faster than separate invocations)
-eval $(echo "$INPUT" | python3 -c "
-import sys, json
+# without invoking ``eval`` on generated code: Python prints one sanitized
+# value per line, the shell reads them via ``mapfile`` and does plain
+# variable assignment — same data, smaller blast radius if the sanitizer
+# is ever bypassed (#1231 review).
+mapfile -t _mempal_parsed < <(echo "$INPUT" | "$MEMPAL_PYTHON_BIN" -c "
+import sys, json, re
 data = json.load(sys.stdin)
 sid = data.get('session_id', 'unknown')
-sha = data.get('stop_hook_active', False)
+sha_raw = data.get('stop_hook_active', False)
 tp = data.get('transcript_path', '')
 # Shell-safe output — only allow alphanumeric, underscore, hyphen, slash, dot, tilde
-import re
 safe = lambda s: re.sub(r'[^a-zA-Z0-9_/.\-~]', '', str(s))
-print(f'SESSION_ID=\"{safe(sid)}\"')
-print(f'STOP_HOOK_ACTIVE=\"{sha}\"')
-print(f'TRANSCRIPT_PATH=\"{safe(tp)}\"')
+# Coerce stop_hook_active to strict boolean string
+sha = 'True' if sha_raw is True or str(sha_raw).lower() in ('true', '1', 'yes') else 'False'
+print(safe(sid))
+print(sha)
+print(safe(tp))
 " 2>/dev/null)
+SESSION_ID="${_mempal_parsed[0]:-unknown}"
+STOP_HOOK_ACTIVE="${_mempal_parsed[1]:-False}"
+TRANSCRIPT_PATH="${_mempal_parsed[2]:-}"
 
 # Expand ~ in path
 TRANSCRIPT_PATH="${TRANSCRIPT_PATH/#\~/$HOME}"
+
+# Validate that TRANSCRIPT_PATH looks like a transcript file:
+#   - non-empty
+#   - .jsonl or .json suffix
+#   - no traversal segments (.. components)
+# Mirrors mempalace.hooks_cli._validate_transcript_path so the shell hook
+# rejects the same shapes the Python hook rejects (#1231 review).
+is_valid_transcript_path() {
+    local path="$1"
+    [ -n "$path" ] || return 1
+    case "$path" in
+        *.json|*.jsonl) ;;
+        *) return 1 ;;
+    esac
+    case "/$path/" in
+        */../*) return 1 ;;
+    esac
+    return 0
+}
 
 # If we're already in a save cycle, let the AI stop normally
 # This is the infinite-loop prevention: block once → AI saves → tries to stop again → we let it through
@@ -92,7 +137,7 @@ fi
 # Count human messages in the JSONL transcript
 # SECURITY: Pass transcript path as sys.argv to avoid shell injection via crafted paths
 if [ -f "$TRANSCRIPT_PATH" ]; then
-    EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PYEOF'
+    EXCHANGE_COUNT=$("$MEMPAL_PYTHON_BIN" - "$TRANSCRIPT_PATH" <<'PYEOF'
 import json, sys
 count = 0
 with open(sys.argv[1]) as f:
@@ -118,7 +163,11 @@ fi
 LAST_SAVE_FILE="$STATE_DIR/${SESSION_ID}_last_save"
 LAST_SAVE=0
 if [ -f "$LAST_SAVE_FILE" ]; then
-    LAST_SAVE=$(cat "$LAST_SAVE_FILE")
+    LAST_SAVE_RAW=$(cat "$LAST_SAVE_FILE")
+    # SECURITY: Validate as plain integer before arithmetic to prevent command injection
+    if [[ "$LAST_SAVE_RAW" =~ ^[0-9]+$ ]]; then
+        LAST_SAVE="$LAST_SAVE_RAW"
+    fi
 fi
 
 SINCE_LAST=$((EXCHANGE_COUNT - LAST_SAVE))
@@ -133,33 +182,41 @@ if [ "$SINCE_LAST" -ge "$SAVE_INTERVAL" ] && [ "$EXCHANGE_COUNT" -gt 0 ]; then
 
     echo "[$(date '+%H:%M:%S')] TRIGGERING SAVE at exchange $EXCHANGE_COUNT" >> "$STATE_DIR/hook.log"
 
-    # Auto-mine the transcript. Two paths:
-    # 1. TRANSCRIPT_PATH (from Claude Code) — mine the directory it lives in
-    # 2. MEMPAL_DIR (user-configured) — mine that directory
-    # At least one should work. If neither is set, nothing mines.
-    PYTHON="$(command -v python3)"
-    MINE_DIR=""
-    if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-        MINE_DIR="$(dirname "$TRANSCRIPT_PATH")"
+    # Auto-mine. Two independent targets — both run if both are set:
+    #   1. TRANSCRIPT_PATH (from Claude Code) → parent dir, --mode convos
+    #      (Claude Code session JSONL — must use the convo miner)
+    #   2. MEMPAL_DIR (user-configured project) → --mode projects
+    #      (code, notes, docs)
+    # MEMPAL_DIR is *additive*, not an override: a user with MEMPAL_DIR
+    # pointed at their project still gets the active conversation mined.
+    if is_valid_transcript_path "$TRANSCRIPT_PATH" && [ -f "$TRANSCRIPT_PATH" ]; then
+        mempalace mine "$(dirname "$TRANSCRIPT_PATH")" --mode convos \
+            >> "$STATE_DIR/hook.log" 2>&1 &
+    elif [ -n "$TRANSCRIPT_PATH" ]; then
+        echo "[$(date '+%H:%M:%S')] Skipping invalid transcript path: $TRANSCRIPT_PATH" \
+            >> "$STATE_DIR/hook.log"
     fi
     if [ -n "$MEMPAL_DIR" ] && [ -d "$MEMPAL_DIR" ]; then
-        MINE_DIR="$MEMPAL_DIR"
-    fi
-    if [ -n "$MINE_DIR" ]; then
-        "$PYTHON" -m mempalace mine "$MINE_DIR" >> "$STATE_DIR/hook.log" 2>&1 &
+        mempalace mine "$MEMPAL_DIR" --mode projects \
+            >> "$STATE_DIR/hook.log" 2>&1 &
     fi
 
-    # Notify the AI that a checkpoint happened — but do NOT ask it to write
-    # anything in chat. All filing happens in the background via the pipeline.
-    # The old version asked the agent to write diary entries, add drawers, and
-    # add KG triples in the chat window — that cost ~$1/session in retransmitted
-    # tokens and cluttered the conversation.
-    cat << 'HOOKJSON'
+    # MEMPAL_VERBOSE toggle:
+    #   true  = developer mode — block and show diaries/code in chat
+    #   false = silent mode (default) — save in background, no chat clutter
+    # Set via: export MEMPAL_VERBOSE=true
+    if [ "$MEMPAL_VERBOSE" = "true" ] || [ "$MEMPAL_VERBOSE" = "1" ]; then
+        cat << 'HOOKJSON'
 {
-  "decision": "allow",
-  "reason": "MemPalace auto-save checkpoint. Your conversation is being saved verbatim in the background — no action needed from you. Continue working."
+  "decision": "block",
+  "reason": "MemPalace save checkpoint. Write a brief session diary entry covering key topics, decisions, and code changes since the last save. Use verbatim quotes where possible. Continue after saving."
 }
 HOOKJSON
+    else
+        # Silent mode: return empty JSON to not block. "decision": "allow" is
+        # not a valid value — only "block" or {} are recognized.
+        echo '{}'
+    fi
 else
     # Not time yet — let the AI stop normally
     echo "{}"

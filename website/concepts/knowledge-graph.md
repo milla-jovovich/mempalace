@@ -80,12 +80,11 @@ The knowledge graph uses SQLite with two tables:
 
 Database location: `~/.mempalace/knowledge_graph.sqlite3`
 
-## Comparison
+## Related Work
 
-| Feature | MemPalace | Zep (Graphiti) |
-|---------|-----------|----------------|
-| Storage | SQLite (local) | Neo4j (cloud) |
-| Cost | Free | $25/mo+ |
-| Temporal validity | Yes | Yes |
-| Self-hosted | Always | Enterprise only |
-| Privacy | Everything local | SOC 2, HIPAA |
+Temporal entity-relationship graphs are a familiar pattern — Zep's
+Graphiti, for example, also exposes a bi-temporal model. MemPalace's
+knowledge graph is local-first (SQLite, everything on disk) and free;
+Zep is a managed service backed by Neo4j with its own pricing, SLAs,
+and compliance surface. See Zep's own [documentation](https://www.getzep.com/)
+for authoritative details on their deployment model.

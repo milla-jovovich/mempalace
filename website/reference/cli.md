@@ -4,23 +4,29 @@ All commands accept `--palace <path>` to override the default palace location.
 
 ## `mempalace init`
 
-Detect rooms from your folder structure and set up the palace.
+Scan a project directory for people, projects, and rooms, and set up the palace.
 
 ```bash
-mempalace init <dir>
-mempalace init <dir> --yes  # non-interactive mode
+mempalace init <dir>                 # <dir> is required
+mempalace init <dir> --yes           # non-interactive mode
+mempalace init ~/projects/myapp      # example
+mempalace init .                     # initialize from the current directory
 ```
 
-| Option | Description |
-|--------|-------------|
-| `<dir>` | Project directory to scan |
-| `--yes` | Auto-accept all detected entities |
+| Option  | Description                                                                  |
+|---------|------------------------------------------------------------------------------|
+| `<dir>` | **Required.** Project directory to scan. Pass `.` for the current directory. |
+| `--yes` | Auto-accept all detected entities                                            |
 
 What it does:
-1. Scans for people and projects in file content
-2. Detects rooms from folder structure
-3. Creates `~/.mempalace/` config directory
-4. Saves detected entities to `<dir>/entities.json`
+
+1. Scans `<dir>` for people and projects in file content
+2. Detects rooms from `<dir>`'s folder structure
+3. Saves detected entities to `<dir>/entities.json`
+4. Ensures the global `~/.mempalace/` config directory exists
+
+Running `mempalace init` with no argument will exit with
+`error: the following arguments are required: dir`.
 
 ## `mempalace mine`
 
@@ -83,7 +89,7 @@ mempalace split <dir> --output-dir ~/split-output/
 
 ## `mempalace wake-up`
 
-Show L0 + L1 wake-up context (~170–900 tokens).
+Show L0 + L1 wake-up context (~600–900 tokens).
 
 ```bash
 mempalace wake-up

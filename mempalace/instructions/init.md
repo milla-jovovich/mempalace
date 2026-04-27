@@ -49,7 +49,7 @@ If this fails, report the error and stop.
 
 Run the following command to register the MemPalace MCP server with Claude:
 
-    claude mcp add mempalace -- python -m mempalace.mcp_server
+    claude mcp add mempalace -- mempalace-mcp
 
 If this fails, report the error but continue to the next step (MCP
 configuration can be done manually later).
