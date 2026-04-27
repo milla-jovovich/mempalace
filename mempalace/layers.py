@@ -281,6 +281,8 @@ class Layer3:
 
         lines = [f'## L3 — SEARCH RESULTS for "{query}"']
         for i, (doc, meta, dist) in enumerate(zip(docs, metas, dists), 1):
+            meta = meta or {}
+            doc = doc or ""
             similarity = round(1 - dist, 3)
             wing_name = meta.get("wing", "?")
             room_name = meta.get("room", "?")
@@ -327,6 +329,13 @@ class Layer3:
             _first_or_empty(results, "metadatas"),
             _first_or_empty(results, "distances"),
         ):
+            # ChromaDB may return None for doc/meta when a drawer's HNSW entry
+            # exists but its metadata/document rows haven't been materialized
+            # (partial-flush states, mid-delete, schema upgrade boundaries).
+            # Degrade gracefully — the hit still appears with real distance;
+            # storage fields show their fallback where content is missing.
+            meta = meta or {}
+            doc = doc or ""
             hits.append(
                 {
                     "text": doc,

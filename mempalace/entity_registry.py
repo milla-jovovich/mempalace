@@ -308,7 +308,7 @@ class EntityRegistry:
         path = (Path(config_dir) / "entity_registry.json") if config_dir else cls.DEFAULT_PATH
         if path.exists():
             try:
-                data = json.loads(path.read_text())
+                data = json.loads(path.read_text(encoding="utf-8"))
                 return cls(data, path)
             except (json.JSONDecodeError, OSError):
                 pass
@@ -656,7 +656,9 @@ class EntityRegistry:
         Find capitalized words in query that aren't in registry or common words.
         These are candidates for Wikipedia research.
         """
-        candidates = re.findall(r"\b[A-Z][a-z]{2,15}\b", query)
+        from .palace import _candidate_entity_words
+
+        candidates = _candidate_entity_words(query)
         unknown = []
         for word in set(candidates):
             if word.lower() in COMMON_ENGLISH_WORDS:

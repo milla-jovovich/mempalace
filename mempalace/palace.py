@@ -7,6 +7,7 @@ Consolidates collection access patterns used by both miners and the MCP server.
 import contextlib
 import hashlib
 import os
+import re
 
 from .backends.chroma import ChromaBackend
 
@@ -130,6 +131,35 @@ _ENTITY_STOPLIST = frozenset(
 )
 
 
+_CANDIDATE_RX_CACHE = None
+
+
+def _candidate_entity_words(text: str) -> list:
+    """Find entity candidate words using i18n-aware patterns.
+
+    Uses the same candidate_patterns as entity_detector (loaded from locale
+    JSON files via get_entity_patterns), so non-Latin names (Cyrillic,
+    accented Latin, etc.) are detected alongside ASCII names.
+    """
+    global _CANDIDATE_RX_CACHE
+    if _CANDIDATE_RX_CACHE is None:
+        from .config import MempalaceConfig
+        from .i18n import get_entity_patterns
+
+        patterns = get_entity_patterns(MempalaceConfig().entity_languages)
+        rxs = []
+        for pat in patterns["candidate_patterns"]:
+            try:
+                rxs.append(re.compile(pat))
+            except re.error:
+                continue
+        _CANDIDATE_RX_CACHE = rxs
+    words = []
+    for rx in _CANDIDATE_RX_CACHE:
+        words.extend(rx.findall(text))
+    return words
+
+
 def build_closet_lines(source_file, drawer_ids, content, wing, room):
     """Build compact closet pointer lines from drawer content.
 
@@ -144,9 +174,9 @@ def build_closet_lines(source_file, drawer_ids, content, wing, room):
     drawer_ref = ",".join(drawer_ids[:3])
     window = content[:CLOSET_EXTRACT_WINDOW]
 
-    # Extract proper nouns (capitalized words, 2+ occurrences). Filter out
-    # common sentence-starters that aren't real entities.
-    words = re.findall(r"\b[A-Z][a-z]{2,}\b", window)
+    # Extract proper nouns (2+ occurrences). Uses i18n-aware patterns so
+    # non-Latin names (Cyrillic, accented Latin, etc.) are also detected.
+    words = _candidate_entity_words(window)
     word_freq = {}
     for w in words:
         if w in _ENTITY_STOPLIST:
@@ -278,6 +308,88 @@ def mine_lock(source_file: str):
         except Exception:
             pass
         lf.close()
+
+
+class MineAlreadyRunning(RuntimeError):
+    """Raised when another `mempalace mine` already holds the per-palace lock."""
+
+
+@contextlib.contextmanager
+def mine_palace_lock(palace_path: str):
+    """Per-palace non-blocking lock around the full `mine` pipeline.
+
+    The per-file `mine_lock` only protects delete+insert interleave for a
+    single source; it does not prevent N copies of `mempalace mine <dir>`
+    from being spawned concurrently by hooks. When that happens, each copy
+    drives ChromaDB HNSW inserts in parallel against the same palace,
+    which (combined with chromadb's multi-threaded ParallelFor) can
+    corrupt the HNSW graph and produce sparse link_lists.bin blowups.
+
+    The lock file is keyed by sha256(palace_path) so mines against
+    *different* palaces can still run in parallel — we only serialize
+    writes into the same palace, which is the correctness boundary.
+
+    The key is derived from a fully normalized form of the path:
+    `realpath` resolves symlinks and `..` segments, and `normcase` folds
+    case on Windows (which has a case-insensitive filesystem). Without
+    normcase, `C:\\Palace` and `c:\\palace` would hash to different keys
+    on Windows and let two concurrent mines touch the same on-disk palace.
+
+    Non-blocking: if another `mine` is already writing to this palace,
+    raise MineAlreadyRunning so the caller can exit cleanly instead of
+    piling up as a waiting worker.
+    """
+    lock_dir = os.path.join(os.path.expanduser("~"), ".mempalace", "locks")
+    os.makedirs(lock_dir, exist_ok=True)
+    resolved = os.path.realpath(os.path.expanduser(palace_path))
+    lock_key_source = os.path.normcase(resolved)
+    palace_key = hashlib.sha256(lock_key_source.encode()).hexdigest()[:16]
+    lock_path = os.path.join(lock_dir, f"mine_palace_{palace_key}.lock")
+
+    lf = open(lock_path, "w")
+    acquired = False
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            try:
+                msvcrt.locking(lf.fileno(), msvcrt.LK_NBLCK, 1)
+                acquired = True
+            except OSError as exc:
+                raise MineAlreadyRunning(
+                    f"another `mempalace mine` is already running against {resolved}"
+                ) from exc
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except BlockingIOError as exc:
+                raise MineAlreadyRunning(
+                    f"another `mempalace mine` is already running against {resolved}"
+                ) from exc
+        yield
+    finally:
+        if acquired:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(lf.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(lf, fcntl.LOCK_UN)
+            except Exception:
+                pass
+        lf.close()
+
+
+# Backward-compatible alias (previous patch iteration used a single global
+# lock). Kept so third-party callers that imported it continue to work; new
+# code should use `mine_palace_lock(palace_path)` for per-palace scoping.
+mine_global_lock = mine_palace_lock
 
 
 def file_already_mined(collection, source_file: str, check_mtime: bool = False) -> bool:

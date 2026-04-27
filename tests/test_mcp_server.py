@@ -250,6 +250,38 @@ class TestReadTools:
         assert "project" in result["wings"]
         assert "notes" in result["wings"]
 
+    def test_status_handles_none_metadata_without_partial(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        """tool_status must not crash or go partial when the metadata cache
+        returns a ``None`` entry — palaces can contain drawers with no
+        metadata (older mining paths, third-party writes). Before the guard,
+        ``m.get("wing")`` raised AttributeError mid-tally and the result
+        carried ``"error"`` + ``"partial": True`` even though the data was
+        perfectly fetchable."""
+        from unittest.mock import patch as _patch
+
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_status
+
+        # Inject a metadata cache where one entry is None
+        with _patch("mempalace.mcp_server._get_collection") as mock_get_col:
+            fake_col = type("C", (), {"count": lambda self: 2})()
+            mock_get_col.return_value = fake_col
+            with _patch(
+                "mempalace.mcp_server._get_cached_metadata",
+                return_value=[{"wing": "proj", "room": "r"}, None],
+            ):
+                result = tool_status()
+
+        # The None-metadata drawer falls under 'unknown/unknown' — no crash,
+        # no partial flag.
+        assert "error" not in result
+        assert result.get("partial") is not True
+        assert result["total_drawers"] == 2
+        assert result["wings"].get("proj") == 1
+        assert result["wings"].get("unknown") == 1
+
     def test_list_wings(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_list_wings
@@ -707,6 +739,40 @@ class TestDiaryTools:
         assert read_result["total"] == 2
         assert entry1 in contents
         assert entry2 in contents
+
+    def test_diary_read_empty_wing_spans_all_wings(self, monkeypatch, config, palace_path, kg):
+        """diary_read(wing='') must return entries from every wing this agent
+        wrote to. Hooks write to project-derived wings (#659); a reader that
+        silos by default wing would never see those entries."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_diary_read, tool_diary_write
+
+        w1 = tool_diary_write(
+            agent_name="TestAgent",
+            entry="default-wing entry",
+            topic="general",
+        )
+        w2 = tool_diary_write(
+            agent_name="TestAgent",
+            entry="project-wing entry",
+            topic="general",
+            wing="wing_someproject",
+        )
+        assert w1["success"] and w2["success"]
+
+        # Empty wing → return both entries
+        r = tool_diary_read(agent_name="TestAgent", wing="")
+        assert r["total"] == 2
+        contents = {e["content"] for e in r["entries"]}
+        assert "default-wing entry" in contents
+        assert "project-wing entry" in contents
+
+        # Explicit wing → return only that wing's entries
+        r_scoped = tool_diary_read(agent_name="TestAgent", wing="wing_someproject")
+        assert r_scoped["total"] == 1
+        assert r_scoped["entries"][0]["content"] == "project-wing entry"
 
 
 # ── Cache Invalidation (inode/mtime) ──────────────────────────────────
