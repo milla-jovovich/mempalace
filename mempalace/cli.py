@@ -740,6 +740,41 @@ def cmd_instructions(args):
     run_instructions(name=args.name)
 
 
+def cmd_config_show_closets(args):
+    """Print resolved closet tunables and where each value came from.
+
+    Resolution order (highest wins): env (``MEMPALACE_CLOSET_*``) →
+    ``config.json`` (``closets`` block) → ``DEFAULT_CLOSETS``. Helps
+    operators confirm the active settings without reading source code.
+    """
+    # Use the module-level MempalaceConfig import so @patch("mempalace.cli.MempalaceConfig")
+    # in tests actually intercepts this call (a local re-import would bypass it).
+    cfg = MempalaceConfig()
+    resolved = cfg.closets
+    sources = cfg.closets_source()
+
+    print("\n  MemPalace closet tunables")
+    print(f"  {'─' * 54}")
+    # Deterministic ordering for consistent output across runs.
+    keys = [
+        "enabled",
+        "char_limit",
+        "extract_window",
+        "rank_boosts",
+        "distance_cap",
+        "max_hydration_chars",
+        "fallback_min_lines",
+    ]
+    for key in keys:
+        val = resolved.get(key)
+        src = sources.get(key, "default")
+        print(f"  {key:22} = {val!r:30}  [{src}]")
+    print()
+    print(f"  Config file: {cfg._config_file}")
+    print("  Env prefix:  MEMPALACE_CLOSET_*")
+    print()
+
+
 def cmd_mcp(args):
     """Show how to wire MemPalace into MCP-capable hosts."""
     base_server_cmd = "mempalace-mcp"
@@ -1145,6 +1180,17 @@ def main():
         help="Show MCP setup command for connecting MemPalace to your AI client",
     )
 
+    # config (two-level: config show-closets)
+    p_config = sub.add_parser(
+        "config",
+        help="Inspect MemPalace configuration (use 'config show-closets' for closet tunables)",
+    )
+    config_sub = p_config.add_subparsers(dest="config_action")
+    config_sub.add_parser(
+        "show-closets",
+        help="Print resolved closet tunables and source (env/file/default)",
+    )
+
     # status
     # migrate
     p_migrate = sub.add_parser(
@@ -1183,6 +1229,14 @@ def main():
             return
         args.name = name
         cmd_instructions(args)
+        return
+
+    if args.command == "config":
+        action = getattr(args, "config_action", None)
+        if action == "show-closets":
+            cmd_config_show_closets(args)
+            return
+        p_config.print_help()
         return
 
     dispatch = {

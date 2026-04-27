@@ -3,7 +3,12 @@ import json
 import tempfile
 
 import pytest
-from mempalace.config import MempalaceConfig, sanitize_kg_value, sanitize_name
+from mempalace.config import (
+    DEFAULT_CLOSETS,
+    MempalaceConfig,
+    sanitize_kg_value,
+    sanitize_name,
+)
 
 
 def test_default_config():
@@ -193,3 +198,112 @@ def test_kg_value_rejects_null_bytes():
 def test_kg_value_rejects_over_length():
     with pytest.raises(ValueError):
         sanitize_kg_value("a" * 129)
+
+
+# --- closets block ---
+
+
+def test_closets_defaults_when_no_file():
+    cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+    c = cfg.closets
+    # All documented keys present
+    assert set(c.keys()) == set(DEFAULT_CLOSETS.keys())
+    # Values match the documented baseline (= current hardcoded constants)
+    assert c["char_limit"] == 1500
+    assert c["extract_window"] == 5000
+    assert c["rank_boosts"] == [0.40, 0.25, 0.15, 0.08, 0.04]
+    assert c["distance_cap"] == 1.5
+    assert c["max_hydration_chars"] == 10000
+    assert c["fallback_min_lines"] == 3
+    assert c["enabled"] is True
+
+
+def test_closets_from_file_partial_override():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"closets": {"char_limit": 2000, "distance_cap": 0.9}}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    c = cfg.closets
+    # Overridden
+    assert c["char_limit"] == 2000
+    assert c["distance_cap"] == 0.9
+    # Fallback to defaults for keys not in the file
+    assert c["rank_boosts"] == DEFAULT_CLOSETS["rank_boosts"]
+    assert c["extract_window"] == DEFAULT_CLOSETS["extract_window"]
+
+
+def test_closets_env_beats_file():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"closets": {"char_limit": 2000}}, f)
+    os.environ["MEMPALACE_CLOSET_CHAR_LIMIT"] = "777"
+    try:
+        cfg = MempalaceConfig(config_dir=tmpdir)
+        assert cfg.closets["char_limit"] == 777
+    finally:
+        del os.environ["MEMPALACE_CLOSET_CHAR_LIMIT"]
+
+
+def test_closets_env_rank_boosts_csv():
+    os.environ["MEMPALACE_CLOSET_RANK_BOOSTS"] = "0.5, 0.3, 0.1"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.closets["rank_boosts"] == [0.5, 0.3, 0.1]
+    finally:
+        del os.environ["MEMPALACE_CLOSET_RANK_BOOSTS"]
+
+
+def test_closets_env_bool():
+    os.environ["MEMPALACE_CLOSET_ENABLED"] = "false"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        assert cfg.closets["enabled"] is False
+    finally:
+        del os.environ["MEMPALACE_CLOSET_ENABLED"]
+
+
+def test_closets_env_invalid_falls_through_to_default():
+    # Malformed env values must not zero out — should fall through to default.
+    os.environ["MEMPALACE_CLOSET_CHAR_LIMIT"] = "not-a-number"
+    os.environ["MEMPALACE_CLOSET_RANK_BOOSTS"] = "abc,def"
+    try:
+        cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+        c = cfg.closets
+        assert c["char_limit"] == DEFAULT_CLOSETS["char_limit"]
+        assert c["rank_boosts"] == DEFAULT_CLOSETS["rank_boosts"]
+    finally:
+        del os.environ["MEMPALACE_CLOSET_CHAR_LIMIT"]
+        del os.environ["MEMPALACE_CLOSET_RANK_BOOSTS"]
+
+
+def test_closets_malformed_file_rank_boosts_recovers():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"closets": {"rank_boosts": "not a list"}}, f)
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    assert cfg.closets["rank_boosts"] == DEFAULT_CLOSETS["rank_boosts"]
+
+
+def test_closets_source_tracking():
+    tmpdir = tempfile.mkdtemp()
+    with open(os.path.join(tmpdir, "config.json"), "w") as f:
+        json.dump({"closets": {"char_limit": 2000}}, f)
+    os.environ["MEMPALACE_CLOSET_DISTANCE_CAP"] = "0.9"
+    try:
+        cfg = MempalaceConfig(config_dir=tmpdir)
+        src = cfg.closets_source()
+        assert src["distance_cap"] == "env"
+        assert src["char_limit"] == "file"
+        assert src["rank_boosts"] == "default"
+    finally:
+        del os.environ["MEMPALACE_CLOSET_DISTANCE_CAP"]
+
+
+def test_init_emits_closets_block():
+    tmpdir = tempfile.mkdtemp()
+    cfg = MempalaceConfig(config_dir=tmpdir)
+    cfg.init()
+    with open(os.path.join(tmpdir, "config.json")) as f:
+        written = json.load(f)
+    assert "closets" in written
+    assert written["closets"]["char_limit"] == DEFAULT_CLOSETS["char_limit"]

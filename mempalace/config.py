@@ -135,6 +135,106 @@ DEFAULT_HALL_KEYWORDS = {
     "creative": ["game", "gameplay", "player", "app", "design", "art", "music", "story"],
 }
 
+# ── Closet (index-layer) tunables ─────────────────────────────────────────────
+# These defaults MUST match the current module-level constants in
+# ``palace.py`` (``CLOSET_CHAR_LIMIT``, ``CLOSET_EXTRACT_WINDOW``) and
+# ``searcher.py`` (``CLOSET_RANK_BOOSTS``, ``CLOSET_DISTANCE_CAP``,
+# ``MAX_HYDRATION_CHARS``) so behaviour is byte-identical when
+# ``config.json`` omits the ``closets`` block.
+#
+# Keys:
+#   enabled             — master switch; when False, closet writes/reads are
+#                         skipped entirely (reserved; not yet wired into all
+#                         call sites — currently informational).
+#   char_limit          — greedy packing cap per closet document (chars).
+#   extract_window      — source-content window scanned for topic extraction.
+#   rank_boosts         — per-rank cosine-distance subtraction applied to
+#                         drawer hits when their source is also a closet hit.
+#   distance_cap        — closet hits with cosine distance > this value are
+#                         ignored as a boost signal.
+#   max_hydration_chars — cap on drawer-grep-hydrated text returned per hit.
+#   fallback_min_lines  — closet fallback floor; when regex produces fewer
+#                         topic lines than this, Phase 3 enrichment kicks in
+#                         (not yet wired — reserved for Phase 3).
+DEFAULT_CLOSETS = {
+    "enabled": True,
+    "char_limit": 1500,
+    "extract_window": 5000,
+    "rank_boosts": [0.40, 0.25, 0.15, 0.08, 0.04],
+    "distance_cap": 1.5,
+    "max_hydration_chars": 10000,
+    "fallback_min_lines": 3,
+}
+
+# Env vars honoured for closet overrides. Values are parsed by
+# ``_parse_closet_env`` below; invalid values fall through to the next
+# source in the precedence chain (file → default).
+_CLOSET_ENV_PREFIX = "MEMPALACE_CLOSET_"
+_CLOSET_ENV_KEYS = {
+    "enabled": _CLOSET_ENV_PREFIX + "ENABLED",
+    "char_limit": _CLOSET_ENV_PREFIX + "CHAR_LIMIT",
+    "extract_window": _CLOSET_ENV_PREFIX + "EXTRACT_WINDOW",
+    "rank_boosts": _CLOSET_ENV_PREFIX + "RANK_BOOSTS",
+    "distance_cap": _CLOSET_ENV_PREFIX + "DISTANCE_CAP",
+    "max_hydration_chars": _CLOSET_ENV_PREFIX + "MAX_HYDRATION_CHARS",
+    "fallback_min_lines": _CLOSET_ENV_PREFIX + "FALLBACK_MIN_LINES",
+}
+
+
+def _parse_bool(raw: str):
+    """Parse a permissive boolean env var. Returns None on failure so callers
+    can treat it as "env var not provided" and fall through."""
+    if raw is None:
+        return None
+    s = raw.strip().lower()
+    if s in ("1", "true", "yes", "on"):
+        return True
+    if s in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
+def _parse_float_list(raw: str):
+    """Parse a comma-separated float list. Returns None on any parse error
+    so the env var is treated as absent rather than silently zeroed out."""
+    if raw is None:
+        return None
+    try:
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        return [float(p) for p in parts] if parts else None
+    except ValueError:
+        return None
+
+
+def _parse_closet_env():
+    """Read all closet env-var overrides. Returns a partial dict (only keys
+    actually set + parseable) so it can be layered on top of file + defaults.
+    """
+    out = {}
+    for key, env_name in _CLOSET_ENV_KEYS.items():
+        raw = os.environ.get(env_name)
+        if raw is None:
+            continue
+        if key == "enabled":
+            val = _parse_bool(raw)
+            if val is not None:
+                out[key] = val
+        elif key == "rank_boosts":
+            val = _parse_float_list(raw)
+            if val is not None:
+                out[key] = val
+        elif key == "distance_cap":
+            try:
+                out[key] = float(raw)
+            except ValueError:
+                pass
+        else:  # int fields
+            try:
+                out[key] = int(raw)
+            except ValueError:
+                pass
+    return out
+
 
 class MempalaceConfig:
     """Configuration manager for MemPalace.
@@ -199,6 +299,54 @@ class MempalaceConfig:
     def hall_keywords(self):
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
+
+    @property
+    def closets(self):
+        """Closet (index-layer) tunables.
+
+        Precedence: env (``MEMPALACE_CLOSET_*``) → ``config.json`` (``closets``
+        block) → ``DEFAULT_CLOSETS``. Unknown or malformed env values are
+        silently dropped so a bad env doesn't hide a valid file override.
+
+        Returns a fresh dict with every documented key present — callers never
+        need to guard against missing keys.
+        """
+        merged = dict(DEFAULT_CLOSETS)
+        file_block = self._file_config.get("closets")
+        if isinstance(file_block, dict):
+            for key in DEFAULT_CLOSETS:
+                if key in file_block:
+                    merged[key] = file_block[key]
+        env_block = _parse_closet_env()
+        merged.update(env_block)
+        # Defensive normalization — a hand-edited file could provide the wrong
+        # type; coerce to the shape callers expect or fall back to default.
+        if not isinstance(merged.get("rank_boosts"), list):
+            merged["rank_boosts"] = list(DEFAULT_CLOSETS["rank_boosts"])
+        else:
+            try:
+                merged["rank_boosts"] = [float(x) for x in merged["rank_boosts"]]
+            except (TypeError, ValueError):
+                merged["rank_boosts"] = list(DEFAULT_CLOSETS["rank_boosts"])
+        return merged
+
+    def closets_source(self):
+        """Where did each closet value come from? For ``mempalace config show-closets``.
+
+        Returns ``{key: "env" | "file" | "default"}`` using the same precedence
+        chain as ``closets``.
+        """
+        env_block = _parse_closet_env()
+        file_block = self._file_config.get("closets") or {}
+        sources = {}
+        for key in DEFAULT_CLOSETS:
+            if key in env_block:
+                sources[key] = "env"
+            elif isinstance(file_block, dict) and key in file_block:
+                sources[key] = "file"
+            else:
+                sources[key] = "default"
+        return sources
 
     @property
     def entity_languages(self):
@@ -314,6 +462,7 @@ class MempalaceConfig:
                 "collection_name": DEFAULT_COLLECTION_NAME,
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,
+                "closets": dict(DEFAULT_CLOSETS),
             }
             with open(self._config_file, "w") as f:
                 json.dump(default_config, f, indent=2)
