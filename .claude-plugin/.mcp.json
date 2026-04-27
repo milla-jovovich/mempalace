@@ -1,6 +1,9 @@
 {
   "mempalace": {
     "command": "${CLAUDE_PLUGIN_ROOT}/venv/bin/python",
-    "args": ["-m", "mempalace.mcp_server"]
+    "args": [
+      "/home/jp/Projects/palace-daemon/clients/mempalace-mcp.py",
+      "--daemon", "http://disks.jphe.in:8085"
+    ]
   }
 }
