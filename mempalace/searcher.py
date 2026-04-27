@@ -165,6 +165,16 @@ def _hybrid_rank(
     return results
 
 
+# Closet-boost ranking constants. Hoisted to module level so they can be
+# tuned from the outside (env var, config flag, or in-process patch for
+# A/B benchmarking) without touching `search_memories`. The ordinal signal
+# — "which closet matched best for this source" — is more reliable than
+# absolute distance on narrative content, where closet distances cluster
+# in 1.2–1.5 regardless of match quality.
+CLOSET_RANK_BOOSTS = [0.40, 0.25, 0.15, 0.08, 0.04]
+CLOSET_DISTANCE_CAP = 1.5  # cosine dist > 1.5 = too weak to use as signal
+
+
 def build_where_filter(wing: str = None, room: str = None) -> dict:
     """Build ChromaDB where filter for wing/room filtering."""
     if wing and room:
@@ -796,12 +806,6 @@ def search_memories(
                 closet_boost_by_source[source] = (rank, cdist, cdoc[:200])
     except Exception:
         pass  # no closets yet — hybrid degrades to pure drawer search
-
-    # Rank-based boost. The ordinal signal ("which closet matched best") is
-    # more reliable than absolute distance on narrative content, where
-    # closet distances cluster in 1.2-1.5 range regardless of match quality.
-    CLOSET_RANK_BOOSTS = [0.40, 0.25, 0.15, 0.08, 0.04]
-    CLOSET_DISTANCE_CAP = 1.5  # cosine dist > 1.5 = too weak to use as signal
 
     scored: list = []
     for doc, meta, dist in zip(
