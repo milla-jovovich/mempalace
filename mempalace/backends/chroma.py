@@ -1,5 +1,6 @@
 """ChromaDB-backed MemPalace storage backend (RFC 001 reference implementation)."""
 
+import contextlib
 import datetime as _dt
 import logging
 import os
@@ -620,10 +621,43 @@ def _as_list(v: Any) -> list:
 
 
 class ChromaCollection(BaseCollection):
-    """Thin adapter translating ChromaDB dict returns into typed results."""
+    """Thin adapter translating ChromaDB dict returns into typed results.
 
-    def __init__(self, collection):
+    When ``palace_path`` is set, all write methods (``add``, ``upsert``,
+    ``update``, ``delete``) acquire ``mine_palace_lock(palace_path)`` for the
+    duration of the underlying chromadb call. This serializes MCP and other
+    direct-backend writers against ``mempalace mine`` and against each other,
+    closing the race between concurrent writers that triggers ChromaDB's
+    multi-threaded HNSW corruption (#974/#965).
+
+    The lock is the same primitive used by ``miner.mine()`` so re-entrant
+    acquisition from inside the mine pipeline (mine -> _mine_body ->
+    collection.upsert) is short-circuited by the per-thread guard inside
+    ``mine_palace_lock`` — no self-deadlock.
+
+    ``palace_path=None`` disables the wrapping, preserving the legacy
+    no-lock behaviour for callers that construct a ``ChromaCollection``
+    directly without going through ``ChromaBackend``.
+    """
+
+    def __init__(self, collection, palace_path: Optional[str] = None):
         self._collection = collection
+        self._palace_path = palace_path
+
+    @contextlib.contextmanager
+    def _write_lock(self):
+        """Acquire ``mine_palace_lock`` for the configured palace, if any.
+
+        No-op (yields immediately) when ``self._palace_path`` is None.
+        """
+        if self._palace_path is None:
+            yield
+            return
+        # Late import — palace.py imports ChromaBackend from this module.
+        from ..palace import mine_palace_lock
+
+        with mine_palace_lock(self._palace_path):
+            yield
 
     # ------------------------------------------------------------------
     # Writes
@@ -635,7 +669,8 @@ class ChromaCollection(BaseCollection):
             kwargs["metadatas"] = metadatas
         if embeddings is not None:
             kwargs["embeddings"] = embeddings
-        self._collection.add(**kwargs)
+        with self._write_lock():
+            self._collection.add(**kwargs)
 
     def upsert(self, *, documents, ids, metadatas=None, embeddings=None):
         kwargs: dict[str, Any] = {"documents": documents, "ids": ids}
@@ -643,7 +678,8 @@ class ChromaCollection(BaseCollection):
             kwargs["metadatas"] = metadatas
         if embeddings is not None:
             kwargs["embeddings"] = embeddings
-        self._collection.upsert(**kwargs)
+        with self._write_lock():
+            self._collection.upsert(**kwargs)
 
     def update(
         self,
@@ -662,7 +698,8 @@ class ChromaCollection(BaseCollection):
             kwargs["metadatas"] = metadatas
         if embeddings is not None:
             kwargs["embeddings"] = embeddings
-        self._collection.update(**kwargs)
+        with self._write_lock():
+            self._collection.update(**kwargs)
 
     # ------------------------------------------------------------------
     # Reads
@@ -806,7 +843,8 @@ class ChromaCollection(BaseCollection):
             kwargs["ids"] = ids
         if where is not None:
             kwargs["where"] = where
-        self._collection.delete(**kwargs)
+        with self._write_lock():
+            self._collection.delete(**kwargs)
 
     def count(self):
         return self._collection.count()
@@ -1049,7 +1087,7 @@ class ChromaBackend(BaseBackend):
         else:
             collection = client.get_collection(collection_name, **ef_kwargs)
         _pin_hnsw_threads(collection)
-        return ChromaCollection(collection)
+        return ChromaCollection(collection, palace_path=palace_path)
 
     def close_palace(self, palace) -> None:
         """Drop cached handles for ``palace``. Accepts ``PalaceRef`` or legacy path str."""
@@ -1100,7 +1138,7 @@ class ChromaBackend(BaseBackend):
             },
             **ef_kwargs,
         )
-        return ChromaCollection(collection)
+        return ChromaCollection(collection, palace_path=palace_path)
 
 
 def _normalize_get_collection_args(args, kwargs):
