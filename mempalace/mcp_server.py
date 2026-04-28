@@ -1911,6 +1911,13 @@ def _restore_stdout():
 
 def main():
     _restore_stdout()
+
+    # Fix for Issue #1242: Force UTF-8 on Windows to handle Unicode/Emoji
+    # This prevents UnicodeDecodeError on systems with non-UTF8 default codepages
+    if sys.platform == "win32":
+        sys.stdin.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8")
+
     logger.info("MemPalace MCP Server starting...")
     # Pre-flight: probe HNSW capacity before any tool call so the warning
     # is visible at startup rather than on first use (#1222). Pure
