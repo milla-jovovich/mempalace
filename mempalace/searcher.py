@@ -9,13 +9,17 @@ weak closets (regex extraction on narrative content) can only help, never
 hide drawers the direct path would have found.
 """
 
+import functools
 import logging
 import math
 import os
 import re
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
+from .config import MempalaceConfig
+from .i18n import get_stopwords
 from .palace import get_closets_collection, get_collection
 
 # Closet pointer line format: "topic|entities|→drawer_id_a,drawer_id_b"
@@ -47,16 +51,60 @@ def _first_or_empty(results, key: str) -> list:
     return outer[0] or []
 
 
-def _tokenize(text: str) -> list:
+def _tokenize(text: str, stop_words: frozenset = frozenset()) -> list:
     """Lowercase + strip to alphanumeric tokens of length ≥ 2.
 
     Tolerates ``None`` documents — Chroma can return ``None`` in the
     ``documents`` field for drawers without text content, which would
     otherwise raise ``AttributeError`` mid-rerank.
+
+    When ``stop_words`` is non-empty, filters tokens that match any entry.
+    The set is expected to already be lowercased so callers can share one
+    instance across query + document tokenization.
     """
     if not text:
         return []
-    return _TOKEN_RE.findall(text.lower())
+    tokens = _TOKEN_RE.findall(text.lower())
+    if stop_words:
+        return [t for t in tokens if t not in stop_words]
+    return tokens
+
+
+@functools.lru_cache(maxsize=16)
+def _stopwords_for_lang(lang: str) -> frozenset:
+    """Cached stop-word set keyed by an explicit locale code.
+
+    Split out from ``_resolve_stop_words`` so the cache key is a canonical
+    lang string, not the raw ``Optional[str]`` input. Caching by ``None``
+    would pin the first result for the lifetime of the process even after
+    ``MEMPALACE_LANG`` / ``config.json["lang"]`` changes.
+    """
+    return frozenset(get_stopwords(lang))
+
+
+def _resolve_stop_words(lang: Optional[str]) -> frozenset:
+    """Return the BM25 stop-word set for ``lang`` as an opt-in feature.
+
+    When ``lang`` is an explicit string, loads that locale's stop words.
+    When ``lang`` is ``None``, reads ``MempalaceConfig().lang_explicit``:
+    the user must have set ``MEMPALACE_LANG`` / ``MEMPAL_LANG`` or
+    ``config.json["lang"]`` for filtering to activate. Palaces that never
+    configured a language get an empty set, preserving pre-PR scoring
+    byte-for-byte.
+
+    Config resolution runs on every call so mid-process env/config changes
+    take effect immediately; the per-locale parse stays cached inside
+    ``_stopwords_for_lang``.
+    """
+    if lang is None:
+        try:
+            lang = MempalaceConfig().lang_explicit
+        except Exception:
+            logger.debug("lang resolution failed, skipping stop-word filter", exc_info=True)
+            return frozenset()
+        if lang is None:
+            return frozenset()
+    return _stopwords_for_lang(lang)
 
 
 def _bm25_scores(
@@ -64,6 +112,7 @@ def _bm25_scores(
     documents: list,
     k1: float = 1.5,
     b: float = 0.75,
+    stop_words: frozenset = frozenset(),
 ) -> list:
     """Compute Okapi-BM25 scores for ``query`` against each document.
 
@@ -81,11 +130,11 @@ def _bm25_scores(
     Returns a list of scores in the same order as ``documents``.
     """
     n_docs = len(documents)
-    query_terms = set(_tokenize(query))
+    query_terms = set(_tokenize(query, stop_words))
     if not query_terms or n_docs == 0:
         return [0.0] * n_docs
 
-    tokenized = [_tokenize(d) for d in documents]
+    tokenized = [_tokenize(d, stop_words) for d in documents]
     doc_lens = [len(toks) for toks in tokenized]
     if not any(doc_lens):
         return [0.0] * n_docs
@@ -123,6 +172,7 @@ def _hybrid_rank(
     query: str,
     vector_weight: float = 0.6,
     bm25_weight: float = 0.4,
+    stop_words: frozenset = frozenset(),
 ) -> list:
     """Re-rank ``results`` by a convex combination of vector similarity and BM25.
 
@@ -141,7 +191,7 @@ def _hybrid_rank(
         return results
 
     docs = [r.get("text", "") for r in results]
-    bm25_raw = _bm25_scores(query, docs)
+    bm25_raw = _bm25_scores(query, docs, stop_words=stop_words)
     max_bm25 = max(bm25_raw) if bm25_raw else 0.0
     bm25_norm = [s / max_bm25 for s in bm25_raw] if max_bm25 > 0 else [0.0] * len(bm25_raw)
 
@@ -553,6 +603,7 @@ def search_memories(
     n_results: int = 5,
     max_distance: float = 0.0,
     vector_disabled: bool = False,
+    lang: Optional[str] = None,
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
 
@@ -572,6 +623,12 @@ def search_memories(
             (#1222). Set by the MCP server when the HNSW capacity probe
             detects a divergence that would segfault chromadb on segment
             load.
+        lang: Locale code for BM25 stop-word filtering (opt-in). When
+            omitted, reads ``MempalaceConfig().lang_explicit`` — returns an
+            empty set unless the user has set ``MEMPALACE_LANG`` /
+            ``MEMPAL_LANG`` or ``config.json["lang"]``. Palaces without an
+            explicit language skip filtering entirely, preserving pre-PR
+            byte-identical scoring.
     """
     if vector_disabled:
         return _bm25_only_via_sqlite(
@@ -581,6 +638,8 @@ def search_memories(
             room=room,
             n_results=n_results,
         )
+
+    stop_words = _resolve_stop_words(lang)
 
     try:
         drawers_col = get_collection(palace_path, create=False)
@@ -727,7 +786,7 @@ def search_memories(
         indexed.sort(key=lambda p: p[0])
         ordered_docs = [d for _, d in indexed]
 
-        query_terms = set(_tokenize(query))
+        query_terms = set(_tokenize(query, stop_words))
         best_idx, best_score = 0, -1
         for idx, d in enumerate(ordered_docs):
             d_lower = d.lower()
@@ -749,7 +808,7 @@ def search_memories(
         h["total_drawers"] = len(ordered_docs)
 
     # BM25 hybrid re-rank within the final candidate set.
-    hits = _hybrid_rank(hits, query)
+    hits = _hybrid_rank(hits, query, stop_words=stop_words)
     for h in hits:
         h.pop("_sort_key", None)
         h.pop("_source_file_full", None)

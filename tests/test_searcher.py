@@ -308,3 +308,140 @@ class TestSearchCLI:
         assert "[2]" in captured.out
         # Second result renders with fallback '?' values instead of crashing
         assert "second doc" in captured.out
+
+
+# ── _tokenize stop-word filter ─────────────────────────────────────────
+
+
+def test_tokenize_default_keeps_all_tokens():
+    """Without stop_words, behaviour matches the pre-i18n tokenizer."""
+    from mempalace.searcher import _tokenize
+
+    assert _tokenize("The cat sat on the mat") == ["the", "cat", "sat", "on", "the", "mat"]
+
+
+def test_tokenize_filters_stop_words():
+    """When stop_words is given, matching tokens are dropped."""
+    from mempalace.searcher import _tokenize
+
+    tokens = _tokenize("The cat sat on the mat", stop_words=frozenset({"the", "on"}))
+    assert "the" not in tokens
+    assert "on" not in tokens
+    assert tokens == ["cat", "sat", "mat"]
+
+
+def test_tokenize_stop_words_empty_is_no_op():
+    """Empty frozenset is the same as default — full backwards compat."""
+    from mempalace.searcher import _tokenize
+
+    assert _tokenize("hello world", stop_words=frozenset()) == _tokenize("hello world")
+
+
+def test_bm25_scores_filters_stop_words_from_query_and_docs():
+    """BM25 with a stop-words set uses the filtered vocabulary on both sides."""
+    from mempalace.searcher import _bm25_scores
+
+    query = "the quick fox"
+    docs = ["the quick fox", "the lazy dog"]
+    stop_words = frozenset({"the"})
+
+    filtered = _bm25_scores(query, docs, stop_words=stop_words)
+    unfiltered = _bm25_scores(query, docs)
+
+    # Both should rank the first doc higher than the second (fox + quick match).
+    assert filtered[0] > filtered[1]
+    assert unfiltered[0] > unfiltered[1]
+    # Filtered scoring differs because IDF no longer counts "the" across docs.
+    assert filtered != unfiltered
+
+
+def test_bm25_scores_all_stopwords_query_returns_zeros():
+    """If every query term is a stop word, BM25 short-circuits to all-zero."""
+    from mempalace.searcher import _bm25_scores
+
+    scores = _bm25_scores(
+        "the and of", ["a doc", "another"], stop_words=frozenset({"the", "and", "of"})
+    )
+    assert scores == [0.0, 0.0]
+
+
+def test_bm25_scores_all_stopword_docs_returns_zero_vector():
+    """Every doc emptied by stop-word filter yields zero scores without divide errors."""
+    from mempalace.searcher import _bm25_scores
+
+    scores = _bm25_scores("fox", ["the the the", "the the"], stop_words=frozenset({"the", "fox"}))
+    assert scores == [0.0, 0.0]
+
+
+def test_resolve_stop_words_falls_back_silently_when_config_raises(monkeypatch):
+    """If MempalaceConfig() blows up, return an empty set so search keeps working."""
+    from mempalace import searcher
+
+    searcher._stopwords_for_lang.cache_clear()
+
+    def boom(*args, **kwargs):
+        raise OSError("config.json unreadable")
+
+    monkeypatch.setattr(searcher, "MempalaceConfig", boom)
+    assert searcher._resolve_stop_words(None) == frozenset()
+
+
+def test_resolve_stop_words_none_with_no_explicit_lang_returns_empty(monkeypatch):
+    """Unconfigured palaces must not suddenly filter stop words."""
+    from mempalace import searcher
+
+    searcher._stopwords_for_lang.cache_clear()
+
+    class FakeCfg:
+        lang_explicit = None
+
+    monkeypatch.setattr(searcher, "MempalaceConfig", FakeCfg)
+    assert searcher._resolve_stop_words(None) == frozenset()
+
+
+def test_resolve_stop_words_none_with_explicit_lang_applies_filter(monkeypatch):
+    """When the user opts in via lang_explicit, the locale's stop words load."""
+    from mempalace import searcher
+
+    searcher._stopwords_for_lang.cache_clear()
+
+    class FakeCfg:
+        lang_explicit = "ja"
+
+    monkeypatch.setattr(searcher, "MempalaceConfig", FakeCfg)
+    sw = searcher._resolve_stop_words(None)
+    assert "した" in sw
+
+
+def test_resolve_stop_words_caches_per_lang():
+    """Repeat lookups for the same lang hit the lru_cache and return the same object."""
+    from mempalace import searcher
+
+    searcher._stopwords_for_lang.cache_clear()
+    a = searcher._resolve_stop_words("ja")
+    b = searcher._resolve_stop_words("ja")
+    assert a is b
+
+
+def test_resolve_stop_words_none_reflects_config_change_between_calls(monkeypatch):
+    """The None-arg path must re-read config on every call; a stale cache key
+    would pin the first result for the lifetime of the process (igorls, #977)."""
+    from mempalace import searcher
+
+    searcher._stopwords_for_lang.cache_clear()
+
+    class FakeCfgUnset:
+        lang_explicit = None
+
+    monkeypatch.setattr(searcher, "MempalaceConfig", FakeCfgUnset)
+    first = searcher._resolve_stop_words(None)
+    assert first == frozenset()
+
+    class FakeCfgJa:
+        lang_explicit = "ja"
+
+    monkeypatch.setattr(searcher, "MempalaceConfig", FakeCfgJa)
+    second = searcher._resolve_stop_words(None)
+    assert (
+        "した" in second
+    ), f"cache pinned stale empty set for None after config change; got {second!r}"
