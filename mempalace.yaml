@@ -1,0 +1,10 @@
+wing: loving-art
+rooms:
+- name: code
+  description: Source code and implementation
+- name: docs
+  description: Documentation and notes
+- name: config
+  description: Configuration files
+- name: general
+  description: Other project files
