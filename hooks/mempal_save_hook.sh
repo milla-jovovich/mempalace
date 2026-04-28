@@ -147,7 +147,14 @@ with open(sys.argv[1]) as f:
             msg = entry.get('message', {})
             if isinstance(msg, dict) and msg.get('role') == 'user':
                 content = msg.get('content', '')
+                # Skip system/command messages
                 if isinstance(content, str) and '<command-message>' in content:
+                    continue
+                # Skip tool results (role: "user" but not human input)
+                if isinstance(content, list) and all(
+                    isinstance(b, dict) and b.get('type') == 'tool_result'
+                    for b in content
+                ):
                     continue
                 count += 1
         except:
