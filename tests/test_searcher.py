@@ -121,6 +121,142 @@ class TestSearchMemories:
         assert none_hit["room"] == "unknown"
 
 
+# ── HNSW drift recovery (chroma-core/chroma#2594) ────────────────────
+
+
+class TestSearchMemoriesHNSWRecovery:
+    """search_memories must recover from chroma's "Error finding id"
+    HNSW segment errors by quarantining the stale segment, dropping the
+    cached client, and retrying once. If the quarantine pass moves
+    nothing (segment passed integrity gate) or the retry also fails,
+    fall through to the BM25-only path that already protects against
+    unloadable HNSW.
+    """
+
+    HNSW_ERROR = RuntimeError("Error finding id 12345 in segment abc-def")
+
+    def _bm25_response(self):
+        # Shape returned by _bm25_only_via_sqlite — only the identifying
+        # `fallback` key matters for assertions in this class.
+        return {
+            "query": "anything",
+            "filters": {"wing": None, "room": None},
+            "total_before_filter": 0,
+            "results": [],
+            "fallback": "bm25_only_via_sqlite",
+            "fallback_reason": "hnsw_recovery_unavailable",
+        }
+
+    def test_non_hnsw_error_still_returns_error_dict(self):
+        """Non-HNSW errors must keep the original return-error-dict
+        behavior — they're not recoverable by the quarantine path."""
+        mock_col = MagicMock()
+        mock_col.query.side_effect = RuntimeError("query failed")
+
+        with patch("mempalace.searcher.get_collection", return_value=mock_col):
+            result = search_memories("test", "/fake/path")
+        assert "error" in result
+        assert "query failed" in result["error"]
+
+    def test_hnsw_error_quarantines_and_retries_successfully(self):
+        """First call raises HNSW error; quarantine moves a segment;
+        retry succeeds and the recovered results are returned."""
+        mock_col = MagicMock()
+        success_response = {
+            "ids": [["d1"]],
+            "documents": [["recovered doc"]],
+            "metadatas": [[{"wing": "w", "room": "r", "source_file": "x"}]],
+            "distances": [[0.2]],
+        }
+        # First .query() raises HNSW; second returns success.
+        mock_col.query.side_effect = [self.HNSW_ERROR, success_response]
+
+        with patch("mempalace.searcher.get_collection", return_value=mock_col), \
+             patch(
+                "mempalace.backends.chroma.quarantine_stale_hnsw",
+                return_value=["/fake/path/abc-def.drift-20260427-000000"],
+             ) as q, \
+             patch("mempalace.palace._DEFAULT_BACKEND") as backend, \
+             patch(
+                "mempalace.searcher._bm25_only_via_sqlite",
+                side_effect=AssertionError("BM25 fallback should not run on retry success"),
+             ):
+            result = search_memories("test", "/fake/path")
+
+        # The quarantine + cache invalidation both fired exactly once.
+        assert q.call_count == 1
+        assert backend.close_palace.call_count == 1
+        # The retry succeeded and produced a normal result.
+        assert "results" in result
+        assert result["results"][0]["text"] == "recovered doc"
+        # The drawer collection was queried twice (initial + retry).
+        assert mock_col.query.call_count == 2
+
+    def test_hnsw_error_no_segment_quarantined_falls_through_to_bm25(self):
+        """If the segment passes the integrity gate inside
+        quarantine_stale_hnsw, no segment is moved and the retry would
+        fail the same way. Skip the retry and fall through to BM25."""
+        mock_col = MagicMock()
+        mock_col.query.side_effect = self.HNSW_ERROR
+
+        with patch("mempalace.searcher.get_collection", return_value=mock_col), \
+             patch(
+                "mempalace.backends.chroma.quarantine_stale_hnsw",
+                return_value=[],
+             ) as q, \
+             patch("mempalace.palace._DEFAULT_BACKEND") as backend, \
+             patch(
+                "mempalace.searcher._bm25_only_via_sqlite",
+                return_value=self._bm25_response(),
+             ) as bm25:
+            result = search_memories("test", "/fake/path")
+
+        assert q.call_count == 1
+        assert backend.close_palace.call_count == 1
+        # Retry was skipped — only the initial query fired.
+        assert mock_col.query.call_count == 1
+        assert bm25.call_count == 1
+        assert result["fallback"] == "bm25_only_via_sqlite"
+
+    def test_hnsw_error_retry_also_fails_falls_through_to_bm25(self):
+        """Quarantine moves a segment but the retry still raises (e.g.
+        a second drifted segment, or the rebuild itself raised). Fall
+        through to BM25 rather than returning a hard error."""
+        mock_col = MagicMock()
+        mock_col.query.side_effect = [
+            self.HNSW_ERROR,
+            RuntimeError("Error finding id again"),
+        ]
+
+        with patch("mempalace.searcher.get_collection", return_value=mock_col), \
+             patch(
+                "mempalace.backends.chroma.quarantine_stale_hnsw",
+                return_value=["/fake/path/abc-def.drift-20260427-000000"],
+             ), \
+             patch("mempalace.palace._DEFAULT_BACKEND"), \
+             patch(
+                "mempalace.searcher._bm25_only_via_sqlite",
+                return_value=self._bm25_response(),
+             ) as bm25:
+            result = search_memories("test", "/fake/path")
+
+        assert mock_col.query.call_count == 2
+        assert bm25.call_count == 1
+        assert result["fallback"] == "bm25_only_via_sqlite"
+
+    def test_looks_like_hnsw_error_matches_expected_shapes(self):
+        from mempalace.searcher import _looks_like_hnsw_error
+
+        # Real-world strings from chroma-core/chroma#2594 and the Rust
+        # segment layer should be recognized.
+        assert _looks_like_hnsw_error(RuntimeError("Error finding id 42 in segment x"))
+        assert _looks_like_hnsw_error(RuntimeError("hnsw segment failure"))
+        assert _looks_like_hnsw_error(RuntimeError("HNSW: index corrupt"))
+        # Unrelated errors must NOT trigger the recovery path.
+        assert not _looks_like_hnsw_error(RuntimeError("query failed"))
+        assert not _looks_like_hnsw_error(ValueError("bad filter"))
+
+
 # ── BM25 internals: None / empty document safety ─────────────────────
 
 

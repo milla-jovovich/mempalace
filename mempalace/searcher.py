@@ -545,6 +545,19 @@ def _bm25_only_via_sqlite(
     }
 
 
+# Substrings that mark a chroma HNSW segment-layer error worth retrying
+# after a quarantine pass. Matched case-insensitively against str(exc).
+# "error finding id" is the Rust segment layer's lookup-miss message
+# from chroma-core/chroma#2594; "hnsw" catches the broader family of
+# index errors that the same quarantine path can recover from.
+_HNSW_ERROR_MARKERS: tuple[str, ...] = ("error finding id", "hnsw")
+
+
+def _looks_like_hnsw_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return any(m in msg for m in _HNSW_ERROR_MARKERS)
+
+
 def search_memories(
     query: str,
     palace_path: str,
@@ -600,17 +613,59 @@ def search_memories(
     # This avoids the "weak-closets regression" where narrative content
     # produces low-signal closets (regex extraction matches few topics)
     # and closet-first routing hides drawers that direct search would find.
+    dkwargs = {
+        "query_texts": [query],
+        "n_results": n_results * 3,  # over-fetch for re-ranking
+        "include": ["documents", "metadatas", "distances"],
+    }
+    if where:
+        dkwargs["where"] = where
+
     try:
-        dkwargs = {
-            "query_texts": [query],
-            "n_results": n_results * 3,  # over-fetch for re-ranking
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if where:
-            dkwargs["where"] = where
         drawer_results = drawers_col.query(**dkwargs)
     except Exception as e:
-        return {"error": f"Search error: {e}"}
+        # HNSW errors look like "Error finding id <N> in segment ..." and
+        # come from chroma's Rust segment layer when the on-disk HNSW
+        # index has drifted vs chroma.sqlite3 (chroma-core/chroma#2594).
+        # Try one quarantine + retry; if that fails, fall through to the
+        # BM25-only path that already protects against unloadable HNSW.
+        if _looks_like_hnsw_error(e):
+            from .backends.chroma import quarantine_stale_hnsw
+            from .palace import _DEFAULT_BACKEND
+
+            logger.warning(
+                "HNSW error on drawer query for %s — quarantining and retrying once: %s",
+                palace_path,
+                e,
+            )
+            moved = quarantine_stale_hnsw(palace_path)
+            _DEFAULT_BACKEND.close_palace(palace_path)
+            if not moved:
+                # quarantine_stale_hnsw skipped (segment passed integrity
+                # gate). Retry would fail the same way; go straight to
+                # BM25.
+                logger.warning(
+                    "HNSW error but no segment quarantined for %s — "
+                    "falling through to BM25.",
+                    palace_path,
+                )
+                return _bm25_only_via_sqlite(
+                    query, palace_path, wing=wing, room=room, n_results=n_results
+                )
+            try:
+                drawers_col = get_collection(palace_path, create=False)
+                drawer_results = drawers_col.query(**dkwargs)
+            except Exception as e2:
+                logger.warning(
+                    "HNSW retry failed for %s — falling through to BM25: %s",
+                    palace_path,
+                    e2,
+                )
+                return _bm25_only_via_sqlite(
+                    query, palace_path, wing=wing, room=room, n_results=n_results
+                )
+        else:
+            return {"error": f"Search error: {e}"}
 
     # Gather closet hits (best-per-source) to build a boost lookup.
     closet_boost_by_source: dict = {}  # source_file -> (rank, closet_dist, preview)
