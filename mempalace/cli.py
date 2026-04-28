@@ -643,6 +643,34 @@ def cmd_repair_status(args):
     repair_status(palace_path=palace_path)
 
 
+def cmd_janitor(args):
+    """Delete superseded *.drift-* dirs left by quarantine_stale_hnsw."""
+    from .backends.chroma import janitor_clean_drift_dirs
+
+    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    records = janitor_clean_drift_dirs(
+        palace_path,
+        max_age_seconds=args.max_age_hours * 3600.0,
+        fresh_threshold_seconds=args.fresh_threshold_hours * 3600.0,
+        dry_run=args.dry_run,
+    )
+    if not records:
+        print(f"No drift dirs found in {palace_path}")
+        return
+    deleted_bytes = sum(r["size_bytes"] for r in records if r["action"] in ("deleted", "would_delete"))
+    kept = sum(1 for r in records if r["action"] == "kept")
+    acted = sum(1 for r in records if r["action"] in ("deleted", "would_delete"))
+    verb = "would delete" if args.dry_run else "deleted"
+    for r in records:
+        age_h = r["age_seconds"] / 3600.0
+        size_mb = r["size_bytes"] / (1024 * 1024)
+        print(f"  [{r['action']:>13s}]  {age_h:6.2f}h  {size_mb:7.2f} MB  {r['path']}")
+        print(f"                 reason: {r['reason']}")
+    total_mb = deleted_bytes / (1024 * 1024)
+    print()
+    print(f"Summary: {acted} {verb}, {kept} kept, {total_mb:.2f} MB recovered")
+
+
 def cmd_repair(args):
     """Rebuild palace vector index from SQLite metadata."""
     import shutil
@@ -1227,6 +1255,38 @@ def main():
         help="Compare sqlite vs HNSW element counts (read-only; never opens a chromadb client)",
     )
 
+    # janitor — clean up *.drift-* dirs left by quarantine_stale_hnsw
+    p_janitor = sub.add_parser(
+        "janitor",
+        help="Delete superseded *.drift-* segment dirs (cron-friendly; safe to re-run)",
+    )
+    p_janitor.add_argument(
+        "--palace",
+        default=None,
+        help="Palace path (default: configured palace).",
+    )
+    p_janitor.add_argument(
+        "--max-age-hours",
+        type=float,
+        default=24.0,
+        help="Drift dirs older than this are deleted unconditionally. Default 24h.",
+    )
+    p_janitor.add_argument(
+        "--fresh-threshold-hours",
+        type=float,
+        default=1.0,
+        help=(
+            "Live segment whose data_level0.bin mtime is within this much "
+            "of chroma.sqlite3 is considered fresh enough to drop the "
+            "matching drift dir. Default 1h."
+        ),
+    )
+    p_janitor.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Identify candidates and report sizes without deleting.",
+    )
+
     # mcp
     sub.add_parser(
         "mcp",
@@ -1284,6 +1344,7 @@ def main():
         "wake-up": cmd_wakeup,
         "repair": cmd_repair,
         "repair-status": cmd_repair_status,
+        "janitor": cmd_janitor,
         "migrate": cmd_migrate,
         "status": cmd_status,
     }

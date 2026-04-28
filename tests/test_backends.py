@@ -18,6 +18,7 @@ from mempalace.backends.chroma import (
     ChromaCollection,
     _fix_blob_seq_ids,
     _pin_hnsw_threads,
+    janitor_clean_drift_dirs,
     quarantine_stale_hnsw,
 )
 
@@ -673,6 +674,107 @@ def test_quarantine_stale_hnsw_skips_already_quarantined(tmp_path):
     moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
     assert moved == []
     assert drift.exists()
+
+
+# ── janitor_clean_drift_dirs ─────────────────────────────────────────────
+
+
+def _make_palace_with_drift(tmp_path, drift_age_seconds, sqlite_mtime=None):
+    """Build a fake palace with one drift dir of the given age and an
+    optional ``chroma.sqlite3`` at ``sqlite_mtime``. Returns
+    ``(palace_path, drift_path)``."""
+    import time as _t
+    palace = tmp_path / "palace"
+    palace.mkdir()
+    if sqlite_mtime is not None:
+        (palace / "chroma.sqlite3").write_text("")
+        os.utime(palace / "chroma.sqlite3", (sqlite_mtime, sqlite_mtime))
+    drift = palace / "abcd-1234.drift-20260101-000000"
+    drift.mkdir()
+    (drift / "data_level0.bin").write_text("payload")
+    drift_mtime = _t.time() - drift_age_seconds
+    os.utime(drift, (drift_mtime, drift_mtime))
+    os.utime(drift / "data_level0.bin", (drift_mtime, drift_mtime))
+    return palace, drift
+
+
+def test_janitor_deletes_drift_dirs_older_than_max_age(tmp_path):
+    """A drift dir older than max_age is deleted regardless of whether
+    a fresh live segment exists."""
+    palace, drift = _make_palace_with_drift(tmp_path, drift_age_seconds=30 * 3600)
+
+    records = janitor_clean_drift_dirs(str(palace), max_age_seconds=24 * 3600)
+    assert len(records) == 1
+    r = records[0]
+    assert r["action"] == "deleted"
+    assert "age" in r["reason"]
+    assert r["size_bytes"] >= len("payload")
+    assert not drift.exists()
+
+
+def test_janitor_deletes_drift_when_live_segment_is_fresh(tmp_path):
+    """A drift dir gets deleted when its live counterpart's HNSW data
+    file is within fresh_threshold of chroma.sqlite3."""
+    import time as _t
+    sqlite_mtime = _t.time() - 60  # 1 min ago
+    palace, drift = _make_palace_with_drift(
+        tmp_path, drift_age_seconds=60, sqlite_mtime=sqlite_mtime,
+    )
+    # Live segment with same UUID prefix as the drift dir.
+    live = palace / "abcd-1234"
+    live.mkdir()
+    live_bin = live / "data_level0.bin"
+    live_bin.write_text("fresh")
+    os.utime(live_bin, (sqlite_mtime - 10, sqlite_mtime - 10))  # 10s gap
+
+    records = janitor_clean_drift_dirs(
+        str(palace), max_age_seconds=24 * 3600, fresh_threshold_seconds=3600,
+    )
+    assert len(records) == 1
+    assert records[0]["action"] == "deleted"
+    assert "fresh" in records[0]["reason"]
+    assert not drift.exists()
+    assert live.exists()  # live segment is preserved
+
+
+def test_janitor_keeps_drift_when_no_fresh_replacement_and_recent(tmp_path):
+    """A young drift dir with no fresh live replacement is left alone."""
+    palace, drift = _make_palace_with_drift(tmp_path, drift_age_seconds=60)
+
+    records = janitor_clean_drift_dirs(str(palace), max_age_seconds=24 * 3600)
+    assert len(records) == 1
+    assert records[0]["action"] == "kept"
+    assert drift.exists()
+
+
+def test_janitor_dry_run_reports_without_deleting(tmp_path):
+    """Dry-run produces ``would_delete`` records and leaves the dirs in place."""
+    palace, drift = _make_palace_with_drift(tmp_path, drift_age_seconds=30 * 3600)
+
+    records = janitor_clean_drift_dirs(
+        str(palace), max_age_seconds=24 * 3600, dry_run=True,
+    )
+    assert len(records) == 1
+    assert records[0]["action"] == "would_delete"
+    assert drift.exists()
+
+
+def test_janitor_ignores_non_drift_dirs(tmp_path):
+    """Dirs without ``.drift-`` in the name are never touched."""
+    palace = tmp_path / "palace"
+    palace.mkdir()
+    normal = palace / "abcd-1234"
+    normal.mkdir()
+    (normal / "data_level0.bin").write_text("live")
+
+    records = janitor_clean_drift_dirs(str(palace))
+    assert records == []
+    assert normal.exists()
+
+
+def test_janitor_handles_missing_palace(tmp_path):
+    """Missing palace dir: return [] without raising."""
+    assert janitor_clean_drift_dirs(str(tmp_path / "missing")) == []
 
 
 # ── make_client cold-start gate ──────────────────────────────────────────

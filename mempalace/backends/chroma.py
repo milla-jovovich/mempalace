@@ -3,7 +3,9 @@
 import datetime as _dt
 import logging
 import os
+import shutil
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -234,6 +236,143 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
         except OSError:
             logger.exception("Failed to quarantine corrupt HNSW segment %s", seg_dir)
     return moved
+
+
+def _dir_size(path: str) -> int:
+    """Total bytes in ``path`` (recursive). 0 if path is unreadable."""
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+def janitor_clean_drift_dirs(
+    palace_path: str,
+    max_age_seconds: float = 86400.0,
+    fresh_threshold_seconds: float = 3600.0,
+    dry_run: bool = False,
+) -> list[dict]:
+    """Remove ``<uuid>.drift-<timestamp>`` segment directories left by
+    :func:`quarantine_stale_hnsw`.
+
+    A drift dir is safe to delete when EITHER:
+
+    1. It's older than ``max_age_seconds`` (default 24h). At that age it
+       has been superseded many times by chromadb's lazy rebuild, and
+       holding onto it serves no recovery purpose.
+    2. There's a live segment with the same UUID prefix whose
+       ``data_level0.bin`` was written within ``fresh_threshold_seconds``
+       of ``chroma.sqlite3``. That means chromadb has built a healthy
+       replacement and the drift dir is a duplicate.
+
+    Otherwise the drift dir is left in place — it may still be the only
+    on-disk copy of a segment that hasn't been rebuilt yet.
+
+    Args:
+        palace_path: path to the palace directory containing
+            ``chroma.sqlite3`` and the segment dirs.
+        max_age_seconds: drift dirs older than this are deleted
+            unconditionally. Default 24h.
+        fresh_threshold_seconds: a live segment with this much (or less)
+            mtime gap from ``chroma.sqlite3`` is considered fresh enough
+            for the corresponding drift dir to be deletable. Default 1h.
+        dry_run: when True, identify candidates and report sizes but do
+            not actually delete.
+
+    Returns:
+        List of records describing each drift dir examined. Each record
+        is a dict with keys: ``path`` (str), ``size_bytes`` (int),
+        ``age_seconds`` (float), ``action`` (one of ``"deleted"``,
+        ``"would_delete"``, ``"kept"``), and ``reason`` (short string).
+    """
+    if not os.path.isdir(palace_path):
+        return []
+
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
+    sqlite_mtime: Optional[float] = None
+    if os.path.isfile(db_path):
+        try:
+            sqlite_mtime = os.path.getmtime(db_path)
+        except OSError:
+            sqlite_mtime = None
+
+    now = time.time()
+    records: list[dict] = []
+
+    try:
+        entries = os.listdir(palace_path)
+    except OSError:
+        return []
+
+    for name in entries:
+        if ".drift-" not in name:
+            continue
+        drift_path = os.path.join(palace_path, name)
+        if not os.path.isdir(drift_path):
+            continue
+
+        try:
+            drift_mtime = os.path.getmtime(drift_path)
+        except OSError:
+            continue
+        age = now - drift_mtime
+        size = _dir_size(drift_path)
+
+        # Reason 1: too old to keep regardless of replacement state.
+        if age >= max_age_seconds:
+            reason = f"age {age:.0f}s >= max_age {max_age_seconds:.0f}s"
+            action = "would_delete" if dry_run else "deleted"
+            records.append({
+                "path": drift_path, "size_bytes": size,
+                "age_seconds": age, "action": action, "reason": reason,
+            })
+            if not dry_run:
+                _safe_rmtree(drift_path)
+            continue
+
+        # Reason 2: a fresh live replacement exists.
+        uuid_prefix = name.split(".drift-", 1)[0]
+        live_path = os.path.join(palace_path, uuid_prefix)
+        live_fresh = False
+        if sqlite_mtime is not None and os.path.isdir(live_path):
+            live_bin = os.path.join(live_path, "data_level0.bin")
+            if os.path.isfile(live_bin):
+                try:
+                    live_mtime = os.path.getmtime(live_bin)
+                    if abs(sqlite_mtime - live_mtime) <= fresh_threshold_seconds:
+                        live_fresh = True
+                except OSError:
+                    pass
+
+        if live_fresh:
+            reason = f"live segment {uuid_prefix} is fresh (within {fresh_threshold_seconds:.0f}s of sqlite)"
+            action = "would_delete" if dry_run else "deleted"
+            records.append({
+                "path": drift_path, "size_bytes": size,
+                "age_seconds": age, "action": action, "reason": reason,
+            })
+            if not dry_run:
+                _safe_rmtree(drift_path)
+            continue
+
+        records.append({
+            "path": drift_path, "size_bytes": size,
+            "age_seconds": age, "action": "kept",
+            "reason": "no fresh live replacement and not yet old enough",
+        })
+
+    return records
+
+
+def _safe_rmtree(path: str) -> None:
+    try:
+        shutil.rmtree(path)
+    except OSError:
+        logger.exception("Failed to delete drift dir %s", path)
 
 
 def _vector_segment_id(palace_path: str, collection_name: str) -> Optional[str]:
