@@ -336,6 +336,20 @@ class EntityRegistry:
         except (OSError, NotImplementedError):
             pass
         os.replace(tmp_path, self._path)
+        # On ext4 (and similar) the rename's durability across power loss
+        # requires an additional fsync on the parent directory. Without it,
+        # the kernel can ack the rename and a crash reverts to the state
+        # where the temp file is present and the target is at the old version.
+        try:
+            dir_fd = os.open(str(self._path.parent), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            # Windows and some special filesystems reject directory fds — they
+            # have different durability semantics on rename anyway.
+            pass
 
     @staticmethod
     def _empty() -> dict:
