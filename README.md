@@ -1,9 +1,14 @@
 > [!CAUTION]
-> **Scam alert.** The only official sources for MemPalace are this
-> [GitHub repository](https://github.com/MemPalace/mempalace), the
-> [PyPI package](https://pypi.org/project/mempalace/), and the docs site at
-> **[mempalaceofficial.com](https://mempalaceofficial.com)**. Any other
-> domain — including `mempalace.tech` — is an impostor and may distribute
+> # 🚨 CRITICAL SECURITY WARNING: BEWARE OF SCAMS
+> **MemPalace has NO other official websites.**
+> 
+> The **ONLY** official sources are:
+> 1. This **[GitHub repository](https://github.com/MemPalace/mempalace)**
+> 2. The **[PyPI package](https://pypi.org/project/mempalace/)**
+> 3. The docs at **[mempalaceofficial.com](https://mempalaceofficial.com)**
+> 
+> **ANY other domain** (including `.tech`, `.net`, or other `.com` variants) is an **impostor** and may distribute **malware**. Do not download executables from untrusted sites.
+
 > malware. Details and timeline: [docs/HISTORY.md](docs/HISTORY.md).
 
 <div align="center">
