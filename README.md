@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/mempalace-mempalace-badge.png)](https://mseep.ai/app/mempalace-mempalace)
+
 > [!CAUTION]
 > **Scam alert.** The only official sources for MemPalace are this
 > [GitHub repository](https://github.com/MemPalace/mempalace), the
