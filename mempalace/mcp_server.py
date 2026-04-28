@@ -1911,6 +1911,16 @@ def _restore_stdout():
 
 def main():
     _restore_stdout()
+    # Force UTF-8 on stdio. MCP JSON-RPC is UTF-8, but Python on Windows
+    # defaults stdin/stdout to the system codepage (e.g. cp1251), which
+    # corrupts non-ASCII payloads and surfaces as generic -32000 errors on
+    # Cyrillic/CJK content. See PEP 540.
+    for stream in (sys.stdin, sys.stdout):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError):
+                pass
     logger.info("MemPalace MCP Server starting...")
     # Pre-flight: probe HNSW capacity before any tool call so the warning
     # is visible at startup rather than on first use (#1222). Pure
