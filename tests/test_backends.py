@@ -372,6 +372,32 @@ def test_chroma_backend_create_collection_sets_hnsw_bloat_guard(tmp_path):
     assert col.metadata.get("hnsw:sync_threshold") == 50_000
 
 
+def test_get_collection_create_true_is_idempotent(tmp_path):
+    """Calling get_collection(create=True) twice on the same name must not crash.
+
+    ChromaDB 1.5.x's Rust bindings SIGSEGV when get_or_create_collection is
+    called with metadata that differs from the stored collection metadata. The
+    fix splits the call into get_collection -> fallback create_collection so the
+    metadata-comparison codepath in chromadb_rust_bindings is never reached for
+    existing collections. Regression guard for issue #1089.
+    """
+    palace = str(tmp_path / "palace")
+    backend = ChromaBackend()
+    backend.get_collection(palace, collection_name="mempalace_drawers", create=True)
+    col2 = backend.get_collection(palace, collection_name="mempalace_drawers", create=True)
+    assert isinstance(col2, ChromaCollection)
+
+
+def test_get_collection_create_true_preserves_existing_metadata(tmp_path):
+    """Existing collection metadata is not overwritten when reopened with create=True."""
+    palace = str(tmp_path / "palace")
+    backend = ChromaBackend()
+    backend.get_collection(palace, collection_name="mempalace_drawers", create=True)
+    col = backend.get_collection(palace, collection_name="mempalace_drawers", create=True)
+    assert col._collection.metadata["hnsw:space"] == "cosine"
+    assert col._collection.metadata.get("hnsw:batch_size") == 50_000
+
+
 def test_fix_blob_seq_ids_converts_blobs_to_integers(tmp_path):
     """Simulate a ChromaDB 0.6.x database with BLOB seq_ids and verify repair."""
     db_path = tmp_path / "chroma.sqlite3"

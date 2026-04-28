@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import chromadb
+from chromadb.errors import NotFoundError as _ChromaNotFoundError
 
 from .base import (
     BaseBackend,
@@ -1037,15 +1038,18 @@ class ChromaBackend(BaseBackend):
         ef_kwargs = {"embedding_function": ef} if ef is not None else {}
 
         if create:
-            collection = client.get_or_create_collection(
-                collection_name,
-                metadata={
-                    "hnsw:space": hnsw_space,
-                    "hnsw:num_threads": 1,
-                    **_HNSW_BLOAT_GUARD,
-                },
-                **ef_kwargs,
-            )
+            try:
+                collection = client.get_collection(collection_name, **ef_kwargs)
+            except _ChromaNotFoundError:
+                collection = client.create_collection(
+                    collection_name,
+                    metadata={
+                        "hnsw:space": hnsw_space,
+                        "hnsw:num_threads": 1,
+                        **_HNSW_BLOAT_GUARD,
+                    },
+                    **ef_kwargs,
+                )
         else:
             collection = client.get_collection(collection_name, **ef_kwargs)
         _pin_hnsw_threads(collection)
