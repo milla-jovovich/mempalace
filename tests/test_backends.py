@@ -1,4 +1,5 @@
 import os
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -204,6 +205,52 @@ def test_query_empty_preserves_embeddings_outer_shape_when_requested():
 
     not_requested = collection.query(query_texts=["q1", "q2"], include=["documents"])
     assert not_requested.embeddings is None
+
+
+def test_chroma_close_palace_releases_sqlite_lock_for_reopen(tmp_path):
+    """close_palace must release chromadb's rust-side SQLite file lock so
+    a fresh PersistentClient on the same path after shutil.rmtree can
+    write without hitting SQLITE_READONLY_DBMOVED."""
+    backend = ChromaBackend()
+    palace_path = tmp_path / "palace-a"
+    ref = PalaceRef(id=str(palace_path), local_path=str(palace_path))
+
+    col = backend.get_collection(palace=ref, collection_name="mempalace_drawers", create=True)
+    col.upsert(documents=["hello"], ids=["a"], metadatas=[{"k": "v"}])
+
+    backend.close_palace(ref)
+    shutil.rmtree(palace_path)
+
+    col = backend.get_collection(palace=ref, collection_name="mempalace_drawers", create=True)
+    col.upsert(documents=["world"], ids=["b"], metadatas=[{"k": "v2"}])
+    assert col.count() == 1
+
+
+def test_chroma_close_releases_all_cached_clients(tmp_path):
+    """close() must release every cached client's SQLite file lock so any
+    of their palace paths can be reopened by a fresh backend in the same
+    process."""
+    backend = ChromaBackend()
+    palace_a = tmp_path / "palace-a"
+    palace_b = tmp_path / "palace-b"
+    ref_a = PalaceRef(id=str(palace_a), local_path=str(palace_a))
+    ref_b = PalaceRef(id=str(palace_b), local_path=str(palace_b))
+
+    for ref in (ref_a, ref_b):
+        backend.get_collection(palace=ref, collection_name="mempalace_drawers", create=True).upsert(
+            documents=["x"], ids=["x"], metadatas=[{"k": "v"}]
+        )
+
+    backend.close()
+
+    for path in (palace_a, palace_b):
+        shutil.rmtree(path)
+        ref = PalaceRef(id=str(path), local_path=str(path))
+        fresh = ChromaBackend()
+        col = fresh.get_collection(palace=ref, collection_name="mempalace_drawers", create=True)
+        col.upsert(documents=["y"], ids=["y"], metadatas=[{"k": "v2"}])
+        assert col.count() == 1
+        fresh.close()
 
 
 def test_chroma_cache_invalidates_when_db_file_missing(tmp_path):
