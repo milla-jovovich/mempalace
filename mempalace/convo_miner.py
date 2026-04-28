@@ -16,11 +16,11 @@ from datetime import datetime
 from collections import defaultdict
 
 from .normalize import normalize
+from .vector_store import get_collection as _get_vector_store_collection
 from .palace import (
     NORMALIZE_VERSION,
     SKIP_DIRS,
     file_already_mined,
-    get_collection,
     mine_lock,
 )
 
@@ -413,7 +413,7 @@ def mine_convos(
         print("  DRY RUN — nothing will be filed")
     print(f"{'-' * 55}\n")
 
-    collection = get_collection(palace_path) if not dry_run else None
+    collection = _get_vector_store_collection(palace_path, create=True) if not dry_run else None
 
     total_drawers = 0
     files_skipped = 0

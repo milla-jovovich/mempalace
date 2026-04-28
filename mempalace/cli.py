@@ -650,8 +650,11 @@ def cmd_repair(args):
     from .migrate import confirm_destructive_action, contains_palace_database
     from .repair import TruncationDetected, check_extraction_safety
 
+    from .vector_store import get_collection, reset_collection
+
+    cfg = MempalaceConfig()
     palace_path = os.path.abspath(
-        os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+        os.path.expanduser(args.palace) if args.palace else cfg.palace_path
     )
 
     if getattr(args, "mode", "legacy") == "max-seq-id":
@@ -681,11 +684,11 @@ def cmd_repair(args):
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
 
-    backend = ChromaBackend()
+    ChromaBackend()
 
     # Try to read existing drawers
     try:
-        col = backend.get_collection(palace_path, "mempalace_drawers")
+        col = get_collection(palace_path, config=cfg)
         total = col.count()
         print(f"  Drawers found: {total}")
     except Exception as e:
@@ -751,8 +754,7 @@ def cmd_repair(args):
     shutil.copytree(palace_path, backup_path)
 
     print("  Rebuilding collection...")
-    backend.delete_collection(palace_path, "mempalace_drawers")
-    new_col = backend.create_collection(palace_path, "mempalace_drawers")
+    new_col = reset_collection(palace_path, config=cfg)
 
     filed = 0
     for i in range(0, len(all_ids), batch_size):
@@ -764,7 +766,8 @@ def cmd_repair(args):
         print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
-    print(f"  Backup saved at {backup_path}")
+    if backup_path:
+        print(f"  Backup saved at {backup_path}")
     print(f"\n{'=' * 55}\n")
 
 
@@ -805,10 +808,11 @@ def cmd_mcp(args):
 
 def cmd_compress(args):
     """Compress drawers in a wing using AAAK Dialect."""
-    from .backends.chroma import ChromaBackend
     from .dialect import Dialect
+    from .vector_store import get_collection
 
-    palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+    cfg = MempalaceConfig()
+    palace_path = os.path.expanduser(args.palace) if args.palace else cfg.palace_path
 
     # Load dialect (with optional entity config)
     config_path = args.config
@@ -825,9 +829,8 @@ def cmd_compress(args):
         dialect = Dialect()
 
     # Connect to palace
-    backend = ChromaBackend()
     try:
-        col = backend.get_collection(palace_path, "mempalace_drawers")
+        col = get_collection(palace_path, config=cfg)
     except Exception:
         print(f"\n  No palace found at {palace_path}")
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
@@ -902,7 +905,12 @@ def cmd_compress(args):
     # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
-            comp_col = backend.get_or_create_collection(palace_path, "mempalace_compressed")
+            comp_col = get_collection(
+                palace_path,
+                config=cfg,
+                create=True,
+                collection_name="mempalace_compressed",
+            )
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
                 comp_meta["compression_ratio"] = round(stats["size_ratio"], 1)
