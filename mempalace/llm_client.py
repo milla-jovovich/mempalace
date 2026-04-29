@@ -28,7 +28,79 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+
+
+# ── External-service heuristic (issue #24 — privacy warning support) ─────
+# Used by ``LLMProvider.is_external_service`` to decide whether the
+# provider's configured endpoint will send user content off the local
+# machine/network. Single source of truth so all three providers share
+# identical "local vs external" semantics.
+
+_LOCALHOST_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _endpoint_is_local(url: Optional[str]) -> bool:
+    """Return True if ``url``'s hostname is on the user's machine or
+    private network.
+
+    Local includes:
+      - localhost, 127.0.0.1, ::1
+      - hostnames ending in .local (mDNS/Bonjour)
+      - IPv4 RFC1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+      - IPv4 CGNAT (Tailscale and similar VPN/tunnel networks):
+        100.64.0.0/10 — first octet 100, second octet 64-127 inclusive
+      - IPv6 unique-local addresses (fc00::/7) — fc.../fd... prefixes
+
+    None / empty / unparseable URLs are treated as local (defensive default —
+    no endpoint means no external request can happen yet).
+
+    Anything else (including public IPs and FQDNs) is external.
+    """
+    if not url:
+        return True
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except (ValueError, AttributeError):
+        return False
+    if not host:
+        return True
+    if host in _LOCALHOST_HOSTS:
+        return True
+    if host.endswith(".local"):
+        return True
+    if host.startswith("10."):
+        return True
+    if host.startswith("192.168."):
+        return True
+    if host.startswith("172."):
+        # 172.16.0.0 - 172.31.255.255
+        parts = host.split(".")
+        if len(parts) >= 2:
+            try:
+                if 16 <= int(parts[1]) <= 31:
+                    return True
+            except ValueError:
+                pass
+    if host.startswith("100."):
+        # 100.64.0.0/10 — Tailscale CGNAT range. First octet 100, second
+        # octet 64-127 inclusive. Users running a local LLM (LM Studio,
+        # Ollama, etc.) accessible via Tailscale on a 100.x.x.x address
+        # should not trigger the external-API privacy warning.
+        # 100.x.x.x outside this range is regular allocated public space
+        # and remains external.
+        parts = host.split(".")
+        if len(parts) >= 2:
+            try:
+                if 64 <= int(parts[1]) <= 127:
+                    return True
+            except ValueError:
+                pass
+    # IPv6 unique-local addresses fc00::/7 — match leading hex chars
+    if host.startswith("fc") or host.startswith("fd"):
+        return True
+    return False
 
 
 class LLMError(RuntimeError):
@@ -67,6 +139,20 @@ class LLMProvider:
     def check_available(self) -> tuple[bool, str]:
         """Return ``(ok, message)``. Fast probe that the provider is reachable."""
         raise NotImplementedError
+
+    @property
+    def is_external_service(self) -> bool:
+        """Return True if this provider's endpoint will send user content
+        off the local machine/network.
+
+        Used by ``mempalace init`` to decide whether to print a privacy
+        warning before first use (issue #24). URL-based heuristic only —
+        the endpoint determines, regardless of which provider class.
+        Subclasses that resolve their endpoint dynamically should override
+        if needed; the default works for the three in-tree providers
+        (Ollama / OpenAI-compat / Anthropic).
+        """
+        return not _endpoint_is_local(self.endpoint)
 
 
 def _http_post_json(url: str, body: dict, headers: dict, timeout: int) -> dict:

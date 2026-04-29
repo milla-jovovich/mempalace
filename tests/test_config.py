@@ -3,7 +3,7 @@ import json
 import tempfile
 
 import pytest
-from mempalace.config import MempalaceConfig, sanitize_kg_value, sanitize_name
+from mempalace.config import MempalaceConfig, normalize_wing_name, sanitize_kg_value, sanitize_name
 
 
 def test_default_config():
@@ -18,6 +18,30 @@ def test_config_from_file():
         json.dump({"palace_path": "/custom/palace"}, f)
     cfg = MempalaceConfig(config_dir=tmpdir)
     assert cfg.palace_path == "/custom/palace"
+
+
+def test_embedding_device_defaults_to_auto(monkeypatch):
+    monkeypatch.delenv("MEMPALACE_EMBEDDING_DEVICE", raising=False)
+    cfg = MempalaceConfig(config_dir=tempfile.mkdtemp())
+    assert cfg.embedding_device == "auto"
+
+
+def test_embedding_device_from_config_is_normalized(tmp_path, monkeypatch):
+    monkeypatch.delenv("MEMPALACE_EMBEDDING_DEVICE", raising=False)
+    with open(tmp_path / "config.json", "w") as f:
+        json.dump({"embedding_device": "  CUDA  "}, f)
+
+    cfg = MempalaceConfig(config_dir=str(tmp_path))
+    assert cfg.embedding_device == "cuda"
+
+
+def test_embedding_device_env_overrides_config(tmp_path, monkeypatch):
+    with open(tmp_path / "config.json", "w") as f:
+        json.dump({"embedding_device": "cpu"}, f)
+    monkeypatch.setenv("MEMPALACE_EMBEDDING_DEVICE", "  CoreML  ")
+
+    cfg = MempalaceConfig(config_dir=str(tmp_path))
+    assert cfg.embedding_device == "coreml"
 
 
 def test_env_override():
@@ -84,6 +108,25 @@ def test_init():
     cfg = MempalaceConfig(config_dir=tmpdir)
     cfg.init()
     assert os.path.exists(os.path.join(tmpdir, "config.json"))
+
+
+# --- normalize_wing_name ---
+
+
+def test_normalize_wing_name_hyphen():
+    assert normalize_wing_name("mempal-private") == "mempal_private"
+
+
+def test_normalize_wing_name_space():
+    assert normalize_wing_name("My Project") == "my_project"
+
+
+def test_normalize_wing_name_already_clean():
+    assert normalize_wing_name("memorymark") == "memorymark"
+
+
+def test_normalize_wing_name_mixed():
+    assert normalize_wing_name("My-Cool App") == "my_cool_app"
 
 
 # --- sanitize_name ---

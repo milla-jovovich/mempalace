@@ -363,11 +363,14 @@ def test_to_detected_dict_shape():
     projects = [ProjectInfo(name="p", repo_root=Path("."), is_mine=True, manifest="package.json")]
     people = [PersonInfo(name="Jane Doe", total_commits=5, repos={"r"})]
     d = to_detected_dict(projects, people)
-    assert set(d.keys()) == {"people", "projects", "uncertain"}
+    # ``topics`` is the LLM-refine bucket for cross-wing tunnel signal —
+    # always present even when empty so callers can rely on the shape.
+    assert set(d.keys()) == {"people", "projects", "topics", "uncertain"}
     assert d["projects"][0]["name"] == "p"
     assert d["projects"][0]["type"] == "project"
     assert d["people"][0]["name"] == "Jane Doe"
     assert d["people"][0]["type"] == "person"
+    assert d["topics"] == []
     assert d["uncertain"] == []
 
 
