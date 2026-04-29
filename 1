@@ -1,0 +1,99 @@
+[project]
+name = "mempalace"
+version = "3.3.0"
+description = "Give your AI a memory — mine projects and conversations into a searchable palace. No API key required."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+    {name = "milla-jovovich"},
+]
+keywords = [
+    "ai", "memory", "llm", "rag", "chromadb", "mcp",
+    "vector-database", "claude", "chatgpt", "embeddings",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "chromadb>=1.5.4,<2",
+    "pyyaml>=6.0,<7",
+]
+
+[project.urls]
+Homepage = "https://github.com/MemPalace/mempalace"
+Repository = "https://github.com/MemPalace/mempalace"
+"Bug Tracker" = "https://github.com/MemPalace/mempalace/issues"
+
+[project.scripts]
+mempalace = "mempalace.cli:main"
+
+[project.entry-points."mempalace.backends"]
+chroma = "mempalace.backends.chroma:ChromaBackend"
+
+# RFC 002 source-adapter entry-point group. Core publishes no first-party
+# adapters under this group yet; ``miner.py`` and ``convo_miner.py`` migrate
+# onto ``BaseSourceAdapter`` in a follow-up PR. Third-party adapter packages
+# (``mempalace-source-cursor``, ``mempalace-source-git``, …) register here.
+[project.entry-points."mempalace.sources"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
+spellcheck = ["autocorrect>=2.0"]
+
+[dependency-groups]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.4.0", "psutil>=5.9"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mempalace"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+extend-exclude = ["benchmarks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "C901"]
+ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 25
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-m 'not benchmark and not slow and not stress'"
+markers = [
+    "benchmark: scale/performance benchmark tests",
+    "slow: tests that take more than 30 seconds",
+    "stress: destructive scale tests (100K+ drawers)",
+]
+
+[tool.coverage.run]
+source = ["mempalace"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+exclude_lines = [
+    "if __name__",
+    "pragma: no cover",
+]
