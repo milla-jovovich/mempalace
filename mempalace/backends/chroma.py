@@ -3,6 +3,7 @@
 import datetime as _dt
 import logging
 import os
+import pickle
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
@@ -125,6 +126,63 @@ def _segment_appears_healthy(seg_dir: str) -> bool:
     return len(head) == 2 and head[0] == 0x80 and tail == b"\x2e"
 
 
+class _BoundedUnpickler(pickle.Unpickler):
+    """Unpickler that refuses any class instantiation.
+
+    ``index_metadata.pickle`` written by chromadb 1.5.x is a plain dict of
+    builtins (``id_to_label`` is a ``dict``, ``total_elements_added`` is
+    an ``int``, etc.). Refusing ``find_class`` for anything else means a
+    structurally-valid-but-malicious pickle cannot execute arbitrary code
+    at quarantine-check time. Older 0.6.x palaces that stored the
+    metadata as a custom-class instance fall back to "unknown" — the
+    existing byte-sniff verdict stands.
+    """
+
+    _ALLOWED_BUILTINS = frozenset(
+        {"dict", "int", "str", "tuple", "list", "set", "frozenset", "bytes", "bool"}
+    )
+
+    def find_class(self, module: str, name: str) -> Any:
+        if module == "builtins" and name in self._ALLOWED_BUILTINS:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(f"Refusing to load {module}.{name}")
+
+
+def _segment_pickle_counts_consistent(seg_dir: str) -> Optional[bool]:
+    """Return True if HNSW pickle counts agree, False if they don't, None if undetermined.
+
+    Catches the off-by-one corruption shape from chroma-core/chroma#6979,
+    where ``total_elements_added`` is advanced past ``id_to_label`` entries
+    after a write killed mid-flush. HNSW traversal eventually steps on
+    the unmapped element and null-derefs (SIGSEGV — same shape diagnosed
+    at MemPalace/mempalace#1046).
+
+    The byte-sniff in :func:`_segment_appears_healthy` cannot detect this:
+    the pickle is structurally valid (PROTO marker present, terminator
+    present, file size large). The inconsistency lives in the values.
+
+    Returns ``None`` (rather than ``False``) when the file cannot be
+    parsed by :class:`_BoundedUnpickler`, the keys are missing, or types
+    are unexpected — those cases stay with the existing byte-sniff
+    verdict and are not used to trigger quarantine.
+    """
+    meta_path = os.path.join(seg_dir, "index_metadata.pickle")
+    if not os.path.isfile(meta_path):
+        return None
+    try:
+        with open(meta_path, "rb") as f:
+            obj = _BoundedUnpickler(f).load()
+    except (pickle.UnpicklingError, OSError, EOFError, ValueError, AttributeError, KeyError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    id_to_label = obj.get("id_to_label")
+    total_added = obj.get("total_elements_added")
+    if not isinstance(id_to_label, dict) or not isinstance(total_added, int):
+        return None
+    return len(id_to_label) == total_added
+
+
 def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> list[str]:
     """Rename HNSW segment dirs that are both stale-by-mtime AND fail an
     integrity sniff-test.
@@ -135,14 +193,14 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
     chroma-core/chroma#2594. Renaming a corrupt segment lets chromadb
     rebuild lazily on next open instead of segfaulting.
 
-    Two-stage check:
+    Three-stage check:
 
     1. **mtime gate.** If ``chroma.sqlite3`` is less than
        ``stale_seconds`` newer than the segment's ``data_level0.bin``,
        skip — chromadb is in normal write-path territory.
 
-    2. **Integrity gate** (``_segment_appears_healthy``). Even when the
-       mtime gap exceeds the threshold, a segment whose
+    2. **Byte-sniff integrity gate** (``_segment_appears_healthy``).
+       Even when the mtime gap exceeds the threshold, a segment whose
        ``index_metadata.pickle`` passes a format sniff-test is healthy:
        chromadb 1.5.x flushes HNSW state asynchronously and a clean
        shutdown does NOT force-flush, so the on-disk HNSW is *always*
@@ -155,8 +213,22 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
        from vector recall until the operator runs ``mempalace repair
        --mode rebuild`` (15+ min on a 151K palace).
 
-    Only segments that pass stage 1 (suspiciously stale) AND fail stage
-    2 (metadata file truncated, zero-filled, or absent-with-data) are
+    3. **Pickle-counts consistency gate**
+       (``_segment_pickle_counts_consistent``). When the byte-sniff
+       passes, deserialize the metadata via :class:`_BoundedUnpickler`
+       and compare ``len(id_to_label) == total_elements_added``. The
+       off-by-one corruption shape from chroma-core/chroma#6979 — a
+       write killed mid-flush leaves ``total_elements_added`` advanced
+       on disk while the corresponding ``id_to_label`` entry is never
+       written — produces a structurally-valid pickle that the byte-
+       sniff cannot detect. HNSW traversal eventually lands on the
+       unmapped label and null-derefs (SIGSEGV; same shape diagnosed
+       at #1046). When the unpickler refuses a non-builtin or the keys
+       are missing, returns "undetermined" and the byte-sniff verdict
+       stands — older 0.6.x palaces with attr-object metadata are not
+       quarantined on this gate alone.
+
+    Only segments that pass stage 1 AND fail stage 2 OR stage 3 are
     renamed to ``<uuid>.drift-<timestamp>``. The original directory is
     renamed, not deleted, so recovery remains possible if the heuristic
     misfires.
@@ -210,15 +282,26 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
         # state condition. A healthy segment metadata file proves
         # chromadb can open the segment without segfault; don't
         # quarantine a healthy index.
-        if _segment_appears_healthy(seg_dir):
-            logger.info(
-                "HNSW mtime gap %.0fs on %s exceeds threshold but segment "
-                "metadata file is intact — flush-lag, not corruption. "
-                "Leaving in place.",
-                sqlite_mtime - hnsw_mtime,
-                seg_dir,
-            )
-            continue
+        byte_sniff_ok = _segment_appears_healthy(seg_dir)
+        consistent = _segment_pickle_counts_consistent(seg_dir) if byte_sniff_ok else None
+        drift_reason: Optional[str] = None
+        if byte_sniff_ok:
+            if consistent is False:
+                # Stage 3: pickle parses but counts disagree. Off-by-one
+                # corruption from chroma-core/chroma#6979 — traversal
+                # eventually steps on an unmapped element and SIGSEGVs.
+                drift_reason = "id_to_label vs total_elements_added mismatch"
+            else:
+                logger.info(
+                    "HNSW mtime gap %.0fs on %s exceeds threshold but segment "
+                    "metadata file is intact — flush-lag, not corruption. "
+                    "Leaving in place.",
+                    sqlite_mtime - hnsw_mtime,
+                    seg_dir,
+                )
+                continue
+        else:
+            drift_reason = "metadata pickle byte-sniff failed"
 
         stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         target = f"{seg_dir}.drift-{stamp}"
@@ -226,9 +309,10 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
             os.rename(seg_dir, target)
             moved.append(target)
             logger.warning(
-                "Quarantined corrupt HNSW segment %s (sqlite %.0fs newer than HNSW, integrity check failed); renamed to %s",
+                "Quarantined corrupt HNSW segment %s (sqlite %.0fs newer than HNSW, %s); renamed to %s",
                 seg_dir,
                 sqlite_mtime - hnsw_mtime,
+                drift_reason,
                 target,
             )
         except OSError:
@@ -315,7 +399,6 @@ class _SafePersistentDataUnpickler:
 
     @classmethod
     def load(cls, path: str):
-        import pickle
 
         class _Restricted(pickle.Unpickler):
             def find_class(self, module: str, name: str):
