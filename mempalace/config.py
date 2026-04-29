@@ -9,7 +9,6 @@ import os
 import re
 from pathlib import Path
 
-
 # ── Input validation ──────────────────────────────────────────────────────────
 # Shared sanitizers for wing/room/entity names. Prevents path traversal,
 # excessively long strings, and special characters that could cause issues
@@ -40,7 +39,9 @@ def sanitize_name(value: str, field_name: str = "name") -> str:
     value = value.strip()
 
     if len(value) > MAX_NAME_LENGTH:
-        raise ValueError(f"{field_name} exceeds maximum length of {MAX_NAME_LENGTH} characters")
+        raise ValueError(
+            f"{field_name} exceeds maximum length of {MAX_NAME_LENGTH} characters"
+        )
 
     # Block path traversal
     if ".." in value or "/" in value or "\\" in value:
@@ -141,8 +142,26 @@ DEFAULT_HALL_KEYWORDS = {
         "server",
     ],
     "identity": ["identity", "name", "who am i", "persona", "self"],
-    "family": ["family", "kids", "children", "daughter", "son", "parent", "mother", "father"],
-    "creative": ["game", "gameplay", "player", "app", "design", "art", "music", "story"],
+    "family": [
+        "family",
+        "kids",
+        "children",
+        "daughter",
+        "son",
+        "parent",
+        "mother",
+        "father",
+    ],
+    "creative": [
+        "game",
+        "gameplay",
+        "player",
+        "app",
+        "design",
+        "art",
+        "music",
+        "story",
+    ],
 }
 
 
@@ -176,7 +195,9 @@ class MempalaceConfig:
     @property
     def palace_path(self):
         """Path to the memory palace data directory."""
-        env_val = os.environ.get("MEMPALACE_PALACE_PATH") or os.environ.get("MEMPAL_PALACE_PATH")
+        env_val = os.environ.get("MEMPALACE_PALACE_PATH") or os.environ.get(
+            "MEMPAL_PALACE_PATH"
+        )
         if env_val:
             # Normalize: expand ~ and collapse .. to match the CLI --palace
             # code path (mcp_server.py:62) and prevent surprise redirection
@@ -199,6 +220,19 @@ class MempalaceConfig:
             except (json.JSONDecodeError, OSError):
                 pass
         return self._file_config.get("people_map", {})
+
+    @property
+    def hooks_auto_save(self):
+        """Whether the stop/precompact hooks should block for auto-save.
+
+        When False, hooks pass through without blocking — equivalent to
+        disabling auto-save while keeping hook scripts installed.
+        """
+        env_val = os.environ.get("MEMPALACE_HOOKS_AUTO_SAVE")
+        if env_val is not None:
+            return env_val.lower() not in ("false", "0", "no")
+        hooks = self._file_config.get("hooks", {})
+        return hooks.get("auto_save", True)
 
     @property
     def topic_wings(self):

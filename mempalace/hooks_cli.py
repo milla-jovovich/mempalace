@@ -14,6 +14,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from mempalace.config import MempalaceConfig
+
 SAVE_INTERVAL = 15
 STATE_DIR = Path.home() / ".mempalace" / "hook_state"
 
@@ -47,25 +49,15 @@ def _mempalace_python() -> str:
 _RECENT_MSG_COUNT = 30  # how many recent user messages to summarize
 
 STOP_BLOCK_REASON = (
-    "AUTO-SAVE checkpoint (MemPalace). Save this session's key content:\n"
-    "1. mempalace_diary_write — session summary (what was discussed, "
-    "key decisions, current state of work)\n"
-    "2. mempalace_add_drawer — verbatim quotes, decisions, code snippets "
-    "(place in appropriate wing and room)\n"
-    "3. mempalace_kg_add — entity relationships (optional)\n"
-    "For THIS save, use MemPalace MCP tools only (not auto-memory .md files). "
-    "Use verbatim quotes where possible. Continue conversation after saving."
+    "MemPalace auto-save checkpoint. "
+    "Use mempalace_diary_write and mempalace_add_drawer to save session content. "
+    "Do NOT use native auto-memory files."
 )
 
 PRECOMPACT_BLOCK_REASON = (
-    "COMPACTION IMMINENT (MemPalace). Save ALL session content before context is lost:\n"
-    "1. mempalace_diary_write — thorough session summary\n"
-    "2. mempalace_add_drawer — ALL verbatim quotes, decisions, code, context "
-    "(place each in appropriate wing and room)\n"
-    "3. mempalace_kg_add — entity relationships (optional)\n"
-    "For THIS save, use MemPalace MCP tools only (not auto-memory .md files). "
-    "Be thorough — after compaction this is all that survives. "
-    "Save everything to MemPalace, then allow compaction to proceed."
+    "MemPalace emergency save — compaction imminent. "
+    "Use mempalace_diary_write and mempalace_add_drawer to save ALL content "
+    "before context is lost. Do NOT use native auto-memory files."
 )
 
 
@@ -555,6 +547,11 @@ def hook_stop(data: dict, harness: str):
     stop_hook_active = parsed["stop_hook_active"]
     transcript_path = parsed["transcript_path"]
 
+    # Respect auto_save config toggle (clean opt-out)
+    if not MempalaceConfig().hooks_auto_save:
+        _output({})
+        return
+
     # If already in a block-mode save cycle, let through (infinite-loop prevention).
     # Silent mode saves directly without returning {"decision":"block"}, so there's
     # no loop to prevent — and Claude Code's plugin dispatch sets this flag on every
@@ -672,10 +669,19 @@ def hook_session_start(data: dict, harness: str):
 
 
 def hook_precompact(data: dict, harness: str):
-    """Precompact hook: mine transcript synchronously, then allow compaction."""
+    """Precompact hook: mine transcript synchronously, then allow compaction.
+
+    Respects the ``hooks.auto_save`` config toggle — when disabled, returns
+    immediately without mining.
+    """
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
     transcript_path = parsed["transcript_path"]
+
+    # Respect auto_save config toggle (clean opt-out)
+    if not MempalaceConfig().hooks_auto_save:
+        _output({})
+        return
 
     _log(f"PRE-COMPACT triggered for session {session_id}")
 
