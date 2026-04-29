@@ -50,14 +50,16 @@ _RECENT_MSG_COUNT = 30  # how many recent user messages to summarize
 
 STOP_BLOCK_REASON = (
     "MemPalace auto-save checkpoint. "
-    "Use mempalace_diary_write and mempalace_add_drawer to save session content. "
+    "Use mempalace_diary_write (session summary) and mempalace_add_drawer "
+    "(quotes, decisions, code) to save session content. "
     "Do NOT use native auto-memory files."
 )
 
 PRECOMPACT_BLOCK_REASON = (
     "MemPalace emergency save — compaction imminent. "
-    "Use mempalace_diary_write and mempalace_add_drawer to save ALL content "
-    "before context is lost. Do NOT use native auto-memory files."
+    "Use mempalace_diary_write (thorough summary) and mempalace_add_drawer "
+    "(ALL quotes, decisions, code, context) to save ALL content before context is lost. "
+    "Do NOT use native auto-memory files."
 )
 
 

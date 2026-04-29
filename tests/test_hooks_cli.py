@@ -905,10 +905,6 @@ def test_run_hook_dispatches_precompact(tmp_path):
 
 def test_stop_hook_disabled_by_config(tmp_path):
     """When hooks.auto_save is false in config, stop hook passes through."""
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "config.json").write_text(json.dumps({"hooks": {"auto_save": False}}))
-
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
         transcript,

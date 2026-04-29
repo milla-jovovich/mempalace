@@ -76,7 +76,7 @@ import json, sys
 try:
     cfg = json.load(open(sys.argv[1]))
     print(str(cfg.get('hooks', {}).get('auto_save', True)).lower())
-except: print('true')
+except Exception: print('true')
 " "$CONFIG_FILE" 2>/dev/null)
         if [ "$AUTO_SAVE" = "false" ]; then
             echo "{}"
