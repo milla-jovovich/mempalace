@@ -89,6 +89,59 @@ class TestSearchMemories:
         assert result["filters"]["wing"] == "project"
         assert result["filters"]["room"] == "backend"
 
+    def test_tenant_id_scopes_results(self, palace_path, collection):
+        """search_memories(..., tenant_id=X) must return only X's drawers."""
+        # Seed two tenants writing semantically similar content.
+        collection.add(
+            ids=["d_tenant_a_1", "d_tenant_b_1"],
+            documents=[
+                "Tenant A's note about distributed consensus algorithms.",
+                "Tenant B's note about distributed consensus algorithms.",
+            ],
+            metadatas=[
+                {
+                    "wing": "shared",
+                    "room": "topic",
+                    "source_file": "a.md",
+                    "filed_at": "2026-01-01T00:00:00",
+                    "tenant_id": "tenant-a",
+                },
+                {
+                    "wing": "shared",
+                    "room": "topic",
+                    "source_file": "b.md",
+                    "filed_at": "2026-01-02T00:00:00",
+                    "tenant_id": "tenant-b",
+                },
+            ],
+        )
+        result_a = search_memories("consensus", palace_path, tenant_id="tenant-a")
+        assert "results" in result_a, result_a
+        # Only tenant A's drawer should come back. The seeded_collection
+        # fixture's pre-existing drawers have no tenant_id and must be
+        # excluded from a tenant-scoped query (chromadb metadata filter).
+        for hit in result_a["results"]:
+            assert "tenant-a" in hit["text"] or hit["source_file"] == "a.md", (
+                f"tenant-a search returned non-A drawer: {hit}"
+            )
+        result_b = search_memories("consensus", palace_path, tenant_id="tenant-b")
+        for hit in result_b["results"]:
+            assert "tenant-b" in hit["text"] or hit["source_file"] == "b.md", (
+                f"tenant-b search returned non-B drawer: {hit}"
+            )
+
+    def test_tenant_id_in_filters_field(self, palace_path, seeded_collection):
+        """Result envelope's `filters` dict must surface the tenant_id used."""
+        result = search_memories("authentication", palace_path, tenant_id="tenant-x")
+        assert result["filters"].get("tenant_id") == "tenant-x"
+
+    def test_no_tenant_id_returns_unscoped(self, palace_path, seeded_collection):
+        """Calls without tenant_id must keep legacy behaviour (no filter applied)."""
+        result = search_memories("authentication", palace_path)
+        assert "results" in result
+        assert len(result["results"]) > 0
+        assert result["filters"].get("tenant_id") is None
+
     def test_search_memories_handles_none_metadata(self):
         """API path: `None` entries in the drawer results' metadatas list must
         fall back to the sentinel strings (wing/room 'unknown', source '?')
@@ -250,9 +303,9 @@ class TestSearchCLI:
         captured = capsys.readouterr()
         first_block, _, _ = captured.out.partition("[2]")
         # Lexical match must rank first
-        assert (
-            "b.md" in first_block
-        ), f"expected lexical match 'b.md' at rank 1, got:\n{captured.out}"
+        assert "b.md" in first_block, (
+            f"expected lexical match 'b.md' at rank 1, got:\n{captured.out}"
+        )
         # Non-zero bm25 reported
         assert "bm25=" in first_block
         assert "bm25=0.0" not in first_block

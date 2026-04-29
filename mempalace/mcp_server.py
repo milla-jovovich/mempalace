@@ -587,11 +587,13 @@ def tool_search(
     max_distance: float = 1.5,
     min_similarity: float = None,
     context: str = None,
+    tenant_id: str = None,
 ):
     limit = max(1, min(limit, _MAX_RESULTS))
     try:
         wing = _sanitize_optional_name(wing, "wing")
         room = _sanitize_optional_name(room, "room")
+        tenant_id = _sanitize_optional_name(tenant_id, "tenant_id")
     except ValueError as e:
         return {"error": str(e)}
     # Backwards compat: accept old name
@@ -613,6 +615,7 @@ def tool_search(
         n_results=limit,
         max_distance=dist,
         vector_disabled=_vector_disabled,
+        tenant_id=tenant_id,
     )
     if _vector_disabled:
         result["vector_disabled"] = True
@@ -646,7 +649,7 @@ def tool_check_duplicate(content: str, threshold: float = 0.9):
             "vector_disabled": True,
             "vector_disabled_reason": _vector_disabled_reason,
             "hint": (
-                "duplicate detection requires vector search; run " "`mempalace repair` to restore"
+                "duplicate detection requires vector search; run `mempalace repair` to restore"
             ),
         }
     try:
@@ -780,14 +783,32 @@ def tool_follow_tunnels(wing: str, room: str):
 
 
 def tool_add_drawer(
-    wing: str, room: str, content: str, source_file: str = None, added_by: str = "mcp"
+    wing: str,
+    room: str,
+    content: str,
+    source_file: str = None,
+    added_by: str = "mcp",
+    tenant_id: str = None,
 ):
-    """File verbatim content into a wing/room. Checks for duplicates first."""
+    """File verbatim content into a wing/room. Checks for duplicates first.
+
+    When ``tenant_id`` is supplied:
+      - it's persisted on the drawer's chromadb metadata so a
+        tenant-scoped ``mempalace_search`` can filter on it;
+      - it's mixed into the drawer-id hash so two tenants writing the
+        same (wing, room, content) get distinct drawers instead of
+        colliding on the existing un-tenanted hash.
+
+    Calls without ``tenant_id`` keep the legacy hash and write no
+    tenant metadata — pre-multitenant deployments are bit-compatible.
+    """
     global _metadata_cache
     try:
         wing = sanitize_name(wing, "wing")
         room = sanitize_name(room, "room")
         content = sanitize_content(content)
+        if tenant_id is not None:
+            tenant_id = sanitize_name(tenant_id, "tenant_id")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -795,9 +816,13 @@ def tool_add_drawer(
     if not col:
         return _no_palace()
 
-    drawer_id = (
-        f"drawer_{wing}_{room}_{hashlib.sha256((wing + room + content).encode()).hexdigest()[:24]}"
-    )
+    if tenant_id:
+        # Salt the hash with tenant_id so cross-tenant collisions of
+        # identical (wing, room, content) don't overwrite each other.
+        hash_input = f"{tenant_id}\x00{wing}{room}{content}".encode()
+    else:
+        hash_input = (wing + room + content).encode()
+    drawer_id = f"drawer_{wing}_{room}_{hashlib.sha256(hash_input).hexdigest()[:24]}"
 
     _wal_log(
         "add_drawer",
@@ -805,6 +830,7 @@ def tool_add_drawer(
             "drawer_id": drawer_id,
             "wing": wing,
             "room": room,
+            "tenant_id": tenant_id,
             "added_by": added_by,
             "content_length": len(content),
             "content_preview": content[:200],
@@ -820,23 +846,33 @@ def tool_add_drawer(
         pass
 
     try:
+        metadata = {
+            "wing": wing,
+            "room": room,
+            "source_file": source_file or "",
+            "chunk_index": 0,
+            "added_by": added_by,
+            "filed_at": datetime.now().isoformat(),
+        }
+        if tenant_id:
+            metadata["tenant_id"] = tenant_id
         col.upsert(
             ids=[drawer_id],
             documents=[content],
-            metadatas=[
-                {
-                    "wing": wing,
-                    "room": room,
-                    "source_file": source_file or "",
-                    "chunk_index": 0,
-                    "added_by": added_by,
-                    "filed_at": datetime.now().isoformat(),
-                }
-            ],
+            metadatas=[metadata],
         )
         _metadata_cache = None
-        logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
-        return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
+        logger.info(
+            f"Filed drawer: {drawer_id} → {wing}/{room}"
+            + (f" tenant={tenant_id}" if tenant_id else "")
+        )
+        return {
+            "success": True,
+            "drawer_id": drawer_id,
+            "wing": wing,
+            "room": room,
+            **({"tenant_id": tenant_id} if tenant_id else {}),
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1586,6 +1622,10 @@ TOOLS = {
                     "type": "string",
                     "description": "Background context for the search (optional). NOT used for embedding — only for future re-ranking.",
                 },
+                "tenant_id": {
+                    "type": "string",
+                    "description": "Per-tenant scope (optional). When set, restrict results to drawers whose metadata tenant_id matches. Drawers stored without a tenant_id are excluded from a tenant-scoped query.",
+                },
             },
             "required": ["query"],
         },
@@ -1622,6 +1662,10 @@ TOOLS = {
                 },
                 "source_file": {"type": "string", "description": "Where this came from (optional)"},
                 "added_by": {"type": "string", "description": "Who is filing this (default: mcp)"},
+                "tenant_id": {
+                    "type": "string",
+                    "description": "Per-tenant scope (optional). When set, persisted in metadata and salted into drawer-id so two tenants storing identical content get distinct drawers. Required if the host enforces strict tenant scoping.",
+                },
             },
             "required": ["wing", "room", "content"],
         },

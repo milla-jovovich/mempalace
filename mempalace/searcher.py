@@ -156,15 +156,32 @@ def _hybrid_rank(
     return results
 
 
-def build_where_filter(wing: str = None, room: str = None) -> dict:
-    """Build ChromaDB where filter for wing/room filtering."""
-    if wing and room:
-        return {"$and": [{"wing": wing}, {"room": room}]}
-    elif wing:
-        return {"wing": wing}
-    elif room:
-        return {"room": room}
-    return {}
+def build_where_filter(
+    wing: str = None,
+    room: str = None,
+    tenant_id: str = None,
+) -> dict:
+    """Build ChromaDB where filter for wing/room/tenant scoping.
+
+    tenant_id, when set, scopes the query to drawers whose metadata
+    matches. Drawers written before tenant_id support landed have no
+    such metadata field and are excluded from a tenant-scoped query —
+    callers running a multi-tenant deployment should backfill or
+    re-index those entries before relying on per-tenant isolation.
+    """
+    clauses = []
+    if wing:
+        clauses.append({"wing": wing})
+    if room:
+        clauses.append({"room": room})
+    if tenant_id:
+        clauses.append({"tenant_id": tenant_id})
+
+    if not clauses:
+        return {}
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$and": clauses}
 
 
 def _extract_drawer_ids_from_closet(closet_doc: str) -> list:
@@ -372,6 +389,7 @@ def _bm25_only_via_sqlite(
     room: str = None,
     n_results: int = 5,
     max_candidates: int = 500,
+    tenant_id: str = None,
 ) -> dict:
     """BM25-only search reading drawers directly from chroma.sqlite3.
 
@@ -473,7 +491,7 @@ def _bm25_only_via_sqlite(
         if not candidate_ids:
             return {
                 "query": query,
-                "filters": {"wing": wing, "room": room},
+                "filters": {"wing": wing, "room": room, "tenant_id": tenant_id},
                 "total_before_filter": 0,
                 "results": [],
                 "fallback": "bm25_only_via_sqlite",
@@ -500,14 +518,16 @@ def _bm25_only_via_sqlite(
         else:
             d["metadata"][key] = sval if sval is not None else ival
 
-    # Apply wing/room filters in Python (FTS5 candidates may include
-    # entries from other wings).
+    # Apply wing/room/tenant filters in Python (FTS5 candidates may
+    # include entries from other wings or other tenants).
     candidates = []
     for d in drawers.values():
         meta = d["metadata"]
         if wing and meta.get("wing") != wing:
             continue
         if room and meta.get("room") != room:
+            continue
+        if tenant_id and meta.get("tenant_id") != tenant_id:
             continue
         candidates.append(
             {
@@ -537,7 +557,7 @@ def _bm25_only_via_sqlite(
 
     return {
         "query": query,
-        "filters": {"wing": wing, "room": room},
+        "filters": {"wing": wing, "room": room, "tenant_id": tenant_id},
         "total_before_filter": len(candidates),
         "results": hits,
         "fallback": "bm25_only_via_sqlite",
@@ -553,6 +573,7 @@ def search_memories(
     n_results: int = 5,
     max_distance: float = 0.0,
     vector_disabled: bool = False,
+    tenant_id: str = None,
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
 
@@ -572,6 +593,13 @@ def search_memories(
             (#1222). Set by the MCP server when the HNSW capacity probe
             detects a divergence that would segfault chromadb on segment
             load.
+        tenant_id: Optional per-tenant scope. When supplied, drawers whose
+            metadata's ``tenant_id`` does not match are filtered out at the
+            chromadb (or sqlite-fallback) layer. Drawers stored before the
+            field existed have no value and will be excluded from a
+            tenant-scoped query — callers in shared-palace deployments
+            must either backfill metadata or rely on wing/room scoping
+            until backfill lands.
     """
     if vector_disabled:
         return _bm25_only_via_sqlite(
@@ -580,6 +608,7 @@ def search_memories(
             wing=wing,
             room=room,
             n_results=n_results,
+            tenant_id=tenant_id,
         )
 
     try:
@@ -591,7 +620,7 @@ def search_memories(
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
         }
 
-    where = build_where_filter(wing, room)
+    where = build_where_filter(wing, room, tenant_id)
 
     # Hybrid retrieval: always query drawers directly (the floor), then use
     # closet hits to boost rankings. Closets are a ranking SIGNAL, never a
@@ -757,7 +786,7 @@ def search_memories(
 
     return {
         "query": query,
-        "filters": {"wing": wing, "room": room},
+        "filters": {"wing": wing, "room": room, "tenant_id": tenant_id},
         "total_before_filter": len(_first_or_empty(drawer_results, "documents")),
         "results": hits,
     }
