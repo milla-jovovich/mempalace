@@ -906,24 +906,29 @@ def test_stop_hook_disabled_by_config(tmp_path):
 
 
 def test_stop_hook_enabled_by_default(tmp_path):
-    """When config has no hooks section, stop hook blocks normally."""
+    """When auto_save is enabled, stop hook saves silently (systemMessage)."""
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
         transcript,
         [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
+    save_result = {"count": 3, "themes": ["auto-save"]}
     with patch("mempalace.hooks_cli.MempalaceConfig") as mock_cfg_cls:
         mock_cfg_cls.return_value.hooks_auto_save = True
-        result = _capture_hook_output(
-            hook_stop,
-            {
-                "session_id": "test",
-                "stop_hook_active": False,
-                "transcript_path": str(transcript),
-            },
-            state_dir=tmp_path,
-        )
-    assert result["decision"] == "block"
+        mock_cfg_cls.return_value.hook_silent_save = True
+        mock_cfg_cls.return_value.hook_desktop_toast = False
+        with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result):
+            result = _capture_hook_output(
+                hook_stop,
+                {
+                    "session_id": "test",
+                    "stop_hook_active": False,
+                    "transcript_path": str(transcript),
+                },
+                state_dir=tmp_path,
+            )
+    assert "systemMessage" in result
+    assert "3 memories" in result["systemMessage"]
 
 
 def test_precompact_hook_disabled_by_config(tmp_path):
