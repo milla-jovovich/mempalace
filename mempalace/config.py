@@ -92,6 +92,33 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
     return value
 
 
+# ── ISO-8601 date validation ─────────────────────────────────────────────────
+# Accepts YYYY, YYYY-MM, or YYYY-MM-DD.  Used at the MCP boundary so that
+# invalid date strings are rejected early instead of silently producing
+# empty knowledge-graph query results.
+
+_ISO_DATE_RE = re.compile(r"^\d{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$")
+
+
+def validate_iso_date(value: str | None, param_name: str = "date") -> str | None:
+    """Validate an optional ISO-8601 date string (YYYY, YYYY-MM, or YYYY-MM-DD).
+
+    Returns the value unchanged if valid (or ``None``).  Raises ``ValueError``
+    with a user-facing message if the format is unrecognised.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    if not _ISO_DATE_RE.match(value):
+        raise ValueError(
+            f"{param_name}={value!r} is not a valid ISO-8601 date "
+            f"(expected YYYY, YYYY-MM, or YYYY-MM-DD)"
+        )
+    return value
+
+
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
 
