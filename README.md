@@ -83,6 +83,22 @@ We surveyed the memory-system landscape in April 2026 and found no verbatim-firs
 
 The April-2026 verbatim cluster (MemPalace, Celiums, Longhand, engram all within ~8 days) is striking — it suggests the "store it raw and retrieve well" pattern reached independent critical mass right around the same time. The differentiator: **verbatim storage is the foundation; everything else (tags, KG, decay, summaries) is enrichment layered on top.** If any layer fails or needs rebuilding, the underlying truth is still there.
 
+## Substrate exploration: Postgres + pgvector + Apache AGE
+
+*Status: exploring — not committed.*
+
+The fork is evaluating a Postgres-based backend (pgvector for vector search, Apache AGE for graph traversal) as a candidate implementation against the upstream RFC 001 backend seam. This is composition, not a fork-led architectural shift: `BaseBackend` + `BaseCollection` + `PalaceRef` + the entry-point registry already live in upstream develop at [`mempalace/backends/`](https://github.com/MemPalace/mempalace/tree/develop/mempalace/backends), explicitly designed so third-party backends register via Python entry points without touching core. The architectural decision was upstream's; the fork's contribution would be choosing pgvector + AGE as one specific implementation worth picking.
+
+**What this would consolidate.** Vector search, full-text search, graph traversal, and the temporal entity-relationship store all in a single engine. Today: ChromaDB (HNSW vectors), SQLite (BM25 + KG triples + corpus_origin index), graph cache (in-process). Under Postgres: one connection, one transaction model, one backup story, one operational surface.
+
+**The bridge pattern.** Microsoft's [pgvector ↔ Apache AGE post](https://techcommunity.microsoft.com/blog/adforpostgresql/combining-pgvector-and-apache-age---knowledge-graph--semantic-intelligence-in-a-/4508781) (Raunak, 2026-04-15) describes the architectural reference: pgvector cosine similarity scores written as `SIMILAR_TO` edges in the AGE property graph, making vector similarity itself a traversable relationship. The KG-extraction work (P4/P5) lands much more naturally when the graph is in-database than it does in a separate SQLite alongside ChromaDB.
+
+**Why graph structure matters.** Dave Plummer's [*"My Custom AI Went Superhuman Yesterday..."*](https://www.youtube.com/watch?v=TdbpoDjIvPk) (Dave's Garage, 2026-02-28) is the conceptual reference: his Tempest AI couldn't reason about the playing field as flat coordinates — it needed the actual geometric structure of the 3D web. Memory retrieval is a related claim: an AI cannot reason about memory as flat vectors alone; the relational structure (entity → entity, conversation → mined-doc, decision → outcome) is what lets it navigate. Vectors get you "topically nearby"; the graph gets you "actually related."
+
+**What stays the same.** The verbatim-first commitment is unchanged — Postgres tables would hold the same canonical raw text, just on a different storage engine. The multi-collection-by-purpose pattern (Principle 1 of the thesis) maps directly onto Postgres schemas or per-collection tables. Composition with upstream stays the rule, including here: this is a backend implementation against the seam, not a parallel reimplementation. If the evaluation pans out, the natural ship shape is a separate `pip install` package wired via entry-point registration; the fork's main branch keeps tracking upstream develop and ChromaDB stays the default.
+
+**What's still open.** Embedding-model identity across the migration window. Operational ergonomics versus the current daemon-fronted ChromaDB story. Whether the bridge pattern survives at 150K+ drawers without a custom indexing strategy. Whether the bench numbers justify the migration cost at all. The honest version is *"I don't know yet which engine is better on this corpus and want to find out"* — same posture as the [Hybrid retrieval A/B](#active-investigations).
+
 ## What this fork ships, organized by axis
 
 Three bands of work, all instances of the principles above. Detail rows in the [appendix](#fork-change-inventory) at the bottom.
@@ -182,14 +198,14 @@ Reorganized 2026-04-26 around the verbatim-vs-derivative axis. Each item evaluat
 ### Derivative-store work (the new axis)
 
 - **P8 — Corpus partitioning by purpose** *(architectural)*. The checkpoint collection split is the first instance. `mempalace_session_recovery` for hook-fired audit data; future siblings for transcript-mine outputs (the [#1083](https://github.com/MemPalace/mempalace/issues/1083) family — currently being addressed at the hook layer by [#1199](https://github.com/MemPalace/mempalace/pull/1199), but the collection-level move is the durable fix), KG-triple store ([P4](#p4-anchor)), Haiku-enriched topic docs (companion to P0). Worth flagging in [RFC 001](https://github.com/MemPalace/mempalace/pull/743) so future backends know multi-collection-per-palace is the canonical pattern.
-- **P4 — KG auto-population + entity resolution** *(1.5 days)*. <a id="p4-anchor"></a> Hooks extract `subject/predicate/object` triples on every save using heuristics (no LLM). Triples land in their own store (KG SQLite is already separate, P8-aligned). Normalize entity IDs; alias table + Levenshtein. Triples are *derived* — re-mine if extraction improves; verbatim untouched.
-- **P5 — Temporal fact validity** *(1 day, depends on P4)*. KG triples get a context slot (SPOC: subject-predicate-object-context). Reference: Zep's [Graphiti](https://github.com/getzep/graphiti).
+- **P4 — KG auto-population + entity resolution** *(1.5 days)*. <a id="p4-anchor"></a> Hooks extract `subject/predicate/object` triples on every save using heuristics (no LLM). Triples land in their own store (KG SQLite is already separate, P8-aligned). Normalize entity IDs; alias table + Levenshtein. Triples are *derived* — re-mine if extraction improves; verbatim untouched. *Note: under the [Postgres + pgvector + AGE substrate exploration](#substrate-exploration-postgres--pgvector--apache-age), the graph lives in-database (AGE) rather than in a separate SQLite, which makes this work meaningfully more natural to implement.*
+- **P5 — Temporal fact validity** *(1 day, depends on P4)*. KG triples get a context slot (SPOC: subject-predicate-object-context). Reference: Zep's [Graphiti](https://github.com/getzep/graphiti). *Same Postgres+AGE caveat as P4 — temporal validity ranges are SQL-native on Postgres in a way they aren't across two engines.*
 
 ### Cross-cutting
 
 - **P2 — Decay / recency weighting** *(tracked upstream)*. Handled by [#1032](https://github.com/MemPalace/mempalace/pull/1032) (Weibull decay, MERGEABLE). Independent `mempalace prune --stale-days 180` CLI is still a fork opportunity.
 - **P3 — Feedback loops** *(rerank tracked upstream; rating still open)*. #1032 covers Tier 0 LLM rerank (96.6% → 99.4% with Haiku). Tier 1+: `mempalace_rate_memory(drawer_id, useful: bool)` MCP tool, implicit echo/fizzle signals. Reference: [Celiums](https://celiums.ai/)'s novelty + emotional + circadian importance scoring.
-- **P7 — Alternative storage modes** *(tracked upstream — RFC 001 + four backend PRs)*. Fork tracks; doesn't rebuild. See "Composition with upstream" section below.
+- **P7 — Alternative storage modes** *(tracked upstream + fork-side pgvector+AGE evaluation in flight)*. Upstream owns the [RFC 001](https://github.com/MemPalace/mempalace/pull/743) seam and the four backend-implementation PRs. Fork is exploring [Postgres + pgvector + Apache AGE](#substrate-exploration-postgres--pgvector--apache-age) as one specific implementation against that seam — composition, not a parallel reimplementation. See the dedicated section earlier for what's being evaluated and what's still open.
 
 ### Deprioritized
 
@@ -200,11 +216,11 @@ Reorganized 2026-04-26 around the verbatim-vs-derivative axis. Each item evaluat
 
 ## Active investigations
 
-### Engram-2's "17% E2E QA" critique — *partially closed 2026-04-26*
+### Engram-2's "17% E2E QA" critique — *closing — structural fix 2026-04-26, E2E run in flight*
 
 [engram-2](https://github.com/199-biotechnologies/engram-2) published a benchmark note stating MemPalace achieves 0.984 R@5 on LongMemEval but only 17% end-to-end question-answering accuracy. We located *one* concrete instance of the gap — checkpoint domination of `mempalace_search` results — and the structural fix shipped 2026-04-25 → 2026-04-26 demonstrably closes it on this corpus. Pre-migration `kind=content` returned 3 tokens/Q; post-migration it returns 1,267. The corpus-shape thesis proved out.
 
-What remains: LongMemEval-S E2E run end-to-end through this fork against a modern reader model. Predicted: substantially better than 17% post-migration, possibly close to recall ceiling once chunk-size + embedding-model alignment ([P0](#planned-work) Haiku enrichment, [#442](https://github.com/MemPalace/mempalace/pull/442) collection-bound model identity) lands. Cheap to run; deferred until those land so the result is the *durable* number, not the snapshot.
+End-to-end LongMemEval-S through this fork against a modern reader model is **now in flight**; results will land at `notebook/data/cat9-postmigrate-e2e/REPORT.md` (TODO: link when committed). Predicted: substantially better than 17% post-migration, possibly close to recall ceiling, with a chunk-size + embedding-model-alignment headroom delta still to characterize ([P0](#planned-work) Haiku enrichment, [#442](https://github.com/MemPalace/mempalace/pull/442) collection-bound model identity). The structural-fix snapshot is what the migration buys today; the E2E number is the durable claim.
 
 ### Hybrid retrieval A/B
 
@@ -304,7 +320,7 @@ Built *on top of* or *alongside* MemPalace, by community contributors who use th
 
 Forward-looking, in rough priority order. The substrate exploration is the biggest open question; everything else is incremental against the existing direction.
 
-- **Continue pgvector + Apache AGE evaluation** against the RFC 001 backend seam (`BaseBackend` + entry-point registry, already in upstream develop). Frame it as a candidate implementation, not a commitment. See [Substrate exploration](#substrate-exploration-postgres--pgvector--apache-age) below for the bridge pattern and references.
+- **Continue pgvector + Apache AGE evaluation** against the RFC 001 backend seam (`BaseBackend` + entry-point registry, already in upstream develop). Frame it as a candidate implementation, not a commitment. See [Substrate exploration](#substrate-exploration-postgres--pgvector--apache-age) above for the bridge pattern and references.
 - **Publish Cat 9 end-to-end results** on the post-migration palace at `notebook/data/cat9-postmigrate-e2e/REPORT.md`, with adapter parity numbers across the verbatim-first cohort once the SME harness lands.
 - **Publish the multipass-structural-memory-eval harness** with adapters for MemPalace, Longhand, Celiums, mcp-memory-service so Cat 9 / The Handshake stops being a one-deployment story.
 - **Land P0 (multi-label tags) and P2 (decay/recency)** — P2 tracked upstream via [#1032](https://github.com/MemPalace/mempalace/pull/1032); P0 is fork-side until upstream wants it.
