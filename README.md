@@ -26,7 +26,17 @@ Both modes now return real content. The structural fix did the work the algorith
 
 The fork has converged on three principles. Treat them as the design test for future work.
 
-### 1. Corpus shape eats retrieval algorithm for breakfast
+### 1. Verbatim vs. derivative is the canonical axis
+
+The unit of memory in MemPalace is the verbatim utterance — chats, tool calls, mined files, the literal text the user produced or witnessed. Anything else (Stop-hook checkpoints, summaries, KG triples, agent journals, AAAK-encoded reflections) is *derivative* of that verbatim record. Derivative writes are useful but they are a different kind of thing: their right read pattern is event-shaped (session_id, time, agent), not semantic similarity.
+
+Most public AI memory systems frame the problem the other way around: ingest raw, transform on write, store the derivative as canonical. Mem0 extracts "memories." Zep and Letta tier and summarize. Cognee builds a knowledge graph. Hindsight retains/recalls/reflects with LLM-extracted facts. In each, the verbatim original is gone — or at best, retrievable only through a layer of inference that already lost nuance. The fork's bet is the inverse: keep verbatim canonical, key derivative layers for their actual access pattern, and treat any derivative store as rebuildable from the verbatim. Derivative layers can then be replaced or re-derived without losing underlying truth. The April-2026 verbatim cohort (Longhand, Celiums, mcp-memory-service, MemPalace) converged on this within ~8 days of each other; the timing is suggestive.
+
+Mixing verbatim and derivative in one corpus is the disease the checkpoint split treats. Recovery checkpoints, transcript-mining outputs, future KG-triple stores, and Haiku-enriched topic docs all want their own homes. The main `mempalace_drawers` collection holds verbatim only; sibling collections (`mempalace_session_recovery` shipped, more proposed) hold derivatives keyed for their actual read pattern.
+
+This axis is implicit in upstream's [RFC 001](https://github.com/MemPalace/mempalace/pull/743) (`get_collection(palace, collection_name=...)` already supports it) but isn't yet named in the spec. Worth making explicit upstream — multi-collection-by-purpose is the architectural move that future backends should plan for.
+
+### 2. Corpus shape eats retrieval algorithm for breakfast
 
 A week of filter tuning, BM25 fallback, and over-fetch parameters could not make `kind=content` return more than 3 tokens per question on the canonical palace. ~640 Stop-hook auto-save checkpoint drawers — 0.4% of the corpus — dominated 80%+ of every vector top-N because they were short, query-term-saturated, and embedded close to recent prompts. Recall@5 was 0.984 the whole time. End-to-end answer quality collapsed.
 
@@ -34,21 +44,44 @@ Then we moved them out of the corpus. One structural change — a separate Chrom
 
 This generalizes to every retrieval system that ingests by default and filters by query. Solve it at write time, by purpose, not at query time, by predicate.
 
-### 2. Verbatim vs. derivative is the canonical axis
-
-The unit of memory in MemPalace is the verbatim utterance — chats, tool calls, mined files, the literal text the user produced or witnessed. Anything else (Stop-hook checkpoints, summaries, KG triples, agent journals, AAAK-encoded reflections) is *derivative* of that verbatim record. Derivative writes are useful but they are a different kind of thing: their right read pattern is event-shaped (session_id, time, agent), not semantic similarity.
-
-Mixing the two in one corpus is the disease the checkpoint split treats. Recovery checkpoints, transcript-mining outputs, future KG-triple stores, and Haiku-enriched topic docs all want their own homes. The main `mempalace_drawers` collection holds verbatim only; sibling collections (`mempalace_session_recovery` shipped, more proposed) hold derivatives keyed for their actual read pattern.
-
-This axis is implicit in upstream's [RFC 001](https://github.com/MemPalace/mempalace/pull/743) (`get_collection(palace, collection_name=...)` already supports it) but isn't yet named in the spec. Worth making explicit upstream — multi-collection-by-purpose is the architectural move that future backends should plan for.
-
 ### 3. The right to measure is the local-first benefit
 
 The usual case for local AI memory is data sovereignty. The deeper benefit, surfaced this week, is *the right to audit your own integration shape*. Cat 9 in the SME framework — "the Handshake" — names a class of failure that recall benchmarks miss: the gap between retrieval working and the model actually being grounded on the retrieved content. We could only measure it because we own every layer of the stack. A vendor product would have shown us 0.984 R@5 on a dashboard and called it a day.
 
-If you build memory systems and don't run integration measurements, you don't know how big this gap is on your deployment. A 0.984 / 17% split (engram-2's claim) is real, structural, and on the canonical palace it traces directly to checkpoint dominance — fixable, but only because we could see it.
+If you build memory systems and don't run integration measurements, you don't know how big this gap is on your deployment. A 0.984 / 17% split (engram-2's claim) is real, structural, and on the canonical palace it traces directly to checkpoint dominance — fixable, but only because we could see it. End-to-end LongMemEval on the post-migration palace is now in flight; the principle moves from theory to operationalized as those numbers land.
 
 The deeper read on local-first AI memory: the sovereignty argument lands in court; the *right to measure* lands in production. The TechEmpower bridge essay at [`notebook/essays/2026-04-25-techempower-bridge.md`](https://github.com/jphein/notebook/blob/main/essays/2026-04-25-techempower-bridge.md) develops this further.
+
+## What this fork has learned
+
+Four claims that fall out of the thesis when you take it seriously and run it in production for a few months.
+
+**Corpus shape is not a tuning parameter; it's an architectural choice.** The 2026-04-25 → 2026-04-26 collection split closed a 210× pre/post token gap that no amount of `kind=` filtering, over-fetch tuning, or BM25 fallback had touched. Retrieval algorithms have less leverage over end-to-end quality than the shape of what you ingest; when the corpus is wrong-shaped, you don't filter your way out — you split.
+
+**Verbatim storage is load-bearing as the canonical layer.** Derivative work (KG, summaries, decay scores, embeddings under different models) is welcome as long as it stays *next to* the verbatim record, not replacing it. The integrity of every downstream layer depends on being able to re-derive from the original — drop the original and every layer above it is fragile.
+
+**The right to measure is the local-first benefit that matters in production.** Sovereignty wins arguments; auditability wins debugging sessions. Cat 9 / The Handshake on this fork's deployment was findable because we own every layer of the stack — a vendor product would have shown 0.984 R@5 on a dashboard and called it shipped.
+
+**The integration gap (Cat 9 / Handshake) is real, reproducible, and measurable.** Engram-2's "17% E2E QA" claim landed on a real failure surface — checkpoint domination of vector top-N — and the structural fix demonstrably closes it on this corpus. The 632/3 → 974/1267 token convergence above is the structural-fix proxy; the end-to-end LongMemEval run on the post-migration palace is in flight, with results to publish at `notebook/data/cat9-postmigrate-e2e/` (TODO: link when committed).
+
+## Why this fork exists
+
+We surveyed the memory-system landscape in April 2026 and found no verbatim-first local system with MCP. Every alternative transforms content on write — extracted facts, knowledge graphs, tiered summaries — losing the original text.
+
+| System | Verbatim? | Local? | MCP? | First public | Notes |
+|---|---|---|---|---|---|
+| **MemPalace** | Yes | Yes | Yes | 2026-04-06 (v3.0.0) | What we have. 151,478 drawers as of 2026-04-26 — 150,811 in main, 667 in recovery. Verbatim drawers + wings/rooms scope + SQLite KG + BM25/vector hybrid search. |
+| [Longhand](https://glama.ai/mcp/servers/Wynelson94/longhand) | Yes | Yes | Yes, 16-tool MCP | 2026-04-14 (v0.5.2; repo 2026-04-09) | Closest cousin. Claude Code-specific — reads `~/.claude/projects/*.jsonl` directly. SQLite (raw JSON per event) + ChromaDB (embeddings of pre-computed "episodes"). Deterministic file-state replay via stored diffs. |
+| [Celiums](https://celiums.ai/) | Yes | Yes (SQLite, Docker, or DO) | Yes, 6-tool MCP | 2026-04-08 (repo) | Stores full module text with PAD emotional vectors, importance scores, and circadian metadata. Bundles a 500K+ expert-module knowledge base alongside personal memory — different product shape. |
+| [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service) | Yes by default (opt-in consolidation) | Yes (SQLite) or Cloudflare Workers | Yes | 2024-12-26 | The long-standing verbatim option. Turn-level storage; MiniLM embeddings local. Targets LangGraph / CrewAI / AutoGen plus Claude. |
+| [Hindsight](https://github.com/vectorize-io/hindsight) | No — LLM extracts facts | Yes (Docker) | Yes | 2026-01-05 | Three ops: retain / recall / reflect. Original text is lost. |
+| [Mem0](https://github.com/mem0ai/mem0) / [OpenMemory](https://github.com/mem0ai/mem0/tree/main/openmemory) | No — extracts "memories" | Partial | Yes | 2023-06 | Cloud-first; OpenMemory is local-mode sibling. |
+| [Cognee](https://github.com/topoteretes/cognee) | No — knowledge graph | Yes | Yes | 2023-08 | "Knowledge Engine" via ECL pipeline. |
+| [Letta](https://github.com/letta-ai/letta) | No — tiered summarization | Yes | No | 2023-10 (as MemGPT) | Rebrand kept the repo. |
+| [engram](https://github.com/NickCirv/engram) | Structured fields, not raw | Yes | Yes | 2026-04-11 | Go + SQLite FTS5. |
+| [CaviraOSS OpenMemory](https://github.com/CaviraOSS/OpenMemory) | No — temporal graph | Yes | Yes | 2025-10-26 | SQL-native. |
+
+The April-2026 verbatim cluster (MemPalace, Celiums, Longhand, engram all within ~8 days) is striking — it suggests the "store it raw and retrieve well" pattern reached independent critical mass right around the same time. The differentiator: **verbatim storage is the foundation; everything else (tags, KG, decay, summaries) is enrichment layered on top.** If any layer fails or needs rebuilding, the underlying truth is still there.
 
 ## What this fork ships, organized by axis
 
@@ -104,19 +137,19 @@ After the 2026-04-26 migration, the example queries from a week ago all return c
 
 ## Architectural principles
 
-These predate the new thesis. Use them to evaluate PRs alongside it.
+Three operational principles that inform PR review alongside the thesis above. They predate the thesis but converge on the same conclusions.
 
-### 1. Forced transforms on write are the enemy
+### 1. Lazy derivation with graceful fallback is the pattern
 
-Every operation that *requires* interpreting content at write time is a failure surface. Entity detection misfires. Classifiers force wrong rooms. LLM-extracted "facts" lose nuance and can't be un-extracted. Many of this fork's earliest visible bugs (`room=None` crashes, a stopword list at 285 English entries papering over false positives, wing misassignment) trace to a single mistake: making classification a *gate* instead of a best-effort enrichment.
+Write the raw text first; derive everything else lazily, from unambiguous signals, with a graceful fallback when derivation fails. The verbatim archive is the one thing that must always succeed. Optional enrichment (LLM topic extraction, AAAK encoding, concept chunking) is welcome as long as it stays opt-in, additive, and never a prerequisite for the write to complete.
 
-Write the raw text. Derive everything else lazily, from unambiguous signals, with a graceful fallback when derivation fails. The verbatim archive is the one thing that must always succeed. Optional enrichment (LLM topic extraction, AAAK encoding, concept chunking) is welcome as long as it stays opt-in, additive, and never a prerequisite for the write to complete.
+The inverse — making classification a *gate* — is where the fork's earliest visible bugs came from: `room=None` crashes, a stopword list at 285 English entries papering over false positives, wing misassignment. Entity detection misfires, classifiers force wrong rooms, LLM-extracted "facts" lose nuance and can't be un-extracted. The fork's design test for any new write-path feature is now: *does this require interpreting content at write time?* If yes, derive lazily instead.
 
-This is the same instinct as the verbatim-vs-derivative axis above. Derivative work belongs *next to* the verbatim record, never *replacing* it.
+Same instinct as the verbatim-vs-derivative axis. Derivative work belongs *next to* the verbatim record, never *replacing* it.
 
-### 2. Hierarchy as optional scope, not required metadata
+### 2. Derived hierarchy from unambiguous signals outperforms hand-classified hierarchy
 
-Hierarchy isn't wrong — *mandatory synchronous classification* is wrong. Different claims; conflating them was the earlier mistake.
+Hierarchy works when it's derived from unambiguous signals (cwd, transcript path, project directory) — not when it's hand-classified by content inspection. The earlier mistake was conflating "hierarchy is bad" with "mandatory synchronous classification is bad" — different claims.
 
 **Good uses of hierarchy, which we keep:**
 - **Browseable scope** for serendipitous recall across 152K drawers.
@@ -130,30 +163,11 @@ Hierarchy isn't wrong — *mandatory synchronous classification* is wrong. Diffe
 - Single-label, as if every drawer had one true parent. Cross-cutting concerns belong in tags ([P0](#planned-work)).
 - Deep nesting when shallow would do.
 
-### 3. Retrieval is the investment, not classification
+### 3. Algorithmic effort belongs on retrieval, not on write-time classification
 
-Search quality compounds. Classification quality has a hard ceiling set by the accuracy of the classifier, and ours isn't good enough to justify the complexity. Vector + BM25 + optional scope filter already beats the hierarchy on its own. Tags ([P0](#planned-work)), feedback ([P3](#planned-work)), and decay ([P2](#planned-work)) extend without requiring write-time commitment.
+Spend the algorithmic budget on retrieval, where quality compounds. Classification quality has a hard ceiling set by the accuracy of the classifier, and a write-time classifier won't be that accurate. Vector + BM25 + optional scope filter already beats the hierarchy on its own. Tags ([P0](#planned-work)), feedback ([P3](#planned-work)), and decay ([P2](#planned-work)) extend without requiring write-time commitment.
 
 Effort spent tuning the entity detector is effort not spent on the thing that pays compounding returns.
-
-## Why this fork exists
-
-We surveyed the memory-system landscape in April 2026 and found no verbatim-first local system with MCP. Every alternative transforms content on write — extracted facts, knowledge graphs, tiered summaries — losing the original text.
-
-| System | Verbatim? | Local? | MCP? | First public | Notes |
-|---|---|---|---|---|---|
-| **MemPalace** | Yes | Yes | Yes | 2026-04-06 (v3.0.0) | What we have. 151,478 drawers as of 2026-04-26 — 150,811 in main, 667 in recovery. Verbatim drawers + wings/rooms scope + SQLite KG + BM25/vector hybrid search. |
-| [Longhand](https://glama.ai/mcp/servers/Wynelson94/longhand) | Yes | Yes | Yes, 16-tool MCP | 2026-04-14 (v0.5.2; repo 2026-04-09) | Closest cousin. Claude Code-specific — reads `~/.claude/projects/*.jsonl` directly. SQLite (raw JSON per event) + ChromaDB (embeddings of pre-computed "episodes"). Deterministic file-state replay via stored diffs. |
-| [Celiums](https://celiums.ai/) | Yes | Yes (SQLite, Docker, or DO) | Yes, 6-tool MCP | 2026-04-08 (repo) | Stores full module text with PAD emotional vectors, importance scores, and circadian metadata. Bundles a 500K+ expert-module knowledge base alongside personal memory — different product shape. |
-| [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service) | Yes by default (opt-in consolidation) | Yes (SQLite) or Cloudflare Workers | Yes | 2024-12-26 | The long-standing verbatim option. Turn-level storage; MiniLM embeddings local. Targets LangGraph / CrewAI / AutoGen plus Claude. |
-| [Hindsight](https://github.com/vectorize-io/hindsight) | No — LLM extracts facts | Yes (Docker) | Yes | 2026-01-05 | Three ops: retain / recall / reflect. Original text is lost. |
-| [Mem0](https://github.com/mem0ai/mem0) / [OpenMemory](https://github.com/mem0ai/mem0/tree/main/openmemory) | No — extracts "memories" | Partial | Yes | 2023-06 | Cloud-first; OpenMemory is local-mode sibling. |
-| [Cognee](https://github.com/topoteretes/cognee) | No — knowledge graph | Yes | Yes | 2023-08 | "Knowledge Engine" via ECL pipeline. |
-| [Letta](https://github.com/letta-ai/letta) | No — tiered summarization | Yes | No | 2023-10 (as MemGPT) | Rebrand kept the repo. |
-| [engram](https://github.com/NickCirv/engram) | Structured fields, not raw | Yes | Yes | 2026-04-11 | Go + SQLite FTS5. |
-| [CaviraOSS OpenMemory](https://github.com/CaviraOSS/OpenMemory) | No — temporal graph | Yes | Yes | 2025-10-26 | SQL-native. |
-
-The April-2026 verbatim cluster (MemPalace, Celiums, Longhand, engram all within ~8 days) is striking — it suggests the "store it raw and retrieve well" pattern reached independent critical mass right around the same time. The differentiator: **verbatim storage is the foundation; everything else (tags, KG, decay, summaries) is enrichment layered on top.** If any layer fails or needs rebuilding, the underlying truth is still there.
 
 ## Planned work
 
@@ -285,6 +299,17 @@ Built *on top of* or *alongside* MemPalace, by community contributors who use th
 | [#1087](https://github.com/MemPalace/mempalace/pull/1087) | CI green, **rewritten 2026-04-26** per @igorls's review | `mempalace purge --wing/--room` via `delete(where=)` (no nuke-and-rebuild) |
 | [#1094](https://github.com/MemPalace/mempalace/pull/1094) | CI green, awaiting review | Coerce `None` metadatas to `{}` at `ChromaCollection` boundary |
 | [#1142](https://github.com/MemPalace/mempalace/pull/1142) | CI green, @bensig accepted 2026-04-23 | `docs/RELEASING.md` |
+
+## What's next
+
+Forward-looking, in rough priority order. The substrate exploration is the biggest open question; everything else is incremental against the existing direction.
+
+- **Continue pgvector + Apache AGE evaluation** against the RFC 001 backend seam (`BaseBackend` + entry-point registry, already in upstream develop). Frame it as a candidate implementation, not a commitment. See [Substrate exploration](#substrate-exploration-postgres--pgvector--apache-age) below for the bridge pattern and references.
+- **Publish Cat 9 end-to-end results** on the post-migration palace at `notebook/data/cat9-postmigrate-e2e/REPORT.md`, with adapter parity numbers across the verbatim-first cohort once the SME harness lands.
+- **Publish the multipass-structural-memory-eval harness** with adapters for MemPalace, Longhand, Celiums, mcp-memory-service so Cat 9 / The Handshake stops being a one-deployment story.
+- **Land P0 (multi-label tags) and P2 (decay/recency)** — P2 tracked upstream via [#1032](https://github.com/MemPalace/mempalace/pull/1032); P0 is fork-side until upstream wants it.
+- **Publish the verbatim-vs-derivative axis as a standalone essay**, distinct from the README. The axis is doing more work than the README has space to spell out.
+- **Coordinate with upstream on the multi-collection-by-purpose pattern** — implicit in RFC 001 today, worth naming explicitly so future backends plan for it.
 
 ## Setup / Development
 
