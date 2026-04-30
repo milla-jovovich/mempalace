@@ -36,7 +36,7 @@ from pathlib import Path
 from .config import MempalaceConfig
 
 
-_MEMPALACE_PROJECT_FILES = ("mempalace.yaml", "entities.json")
+_MEMPALACE_PROJECT_FILES = (".mempalace/", "mempalace.yaml", "entities.json")
 
 
 def _ensure_mempalace_files_gitignored(project_dir) -> bool:
