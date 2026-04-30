@@ -4,7 +4,7 @@ import argparse
 import shlex
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -760,13 +760,61 @@ def test_cmd_repair_success(mock_config_cls, tmp_path, capsys):
         "documents": ["doc1", "doc2"],
         "metadatas": [{"wing": "a"}, {"wing": "b"}],
     }
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
     mock_new_col = MagicMock()
+    mock_new_col.count.return_value = 2
     mock_backend = _mock_backend_for(col=mock_col, new_col=mock_new_col)
+    mock_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
     with patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend):
         cmd_repair(args)
     out = capsys.readouterr().out
     assert "Repair complete" in out
     assert "2 drawers rebuilt" in out
+    assert mock_backend.delete_collection.call_args_list == [
+        call(str(palace_dir), "mempalace_drawers__repair_tmp"),
+        call(str(palace_dir), "mempalace_drawers"),
+        call(str(palace_dir), "mempalace_drawers__repair_tmp"),
+    ]
+    mock_temp_col.upsert.assert_called_once()
+    mock_new_col.upsert.assert_called_once()
+    mock_new_col.add.assert_not_called()
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_repair_restores_backup_on_live_rebuild_failure(mock_config_cls, tmp_path, capsys):
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+    (palace_dir / "chroma.sqlite3").write_text("db")
+    mock_config_cls.return_value.palace_path = str(palace_dir)
+    args = argparse.Namespace(palace=None, yes=True)
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [{"wing": "a"}, {"wing": "b"}],
+    }
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
+    mock_backend = _mock_backend_for(col=mock_col)
+    mock_backend.create_collection.side_effect = [mock_temp_col, RuntimeError("live build failed")]
+    with (
+        patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend),
+        patch("mempalace.repair._close_chroma_handles") as mock_close_handles,
+    ):
+        with pytest.raises(SystemExit) as excinfo:
+            cmd_repair(args)
+    out = capsys.readouterr().out
+    assert excinfo.value.code == 1
+    assert "Repair failed" in out
+    assert "restoring from backup" in out
+    mock_close_handles.assert_called_once_with(str(palace_dir))
+    assert mock_backend.delete_collection.call_args_list == [
+        call(str(palace_dir), "mempalace_drawers__repair_tmp"),
+        call(str(palace_dir), "mempalace_drawers"),
+        call(str(palace_dir), "mempalace_drawers__repair_tmp"),
+    ]
 
 
 @patch("mempalace.cli.MempalaceConfig")
