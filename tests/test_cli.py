@@ -799,17 +799,14 @@ def test_cmd_repair_restores_backup_on_live_rebuild_failure(mock_config_cls, tmp
     mock_temp_col.count.return_value = 2
     mock_backend = _mock_backend_for(col=mock_col)
     mock_backend.create_collection.side_effect = [mock_temp_col, RuntimeError("live build failed")]
-    with (
-        patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend),
-        patch("mempalace.repair._close_chroma_handles") as mock_close_handles,
-    ):
+    with patch("mempalace.backends.chroma.ChromaBackend", return_value=mock_backend):
         with pytest.raises(SystemExit) as excinfo:
             cmd_repair(args)
     out = capsys.readouterr().out
     assert excinfo.value.code == 1
     assert "Repair failed" in out
     assert "restoring from backup" in out
-    mock_close_handles.assert_called_once_with(str(palace_dir))
+    mock_backend.close_palace.assert_called_once_with(str(palace_dir))
     assert mock_backend.delete_collection.call_args_list == [
         call(str(palace_dir), "mempalace_drawers__repair_tmp"),
         call(str(palace_dir), "mempalace_drawers"),

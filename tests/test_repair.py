@@ -499,20 +499,25 @@ def test_rebuild_index_live_failure_restores_backup(mock_backend_cls, mock_shuti
     mock_temp_col.count.return_value = 2
     mock_new_col = MagicMock()
     mock_new_col.upsert.side_effect = RuntimeError("live upsert failed")
-    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
-    mock_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
+    active_backend = MagicMock()
+    active_backend.get_collection.return_value = mock_col
+    active_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
+    helper_backend = MagicMock()
+    mock_backend_cls.side_effect = [active_backend, helper_backend]
 
     with pytest.raises(repair.RebuildCollectionError) as excinfo:
         repair.rebuild_index(palace_path=str(tmp_path))
 
     assert excinfo.value.live_replaced is True
     assert mock_shutil.copy2.call_count == 2
-    assert mock_backend.delete_collection.call_args_list == [
+    assert active_backend.delete_collection.call_args_list == [
         call(str(tmp_path), "mempalace_drawers__repair_tmp"),
         call(str(tmp_path), "mempalace_drawers"),
         call(str(tmp_path), "mempalace_drawers__repair_tmp"),
         call(str(tmp_path), "mempalace_drawers"),
     ]
+    active_backend.close_palace.assert_called_once_with(str(tmp_path))
+    helper_backend.close_palace.assert_not_called()
 
 
 @patch("mempalace.repair.shutil")

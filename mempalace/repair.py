@@ -517,7 +517,7 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
         if e.live_replaced and os.path.exists(backup_path):
             print(f"  Restoring from backup: {backup_path}")
             try:
-                _close_chroma_handles(palace_path)
+                _close_chroma_handles(palace_path, backend=backend)
                 _delete_collection_if_exists(backend, palace_path, COLLECTION_NAME)
                 shutil.copy2(backup_path, sqlite_path)
                 print("  Backup restored. Palace is back to pre-repair state.")
@@ -593,12 +593,18 @@ def status(palace_path=None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _close_chroma_handles(palace_path: str) -> None:
-    """Drop ChromaBackend + chromadb singleton caches so OS mmap handles release."""
+def _close_chroma_handles(palace_path: str, backend: ChromaBackend | None = None) -> None:
+    """Drop ChromaBackend + chromadb singleton caches so OS mmap handles release.
+
+    When ``backend`` is provided, close the live instance so rollback/restore
+    releases the handles it was already using. Otherwise fall back to a
+    transient backend instance for the max-seq-id repair path.
+    """
     import gc
 
     try:
-        ChromaBackend().close_palace(palace_path)
+        closer = backend if backend is not None else ChromaBackend()
+        closer.close_palace(palace_path)
     except Exception:
         pass
     try:
