@@ -29,6 +29,15 @@ from mempalace.hooks_cli import (
 )
 
 
+class ReconfigurableStringIO(io.StringIO):
+    def __init__(self, initial_value=""):
+        super().__init__(initial_value)
+        self.reconfigure_calls = []
+
+    def reconfigure(self, **kwargs):
+        self.reconfigure_calls.append(kwargs)
+
+
 # --- _mempalace_python ---
 
 
@@ -822,6 +831,27 @@ def test_run_hook_dispatches_session_start(tmp_path):
         with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
             with patch("mempalace.hooks_cli._output") as mock_output:
                 run_hook("session-start", "claude-code")
+    mock_output.assert_called_once_with({})
+
+
+def test_run_hook_reconfigures_stdio_to_utf8_on_windows(tmp_path):
+    """Windows hook stdin must be UTF-8 before json.load() reads it."""
+    stdin = ReconfigurableStringIO(json.dumps({"session_id": "utf8-test"}))
+    stdout = ReconfigurableStringIO()
+    stderr = ReconfigurableStringIO()
+
+    with patch("mempalace.hooks_cli.sys.platform", "win32"):
+        with patch("mempalace.hooks_cli.sys.stdin", stdin):
+            with patch("mempalace.hooks_cli.sys.stdout", stdout):
+                with patch("mempalace.hooks_cli.sys.stderr", stderr):
+                    with patch("mempalace.hooks_cli.STATE_DIR", tmp_path):
+                        with patch("mempalace.hooks_cli._output") as mock_output:
+                            run_hook("session-start", "claude-code")
+
+    expected = {"encoding": "utf-8", "errors": "strict"}
+    assert stdin.reconfigure_calls == [expected]
+    assert stdout.reconfigure_calls == [expected]
+    assert stderr.reconfigure_calls == [expected]
     mock_output.assert_called_once_with({})
 
 

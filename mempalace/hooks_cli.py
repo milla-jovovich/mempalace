@@ -18,6 +18,28 @@ SAVE_INTERVAL = 15
 STATE_DIR = Path.home() / ".mempalace" / "hook_state"
 
 
+def _reconfigure_stdio_utf8_on_windows():
+    """Decode Claude/Codex hook JSON as UTF-8 on Windows.
+
+    Hook harnesses send JSON over stdin as UTF-8. On Windows, Python can
+    default stdio to the system ANSI codepage, which mojibakes non-ASCII
+    payload fields and may introduce surrogate characters before json.load()
+    sees the stream.
+    """
+    if sys.platform != "win32":
+        return
+
+    for name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="strict")
+        except Exception as exc:
+            _log(f"WARNING: Could not reconfigure {name} to UTF-8: {exc}")
+
+
 def _mempalace_python() -> str:
     """Return the python interpreter that has mempalace installed.
 
@@ -693,6 +715,8 @@ def hook_precompact(data: dict, harness: str):
 
 def run_hook(hook_name: str, harness: str):
     """Main entry point: read stdin JSON, dispatch to hook handler."""
+    _reconfigure_stdio_utf8_on_windows()
+
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, EOFError):
