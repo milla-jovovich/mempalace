@@ -760,7 +760,7 @@ def cmd_repair(args):
         if getattr(e, "live_replaced", False):
             print("  Live collection was already replaced; restoring from backup...")
             try:
-                _close_chroma_handles(palace_path)
+                _close_chroma_handles(palace_path, backend=backend)
                 if os.path.exists(palace_path):
                     shutil.rmtree(palace_path)
                 shutil.copytree(backup_path, palace_path)
