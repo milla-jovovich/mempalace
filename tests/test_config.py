@@ -3,7 +3,13 @@ import json
 import tempfile
 
 import pytest
-from mempalace.config import MempalaceConfig, normalize_wing_name, sanitize_kg_value, sanitize_name
+from mempalace.config import (
+    MempalaceConfig,
+    normalize_wing_name,
+    sanitize_kg_value,
+    sanitize_name,
+    validate_iso_date,
+)
 
 
 def test_default_config():
@@ -212,3 +218,72 @@ def test_kg_value_rejects_null_bytes():
 def test_kg_value_rejects_over_length():
     with pytest.raises(ValueError):
         sanitize_kg_value("a" * 129)
+
+
+# --- validate_iso_date ---
+
+
+def test_validate_iso_date_accepts_none():
+    assert validate_iso_date(None) is None
+
+
+def test_validate_iso_date_accepts_empty_string():
+    assert validate_iso_date("") is None
+
+
+def test_validate_iso_date_accepts_whitespace_only():
+    assert validate_iso_date("   ") is None
+
+
+def test_validate_iso_date_accepts_full_date():
+    assert validate_iso_date("2025-01-01") == "2025-01-01"
+
+
+def test_validate_iso_date_accepts_year_month():
+    assert validate_iso_date("2025-01") == "2025-01"
+
+
+def test_validate_iso_date_accepts_year_only():
+    assert validate_iso_date("2025") == "2025"
+
+
+def test_validate_iso_date_strips_whitespace():
+    assert validate_iso_date("  2025-06-15  ") == "2025-06-15"
+
+
+def test_validate_iso_date_rejects_natural_language():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("March 2026")
+
+
+def test_validate_iso_date_rejects_partial_date():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("2025-1")
+
+
+def test_validate_iso_date_rejects_invalid_month():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("2025-13-01")
+
+
+def test_validate_iso_date_rejects_invalid_day():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("2025-02-32")
+
+
+def test_validate_iso_date_rejects_garbage():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("not-a-date")
+
+
+def test_validate_iso_date_custom_param_name():
+    with pytest.raises(ValueError, match="as_of="):
+        validate_iso_date("Jan 2025", "as_of")
+
+
+def test_validate_iso_date_edge_case_december():
+    assert validate_iso_date("2025-12-31") == "2025-12-31"
+
+
+def test_validate_iso_date_edge_case_january():
+    assert validate_iso_date("2025-01-01") == "2025-01-01"
