@@ -11,7 +11,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime
+import datetime as _dt
 from pathlib import Path
 
 SAVE_INTERVAL = 15
@@ -153,7 +153,7 @@ def _log(message: str):
             _state_dir_initialized = True
         log_path = STATE_DIR / "hook.log"
         is_new = not log_path.exists()
-        timestamp = datetime.now().strftime("%H:%M:%S")
+        timestamp = _dt.datetime.now().strftime("%H:%M:%S")
         with open(log_path, "a") as f:
             f.write(f"[{timestamp}] {message}\n")
         if is_new:
@@ -658,7 +658,7 @@ def hook_stop(data: dict, harness: str):
 
 
 def hook_session_start(data: dict, harness: str):
-    """Session start hook: initialize session tracking state."""
+    """Session start hook: warm up MemPalace backend."""
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
 
@@ -666,6 +666,48 @@ def hook_session_start(data: dict, harness: str):
 
     # Initialize session state directory
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Warm up MemPalace: load config, connect to ChromaDB, load KG
+    try:
+        from .config import MempalaceConfig
+        from .backends.chroma import ChromaBackend, hnsw_capacity_status
+        from .backends.base import PalaceRef
+        from .knowledge_graph import KnowledgeGraph
+
+        start = _dt.datetime.now()
+
+        # 1. Load config
+        config = MempalaceConfig()
+        _log(f"  Config loaded: {config.palace_path}")
+
+        # 2. Connect to ChromaDB (this loads indexes)
+        backend = ChromaBackend()
+        coll = backend.get_collection(config.palace_path, "mempalace_drawers")
+        count = coll.count()
+        _log(f"  ChromaDB connected: {count} drawers")
+
+        # 3. Check HNSW health
+        try:
+            hnsw_status = hnsw_capacity_status(config.palace_path, "mempalace_drawers")
+            if hnsw_status.get("diverged"):
+                _log(f"  WARNING: HNSW diverged, vector search disabled")
+            else:
+                _log(f"  HNSW index healthy")
+        except Exception as e:
+            _log(f"  HNSW check skipped: {e}")
+
+        # 4. Load Knowledge Graph
+        kg = KnowledgeGraph(db_path=os.path.join(config.palace_path, "knowledge_graph.sqlite3"))
+        kg_stats = kg.stats()
+        _log(f"  KG loaded: {kg_stats.get('entities', 0)} entities, {kg_stats.get('triples', 0)} triples")
+
+        elapsed = (_dt.datetime.now() - start).total_seconds() * 1000
+        _log(f"  Warmup complete in {elapsed:.1f}ms")
+
+    except Exception as e:
+        _log(f"  Warmup skipped: {e}")
+        import traceback
+        _log(f"  Traceback: {traceback.format_exc()}")
 
     # Pass through — no blocking on session start
     _output({})
