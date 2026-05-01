@@ -68,6 +68,7 @@ from .backends.chroma import (  # noqa: E402
     _pin_hnsw_threads,
     hnsw_capacity_status,
 )
+from .embedding import get_embedding_function  # noqa: E402
 from .query_sanitizer import sanitize_query  # noqa: E402
 from .searcher import search_memories  # noqa: E402
 from .palace_graph import (  # noqa: E402
@@ -280,6 +281,22 @@ def _get_collection(create=False):
     global _collection_cache, _metadata_cache, _metadata_cache_time
     try:
         client = _get_client()
+        # ChromaDB 1.x does not persist the embedding function with the
+        # collection, so a reader/writer that omits ``embedding_function=``
+        # silently gets the chromadb-built-in default. On bleeding-edge
+        # interpreters (#1299: python 3.14 + chromadb 1.5.x on Apple Silicon)
+        # the default's lazy ONNX provider selection can SIGSEGV the host
+        # process on first ``col.add()``. The miner / Stop hook ingest path
+        # avoids this because it routes through ``ChromaBackend.get_collection``
+        # which resolves the EF via ``mempalace.embedding.get_embedding_function``.
+        # The MCP server bypassed that abstraction; mirror its behaviour so
+        # ``tool_diary_write`` / ``tool_add_drawer`` get the same EF as mining.
+        try:
+            ef = get_embedding_function()
+        except Exception:
+            logger.exception("Failed to build embedding function; using chromadb default")
+            ef = None
+        ef_kwargs = {"embedding_function": ef} if ef is not None else {}
         if create:
             # hnsw:num_threads=1 disables ChromaDB's multi-threaded ParallelFor
             # HNSW insert path, which has a race in repairConnectionsForUpdate /
@@ -294,7 +311,7 @@ def _get_collection(create=False):
             # below skips the metadata-comparison codepath for existing
             # collections, mirroring the backend-layer fix from #1262.
             try:
-                raw = client.get_collection(_config.collection_name)
+                raw = client.get_collection(_config.collection_name, **ef_kwargs)
             except _ChromaNotFoundError:
                 raw = client.create_collection(
                     _config.collection_name,
@@ -303,13 +320,14 @@ def _get_collection(create=False):
                         "hnsw:num_threads": 1,
                         **_HNSW_BLOAT_GUARD,
                     },
+                    **ef_kwargs,
                 )
             _pin_hnsw_threads(raw)
             _collection_cache = ChromaCollection(raw, palace_path=_config.palace_path)
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
-            raw = client.get_collection(_config.collection_name)
+            raw = client.get_collection(_config.collection_name, **ef_kwargs)
             _pin_hnsw_threads(raw)
             _collection_cache = ChromaCollection(raw, palace_path=_config.palace_path)
             _metadata_cache = None
