@@ -1921,6 +1921,18 @@ def _restore_stdout():
 
 def main():
     _restore_stdout()
+
+    # Fix Windows stdio encoding for MCP protocol (UTF-8 required).
+    # Windows defaults to GBK/CP936, which corrupts Chinese characters.
+    # Linux/macOS already use UTF-8 by default, no need to re-wrap.
+    if sys.platform == 'win32' and sys.version_info[0] >= 3:
+        import io
+        # Re-wrap both stdin and stdout with UTF-8 for Windows
+        _REAL_STDIN = sys.stdin
+        _REAL_STDOUT_LOCAL = sys.stdout
+        sys.stdin = io.TextIOWrapper(_REAL_STDIN.buffer, encoding='utf-8', errors='strict')
+        sys.stdout = io.TextIOWrapper(_REAL_STDOUT_LOCAL.buffer, encoding='utf-8', errors='strict')
+
     logger.info("MemPalace MCP Server starting...")
     # Pre-flight: probe HNSW capacity before any tool call so the warning
     # is visible at startup rather than on first use (#1222). Pure
