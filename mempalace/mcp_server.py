@@ -1107,7 +1107,7 @@ def tool_kg_stats():
 # ==================== AGENT DIARY ====================
 
 
-def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: str = ""):
+def tool_diary_write(agent_name: str, entry: str = None, topic: str = "general", wing: str = "", content: str = None):
     """
     Write a diary entry for this agent. Entries are timestamped and
     accumulate over time in a diary room.
@@ -1115,6 +1115,13 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
     This is the agent's personal journal — observations, thoughts,
     what it worked on, what it noticed, what it thinks matters.
     """
+    # Accept 'content' as an alias for 'entry' — add_drawer uses 'content', making
+    # it natural to pattern off it. Accepting both avoids a silent -32000 error.
+    if entry is None and content is not None:
+        entry = content
+    elif entry is None:
+        return {"success": False, "error": "'entry' (or 'content') is required"}
+
     try:
         agent_name = sanitize_name(agent_name, "agent_name")
         entry = sanitize_content(entry)
