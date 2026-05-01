@@ -1886,7 +1886,7 @@ def handle_request(request):
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2, ensure_ascii=False)}]},
             }
         except Exception:
             logger.exception(f"Tool error in {tool_name}")
@@ -1921,6 +1921,18 @@ def _restore_stdout():
 
 def main():
     _restore_stdout()
+
+    # Fix Windows stdio encoding for MCP protocol (UTF-8 required).
+    # Windows defaults to GBK/CP936, which corrupts Chinese characters.
+    # Linux/macOS already use UTF-8 by default, no need to re-wrap.
+    if sys.platform == 'win32' and sys.version_info[0] >= 3:
+        import io
+        # Re-wrap both stdin and stdout with UTF-8 for Windows
+        _REAL_STDIN = sys.stdin
+        _REAL_STDOUT = sys.stdout
+        sys.stdin = io.TextIOWrapper(_REAL_STDIN.buffer, encoding='utf-8', errors='strict')
+        sys.stdout = io.TextIOWrapper(_REAL_STDOUT.buffer, encoding='utf-8', errors='strict')
+
     logger.info("MemPalace MCP Server starting...")
     # Pre-flight: probe HNSW capacity before any tool call so the warning
     # is visible at startup rather than on first use (#1222). Pure
@@ -1937,7 +1949,7 @@ def main():
             request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
+                sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
                 sys.stdout.flush()
         except KeyboardInterrupt:
             break
