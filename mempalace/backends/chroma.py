@@ -492,22 +492,17 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
         divergence_floor = max(_HNSW_DIVERGENCE_FALLBACK_FLOOR, 2 * sync_threshold)
 
         if hnsw_count is None:
-            # No pickle yet — segment hasn't persisted metadata. Could be
-            # fresh-but-unflushed (normal) or interrupted-mid-flush (bad).
-            # We can't distinguish without the pickle, so only flag
-            # divergence when sqlite holds clearly more than two flush
-            # windows worth — same threshold as the with-pickle path.
-            if sqlite_count > divergence_floor:
-                out["status"] = "diverged"
-                out["diverged"] = True
-                out["divergence"] = sqlite_count
-                out["message"] = (
-                    f"sqlite holds {sqlite_count:,} embeddings but the HNSW segment "
-                    "has never flushed metadata — vector search will return nothing "
-                    "until the segment is rebuilt. Run `mempalace repair`."
-                )
-            else:
-                out["message"] = "HNSW segment metadata not yet flushed; skipping"
+            # No pickle yet, so this probe cannot measure HNSW capacity.
+            # Chroma 1.5.x can have binary HNSW files without a flushed
+            # metadata pickle; absence of the pickle alone is not proof that
+            # vector search is unusable or dangerous. Keep the status unknown
+            # so MCP does not globally disable vectors on an inconclusive
+            # signal. Corrupt/invalid metadata, when present, is handled by
+            # quarantine_invalid_hnsw_metadata before Chroma opens.
+            out["message"] = (
+                "HNSW capacity unavailable: metadata has not been flushed; "
+                "leaving vector search enabled"
+            )
             return out
 
         divergence = sqlite_count - hnsw_count
