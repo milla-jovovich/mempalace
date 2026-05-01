@@ -18,6 +18,7 @@ from mempalace.backends.chroma import (
     ChromaCollection,
     _fix_blob_seq_ids,
     _pin_hnsw_threads,
+    hnsw_capacity_status,
     quarantine_stale_hnsw,
 )
 
@@ -736,6 +737,66 @@ def test_make_client_quarantines_each_palace_independently(tmp_path, monkeypatch
     ChromaBackend.make_client(palace_b)  # already gated
 
     assert calls == [palace_a, palace_b]
+
+
+def _seed_hnsw_status_db(palace_path: Path, *, count: int, sync_threshold: int = 50_000):
+    palace_path.mkdir()
+    conn = sqlite3.connect(palace_path / "chroma.sqlite3")
+    conn.executescript(
+        """
+        CREATE TABLE collections(id TEXT PRIMARY KEY, name TEXT);
+        CREATE TABLE segments(id TEXT PRIMARY KEY, type TEXT, scope TEXT, collection TEXT);
+        CREATE TABLE embeddings(id INTEGER PRIMARY KEY, segment_id TEXT, embedding_id TEXT);
+        CREATE TABLE collection_metadata(
+            collection_id TEXT,
+            key TEXT,
+            str_value TEXT,
+            int_value INTEGER,
+            float_value REAL,
+            bool_value INTEGER
+        );
+        """
+    )
+    conn.execute("INSERT INTO collections(id, name) VALUES ('coll', 'mempalace_drawers')")
+    conn.execute(
+        "INSERT INTO segments(id, type, scope, collection) VALUES (?, ?, ?, ?)",
+        ("vec", "urn:chroma:segment/vector/hnsw-local-persisted", "VECTOR", "coll"),
+    )
+    conn.execute(
+        "INSERT INTO collection_metadata(collection_id, key, int_value) VALUES (?, ?, ?)",
+        ("coll", "hnsw:sync_threshold", sync_threshold),
+    )
+    conn.executemany(
+        "INSERT INTO embeddings(segment_id, embedding_id) VALUES ('vec', ?)",
+        ((f"id-{i}",) for i in range(count)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_hnsw_capacity_status_respects_configured_sync_threshold(tmp_path):
+    """No metadata pickle before hnsw:sync_threshold is reached is normal."""
+    palace_path = tmp_path / "palace"
+    _seed_hnsw_status_db(palace_path, count=7_653, sync_threshold=50_000)
+
+    status = hnsw_capacity_status(str(palace_path), "mempalace_drawers")
+
+    assert status["sqlite_count"] == 7_653
+    assert status["hnsw_count"] is None
+    assert status["diverged"] is False
+    assert status["status"] == "ok"
+
+
+def test_hnsw_capacity_status_flags_missing_metadata_past_sync_window(tmp_path):
+    palace_path = tmp_path / "palace"
+    _seed_hnsw_status_db(palace_path, count=120_001, sync_threshold=50_000)
+
+    status = hnsw_capacity_status(str(palace_path), "mempalace_drawers")
+
+    assert status["sqlite_count"] == 120_001
+    assert status["hnsw_count"] is None
+    assert status["diverged"] is True
+    assert status["status"] == "diverged"
 
 
 # ── _pin_hnsw_threads (per-process retrofit, separate from this PR's gate) ──

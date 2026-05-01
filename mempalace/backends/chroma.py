@@ -372,18 +372,66 @@ def _hnsw_element_count(palace_path: str, segment_id: str) -> Optional[int]:
 
 
 # Divergence threshold: chromadb's HNSW flushes asynchronously, so HNSW
-# typically lags sqlite by up to ``sync_threshold`` (default 1000) records
+# typically lags sqlite by up to the collection's ``hnsw:sync_threshold``
 # under active write load — that's the *brute-force batch* that hasn't
 # been compacted into HNSW yet, plus the un-persisted tail beyond the
-# last sync. Two synchronization windows worth (2 × sync_threshold = 2000)
-# is a safe steady-state ceiling; anything past that is real divergence,
-# not flush-lag.
+# last sync. Two synchronization windows worth is a safe steady-state
+# ceiling; anything past that is real divergence, not flush-lag.
 #
 # The #1222 case was 176 613 missing out of 192 997 (91% gone) — orders
 # of magnitude past 2000. A typical post-mine palace shows a few hundred
 # to ~1000 missing, well under threshold.
 _HNSW_DIVERGENCE_ABSOLUTE = 2000
 _HNSW_DIVERGENCE_FRACTION = 0.10
+_HNSW_DEFAULT_SYNC_THRESHOLD = 1000
+
+
+def _collection_hnsw_sync_threshold(palace_path: str, collection_name: str) -> Optional[int]:
+    """Return the persisted Chroma ``hnsw:sync_threshold`` for a collection."""
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(collection_metadata)")}
+            value_columns = [name for name in ("int_value", "float_value", "str_value") if name in columns]
+            if not value_columns:
+                return None
+
+            select_expr = "COALESCE(" + ", ".join(f"cm.{name}" for name in value_columns) + ")"
+            row = conn.execute(
+                f"""
+                SELECT {select_expr}
+                FROM collection_metadata cm
+                JOIN collections c ON cm.collection_id = c.id
+                WHERE c.name = ? AND cm.key = 'hnsw:sync_threshold'
+                LIMIT 1
+                """,
+                (collection_name,),
+            ).fetchone()
+            if row is None or row[0] is None:
+                return None
+            threshold = int(float(row[0]))
+            return threshold if threshold > 0 else None
+        finally:
+            conn.close()
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+
+
+def _hnsw_divergence_threshold(
+    palace_path: str, collection_name: str, sqlite_count: int
+) -> int:
+    sync_threshold = (
+        _collection_hnsw_sync_threshold(palace_path, collection_name)
+        or _HNSW_DEFAULT_SYNC_THRESHOLD
+    )
+    return max(
+        _HNSW_DIVERGENCE_ABSOLUTE,
+        int(sqlite_count * _HNSW_DIVERGENCE_FRACTION),
+        sync_threshold * 2,
+    )
 
 
 def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_drawers") -> dict:
@@ -437,7 +485,8 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
             # We can't distinguish without the pickle, so only flag
             # divergence when sqlite holds clearly more than two flush
             # windows worth — same threshold as the with-pickle path.
-            if sqlite_count > _HNSW_DIVERGENCE_ABSOLUTE:
+            threshold = _hnsw_divergence_threshold(palace_path, collection_name, sqlite_count)
+            if sqlite_count > threshold:
                 out["status"] = "diverged"
                 out["diverged"] = True
                 out["divergence"] = sqlite_count
@@ -447,12 +496,16 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
                     "until the segment is rebuilt. Run `mempalace repair`."
                 )
             else:
-                out["message"] = "HNSW segment metadata not yet flushed; skipping"
+                out["status"] = "ok"
+                out["message"] = (
+                    "HNSW segment metadata not yet flushed; sqlite count is within "
+                    f"the configured sync window ({threshold:,})"
+                )
             return out
 
         divergence = sqlite_count - hnsw_count
         out["divergence"] = divergence
-        threshold = max(_HNSW_DIVERGENCE_ABSOLUTE, int(sqlite_count * _HNSW_DIVERGENCE_FRACTION))
+        threshold = _hnsw_divergence_threshold(palace_path, collection_name, sqlite_count)
         if divergence > threshold:
             out["status"] = "diverged"
             out["diverged"] = True
