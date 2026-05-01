@@ -42,6 +42,21 @@ except (OSError, AttributeError):
     pass
 sys.stdout = sys.stderr
 
+
+def _force_utf8_stdio():
+    """MCP stdio is UTF-8 JSON-RPC, independent of the host console locale."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr, _REAL_STDOUT):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
+_force_utf8_stdio()
+
 import argparse  # noqa: E402  (deferred until after stdio protection above)
 import json  # noqa: E402
 import logging  # noqa: E402
@@ -1876,7 +1891,14 @@ def handle_request(request):
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(result, indent=2, ensure_ascii=False),
+                        }
+                    ]
+                },
             }
         except Exception:
             logger.exception(f"Tool error in {tool_name}")
@@ -1911,6 +1933,7 @@ def _restore_stdout():
 
 def main():
     _restore_stdout()
+    _force_utf8_stdio()
     logger.info("MemPalace MCP Server starting...")
     # Pre-flight: probe HNSW capacity before any tool call so the warning
     # is visible at startup rather than on first use (#1222). Pure
