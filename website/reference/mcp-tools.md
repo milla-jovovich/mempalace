@@ -1,16 +1,28 @@
 # MCP Tools Reference
 
-Detailed parameter schemas for all 29 MCP tools.
+Detailed parameter schemas for all 30 MCP tools.
 
 ## Palace — Read Tools
 
 ### `mempalace_status`
 
-Palace overview: total drawers, wing and room counts, AAAK spec, and memory protocol.
+Palace overview: total drawers, wing and room counts, AAAK spec, memory protocol, and Layer 0/1 wake-up context.
 
 **Parameters:** None
 
-**Returns:** `{ total_drawers, wings, rooms, palace_path, protocol, aaak_dialect }`
+**Returns:** `{ total_drawers, wings, rooms, palace_path, protocol, aaak_dialect, wake_up_context }`
+
+---
+
+### `mempalace_wake_up`
+
+Returns Layer 0 identity and Layer 1 essential story as bounded startup context. Use this explicitly when an MCP client does not load server instructions automatically.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `wing` | string | No | Optional project/wing filter for Layer 1 |
+
+**Returns:** `{ context, tokens_estimate, wing }`
 
 ---
 
