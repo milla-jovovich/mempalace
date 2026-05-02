@@ -372,6 +372,7 @@ def _bm25_only_via_sqlite(
     room: str = None,
     n_results: int = 5,
     max_candidates: int = 500,
+    collection_name: str = None,
 ) -> dict:
     """BM25-only search reading drawers directly from chroma.sqlite3.
 
@@ -395,6 +396,10 @@ def _bm25_only_via_sqlite(
             "error": "No palace found",
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
         }
+    if collection_name is None:
+        from .config import get_configured_collection_name
+
+        collection_name = get_configured_collection_name()
 
     def _metadata_filter_sql(row_id_expr: str) -> tuple[str, list[str]]:
         clauses = []
@@ -431,35 +436,43 @@ def _bm25_only_via_sqlite(
         # shorter than 3 chars (trigram tokenizer can't match them).
         tokens = [t for t in _tokenize(query) if len(t) >= 3]
         candidate_ids: list[int] = []
+        use_recency_fallback = not tokens
         if tokens:
             fts_query = " OR ".join(tokens)
             filter_sql, filter_params = _metadata_filter_sql("embedding_fulltext_search.rowid")
             try:
                 rows = conn.execute(
                     f"""
-                    SELECT rowid
+                    SELECT embedding_fulltext_search.rowid
                     FROM embedding_fulltext_search
+                    JOIN embeddings e ON e.id = embedding_fulltext_search.rowid
+                    JOIN segments s ON e.segment_id = s.id
+                    JOIN collections c ON s.collection = c.id
                     WHERE embedding_fulltext_search MATCH ?
+                      AND c.name = ?
                     {filter_sql}
                     LIMIT ?
                     """,
-                    (fts_query, *filter_params, max_candidates),
+                    (fts_query, collection_name, *filter_params, max_candidates),
                 ).fetchall()
                 candidate_ids = [r[0] for r in rows]
             except sqlite3.Error:
                 # FTS5 tokenizer mismatch or syntax error — fall through
                 # to the recency-window selector below.
                 logger.debug("FTS5 MATCH failed; using recency fallback", exc_info=True)
+                use_recency_fallback = True
 
-        if not candidate_ids:
-            # No FTS hits (or no usable tokens) — pull the most recent
-            # rows for the drawers segment so we can BM25-rank something
-            # rather than return empty-handed. Wrapped in try/except
-            # because the schema may differ on legacy palaces (older
-            # chromadb without ``created_at``, missing ``segments``
-            # rows after partial restore, etc.); on schema mismatch we
-            # fall back to ordering by primary-key id and finally to an
-            # empty result rather than letting search raise.
+        if not candidate_ids and use_recency_fallback:
+            # No usable FTS tokens, or FTS itself failed — pull the most
+            # recent rows for the drawers segment so we can BM25-rank
+            # something rather than return empty-handed. A clean FTS miss
+            # must stay empty, especially after wing/room filtering, because
+            # recency fallback would return unrelated scoped drawers.
+            # Wrapped in try/except because the schema may differ on legacy
+            # palaces (older chromadb without ``created_at``, missing
+            # ``segments`` rows after partial restore, etc.); on schema
+            # mismatch we fall back to ordering by primary-key id and finally
+            # to an empty result rather than letting search raise.
             try:
                 filter_sql, filter_params = _metadata_filter_sql("e.id")
                 rows = conn.execute(
@@ -468,12 +481,12 @@ def _bm25_only_via_sqlite(
                     FROM embeddings e
                     JOIN segments s ON e.segment_id = s.id
                     JOIN collections c ON s.collection = c.id
-                    WHERE c.name = 'mempalace_drawers'
+                    WHERE c.name = ?
                     {filter_sql}
                     ORDER BY e.created_at DESC
                     LIMIT ?
                     """,
-                    (*filter_params, max_candidates),
+                    (collection_name, *filter_params, max_candidates),
                 ).fetchall()
                 candidate_ids = [r[0] for r in rows]
             except sqlite3.Error:
@@ -489,12 +502,12 @@ def _bm25_only_via_sqlite(
                         FROM embeddings e
                         JOIN segments s ON e.segment_id = s.id
                         JOIN collections c ON s.collection = c.id
-                        WHERE c.name = 'mempalace_drawers'
+                        WHERE c.name = ?
                         {filter_sql}
                         ORDER BY e.id DESC
                         LIMIT ?
                         """,
-                        (*filter_params, max_candidates),
+                        (collection_name, *filter_params, max_candidates),
                     ).fetchall()
                     candidate_ids = [r[0] for r in rows]
                 except sqlite3.Error:
@@ -584,6 +597,7 @@ def search_memories(
     n_results: int = 5,
     max_distance: float = 0.0,
     vector_disabled: bool = False,
+    collection_name: str = None,
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
 
@@ -611,10 +625,11 @@ def search_memories(
             wing=wing,
             room=room,
             n_results=n_results,
+            collection_name=collection_name,
         )
 
     try:
-        drawers_col = get_collection(palace_path, create=False)
+        drawers_col = get_collection(palace_path, collection_name=collection_name, create=False)
     except Exception as e:
         logger.error("No palace found at %s: %s", palace_path, e)
         return {

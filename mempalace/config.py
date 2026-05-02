@@ -7,6 +7,7 @@ Priority: env vars > config file (~/.mempalace/config.json) > defaults
 import json
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -94,6 +95,13 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
+
+
+@lru_cache(maxsize=1)
+def get_configured_collection_name() -> str:
+    """Return the configured drawer collection name without repeated config-file reads."""
+    return MempalaceConfig().collection_name
+
 
 DEFAULT_TOPIC_WINGS = [
     "emotions",
