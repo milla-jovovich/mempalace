@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -124,6 +125,13 @@ def validate_iso_date(value: Optional[str], param_name: str = "date") -> Optiona
 
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
+
+
+@lru_cache(maxsize=1)
+def get_configured_collection_name() -> str:
+    """Return the configured drawer collection name without repeated config-file reads."""
+    return MempalaceConfig().collection_name
+
 
 DEFAULT_TOPIC_WINGS = [
     "emotions",

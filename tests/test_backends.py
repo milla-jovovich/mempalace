@@ -1086,3 +1086,26 @@ def test_chroma_backend_requarantines_after_inode_replacement(tmp_path, monkeypa
         ("invalid", str(palace)),
         ("stale", str(palace)),
     ]
+
+
+def test_palace_get_collection_uses_configured_collection_name(monkeypatch):
+    from mempalace import palace
+
+    captured = {}
+
+    def fake_get_collection(palace_path, collection_name=None, create=False):
+        captured["palace_path"] = palace_path
+        captured["collection_name"] = collection_name
+        captured["create"] = create
+        return object()
+
+    monkeypatch.setattr(palace._DEFAULT_BACKEND, "get_collection", fake_get_collection)
+    monkeypatch.setattr("mempalace.config.get_configured_collection_name", lambda: "custom_drawers")
+
+    palace.get_collection("/palace", create=False)
+
+    assert captured == {
+        "palace_path": "/palace",
+        "collection_name": "custom_drawers",
+        "create": False,
+    }

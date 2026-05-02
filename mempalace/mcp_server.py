@@ -143,7 +143,7 @@ def _refresh_vector_disabled_flag() -> None:
     """
     global _vector_disabled, _vector_disabled_reason, _vector_capacity_status
     try:
-        info = hnsw_capacity_status(_config.palace_path, "mempalace_drawers")
+        info = hnsw_capacity_status(_config.palace_path, _config.collection_name)
     except Exception:
         logger.debug("HNSW capacity probe raised", exc_info=True)
         return
@@ -393,6 +393,7 @@ def _tool_status_via_sqlite() -> dict:
     db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
     if not os.path.isfile(db_path):
         return _no_palace()
+    collection_name = _config.collection_name
 
     wings: dict = {}
     rooms: dict = {}
@@ -406,8 +407,9 @@ def _tool_status_via_sqlite() -> dict:
                 FROM embeddings e
                 JOIN segments s ON e.segment_id = s.id
                 JOIN collections c ON s.collection = c.id
-                WHERE c.name = 'mempalace_drawers'
-                """
+                WHERE c.name = ?
+                """,
+                (collection_name,),
             ).fetchone()
             total = int(row[0]) if row and row[0] is not None else 0
             for key, target in (("wing", wings), ("room", rooms)):
@@ -418,12 +420,12 @@ def _tool_status_via_sqlite() -> dict:
                     JOIN embeddings e ON em.id = e.id
                     JOIN segments s ON e.segment_id = s.id
                     JOIN collections c ON s.collection = c.id
-                    WHERE c.name = 'mempalace_drawers'
+                    WHERE c.name = ?
                       AND em.key = ?
                       AND em.string_value IS NOT NULL
                     GROUP BY em.string_value
                     """,
-                    (key,),
+                    (collection_name, key),
                 ):
                     target[value] = count
         finally:
@@ -625,6 +627,7 @@ def tool_search(
         n_results=limit,
         max_distance=dist,
         vector_disabled=_vector_disabled,
+        collection_name=_config.collection_name,
     )
     if _vector_disabled:
         result["vector_disabled"] = True
@@ -826,8 +829,8 @@ def tool_add_drawer(
 
     # Idempotency: if the deterministic ID already exists, return success as a no-op.
     try:
-        existing = col.get(ids=[drawer_id])
-        if existing and existing["ids"]:
+        existing = col.get(ids=[drawer_id], include=[])
+        if existing.ids:
             return {"success": True, "reason": "already_exists", "drawer_id": drawer_id}
     except Exception:
         pass
@@ -847,6 +850,12 @@ def tool_add_drawer(
                 }
             ],
         )
+        inserted = col.get(ids=[drawer_id], include=[])
+        if not inserted.ids:
+            raise RuntimeError(
+                "Drawer write was acknowledged but the new ID is not readable. "
+                "The palace index may be stale; run reconnect or repair."
+            )
         _metadata_cache = None
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
@@ -1340,6 +1349,30 @@ def tool_reconnect():
         _palace_db_mtime, \
         _vector_disabled, \
         _vector_disabled_reason
+    from . import palace as palace_module
+
+    close_errors = []
+    try:
+        palace_module._DEFAULT_BACKEND.close_palace(_config.palace_path)
+    except Exception as exc:
+        logger.debug("Failed to close shared palace backend during reconnect", exc_info=True)
+        close_errors.append(f"backend close_palace failed: {exc}")
+    try:
+        from chromadb.api.client import SharedSystemClient
+
+        clear_system_cache = getattr(SharedSystemClient, "clear_system_cache", None)
+        if callable(clear_system_cache):
+            clear_system_cache()
+        else:
+            logger.debug(
+                "SharedSystemClient.clear_system_cache is unavailable; skipping shared Chroma cache clear during reconnect"
+            )
+    except Exception as exc:
+        logger.debug(
+            "Failed to clear Chroma shared system cache during reconnect",
+            exc_info=True,
+        )
+        close_errors.append(f"shared Chroma cache clear failed: {exc}")
     _client_cache = None
     _collection_cache = None
     _palace_db_inode = 0
@@ -1352,11 +1385,23 @@ def tool_reconnect():
     try:
         col = _get_collection()
         if col is None:
-            return {
+            result = {
                 "success": False,
                 "message": "No palace found after reconnect",
                 "drawers": 0,
                 "vector_disabled": _vector_disabled,
+            }
+            if close_errors:
+                result["error"] = "; ".join(close_errors)
+            return result
+        if close_errors:
+            return {
+                "success": False,
+                "message": "Reconnect reopened the palace but failed to fully reset cached handles",
+                "drawers": col.count(),
+                "vector_disabled": _vector_disabled,
+                "vector_disabled_reason": _vector_disabled_reason,
+                "error": "; ".join(close_errors),
             }
         return {
             "success": True,

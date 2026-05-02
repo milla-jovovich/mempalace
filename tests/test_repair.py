@@ -28,6 +28,16 @@ def test_get_palace_path_fallback():
         assert ".mempalace" in result
 
 
+def test_get_collection_name_from_config():
+    from mempalace.config import get_configured_collection_name
+
+    get_configured_collection_name.cache_clear()
+    with patch("mempalace.config.MempalaceConfig") as mock_config_cls:
+        mock_config_cls.return_value.collection_name = "custom_drawers"
+        assert repair._get_collection_name() == "custom_drawers"
+    get_configured_collection_name.cache_clear()
+
+
 # ── _paginate_ids ─────────────────────────────────────────────────────
 
 
@@ -330,6 +340,21 @@ def test_check_extraction_safety_passes_when_counts_match(tmp_path):
         repair.check_extraction_safety(str(tmp_path), 500)
 
 
+def test_check_extraction_safety_uses_configured_collection(tmp_path):
+    with patch("mempalace.repair.sqlite_drawer_count", return_value=500) as count:
+        repair.check_extraction_safety(str(tmp_path), 500, collection_name="custom_drawers")
+    count.assert_called_once_with(str(tmp_path), "custom_drawers")
+
+
+def test_check_extraction_safety_default_uses_configured_collection(tmp_path):
+    with (
+        patch("mempalace.repair._get_collection_name", return_value="custom_drawers"),
+        patch("mempalace.repair.sqlite_drawer_count", return_value=500) as count,
+    ):
+        repair.check_extraction_safety(str(tmp_path), 500)
+    count.assert_called_once_with(str(tmp_path), "custom_drawers")
+
+
 def test_check_extraction_safety_passes_when_sqlite_unreadable_and_under_cap(tmp_path):
     """SQLite check fails (None) but extraction is well under the cap → safe."""
     with patch("mempalace.repair.sqlite_drawer_count", return_value=None):
@@ -382,6 +407,73 @@ def test_sqlite_drawer_count_returns_none_on_unreadable_schema(tmp_path):
     with open(sqlite_path, "wb") as f:
         f.write(b"not a sqlite file at all")
     assert repair.sqlite_drawer_count(str(tmp_path)) is None
+
+
+@patch("mempalace.repair.shutil")
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_default_uses_configured_collection(mock_backend_cls, mock_shutil, tmp_path):
+    sqlite_path = tmp_path / "chroma.sqlite3"
+    sqlite_path.write_text("fake")
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [{"wing": "a"}, {"wing": "b"}],
+    }
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
+    mock_new_col = MagicMock()
+    mock_new_col.count.return_value = 2
+    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
+    mock_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
+
+    with (
+        patch("mempalace.repair._get_collection_name", return_value="custom_drawers"),
+        patch("mempalace.repair.sqlite_drawer_count", return_value=2) as count,
+    ):
+        repair.rebuild_index(palace_path=str(tmp_path))
+
+    mock_backend.get_collection.assert_called_once_with(str(tmp_path), "custom_drawers")
+    count.assert_called_once_with(str(tmp_path), "custom_drawers")
+    assert mock_backend.create_collection.call_args_list == [
+        call(str(tmp_path), "custom_drawers__repair_tmp"),
+        call(str(tmp_path), "custom_drawers"),
+    ]
+    assert mock_backend.delete_collection.call_args_list == [
+        call(str(tmp_path), "custom_drawers__repair_tmp"),
+        call(str(tmp_path), "custom_drawers"),
+        call(str(tmp_path), "custom_drawers__repair_tmp"),
+    ]
+
+
+def test_status_default_uses_configured_drawer_collection(tmp_path):
+    with (
+        patch("mempalace.repair._get_collection_name", return_value="custom_drawers"),
+        patch("mempalace.repair.hnsw_capacity_status") as capacity_status,
+    ):
+        capacity_status.side_effect = [
+            {
+                "sqlite_count": 1,
+                "hnsw_count": 1,
+                "divergence": 0,
+                "diverged": False,
+                "status": "ok",
+                "message": "",
+            },
+            {
+                "sqlite_count": 0,
+                "hnsw_count": 0,
+                "divergence": 0,
+                "diverged": False,
+                "status": "ok",
+                "message": "",
+            },
+        ]
+        repair.status(palace_path=str(tmp_path))
+
+    assert capacity_status.call_args_list[0].args == (str(tmp_path), "custom_drawers")
+    assert capacity_status.call_args_list[1].args == (str(tmp_path), "mempalace_closets")
 
 
 @patch("mempalace.repair.shutil")
