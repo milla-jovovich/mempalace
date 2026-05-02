@@ -68,7 +68,7 @@ def tool_status():
     wings = {}
     rooms = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=_TAXONOMY_AGGREGATE_LIMIT)["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -119,13 +119,24 @@ Read AAAK naturally — expand codes mentally, treat *markers* as emotional cont
 When WRITING AAAK: use entity codes, mark emotions, keep structure tight."""
 
 
+# Aggregation hard cap. 2026-04-19: the prior `limit=10000` silently truncated
+# enumeration once the palace exceeded 10k drawers — ChromaDB's col.get() returns
+# rows in insertion order, so later-added wings (memory, claude-user-memory,
+# claude-project-memory, etc.) vanished from list_wings/list_rooms/get_taxonomy
+# even though search could still find them. At 18k+ drawers, 9 of 12 wings were
+# invisible. Raising the cap to 1M gives ~50x headroom vs the current 18k palace
+# while keeping the O(n) pull-all approach. When the palace grows past ~500k,
+# replace with a direct SQL aggregate on embedding_metadata for O(wings) memory.
+_TAXONOMY_AGGREGATE_LIMIT = 1_000_000
+
+
 def tool_list_wings():
     col = _get_collection()
     if not col:
         return _no_palace()
     wings = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=_TAXONOMY_AGGREGATE_LIMIT)["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             wings[w] = wings.get(w, 0) + 1
@@ -140,7 +151,7 @@ def tool_list_rooms(wing: str = None):
         return _no_palace()
     rooms = {}
     try:
-        kwargs = {"include": ["metadatas"], "limit": 10000}
+        kwargs = {"include": ["metadatas"], "limit": _TAXONOMY_AGGREGATE_LIMIT}
         if wing:
             kwargs["where"] = {"wing": wing}
         all_meta = col.get(**kwargs)["metadatas"]
@@ -158,7 +169,7 @@ def tool_get_taxonomy():
         return _no_palace()
     taxonomy = {}
     try:
-        all_meta = col.get(include=["metadatas"], limit=10000)["metadatas"]
+        all_meta = col.get(include=["metadatas"], limit=_TAXONOMY_AGGREGATE_LIMIT)["metadatas"]
         for m in all_meta:
             w = m.get("wing", "unknown")
             r = m.get("room", "unknown")
@@ -406,7 +417,7 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         results = col.get(
             where={"$and": [{"wing": wing}, {"room": "diary"}]},
             include=["documents", "metadatas"],
-            limit=10000,
+            limit=100000,
         )
 
         if not results["ids"]:

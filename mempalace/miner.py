@@ -653,16 +653,26 @@ def status(palace_path: str):
         print("  Run: mempalace init <dir> then mempalace mine <dir>")
         return
 
-    # Count by wing and room
-    r = col.get(limit=10000, include=["metadatas"])
-    metas = r["metadatas"]
+    total = col.count()
+
+    # Fetch all metadata in batches (ChromaDB defaults to limit=10000)
+    _BATCH = 5000
+    metas = []
+    offset = 0
+    while offset < total:
+        batch = col.get(limit=_BATCH, offset=offset, include=["metadatas"])
+        batch_metas = batch.get("metadatas", []) or []
+        if not batch_metas:
+            break
+        metas.extend(batch_metas)
+        offset += len(batch_metas)
 
     wing_rooms = defaultdict(lambda: defaultdict(int))
     for m in metas:
         wing_rooms[m.get("wing", "?")][m.get("room", "?")] += 1
 
     print(f"\n{'=' * 55}")
-    print(f"  MemPalace Status — {len(metas)} drawers")
+    print(f"  MemPalace Status — {total} drawers")
     print(f"{'=' * 55}\n")
     for wing, rooms in sorted(wing_rooms.items()):
         print(f"  WING: {wing}")
