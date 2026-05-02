@@ -476,9 +476,68 @@ class TestWriteTools:
 
         assert result1["success"] is True
         assert result2["success"] is True
-        assert (
-            result1["drawer_id"] != result2["drawer_id"]
-        ), "Documents with shared header but different content must have distinct drawer IDs"
+        assert result1["drawer_id"] != result2["drawer_id"], (
+            "Documents with shared header but different content must have distinct drawer IDs"
+        )
+
+    def test_add_drawer_with_tenant_id_persists_metadata(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        """tenant_id, when supplied, must round-trip into chromadb metadata."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer
+
+        result = tool_add_drawer(
+            wing="multitenant",
+            room="r",
+            content="tenant-A's notes about Rust lifetimes.",
+            tenant_id="tenant-a",
+        )
+        assert result["success"] is True
+        assert result["tenant_id"] == "tenant-a"
+        row = col.get(ids=[result["drawer_id"]], include=["metadatas"])
+        assert row["metadatas"][0]["tenant_id"] == "tenant-a"
+
+    def test_add_drawer_tenant_isolation_breaks_cross_tenant_dedup(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        """Two tenants writing the SAME (wing, room, content) must get distinct drawers."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer
+
+        content = "Shared topic — both tenants happen to file the same observation."
+        a = tool_add_drawer(wing="w", room="r", content=content, tenant_id="tenant-a")
+        b = tool_add_drawer(wing="w", room="r", content=content, tenant_id="tenant-b")
+        assert a["success"] is True
+        assert b["success"] is True
+        assert a["drawer_id"] != b["drawer_id"], (
+            "Tenant-A's drawer and tenant-B's drawer must not collide; the "
+            "drawer-id hash must be salted with tenant_id."
+        )
+
+    def test_add_drawer_no_tenant_keeps_legacy_hash(self, monkeypatch, config, palace_path, kg):
+        """Calls without tenant_id must keep the pre-3.3.4 deterministic id (bit-compat)."""
+        import hashlib
+
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_add_drawer
+
+        wing, room = "legacy", "shape"
+        content = "Pre-3.3.4 callers must continue to get the un-salted drawer id."
+        expected = (
+            f"drawer_{wing}_{room}_"
+            + hashlib.sha256((wing + room + content).encode()).hexdigest()[:24]
+        )
+        result = tool_add_drawer(wing=wing, room=room, content=content)
+        assert result["success"] is True
+        assert result["drawer_id"] == expected
+        assert "tenant_id" not in result
 
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
