@@ -4,6 +4,8 @@ MemPalace configuration system.
 Priority: env vars > config file (~/.mempalace/config.json) > defaults
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
