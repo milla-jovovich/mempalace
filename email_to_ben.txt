@@ -1,0 +1,18 @@
+To: ben@anthropic.com
+Subject: Request to Merge PR #1050 — Git Miner Feature
+
+Hi Ben,
+
+Hope you're doing well! I wanted to kindly ask if you'd have a chance to review and merge PR #1050 when you get a chance:
+
+PR #1050: https://github.com/MemPalace/mempalace/pull/1050
+
+It adds a new `--mode git` to the miner that mines git repos commit-by-commit, branch-by-branch using GitPython. Usage:
+
+  mempalace mine /path/to/repo --mode git              # all branches
+  mempalace mine /path/to/repo --mode git --branch develop  # specific branch
+
+Thanks for considering it!
+
+Best,
+Daniel
