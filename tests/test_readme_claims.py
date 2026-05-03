@@ -454,10 +454,13 @@ class TestVersionBadge:
         code_version = version_match.group(1)
 
         readme = _readme()
-        # Find the version badge URL
+        # Find the version badge URL. shields.io requires ``+`` to be URL-encoded
+        # as ``%2B`` in path segments, so decode before comparing to ``__version__``.
         badge_match = re.search(r"shields\.io/badge/version-([^-]+)-", readme)
         assert badge_match, "Could not find version badge URL in README"
-        badge_version = badge_match.group(1)
+        from urllib.parse import unquote
+
+        badge_version = unquote(badge_match.group(1))
 
         assert badge_version == code_version, (
             f"README badge says {badge_version} but version.py says {code_version}. "
