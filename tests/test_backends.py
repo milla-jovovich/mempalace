@@ -730,9 +730,9 @@ def test_make_client_quarantines_only_on_first_call_per_palace(tmp_path, monkeyp
     ChromaBackend.make_client(palace_path)
     ChromaBackend.make_client(palace_path)
 
-    assert calls == [
-        palace_path
-    ], "quarantine_stale_hnsw should fire once per palace per process, not on every reconnect"
+    assert calls == [palace_path], (
+        "quarantine_stale_hnsw should fire once per palace per process, not on every reconnect"
+    )
 
 
 def test_make_client_quarantines_each_palace_independently(tmp_path, monkeypatch):
