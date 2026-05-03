@@ -114,16 +114,22 @@ The `stop_hook_active` flag prevents infinite loops: block once → AI saves →
 ```
 Context window getting full → Claude Code fires PreCompact
                                         ↓
-                                Find transcript (from input or session_id lookup)
-                                        ↓
-                                Auto-mine transcript → palace (tool output captured)
-                                        ↓
-                                {"decision": "block", "reason": "save tool output verbatim..."}
+                                Hook may block (configurable)
                                         ↓
                                 AI saves everything
                                         ↓
                                 Compaction proceeds
 ```
+
+#### PreCompact behavior modes
+
+`mempal_precompact_hook.sh` supports `MEMPAL_PRECOMPACT_MODE`:
+
+- `block_once` — block once per session (default for non-Claude harnesses)
+- `block` — always block
+- `proceed` — never block (default when the harness is detected as Claude/Claude Code)
+
+The Claude default is `proceed` because some Claude setups don’t automatically retry compaction after a block, which can prevent compaction from happening at all.
 
 No counting needed — compaction always warrants a save. The auto-mine captures raw tool output before the AI gets a chance to summarize it away.
 
@@ -155,27 +161,4 @@ export MEMPAL_PYTHON="/usr/bin/python3"                   # system Python is fin
 export MEMPAL_PYTHON="$HOME/.venvs/mempalace/bin/python"  # or your venv
 ```
 
-Resolution priority: `$MEMPAL_PYTHON` (if set and executable) → `$(command -v python3)` → bare `python3`. The interpreter only needs `json` and `sys` from the standard library — `mempalace` itself does not need to be installed in it.
-
-Note: the `mempalace mine` auto-ingest runs via the `mempalace` CLI, so that command also needs to be on the hook's `PATH`. Installing with `pipx install mempalace` or `uv tool install mempalace` puts it on a stable global location; otherwise extend the hook environment's `PATH` to include your venv's `bin/`.
-
-## Backfill Past Conversations
-
-The hooks only capture conversations going forward. To mine **past** Claude Code sessions into your palace, run a one-time backfill:
-
-```bash
-mempalace mine ~/.claude/projects/ --mode convos
-```
-
-This scans all JSONL transcripts from previous sessions and files them into the `conversations` wing. On a typical developer machine with months of history, this can yield 50K–200K drawers.
-
-For Codex CLI sessions:
-```bash
-mempalace mine ~/.codex/sessions/ --mode convos
-```
-
-This only needs to be done once — after that, the hooks auto-mine each session as you go.
-
-## Cost
-
-**Zero extra tokens.** The hooks notify the AI that saves happened in the background — the AI doesn't need to write anything in the chat. All filing is handled automatically. Previous versions asked the AI to write diary entries and drawer content in the chat window, which cost ~$1/session in retransmitted tokens.
+Resolution priority: `$MEMPAL_PYTHON` (if set and executable) → `python3` from the hook's `PATH`.

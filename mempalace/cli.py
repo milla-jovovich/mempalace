@@ -1153,7 +1153,7 @@ def main():
     p_hook_run.add_argument(
         "--harness",
         required=True,
-        choices=["claude-code", "codex"],
+        choices=["claude-code", "codex", "opencode", "gemini", "qwen", "deepseek"],
         help="Harness type (determines stdin JSON format)",
     )
 

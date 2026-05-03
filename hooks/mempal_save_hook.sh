@@ -21,14 +21,6 @@
 #       }]
 #     }]
 #   }
-#
-# For Codex CLI, add to .codex/hooks.json:
-#
-#   "Stop": [{
-#     "type": "command",
-#     "command": "/absolute/path/to/mempal_save_hook.sh",
-#     "timeout": 30
-#   }]
 
 set -euo pipefail
 
@@ -40,5 +32,15 @@ export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$MEMPALACE_SRC"
 MEMPAL_PYTHON="${MEMPAL_PYTHON:-$HOME/.mempalace/venv/bin/python}"
 [ -x "$MEMPAL_PYTHON" ] || MEMPAL_PYTHON="python3"
 
-# Delegate to Python implementation
-exec "$MEMPAL_PYTHON" -m mempalace.hooks stop claude-code
+INPUT=$(cat)
+HARNESS="claude-code"
+PARENT_CMD=$(ps -p $PPID -o comm= 2>/dev/null | tr -d ' ' || echo "")
+case "$PARENT_CMD" in
+  codex|Codex) HARNESS="codex" ;;
+  gemini|Gemini|gemini-cli) HARNESS="gemini" ;;
+  qwen|Qwen|qwen-code) HARNESS="qwen" ;;
+  opencode|Opencode) HARNESS="opencode" ;;
+  *) ;;
+esac
+
+printf '%s' "$INPUT" | "$MEMPAL_PYTHON" -m mempalace hook run --hook stop --harness "$HARNESS"
