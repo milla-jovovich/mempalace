@@ -19,9 +19,12 @@ Usage:
 """
 
 import errno
+import gc
 import os
 import shutil
 import sqlite3
+import sys
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -155,6 +158,30 @@ def confirm_destructive_action(
     return True
 
 
+def _atomic_swap_move(src: str, dst: str) -> None:
+    """Rename ``src`` to ``dst`` atomically, retrying on Windows mmap handles.
+
+    ChromaDB mmap's HNSW segment files (``data_level0.bin``); on Windows those
+    handles can linger briefly after Python drops the client reference. We use
+    ``os.rename`` (atomic — no copytree fallback that can leave partial state)
+    and retry a few times on Windows if the rename fails with a lingering
+    handle error.
+    """
+    if sys.platform != "win32":
+        os.rename(src, dst)
+        return
+    last_err = None
+    for _ in range(10):
+        try:
+            os.rename(src, dst)
+            return
+        except OSError as err:
+            last_err = err
+            gc.collect()
+            time.sleep(0.2)
+    raise last_err if last_err is not None else RuntimeError("rename failed")
+
+
 def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
     """Migrate a palace to the currently installed ChromaDB version."""
     from .backends.chroma import ChromaBackend
@@ -178,6 +205,12 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
     target_version = ChromaBackend.backend_version()
     print(f"  Source:    ChromaDB {source_version}")
     print(f"  Target:    ChromaDB {target_version}")
+
+    # Capture expected schema from current ChromaDB version
+    from .schema import create_reference_schema, validate_and_patch
+
+    print("  Capturing reference schema...")
+    reference_schema = create_reference_schema()
 
     # Try reading with current chromadb first
     try:
@@ -250,7 +283,28 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
     # Verify before swapping
     final_count = col.count()
     del col
+    fresh_backend.close()
     del fresh_backend
+
+    # Validate schema before swapping
+    temp_db = os.path.join(temp_palace, "chroma.sqlite3")
+    print("  Validating migrated schema...")
+    valid, actions = validate_and_patch(temp_db, reference=reference_schema)
+    for action in actions:
+        print(f"    {action}")
+    if not valid:
+        print("\n  ERROR: Schema validation failed. Aborting.")
+        print(f"  Temp palace preserved at: {temp_palace}")
+        return False
+
+    # Drop chromadb's singleton client cache so mmap'd segment files are
+    # released. Clearing ChromaBackend's own dict above isn't enough —
+    # chromadb holds its own module-level strong refs, which on Windows
+    # keep data_level0.bin open and block the rename below.
+    from chromadb.api.client import SharedSystemClient
+
+    SharedSystemClient.clear_system_cache()
+    gc.collect()
 
     # Swap: rename old palace aside, then move new one into place.
     # This avoids a window where both old and new are missing.
@@ -260,10 +314,10 @@ def migrate(palace_path: str, dry_run: bool = False, confirm: bool = False):
         shutil.rmtree(stale_path)
     os.replace(palace_path, stale_path)
     try:
-        os.replace(temp_palace, palace_path)
+        _atomic_swap_move(temp_palace, palace_path)
     except OSError as e:
         # EXDEV = temp lives on a different filesystem; fall back to copy+delete.
-        # Anything else is a real error — don't mask it with shutil.move.
+        # Anything else is a real error — don't mask it.
         if getattr(e, "errno", None) != errno.EXDEV:
             _restore_stale_palace(palace_path, stale_path)
             raise
