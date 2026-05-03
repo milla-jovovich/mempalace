@@ -10,6 +10,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Optional
 
 
 # ── Input validation ──────────────────────────────────────────────────────────
@@ -102,7 +103,7 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 _ISO_DATE_RE = re.compile(r"^\d{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?)?$")
 
 
-def validate_iso_date(value: str | None, param_name: str = "date") -> str | None:
+def validate_iso_date(value: Optional[str], param_name: str = "date") -> Optional[str]:
     """Validate an optional ISO-8601 date string (YYYY, YYYY-MM, or YYYY-MM-DD).
 
     Returns the value unchanged if valid (or ``None``).  Raises ``ValueError``
