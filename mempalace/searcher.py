@@ -16,6 +16,7 @@ import re
 import sqlite3
 from pathlib import Path
 
+from ._runtime import using_local_chroma
 from .palace import get_closets_collection, get_collection
 
 # Closet pointer line format: "topic|entities|→drawer_id_a,drawer_id_b"
@@ -374,6 +375,44 @@ def search(query: str, palace_path: str, wing: str = None, room: str = None, n_r
     print()
 
 
+def _bm25_only(
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    max_candidates: int = 500,
+    _include_internal: bool = False,
+) -> dict:
+    """BM25-only candidate search dispatched on the active backend.
+
+    Local chromadb: route through the sqlite + FTS5 fast path
+    (:func:`_bm25_only_via_sqlite`). Remote chromadb (HTTP mode):
+    route through the public API (:func:`_bm25_only_via_api`) so we
+    never need direct filesystem access. Both paths produce the same
+    result shape.
+    """
+    if using_local_chroma():
+        return _bm25_only_via_sqlite(
+            query,
+            palace_path,
+            wing=wing,
+            room=room,
+            n_results=n_results,
+            max_candidates=max_candidates,
+            _include_internal=_include_internal,
+        )
+    return _bm25_only_via_api(
+        query,
+        palace_path,
+        wing=wing,
+        room=room,
+        n_results=n_results,
+        max_candidates=max_candidates,
+        _include_internal=_include_internal,
+    )
+
+
 def _bm25_only_via_sqlite(
     query: str,
     palace_path: str,
@@ -569,6 +608,162 @@ def _bm25_only_via_sqlite(
     }
 
 
+def _bm25_only_via_api(
+    query: str,
+    palace_path: str,
+    wing: str = None,
+    room: str = None,
+    n_results: int = 5,
+    max_candidates: int = 500,
+    _include_internal: bool = False,
+) -> dict:
+    """BM25-only candidate selection using the chromadb public API.
+
+    Drop-in counterpart to :func:`_bm25_only_via_sqlite` for HTTP-mode
+    palaces. The implementation is constrained by what chromadb exposes
+    over HTTP: the FTS5 ``embedding_fulltext_search`` table is internal
+    to the local store and cannot be queried remotely. Instead, we use
+    the documented ``where_document={"$contains": token}`` filter plus
+    a small union over query tokens, then BM25-rank locally.
+
+    Tokens shorter than 3 characters are dropped to mirror the FTS5
+    trigram-tokenizer behaviour of the sqlite path; this also keeps the
+    union from exploding on stop words. When no usable token survives,
+    we fall back to the ``max_candidates`` most-recent drawers via
+    ``collection.get(limit=...)`` so callers always get *something*.
+
+    Wing/room filters are pushed down via the chromadb ``where`` clause
+    so the server filters before paginating, matching the sqlite path's
+    semantics.
+    """
+    try:
+        col = get_collection(palace_path, create=False)
+    except Exception as e:
+        return {
+            "error": "No palace found",
+            "hint": str(e),
+        }
+
+    tokens = [t for t in _tokenize(query) if len(t) >= 3]
+
+    where_meta: dict = {}
+    if wing:
+        where_meta["wing"] = wing
+    if room:
+        where_meta["room"] = room
+
+    # Union per-token contains hits with a budget so total candidates stay
+    # under ``max_candidates``. Order is preserved from chromadb (most
+    # recent first when no scoring is available).
+    seen_ids: set[str] = set()
+    candidate_docs: dict[str, dict] = {}
+    per_token_limit = max(1, max_candidates // max(1, len(tokens) or 1))
+
+    def _ingest(get_result):
+        ids_ = getattr(get_result, "ids", None) or get_result.get("ids", [])
+        docs_ = getattr(get_result, "documents", None) or get_result.get("documents", [])
+        metas_ = getattr(get_result, "metadatas", None) or get_result.get("metadatas", [])
+        for i, drawer_id in enumerate(ids_):
+            if drawer_id in seen_ids:
+                continue
+            seen_ids.add(drawer_id)
+            candidate_docs[drawer_id] = {
+                "_id": drawer_id,
+                "text": docs_[i] if i < len(docs_) else "",
+                "metadata": metas_[i] if i < len(metas_) else {},
+            }
+            if len(seen_ids) >= max_candidates:
+                return True
+        return False
+
+    try:
+        if tokens:
+            for tok in tokens:
+                kwargs: dict = {
+                    "where_document": {"$contains": tok},
+                    "limit": per_token_limit,
+                    "include": ["documents", "metadatas"],
+                }
+                if where_meta:
+                    kwargs["where"] = where_meta if len(where_meta) == 1 else {
+                        "$and": [{k: v} for k, v in where_meta.items()]
+                    }
+                try:
+                    if _ingest(col.get(**kwargs)):
+                        break
+                except Exception:
+                    logger.debug(
+                        "where_document $contains failed for token=%r", tok, exc_info=True
+                    )
+
+        if not candidate_docs:
+            # Recency fallback: pull the most recent drawers and BM25 those.
+            kwargs = {
+                "limit": max_candidates,
+                "include": ["documents", "metadatas"],
+            }
+            if where_meta:
+                kwargs["where"] = where_meta if len(where_meta) == 1 else {
+                    "$and": [{k: v} for k, v in where_meta.items()]
+                }
+            _ingest(col.get(**kwargs))
+    except Exception as e:
+        return {"error": f"chromadb HTTP call failed: {e}"}
+
+    if not candidate_docs:
+        return {
+            "query": query,
+            "filters": {"wing": wing, "room": room},
+            "total_before_filter": 0,
+            "results": [],
+            "fallback": "bm25_only_via_api",
+        }
+
+    # Reshape into the same dict layout the sqlite path emits so downstream
+    # code (``_merge_bm25_union_candidates``) doesn't have to special-case.
+    candidates: list[dict] = []
+    for drawer in candidate_docs.values():
+        meta = drawer["metadata"] or {}
+        full_source = meta.get("source_file", "") or ""
+        candidates.append(
+            {
+                "text": drawer["text"] or "",
+                "wing": meta.get("wing", "unknown"),
+                "room": meta.get("room", "unknown"),
+                "source_file": Path(full_source).name if full_source else "?",
+                "created_at": meta.get("filed_at", "unknown"),
+                "similarity": None,
+                "distance": None,
+                "matched_via": "bm25_api",
+                "_source_file_full": full_source,
+                "_chunk_index": meta.get("chunk_index"),
+            }
+        )
+
+    docs = [c["text"] for c in candidates]
+    bm25_raw = _bm25_scores(query, docs)
+    max_bm25 = max(bm25_raw) if bm25_raw else 0.0
+    for c, raw in zip(candidates, bm25_raw):
+        c["bm25_score"] = round(raw, 3)
+        c["_score"] = (raw / max_bm25) if max_bm25 > 0 else 0.0
+    candidates.sort(key=lambda c: c["_score"], reverse=True)
+    hits = candidates[:n_results]
+    for h in hits:
+        h.pop("_score", None)
+        if not _include_internal:
+            h.pop("_source_file_full", None)
+            h.pop("_chunk_index", None)
+
+    return {
+        "query": query,
+        "filters": {"wing": wing, "room": room},
+        "total_before_filter": len(candidates),
+        "results": hits,
+        "fallback": "bm25_only_via_api",
+        "fallback_reason": "vector_search_disabled",
+    }
+
+
 def _merge_bm25_union_candidates(
     hits: list,
     query: str,
@@ -604,7 +799,7 @@ def _merge_bm25_union_candidates(
         return
 
     try:
-        bm25_extra = _bm25_only_via_sqlite(
+        bm25_extra = _bm25_only(
             query,
             palace_path,
             wing=wing,
@@ -733,7 +928,7 @@ def search_memories(
     _validate_candidate_strategy(candidate_strategy)
 
     if vector_disabled:
-        return _bm25_only_via_sqlite(
+        return _bm25_only(
             query,
             palace_path,
             wing=wing,

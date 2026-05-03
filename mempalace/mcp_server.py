@@ -138,8 +138,21 @@ def _refresh_vector_disabled_flag() -> None:
     (first open or palace replacement). Cheap — pure sqlite + pickle
     read, no chromadb interaction. Never raises: a probe that crashes
     would defeat the point.
+
+    No-op in HTTP mode: the HNSW segment files live on the chromadb
+    server, not the client. Server-side health is the chromadb operator's
+    responsibility; from the client we either reach the server (queries
+    succeed) or we don't (network error).
     """
     global _vector_disabled, _vector_disabled_reason, _vector_capacity_status
+    from ._runtime import using_local_chroma
+
+    if not using_local_chroma():
+        # Reset any leftover divergence state from a previous local-mode run.
+        _vector_disabled = False
+        _vector_disabled_reason = ""
+        _vector_capacity_status = None
+        return
     try:
         info = hnsw_capacity_status(_config.palace_path, "mempalace_drawers")
     except Exception:
@@ -217,13 +230,17 @@ def _wal_log(operation: str, params: dict, result: dict = None):
 
 
 def _get_client():
-    """Return a ChromaDB PersistentClient, reconnecting if the database changed on disk.
+    """Return a ChromaDB client, reconnecting if the database changed on disk.
 
-    Detects palace rebuilds (repair/nuke/purge) by checking the inode of
-    chroma.sqlite3.  A full rebuild replaces the file, changing the inode.
-    Also detects external writes (scripts, CLI) via mtime changes — the
-    inode check alone misses in-place modifications that invalidate the
-    in-memory HNSW index.
+    In local mode (default): builds a ``PersistentClient`` and detects
+    palace rebuilds via inode/mtime checks on ``chroma.sqlite3``. A full
+    rebuild replaces the file, changing the inode; external writes via
+    scripts or CLI bump mtime.
+
+    In HTTP mode (``MEMPALACE_BACKEND=chroma_http`` or
+    ``MEMPALACE_CHROMA_URL`` set): builds an ``HttpClient`` once and
+    returns the cached instance. There is no local file to inode-watch,
+    and the chromadb server owns its own state.
 
     Note: FAT/exFAT may return 0 for st_ino — the ``current_inode != 0``
     guard skips reconnect detection on those filesystems (safe fallback).
@@ -235,6 +252,21 @@ def _get_client():
         _palace_db_mtime, \
         _metadata_cache, \
         _metadata_cache_time
+
+    from ._runtime import using_local_chroma
+
+    if not using_local_chroma():
+        # HTTP mode: one cached HttpClient per process. No filesystem
+        # state to watch.
+        if _client_cache is None:
+            from .backends.chroma_http import HttpChromaBackend
+
+            _client_cache = HttpChromaBackend.make_client()
+            _collection_cache = None
+            _metadata_cache = None
+            _metadata_cache_time = 0
+        return _client_cache
+
     db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
     try:
         st = os.stat(db_path)

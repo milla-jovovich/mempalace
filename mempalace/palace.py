@@ -9,6 +9,7 @@ import hashlib
 import os
 import re
 
+from ._runtime import using_local_chroma
 from .backends.chroma import ChromaBackend
 
 SKIP_DIRS = {
@@ -38,6 +39,23 @@ SKIP_DIRS = {
 }
 
 _DEFAULT_BACKEND = ChromaBackend()
+_HTTP_BACKEND = None  # lazily constructed when HTTP mode is detected
+
+
+def _resolve_backend():
+    """Pick the active backend based on env-var configuration.
+
+    Cached per backend type so the chromadb client (and its connection
+    pool, in HTTP mode) is shared across calls.
+    """
+    global _HTTP_BACKEND
+    if using_local_chroma():
+        return _DEFAULT_BACKEND
+    if _HTTP_BACKEND is None:
+        from .backends.chroma_http import HttpChromaBackend
+
+        _HTTP_BACKEND = HttpChromaBackend()
+    return _HTTP_BACKEND
 
 # Schema version for drawer normalization. Bump when the normalization
 # pipeline changes in a way that existing drawers should be rebuilt to pick up
@@ -55,8 +73,14 @@ def get_collection(
     collection_name: str = "mempalace_drawers",
     create: bool = True,
 ):
-    """Get the palace collection through the backend layer."""
-    return _DEFAULT_BACKEND.get_collection(
+    """Get the palace collection through the active backend layer.
+
+    Active backend is local :class:`ChromaBackend` by default; switches
+    to :class:`HttpChromaBackend` when ``MEMPALACE_BACKEND=chroma_http``
+    or any ``MEMPALACE_CHROMA_*`` env var is set.
+    """
+    backend = _resolve_backend()
+    return backend.get_collection(
         palace_path,
         collection_name=collection_name,
         create=create,
