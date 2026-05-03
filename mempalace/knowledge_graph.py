@@ -390,6 +390,34 @@ class KnowledgeGraph:
             "relationship_types": predicates,
         }
 
+    def get_summary(self, limit: int = 20) -> str:
+        """Return a compact text summary of the most recent N current facts."""
+        with self._lock:
+            conn = self._conn()
+            rows = conn.execute(
+                """
+                SELECT s.name as sub_name, t.predicate, o.name as obj_name, t.valid_from
+                FROM triples t
+                JOIN entities s ON t.subject = s.id
+                JOIN entities o ON t.object = o.id
+                WHERE t.valid_to IS NULL
+                ORDER BY t.extracted_at DESC
+                LIMIT ?
+            """,
+                (limit,),
+            ).fetchall()
+
+        if not rows:
+            return "No current knowledge graph facts."
+
+        lines = ["## KG — CURRENT RELATIONSHIPS"]
+        for r in rows:
+            line = f"  - {r['sub_name']} \u2192 {r['predicate']} \u2192 {r['obj_name']}"
+            if r["valid_from"]:
+                line += f" (since {r['valid_from']})"
+            lines.append(line)
+        return "\n".join(lines)
+
     # ── Seed from known facts ─────────────────────────────────────────────
 
     def seed_from_entity_facts(self, entity_facts: dict):
