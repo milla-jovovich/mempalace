@@ -4,13 +4,6 @@
 # Claude Code "PreCompact" hook. Fires RIGHT BEFORE the conversation
 # gets compressed to free up context window space.
 #
-# This is the safety net. When compaction happens, the AI loses detailed
-# context about what was discussed. This hook forces one final save of
-# EVERYTHING before that happens.
-#
-# Unlike the save hook (which triggers every N exchanges), this ALWAYS
-# blocks — because compaction is always worth saving before.
-#
 # === INSTALL ===
 # Add to .claude/settings.local.json:
 #
@@ -23,14 +16,6 @@
 #       }]
 #     }]
 #   }
-#
-# For Codex CLI, add to .codex/hooks.json:
-#
-#   "PreCompact": [{
-#     "type": "command",
-#     "command": "/absolute/path/to/mempal_precompact_hook.sh",
-#     "timeout": 30
-#   }]
 
 set -euo pipefail
 
@@ -42,5 +27,15 @@ export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$MEMPALACE_SRC"
 MEMPAL_PYTHON="${MEMPAL_PYTHON:-$HOME/.mempalace/venv/bin/python}"
 [ -x "$MEMPAL_PYTHON" ] || MEMPAL_PYTHON="python3"
 
-# Delegate to Python implementation
-exec "$MEMPAL_PYTHON" -m mempalace.hooks precompact claude-code
+INPUT=$(cat)
+HARNESS="claude-code"
+PARENT_CMD=$(ps -p $PPID -o comm= 2>/dev/null | tr -d ' ' || echo "")
+case "$PARENT_CMD" in
+  codex|Codex) HARNESS="codex" ;;
+  gemini|Gemini|gemini-cli) HARNESS="gemini" ;;
+  qwen|Qwen|qwen-code) HARNESS="qwen" ;;
+  opencode|Opencode) HARNESS="opencode" ;;
+  *) ;;
+esac
+
+printf '%s' "$INPUT" | "$MEMPAL_PYTHON" -m mempalace hook run --hook precompact --harness "$HARNESS"
