@@ -396,6 +396,31 @@ def _bm25_only_via_sqlite(
             "hint": "Run: mempalace init <dir> && mempalace mine <dir>",
         }
 
+    def _metadata_filter_sql(row_id_expr: str) -> tuple[str, list[str]]:
+        clauses = []
+        params = []
+        for key, value in (("wing", wing), ("room", room)):
+            if not value:
+                continue
+            clauses.append(
+                f"""
+                AND EXISTS (
+                    SELECT 1
+                    FROM embedding_metadata mf
+                    WHERE mf.id = {row_id_expr}
+                      AND mf.key = ?
+                      AND COALESCE(
+                        mf.string_value,
+                        CAST(mf.int_value AS TEXT),
+                        CAST(mf.float_value AS TEXT),
+                        CAST(mf.bool_value AS TEXT)
+                      ) = ?
+                )
+                """
+            )
+            params.extend([key, value])
+        return "".join(clauses), params
+
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     except sqlite3.Error as e:
@@ -408,15 +433,17 @@ def _bm25_only_via_sqlite(
         candidate_ids: list[int] = []
         if tokens:
             fts_query = " OR ".join(tokens)
+            filter_sql, filter_params = _metadata_filter_sql("embedding_fulltext_search.rowid")
             try:
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT rowid
                     FROM embedding_fulltext_search
                     WHERE embedding_fulltext_search MATCH ?
+                    {filter_sql}
                     LIMIT ?
                     """,
-                    (fts_query, max_candidates),
+                    (fts_query, *filter_params, max_candidates),
                 ).fetchall()
                 candidate_ids = [r[0] for r in rows]
             except sqlite3.Error:
@@ -434,17 +461,19 @@ def _bm25_only_via_sqlite(
             # fall back to ordering by primary-key id and finally to an
             # empty result rather than letting search raise.
             try:
+                filter_sql, filter_params = _metadata_filter_sql("e.id")
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT e.id
                     FROM embeddings e
                     JOIN segments s ON e.segment_id = s.id
                     JOIN collections c ON s.collection = c.id
                     WHERE c.name = 'mempalace_drawers'
+                    {filter_sql}
                     ORDER BY e.created_at DESC
                     LIMIT ?
                     """,
-                    (max_candidates,),
+                    (*filter_params, max_candidates),
                 ).fetchall()
                 candidate_ids = [r[0] for r in rows]
             except sqlite3.Error:
@@ -453,17 +482,19 @@ def _bm25_only_via_sqlite(
                     exc_info=True,
                 )
                 try:
+                    filter_sql, filter_params = _metadata_filter_sql("e.id")
                     rows = conn.execute(
-                        """
+                        f"""
                         SELECT e.id
                         FROM embeddings e
                         JOIN segments s ON e.segment_id = s.id
                         JOIN collections c ON s.collection = c.id
                         WHERE c.name = 'mempalace_drawers'
+                        {filter_sql}
                         ORDER BY e.id DESC
                         LIMIT ?
                         """,
-                        (max_candidates,),
+                        (*filter_params, max_candidates),
                     ).fetchall()
                     candidate_ids = [r[0] for r in rows]
                 except sqlite3.Error:
