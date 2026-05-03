@@ -53,6 +53,16 @@ READABLE_EXTENSIONS = {
     ".csv",
     ".sql",
     ".toml",
+    ".swift",
+    ".m",
+    ".h",
+    ".mm",
+    ".plist",
+    ".entitlements",
+    ".strings",
+    ".stringsdict",
+    ".xcstrings",
+    ".xcconfig",
 }
 
 SKIP_FILENAMES = {
