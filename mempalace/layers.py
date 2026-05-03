@@ -24,6 +24,7 @@ from collections import defaultdict
 from .config import MempalaceConfig
 from .palace import get_collection as _get_collection
 from .searcher import _first_or_empty, build_where_filter
+from .knowledge_graph import KnowledgeGraph
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +176,26 @@ class Layer1:
                 total_len += len(entry_line)
 
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Layer KG — Knowledge Graph Summary
+# ---------------------------------------------------------------------------
+
+
+class LayerKG:
+    """
+    Compact summary of current KG facts.
+    """
+
+    def __init__(self, palace_path: str = None):
+        # KG path is typically a sibling to the palace dir
+        cfg = MempalaceConfig()
+        db_path = os.path.join(palace_path or cfg.palace_path, "knowledge_graph.sqlite3")
+        self.kg = KnowledgeGraph(db_path=db_path)
+
+    def generate(self, limit: int = 15) -> str:
+        return self.kg.get_summary(limit=limit)
 
 
 # ---------------------------------------------------------------------------
@@ -371,12 +392,13 @@ class MemoryStack:
 
         self.l0 = Layer0(self.identity_path)
         self.l1 = Layer1(self.palace_path)
+        self.lkg = LayerKG(self.palace_path)
         self.l2 = Layer2(self.palace_path)
         self.l3 = Layer3(self.palace_path)
 
     def wake_up(self, wing: str = None) -> str:
         """
-        Generate wake-up text: L0 (identity) + L1 (essential story).
+        Generate wake-up text: L0 (identity) + L1 (essential story) + KG summary.
         Typically ~600-900 tokens. Inject into system prompt or first message.
 
         Args:
@@ -392,6 +414,10 @@ class MemoryStack:
         if wing:
             self.l1.wing = wing
         parts.append(self.l1.generate())
+        parts.append("")
+
+        # KG Summary
+        parts.append(self.lkg.generate())
 
         return "\n".join(parts)
 
@@ -414,6 +440,9 @@ class MemoryStack:
             },
             "L1_essential": {
                 "description": "Auto-generated from top palace drawers",
+            },
+            "LKG_knowledge_graph": {
+                "description": "Compact summary of current KG relationships",
             },
             "L2_on_demand": {
                 "description": "Wing/room filtered retrieval",
@@ -445,7 +474,7 @@ if __name__ == "__main__":
         print("layers.py — 4-Layer Memory Stack")
         print()
         print("Usage:")
-        print("  python layers.py wake-up              Show L0 + L1")
+        print("  python layers.py wake-up              Show L0 + L1 + KG")
         print("  python layers.py wake-up --wing=NAME  Wake-up for a specific project")
         print("  python layers.py recall --wing=NAME   On-demand L2 retrieval")
         print("  python layers.py search <query>       Deep L3 search")
