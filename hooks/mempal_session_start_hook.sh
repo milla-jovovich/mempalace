@@ -1,22 +1,6 @@
 #!/bin/bash
-# MEMPALACE PRE-COMPACT HOOK — Emergency save before compaction
-#
-# Claude Code "PreCompact" hook. Fires RIGHT BEFORE the conversation
-# gets compressed to free up context window space.
-#
-# === INSTALL ===
-# Add to .claude/settings.local.json:
-#
-#   "hooks": {
-#     "PreCompact": [{
-#       "hooks": [{
-#         "type": "command",
-#         "command": "/absolute/path/to/mempal_precompact_hook.sh",
-#         "timeout": 30
-#       }]
-#     }]
-#   }
-
+# MEMPALACE SESSION-START HOOK
+# Loads palace context (wake-up + cwd-matched wing) and a protocol nudge into the session.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,5 +21,4 @@ case "$PARENT_CMD" in
   opencode|Opencode) HARNESS="opencode" ;;
   *) ;;
 esac
-
-printf '%s' "$INPUT" | "$MEMPAL_PYTHON" -m mempalace hook run --hook precompact --harness "$HARNESS"
+printf '%s' "$INPUT" | "$MEMPAL_PYTHON" -m mempalace hook run --hook session-start --harness "$HARNESS"
