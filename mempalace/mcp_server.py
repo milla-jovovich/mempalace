@@ -349,20 +349,30 @@ def _get_session_recovery_collection(create=False):
     Stop-hook checkpoint diary entries route here instead of the main
     ``mempalace_drawers`` collection so they don't dominate
     ``mempalace_search`` results. Mirrors :func:`_get_collection`'s
-    shape (same client cache, same ``_pin_hnsw_threads`` retrofit).
+    shape (same client cache, same ``_pin_hnsw_threads`` retrofit,
+    same get-then-create / embedding_function= plumbing per #1262 /
+    #1289 / #1303).
     """
     global _recovery_collection_cache
     try:
         client = _get_client()
         if create:
-            raw = client.get_or_create_collection(
-                _SESSION_RECOVERY_COLLECTION,
-                metadata={"hnsw:space": "cosine", "hnsw:num_threads": 1},
-            )
+            ef = ChromaBackend._resolve_embedding_function()
+            ef_kwargs = {"embedding_function": ef} if ef is not None else {}
+            try:
+                raw = client.get_collection(_SESSION_RECOVERY_COLLECTION, **ef_kwargs)
+            except _ChromaNotFoundError:
+                raw = client.create_collection(
+                    _SESSION_RECOVERY_COLLECTION,
+                    metadata={"hnsw:space": "cosine", "hnsw:num_threads": 1},
+                    **ef_kwargs,
+                )
             _pin_hnsw_threads(raw)
             _recovery_collection_cache = ChromaCollection(raw)
         elif _recovery_collection_cache is None:
-            raw = client.get_collection(_SESSION_RECOVERY_COLLECTION)
+            ef = ChromaBackend._resolve_embedding_function()
+            ef_kwargs = {"embedding_function": ef} if ef is not None else {}
+            raw = client.get_collection(_SESSION_RECOVERY_COLLECTION, **ef_kwargs)
             _pin_hnsw_threads(raw)
             _recovery_collection_cache = ChromaCollection(raw)
         return _recovery_collection_cache
