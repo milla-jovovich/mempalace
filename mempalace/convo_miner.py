@@ -282,16 +282,22 @@ def detect_convo_room(content: str) -> str:
 def scan_convos(convo_dir: str, include_subagents: bool = False) -> list:
     """Find all potential conversation files.
 
-    By default, ``subagents/`` directories are skipped: Claude Code records
-    Explore/Plan/Grep subagent transcripts there, and on a typical workspace
-    they outweigh main session files ~80:1 (#1217). Pass
-    ``include_subagents=True`` to mine them anyway.
+    By default, directories named ``subagents`` are skipped: Claude Code
+    records Explore/Plan/Grep subagent transcripts there, and on typical
+    workspaces they outnumber main session files by one to two orders of
+    magnitude. Pass ``include_subagents=True`` to mine them anyway.
+
+    The match is case-insensitive on the directory name only (``subagents``
+    or ``Subagents``), so directories like ``mysubagents`` or
+    ``subagentsbackup`` are not affected.
     """
     convo_path = Path(convo_dir).expanduser().resolve()
     files = []
     for root, dirs, filenames in os.walk(convo_path):
         dirs[:] = [
-            d for d in dirs if d not in SKIP_DIRS and (include_subagents or d != "subagents")
+            d
+            for d in dirs
+            if d not in SKIP_DIRS and (include_subagents or d.lower() != "subagents")
         ]
         for filename in filenames:
             if filename.endswith(".meta.json"):

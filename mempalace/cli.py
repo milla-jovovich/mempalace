@@ -504,7 +504,7 @@ def cmd_mine(args):
             limit=args.limit,
             dry_run=args.dry_run,
             extract_mode=args.extract,
-            include_subagents=getattr(args, "include_subagents", False),
+            include_subagents=args.include_subagents,
         )
     else:
         from .miner import mine
@@ -1105,11 +1105,12 @@ def main():
     p_mine.add_argument(
         "--include-subagents",
         action="store_true",
+        default=False,
         help=(
             "Also mine Claude Code subagent transcripts (subagents/ dirs). "
-            "Excluded by default — these are short ephemeral exchanges "
+            "Excluded by default: these are short ephemeral exchanges "
             "(Explore/Plan/Grep agents) already summarized in the parent "
-            "session, and on a typical workspace outnumber main sessions ~80:1."
+            "session, and on typical workspaces they dominate file counts."
         ),
     )
 
