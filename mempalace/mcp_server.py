@@ -47,7 +47,7 @@ import json  # noqa: E402
 import logging  # noqa: E402
 import hashlib  # noqa: E402
 import time  # noqa: E402
-from datetime import datetime  # noqa: E402
+from datetime import date, datetime  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Optional  # noqa: E402
 
@@ -1071,9 +1071,26 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
 
 
 def tool_kg_add(
-    subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
+    subject: str,
+    predicate: str,
+    object: str,
+    valid_from: str = None,
+    valid_to: str = None,
+    source_closet: str = None,
+    source_file: str = None,
+    source_drawer_id: str = None,
 ):
-    """Add a relationship to the knowledge graph."""
+    """Add a relationship to the knowledge graph.
+
+    All temporal and provenance fields are optional. ``valid_to`` lets callers
+    backfill historical facts with a known end date in a single call (instead
+    of a separate ``kg_invalidate``). ``source_file`` and ``source_drawer_id``
+    are RFC 002 §5.5 provenance fields populated by adapters / bulk importers.
+
+    TODO(#1283): once the ISO-8601 validation PR lands, wire ``validate_iso_date``
+    over ``valid_from`` / ``valid_to`` here so malformed dates fail fast at the
+    MCP boundary instead of silently producing empty query results.
+    """
     try:
         subject = sanitize_kg_value(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
@@ -1089,17 +1106,35 @@ def tool_kg_add(
             "predicate": predicate,
             "object": object,
             "valid_from": valid_from,
+            "valid_to": valid_to,
             "source_closet": source_closet,
+            "source_file": source_file,
+            "source_drawer_id": source_drawer_id,
         },
     )
     triple_id = _kg.add_triple(
-        subject, predicate, object, valid_from=valid_from, source_closet=source_closet
+        subject,
+        predicate,
+        object,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        source_closet=source_closet,
+        source_file=source_file,
+        source_drawer_id=source_drawer_id,
     )
     return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {object}"}
 
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
-    """Mark a fact as no longer true (set end date)."""
+    """Mark a fact as no longer true (set end date).
+
+    Returns the actual ``ended`` date that was stored — when the caller omits
+    ``ended``, the underlying graph stamps ``date.today()``, and the response
+    reflects that resolved value (instead of the literal string ``"today"``)
+    so callers can verify what was persisted.
+
+    TODO(#1283): apply ``validate_iso_date`` to ``ended`` once that PR lands.
+    """
     try:
         subject = sanitize_kg_value(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
@@ -1107,15 +1142,21 @@ def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = N
         ended = validate_iso_date(ended, "ended")
     except ValueError as e:
         return {"success": False, "error": str(e)}
+    resolved_ended = ended or date.today().isoformat()
     _wal_log(
         "kg_invalidate",
-        {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
+        {
+            "subject": subject,
+            "predicate": predicate,
+            "object": object,
+            "ended": resolved_ended,
+        },
     )
-    _kg.invalidate(subject, predicate, object, ended=ended)
+    _kg.invalidate(subject, predicate, object, ended=resolved_ended)
     return {
         "success": True,
         "fact": f"{subject} → {predicate} → {object}",
-        "ended": ended or "today",
+        "ended": resolved_ended,
     }
 
 
@@ -1488,7 +1529,7 @@ TOOLS = {
         "handler": tool_kg_query,
     },
     "mempalace_kg_add": {
-        "description": "Add a fact to the knowledge graph. Subject → predicate → object with optional time window. E.g. ('Max', 'started_school', 'Year 7', valid_from='2026-09-01').",
+        "description": "Add a fact to the knowledge graph. Subject → predicate → object with optional time window. E.g. ('Max', 'started_school', 'Year 7', valid_from='2026-09-01'). Pass valid_to to backfill an already-ended historical fact in a single call.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1502,9 +1543,21 @@ TOOLS = {
                     "type": "string",
                     "description": "When this became true (YYYY-MM-DD, optional)",
                 },
+                "valid_to": {
+                    "type": "string",
+                    "description": "When this stopped being true (YYYY-MM-DD, optional). Use for backfilling already-ended historical facts.",
+                },
                 "source_closet": {
                     "type": "string",
                     "description": "Closet ID where this fact appears (optional)",
+                },
+                "source_file": {
+                    "type": "string",
+                    "description": "Source file path the fact was extracted from (optional)",
+                },
+                "source_drawer_id": {
+                    "type": "string",
+                    "description": "Drawer ID the fact was extracted from (optional, RFC 002 §5.5 provenance)",
                 },
             },
             "required": ["subject", "predicate", "object"],

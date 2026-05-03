@@ -689,6 +689,90 @@ class TestKGTools:
             ended="2026-03-01",
         )
         assert result["success"] is True
+        # Regression #1314: response must echo the actual ended date,
+        # not silently drop it and return the literal string "today".
+        assert result["ended"] == "2026-03-01"
+
+    def test_kg_add_forwards_valid_to(self, monkeypatch, config, palace_path, kg):
+        """Regression #1314 case 1: valid_to must round-trip through kg_add."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_kg_add
+
+        result = tool_kg_add(
+            subject="_test_temporal",
+            predicate="had_value",
+            object="probe",
+            valid_from="2026-01-01",
+            valid_to="2026-04-28",
+        )
+        assert result["success"] is True
+
+        facts = kg.query_entity("_test_temporal")
+        assert len(facts) == 1
+        assert facts[0]["valid_from"] == "2026-01-01"
+        assert facts[0]["valid_to"] == "2026-04-28"
+        # An already-ended fact must not be reported as still current.
+        assert facts[0]["current"] is False
+
+    def test_kg_add_forwards_source_provenance(self, monkeypatch, config, palace_path, kg):
+        """Regression #1314 case 3: source_file / source_drawer_id reach storage."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace.mcp_server import tool_kg_add
+
+        result = tool_kg_add(
+            subject="operating-verb",
+            predicate="candidate",
+            object="husbandry",
+            valid_from="2026-04-28",
+            source_closet="closet-42",
+            source_file="docs/decisions.md",
+            source_drawer_id="drawer_abc123",
+        )
+        assert result["success"] is True
+
+        triple_id = result["triple_id"]
+        # Read raw row to verify all provenance columns persisted.
+        with kg._lock:
+            row = (
+                kg._conn()
+                .execute(
+                    "SELECT source_closet, source_file, source_drawer_id FROM triples WHERE id = ?",
+                    (triple_id,),
+                )
+                .fetchone()
+            )
+        assert row is not None
+        assert row["source_closet"] == "closet-42"
+        assert row["source_file"] == "docs/decisions.md"
+        assert row["source_drawer_id"] == "drawer_abc123"
+
+    def test_kg_invalidate_returns_actual_ended_date(
+        self, monkeypatch, config, palace_path, seeded_kg
+    ):
+        """Regression #1314 case 2: response reports the resolved date, not 'today'."""
+        from datetime import date as _date
+
+        _patch_mcp_server(monkeypatch, config, seeded_kg)
+        from mempalace.mcp_server import tool_kg_invalidate
+
+        # Caller-supplied date round-trips into the response.
+        explicit = tool_kg_invalidate(
+            subject="Max",
+            predicate="does",
+            object="swimming",
+            ended="2026-04-28",
+        )
+        assert explicit["ended"] == "2026-04-28"
+
+        # Caller-omitted date resolves to today's ISO date — never the
+        # literal string "today" the buggy implementation used to return.
+        implicit = tool_kg_invalidate(
+            subject="Max",
+            predicate="loves",
+            object="Chess",
+        )
+        assert implicit["ended"] != "today"
+        assert implicit["ended"] == _date.today().isoformat()
 
     def test_kg_timeline(self, monkeypatch, config, palace_path, seeded_kg):
         _patch_mcp_server(monkeypatch, config, seeded_kg)
@@ -1018,9 +1102,9 @@ class TestCacheInvalidation:
         all_calls = captured["get"] + captured["create"]
         assert all_calls, "expected get_collection or create_collection to be called"
         for kwargs in all_calls:
-            assert (
-                "embedding_function" in kwargs
-            ), f"missing embedding_function= in chromadb call: {kwargs}"
+            assert "embedding_function" in kwargs, (
+                f"missing embedding_function= in chromadb call: {kwargs}"
+            )
             assert kwargs["embedding_function"] is not None
 
         # Same expectation on the create=False (cache-miss) reopen path.
