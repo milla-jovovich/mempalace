@@ -805,7 +805,8 @@ class TestDiaryTools:
             topic="architecture",
         )
         assert w["success"] is True
-        assert w["agent"] == "TestAgent"
+        # agent_name is normalized to lowercase on write (#1243).
+        assert w["agent"] == "testagent"
 
         r = tool_diary_read(agent_name="TestAgent")
         assert r["total"] == 1
@@ -896,6 +897,50 @@ class TestDiaryTools:
         r_scoped = tool_diary_read(agent_name="TestAgent", wing="wing_someproject")
         assert r_scoped["total"] == 1
         assert r_scoped["entries"][0]["content"] == "project-wing entry"
+
+    def test_diary_read_case_insensitive_agent(self, monkeypatch, config, palace_path, kg):
+        """Regression for #1243: diary_read must be case-insensitive over
+        agent_name. Writing as "Claude" and reading as "claude" (or vice
+        versa) must surface the same entries — sanitize_name preserved
+        case, which silently dropped reads when the agent name's casing
+        differed from the write."""
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_diary_read, tool_diary_write
+
+        # Write as "Claude" → read as "claude" should match.
+        w1 = tool_diary_write(
+            agent_name="Claude",
+            entry="entry written as Claude",
+            topic="general",
+        )
+        assert w1["success"]
+
+        r1 = tool_diary_read(agent_name="claude")
+        assert "entries" in r1, r1
+        contents1 = {e["content"] for e in r1["entries"]}
+        assert "entry written as Claude" in contents1
+
+        # Write as "CLAUDE" → read as "Claude" should also match the
+        # same agent. After normalization both writes target the same
+        # lowercase agent identity, so both entries are returned.
+        w2 = tool_diary_write(
+            agent_name="CLAUDE",
+            entry="entry written as CLAUDE",
+            topic="general",
+        )
+        assert w2["success"]
+
+        r2 = tool_diary_read(agent_name="Claude")
+        contents2 = {e["content"] for e in r2["entries"]}
+        assert "entry written as Claude" in contents2
+        assert "entry written as CLAUDE" in contents2
+
+        # The stored agent metadata is the lowercase form, and the
+        # default wing is derived from that lowercase form too.
+        assert w1["agent"] == "claude"
+        assert w2["agent"] == "claude"
 
 
 # ── Cache Invalidation (inode/mtime) ──────────────────────────────────

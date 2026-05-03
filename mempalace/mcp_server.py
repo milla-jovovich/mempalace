@@ -1186,9 +1186,13 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
 
     This is the agent's personal journal — observations, thoughts,
     what it worked on, what it noticed, what it thinks matters.
+
+    Note: ``agent_name`` is normalized to lowercase before storage so
+    that diary reads are case-insensitive (see #1243). "Claude",
+    "claude", and "CLAUDE" all resolve to the same agent.
     """
     try:
-        agent_name = sanitize_name(agent_name, "agent_name")
+        agent_name = sanitize_name(agent_name, "agent_name").lower()
         entry = sanitize_content(entry)
         topic = sanitize_name(topic, "topic")
     except ValueError as e:
@@ -1197,7 +1201,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
     if wing:
         wing = sanitize_name(wing)
     else:
-        wing = f"wing_{agent_name.lower().replace(' ', '_')}"
+        wing = f"wing_{agent_name.replace(' ', '_')}"
     room = "diary"
     col = _get_collection(create=True)
     if not col:
@@ -1262,9 +1266,14 @@ def tool_diary_read(agent_name: str, last_n: int = 10, wing: str = ""):
     written to. Diary writes from hooks land in project-derived wings
     (``wing_<project>``), so requiring a specific wing on read would
     silo those entries from agent-initiated reads.
+
+    Note: ``agent_name`` is normalized to lowercase before filtering so
+    that reads are case-insensitive (see #1243). Entries written under
+    pre-fix mixed-case agent names will not match the lowercase filter;
+    use ``mempalace repair`` to migrate legacy data if needed.
     """
     try:
-        agent_name = sanitize_name(agent_name, "agent_name")
+        agent_name = sanitize_name(agent_name, "agent_name").lower()
         if wing:
             wing = sanitize_name(wing)
     except ValueError as e:
