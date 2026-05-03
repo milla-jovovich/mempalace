@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mempalace.cli import (
+    _load_drawer_ids,
+    cmd_delete,
     cmd_compress,
     cmd_hook,
     cmd_init,
@@ -98,6 +100,337 @@ def test_cmd_hook_calls_run_hook():
     with patch("mempalace.hooks_cli.run_hook") as mock_run:
         cmd_hook(args)
         mock_run.assert_called_once_with(hook_name="session-start", harness="claude-code")
+
+
+# ── cmd_delete ────────────────────────────────────────────────────────
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_drawer_by_id(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="drawer",
+        id="drawer-1",
+        wing=None,
+        room=None,
+        all=False,
+        dry_run=False,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.return_value = {"ids": ["drawer-1"]}
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        cmd_delete(args)
+    mock_col.delete.assert_called_once_with(ids=["drawer-1"])
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_drawer_requires_all_for_multiple(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="drawer",
+        id=None,
+        wing="wing-a",
+        room=None,
+        all=False,
+        dry_run=False,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [
+        {"ids": ["a", "b"]},
+        {"ids": []},
+    ]
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        with pytest.raises(SystemExit):
+            cmd_delete(args)
+    # ensure we fetched the IDs but did not delete
+    mock_col.delete.assert_not_called()
+
+
+def test_load_drawer_ids_uses_valid_chroma_include():
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [
+        {"ids": ["a", "b"]},
+        {"ids": []},
+    ]
+
+    ids = _load_drawer_ids(mock_col, {"wing": "wing-a"})
+
+    assert ids == ["a", "b"]
+    mock_col.get.assert_any_call(where={"wing": "wing-a"}, include=[], limit=500, offset=0)
+
+
+def test_load_drawer_ids_falls_back_without_offset():
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [
+        Exception("offset not supported"),
+        {"ids": ["a", "b"]},
+        {"ids": ["a", "b"]},
+    ]
+
+    ids = _load_drawer_ids(mock_col, {"wing": "wing-a"})
+
+    assert ids == ["a", "b"]
+    assert mock_col.get.call_args_list[0].kwargs == {
+        "where": {"wing": "wing-a"},
+        "include": [],
+        "limit": 500,
+        "offset": 0,
+    }
+    assert mock_col.get.call_args_list[1].kwargs == {
+        "where": {"wing": "wing-a"},
+        "include": [],
+    }
+    assert "limit" not in mock_col.get.call_args_list[1].kwargs
+
+
+def test_load_drawer_ids_non_offset_error_raises():
+    mock_col = MagicMock()
+    mock_col.get.side_effect = Exception("db timeout")
+
+    with pytest.raises(RuntimeError, match="failed to list drawer IDs"):
+        _load_drawer_ids(mock_col, {"wing": "wing-a"})
+
+    assert mock_col.get.call_count == 1
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_room_dry_run(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="room",
+        name="general",
+        wing="wing-a",
+        all=False,
+        dry_run=True,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.delete.return_value = None
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}), patch(
+        "mempalace.cli._load_drawer_ids", return_value=["a", "b", "c"]
+    ) as mock_load_ids:
+        cmd_delete(args)
+    out = capsys.readouterr().out
+    assert "Would delete" in out
+    mock_load_ids.assert_called_once_with(mock_col, {"room": "general", "wing": "wing-a"})
+    mock_col.delete.assert_not_called()
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_room_auto_scopes_single_wing(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="room",
+        name="general",
+        wing=None,
+        all=False,
+        dry_run=True,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with (
+        patch.dict("sys.modules", {"chromadb": mock_chromadb}),
+        patch("mempalace.cli._load_room_wings", return_value=["wing-a"]),
+        patch("mempalace.cli._load_drawer_ids", return_value=["a", "b"] ) as mock_load_ids,
+    ):
+        cmd_delete(args)
+    mock_load_ids.assert_called_once_with(mock_col, {"room": "general", "wing": "wing-a"})
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_room_prompts_for_wing(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="room",
+        name="general",
+        wing=None,
+        all=False,
+        dry_run=True,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with (
+        patch.dict("sys.modules", {"chromadb": mock_chromadb}),
+        patch("mempalace.cli._load_room_wings", return_value=["wing-a", "wing-b"]),
+        patch("builtins.input", return_value="2") as mock_input,
+        patch("mempalace.cli._load_drawer_ids", return_value=["a"] ) as mock_load_ids,
+        patch.object(sys.stdin, "isatty", return_value=True),
+    ):
+        cmd_delete(args)
+    mock_input.assert_called_once()
+    mock_load_ids.assert_called_once_with(mock_col, {"room": "general", "wing": "wing-b"})
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_room_noninteractive_multi_wing_fails(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="room",
+        name="general",
+        wing=None,
+        all=False,
+        dry_run=False,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with (
+        patch.dict("sys.modules", {"chromadb": mock_chromadb}),
+        patch("mempalace.cli._load_room_wings", return_value=["wing-a", "wing-b"]),
+        patch.object(sys.stdin, "isatty", return_value=False),
+        patch("builtins.input") as mock_input,
+    ):
+        with pytest.raises(SystemExit):
+            cmd_delete(args)
+    out = capsys.readouterr().out
+    assert "matches multiple wings" in out
+    mock_input.assert_not_called()
+    mock_col.delete.assert_not_called()
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_handles_id_load_failure(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="drawer",
+        id=None,
+        wing=None,
+        room=None,
+        all=False,
+        dry_run=False,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [Exception("offset fail"), Exception("no offset")]
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with patch.dict("sys.modules", {"chromadb": mock_chromadb}):
+        with pytest.raises(SystemExit):
+            cmd_delete(args)
+    out = capsys.readouterr().out
+    assert "Error loading drawer IDs" in out
+    mock_col.delete.assert_not_called()
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_wing_all_requires_phrase_confirmation(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="wing",
+        name=None,
+        all=True,
+        dry_run=False,
+        yes=False,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [
+        {"ids": ["a", "b"]},
+        {"ids": []},
+    ]
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with (
+        patch.dict("sys.modules", {"chromadb": mock_chromadb}),
+        patch.object(sys.stdin, "isatty", return_value=True),
+        patch("builtins.input", return_value="delete all") as mock_input,
+    ):
+        cmd_delete(args)
+    mock_input.assert_called_once()
+    mock_col.delete.assert_called_once_with(ids=["a", "b"])
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_wing_named_all_does_not_require_global_phrase(mock_config_cls):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="wing",
+        name="wing-a",
+        all=True,
+        dry_run=False,
+        yes=True,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.side_effect = [
+        {"ids": ["a"]},
+        {"ids": []},
+    ]
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with (
+        patch.dict("sys.modules", {"chromadb": mock_chromadb}),
+        patch("builtins.input") as mock_input,
+    ):
+        cmd_delete(args)
+    mock_input.assert_not_called()
+    mock_col.delete.assert_called_once_with(ids=["a"])
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_delete_wing_all_noninteractive_fails(mock_config_cls, capsys):
+    mock_config_cls.return_value.palace_path = "/fake/palace"
+    args = argparse.Namespace(
+        palace=None,
+        delete_target="wing",
+        name=None,
+        all=True,
+        dry_run=False,
+        yes=True,
+    )
+    mock_chromadb = MagicMock()
+    mock_col = MagicMock()
+    mock_col.get.return_value = {"ids": ["a"], "metadatas": []}
+    mock_client = MagicMock()
+    mock_client.get_collection.return_value = mock_col
+    mock_chromadb.PersistentClient.return_value = mock_client
+    with (
+        patch.dict("sys.modules", {"chromadb": mock_chromadb}),
+        patch.object(sys.stdin, "isatty", return_value=False),
+    ):
+        with pytest.raises(SystemExit):
+            cmd_delete(args)
+    out = capsys.readouterr().out
+    assert "Refusing to delete" in out
+    mock_col.delete.assert_not_called()
 
 
 # ── cmd_init ───────────────────────────────────────────────────────────
@@ -648,6 +981,15 @@ def test_main_split_dispatches():
     with (
         patch("sys.argv", ["mempalace", "split", "/chats"]),
         patch("mempalace.cli.cmd_split") as mock_cmd,
+    ):
+        main()
+        mock_cmd.assert_called_once()
+
+
+def test_main_delete_dispatches():
+    with (
+        patch("sys.argv", ["mempalace", "delete", "drawer", "--id", "abc"]),
+        patch("mempalace.cli.cmd_delete") as mock_cmd,
     ):
         main()
         mock_cmd.assert_called_once()
