@@ -189,6 +189,83 @@ class MempalaceConfig:
         """ChromaDB collection name."""
         return self._file_config.get("collection_name", DEFAULT_COLLECTION_NAME)
 
+    # ── Stateless deployment (3.3.4+stateless.1) ─────────────────────────
+
+    @property
+    def database_url(self):
+        """SQLAlchemy URL for the knowledge graph backend.
+
+        When set, ``KnowledgeGraph(...)`` selects the Postgres backend
+        instead of the local SQLite one. Read from
+        ``MEMPALACE_DATABASE_URL``.
+
+        Example: ``postgresql+psycopg://user:pw@db.svc:5432/mempalace``.
+        Returns ``None`` (and the KG falls back to SQLite) when unset.
+        """
+        return os.environ.get("MEMPALACE_DATABASE_URL", "").strip() or None
+
+    @property
+    def chroma_url(self):
+        """Full URL of the remote ChromaDB server.
+
+        When set, the ChromaDB backend switches from ``PersistentClient``
+        to ``HttpClient``. Read from ``MEMPALACE_CHROMA_URL``.
+
+        Example: ``https://chroma.svc:8000``.
+        ``None`` (and the local backend is used) when unset.
+        """
+        return os.environ.get("MEMPALACE_CHROMA_URL", "").strip() or None
+
+    @property
+    def chroma_host(self):
+        """Hostname of the remote ChromaDB server.
+
+        Used when ``chroma_url`` is not set; the active backend then
+        falls back to the split ``host``/``port``/``ssl`` form.
+        """
+        return os.environ.get("MEMPALACE_CHROMA_HOST", "").strip() or None
+
+    @property
+    def chroma_port(self):
+        """Port of the remote ChromaDB server. ``None`` when unset."""
+        raw = os.environ.get("MEMPALACE_CHROMA_PORT", "").strip()
+        return int(raw) if raw else None
+
+    @property
+    def chroma_ssl(self):
+        """Whether to use HTTPS when connecting to chromadb. Default ``False``."""
+        return os.environ.get("MEMPALACE_CHROMA_SSL", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+            "y",
+        }
+
+    @property
+    def chroma_tenant(self):
+        """ChromaDB tenant for multi-tenant servers. ``None`` when unset."""
+        return os.environ.get("MEMPALACE_CHROMA_TENANT", "").strip() or None
+
+    @property
+    def chroma_database(self):
+        """ChromaDB database (logical namespace). ``None`` when unset."""
+        return os.environ.get("MEMPALACE_CHROMA_DATABASE", "").strip() or None
+
+    @property
+    def backend_mode(self):
+        """``"local"`` or ``"http"`` based on env-driven backend selection.
+
+        Mirrors :func:`mempalace._runtime.resolve_backend_mode` and exists
+        on :class:`MempalaceConfig` so a single object can answer both
+        "where is my palace?" (palace_path / database_url / chroma_url)
+        and "which backend will I use?" without callers cross-importing
+        :mod:`mempalace._runtime`.
+        """
+        from ._runtime import resolve_backend_mode
+
+        return resolve_backend_mode()
+
     @property
     def people_map(self):
         """Mapping of name variants to canonical names."""

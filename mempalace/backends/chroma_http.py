@@ -295,6 +295,46 @@ class HttpChromaBackend(BaseBackend):
         self._client = None
         self._closed = True
 
+    # ── Legacy helpers used by ``mempalace.repair.rebuild_index`` ────────
+
+    def delete_collection(self, palace_path: str, collection_name: str) -> None:
+        """Delete ``collection_name`` for the palace at ``palace_path``.
+
+        ``palace_path`` is used only to derive the namespace prefix (HTTP
+        mode does not touch the local filesystem). Drop-in counterpart to
+        :meth:`ChromaBackend.delete_collection` so the repair pipeline
+        can call either backend uniformly.
+        """
+        ref = PalaceRef(id=palace_path, local_path=palace_path)
+        qualified = self._qualify(ref, collection_name)
+        self._get_client().delete_collection(qualified)
+
+    def create_collection(
+        self,
+        palace_path: str,
+        collection_name: str,
+        hnsw_space: str = "cosine",
+    ) -> ChromaCollection:
+        """Create (not get-or-create) ``collection_name`` with HNSW settings.
+
+        Mirrors :meth:`ChromaBackend.create_collection` over the HTTP
+        client so ``rebuild_index`` works against either backend.
+        """
+        ref = PalaceRef(id=palace_path, local_path=palace_path)
+        qualified = self._qualify(ref, collection_name)
+        ef = self._resolve_embedding_function()
+        ef_kwargs = {"embedding_function": ef} if ef is not None else {}
+        collection = self._get_client().create_collection(
+            qualified,
+            metadata={
+                "hnsw:space": hnsw_space,
+                "hnsw:num_threads": 1,
+                **_HNSW_BLOAT_GUARD,
+            },
+            **ef_kwargs,
+        )
+        return ChromaCollection(collection)
+
     def health(self, palace: Optional[PalaceRef] = None) -> HealthStatus:
         """Probe the chromadb server. Returns unhealthy on connection errors."""
         if self._closed:
