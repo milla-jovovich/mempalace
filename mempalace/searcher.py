@@ -432,6 +432,7 @@ def _bm25_only_via_sqlite(
     n_results: int = 5,
     max_candidates: int = 500,
     _include_internal: bool = False,
+    stop_words: frozenset = frozenset(),
 ) -> dict:
     """BM25-only search reading drawers directly from chroma.sqlite3.
 
@@ -593,7 +594,7 @@ def _bm25_only_via_sqlite(
 
     # Local BM25 over the candidate set.
     docs = [c["text"] for c in candidates]
-    bm25_raw = _bm25_scores(query, docs)
+    bm25_raw = _bm25_scores(query, docs, stop_words=stop_words)
     max_bm25 = max(bm25_raw) if bm25_raw else 0.0
     for c, raw in zip(candidates, bm25_raw):
         c["bm25_score"] = round(raw, 3)
@@ -627,6 +628,7 @@ def _merge_bm25_union_candidates(
     room: str,
     n_results: int,
     max_distance: float = 0.0,
+    stop_words: frozenset = frozenset(),
 ) -> None:
     """Append top-K BM25-only candidates from sqlite into ``hits`` in place.
 
@@ -661,6 +663,7 @@ def _merge_bm25_union_candidates(
             room=room,
             n_results=n_results * 3,
             _include_internal=True,
+            stop_words=stop_words,
         ).get("results", [])
     except Exception:
         logger.debug("candidate_strategy=union: BM25 fetch failed", exc_info=True)
@@ -719,6 +722,7 @@ def _apply_candidate_strategy(
     room: str,
     n_results: int,
     max_distance: float = 0.0,
+    stop_words: frozenset = frozenset(),
 ) -> None:
     """Dispatch to the registered merger for ``strategy``.
 
@@ -727,7 +731,16 @@ def _apply_candidate_strategy(
     """
     merger = _CANDIDATE_MERGERS[strategy]
     if merger is not None:
-        merger(hits, query, palace_path, wing, room, n_results, max_distance=max_distance)
+        merger(
+            hits,
+            query,
+            palace_path,
+            wing,
+            room,
+            n_results,
+            max_distance=max_distance,
+            stop_words=stop_words,
+        )
 
 
 def search_memories(
@@ -789,6 +802,11 @@ def search_memories(
     # the BM25-only fallback below.
     _validate_candidate_strategy(candidate_strategy)
 
+    # Resolve stop words once up-front so every BM25 site (the vector path's
+    # `_hybrid_rank`, the `vector_disabled` fallback, and the union-merge
+    # candidate gather) tokenizes against the same locale.
+    stop_words = _resolve_stop_words(lang)
+
     if vector_disabled:
         return _bm25_only_via_sqlite(
             query,
@@ -796,9 +814,8 @@ def search_memories(
             wing=wing,
             room=room,
             n_results=n_results,
+            stop_words=stop_words,
         )
-
-    stop_words = _resolve_stop_words(lang)
 
     try:
         drawers_col = get_collection(palace_path, create=False)
@@ -981,6 +998,7 @@ def search_memories(
         room,
         n_results,
         max_distance=max_distance,
+        stop_words=stop_words,
     )
 
     # BM25 hybrid re-rank within the final candidate set, then trim back
