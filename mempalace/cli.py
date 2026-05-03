@@ -902,6 +902,15 @@ def cmd_compress(args):
     # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
+            # Drop and recreate the compressed collection on each run.
+            # Repeated upserts in chromadb 1.5.8 cause the HNSW link_lists.bin
+            # sparse file to grow without GC; rebuilding the index from scratch
+            # each compress run keeps disk size proportional to entry count.
+            # See #1092 for the broader concurrent-writer report.
+            try:
+                backend.delete_collection(palace_path, "mempalace_compressed")
+            except Exception:
+                pass
             comp_col = backend.get_or_create_collection(palace_path, "mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
