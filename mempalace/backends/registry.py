@@ -178,12 +178,15 @@ def resolve_backend_for_palace(
 
 
 def _register_builtins() -> None:
-    """Register chroma as the in-tree default."""
+    """Register chroma (local) and chroma_http (remote) as in-tree defaults."""
     from .chroma import ChromaBackend
+    from .chroma_http import HttpChromaBackend
 
     # Use setdefault semantics so a caller that pre-registered for tests wins.
     if "chroma" not in _registry:
         _registry["chroma"] = ChromaBackend
+    if "chroma_http" not in _registry:
+        _registry["chroma_http"] = HttpChromaBackend
 
 
 _register_builtins()

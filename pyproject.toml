@@ -110,6 +110,7 @@ markers = [
     "slow: tests that take more than 30 seconds",
     "stress: destructive scale tests (100K+ drawers)",
     "postgres: tests that require a real Postgres (skipped without testcontainers)",
+    "chroma_http: tests that require a running ChromaDB HTTP server (skipped without docker)",
 ]
 
 [tool.coverage.run]
