@@ -473,6 +473,32 @@ def test_chroma_backend_create_collection_sets_hnsw_bloat_guard(tmp_path):
     assert col.metadata.get("hnsw:sync_threshold") == 50_000
 
 
+def test_get_collection_create_true_is_idempotent(tmp_path):
+    """Calling get_collection(create=True) twice on the same name must not crash.
+
+    ChromaDB 1.5.x's Rust bindings SIGSEGV when get_or_create_collection is
+    called with metadata that differs from the stored collection metadata. The
+    fix splits the call into get_collection -> fallback create_collection so the
+    metadata-comparison codepath in chromadb_rust_bindings is never reached for
+    existing collections. Regression guard for issue #1089.
+    """
+    palace = str(tmp_path / "palace")
+    backend = ChromaBackend()
+    backend.get_collection(palace, collection_name="mempalace_drawers", create=True)
+    col2 = backend.get_collection(palace, collection_name="mempalace_drawers", create=True)
+    assert isinstance(col2, ChromaCollection)
+
+
+def test_get_collection_create_true_preserves_existing_metadata(tmp_path):
+    """Existing collection metadata is not overwritten when reopened with create=True."""
+    palace = str(tmp_path / "palace")
+    backend = ChromaBackend()
+    backend.get_collection(palace, collection_name="mempalace_drawers", create=True)
+    col = backend.get_collection(palace, collection_name="mempalace_drawers", create=True)
+    assert col._collection.metadata["hnsw:space"] == "cosine"
+    assert col._collection.metadata.get("hnsw:batch_size") == 50_000
+
+
 def test_fix_blob_seq_ids_converts_blobs_to_integers(tmp_path):
     """Simulate a ChromaDB 0.6.x database with BLOB seq_ids and verify repair."""
     db_path = tmp_path / "chroma.sqlite3"
@@ -837,6 +863,67 @@ def test_make_client_quarantines_each_palace_independently(tmp_path, monkeypatch
     ChromaBackend.make_client(palace_b)  # already gated
 
     assert calls == [palace_a, palace_b]
+
+
+# ── _client() cold-start gate (#1121, #1132, #1263) ──────────────────────
+
+
+def test_client_quarantines_corrupt_segment_on_first_open(tmp_path, monkeypatch):
+    """The instance ``_client()`` path must run ``quarantine_stale_hnsw``
+    on first open, mirroring the ``make_client()`` static helper. Before
+    PR #1173's wiring was extended here, CLI mining / search / repair /
+    status all skipped the quarantine pass and would SIGSEGV on a stale
+    HNSW segment (#1121, #1132, #1263)."""
+    now = 1_700_000_000.0
+    palace, seg = _make_palace_with_segment(
+        tmp_path,
+        hnsw_mtime=now - 7200,
+        sqlite_mtime=now,
+        meta_bytes=_CORRUPT_META,
+    )
+
+    monkeypatch.setattr(ChromaBackend, "_quarantined_paths", set())
+
+    backend = ChromaBackend()
+    try:
+        backend._client(str(palace))
+    finally:
+        backend.close()
+
+    assert not seg.exists(), "_client() should have quarantined the corrupt segment"
+    drift_dirs = [p for p in palace.iterdir() if ".drift-" in p.name]
+    assert len(drift_dirs) == 1
+
+
+def test_client_quarantines_only_on_first_call_per_palace(tmp_path, monkeypatch):
+    """Repeated ``_client()`` calls for the same palace re-run quarantine
+    at most once — the ``_quarantined_paths`` gate prevents runtime
+    thrash on hot paths (``_client()`` is hit on every backend op)."""
+    palace_path = str(tmp_path / "palace")
+    os.makedirs(palace_path, exist_ok=True)
+    (Path(palace_path) / "chroma.sqlite3").write_text("")
+
+    monkeypatch.setattr(ChromaBackend, "_quarantined_paths", set())
+
+    calls: list[str] = []
+
+    def _spy(path, stale_seconds=300.0):
+        calls.append(path)
+        return []
+
+    monkeypatch.setattr("mempalace.backends.chroma.quarantine_stale_hnsw", _spy)
+
+    backend = ChromaBackend()
+    try:
+        backend._client(palace_path)
+        backend._client(palace_path)
+        backend._client(palace_path)
+    finally:
+        backend.close()
+
+    assert (
+        calls == [palace_path]
+    ), "quarantine_stale_hnsw should fire once per palace per process from _client(), not on every call"
 
 
 # ── _pin_hnsw_threads (per-process retrofit, separate from this PR's gate) ──

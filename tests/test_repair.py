@@ -588,6 +588,32 @@ def test_max_seq_id_segment_filter(tmp_path):
         assert rows[other] > repair.MAX_SEQ_ID_SANITY_THRESHOLD
 
 
+def test_max_seq_id_heuristic_decodes_blob_embeddings_seq_id(tmp_path):
+    """`embeddings.seq_id` rows can be BLOB-typed on palaces where chromadb
+    1.5.x has been writing seq_ids natively (8-byte big-endian uint64).
+    `_compute_heuristic_seq_id` must decode those rather than crashing on
+    `int(bytes)` — the recovery feature is meaningless if it can't read
+    the storage format it was designed to repair.
+    """
+    palace = str(tmp_path / "palace")
+    seg = _seed_poisoned_max_seq_id(palace)
+    db_path = os.path.join(palace, "chroma.sqlite3")
+
+    drawers_meta_max = seg["drawers_meta_max"]
+    blob_max = drawers_meta_max + 7
+    blob_value = blob_max.to_bytes(8, "big")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO embeddings(segment_id, embedding_id, seq_id) VALUES (?, ?, ?)",
+            (seg["drawers_meta"], "d-blob-max", blob_value),
+        )
+        conn.commit()
+
+    result = repair.repair_max_seq_id(palace, dry_run=True)
+    assert result["after"][seg["drawers_vec"]] == blob_max
+    assert result["after"][seg["drawers_meta"]] == blob_max
+
+
 def test_max_seq_id_no_poison_is_noop(tmp_path):
     palace = str(tmp_path / "palace")
     os.makedirs(palace)

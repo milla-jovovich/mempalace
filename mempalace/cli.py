@@ -232,6 +232,13 @@ def cmd_init(args):
     from .project_scanner import discover_entities
     from .room_detector_local import detect_rooms_local
 
+    # Honor --palace (issue #1313): without this, init silently ignored the
+    # flag and always used ~/.mempalace. Mirror the env-var pattern used by
+    # mcp_server.py so every downstream read of ``cfg.palace_path`` (Pass 0,
+    # cfg.init(), the post-init mine) routes to the user-specified location.
+    if getattr(args, "palace", None):
+        os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(os.path.expanduser(args.palace))
+
     cfg = MempalaceConfig()
 
     # Resolve entity-detection languages: --lang overrides config.
@@ -276,6 +283,33 @@ def cmd_init(args):
                         f"retains, or uses your data. Pass --no-llm to keep "
                         f"init fully local."
                     )
+                    # Consent gate (issue #26): block init when the api_key
+                    # was acquired via env-fallback (stray credential in
+                    # shell env). Explicit --llm-api-key (api_key_source ==
+                    # "flag") means the user already opted in.
+                    # --accept-external-llm bypasses for CI / non-interactive.
+                    api_key_source = getattr(candidate, "api_key_source", None)
+                    accept_flag = getattr(args, "accept_external_llm", False)
+                    if api_key_source == "env" and not accept_flag:
+                        try:
+                            answer = (
+                                input(
+                                    "  Your API key was loaded from the environment "
+                                    "(not passed via --llm-api-key). Continue with "
+                                    "external LLM? [y/N] "
+                                )
+                                .strip()
+                                .lower()
+                            )
+                        except EOFError:
+                            answer = ""
+                        if answer != "y":
+                            print(
+                                "  Declined — falling back to heuristics-only. "
+                                "Pass --llm-api-key explicitly or "
+                                "--accept-external-llm to skip this prompt."
+                            )
+                            llm_provider = None
             else:
                 print(
                     f"  No LLM provider reachable ({msg}). "
@@ -283,8 +317,7 @@ def cmd_init(args):
                 )
         except LLMError as e:
             print(
-                f"  LLM init failed ({e}). "
-                f"Running heuristics-only — pass --no-llm to silence this."
+                f"  LLM init failed ({e}). Running heuristics-only — pass --no-llm to silence this."
             )
 
     # Pass 0: detect whether the corpus is AI-dialogue. Writes
@@ -999,7 +1032,7 @@ def cmd_compress(args):
     # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
-            comp_col = backend.get_or_create_collection(palace_path, "mempalace_compressed")
+            comp_col = backend.get_or_create_collection(palace_path, "mempalace_closets")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
                 comp_meta["compression_ratio"] = round(stats["size_ratio"], 1)
@@ -1010,7 +1043,7 @@ def cmd_compress(args):
                     metadatas=[comp_meta],
                 )
             print(
-                f"  Stored {len(compressed_entries)} compressed drawers in 'mempalace_compressed' collection."
+                f"  Stored {len(compressed_entries)} compressed drawers in 'mempalace_closets' collection."
             )
         except Exception as e:
             print(f"  Error storing compressed drawers: {e}")
@@ -1116,6 +1149,16 @@ def main():
         help=(
             "API key for the provider. For anthropic, defaults to $ANTHROPIC_API_KEY; "
             "for openai-compat, defaults to $OPENAI_API_KEY."
+        ),
+    )
+    p_init.add_argument(
+        "--accept-external-llm",
+        action="store_true",
+        help=(
+            "Bypass the interactive consent prompt that fires when an external "
+            "LLM is configured via an environment-variable API key (issue #26). "
+            "Use this in CI / non-interactive runs where you've already decided "
+            "the external send is acceptable."
         ),
     )
 

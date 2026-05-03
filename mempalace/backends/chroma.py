@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import chromadb
+from chromadb.errors import NotFoundError as _ChromaNotFoundError
 
 from .base import (
     BaseBackend,
@@ -372,18 +373,69 @@ def _hnsw_element_count(palace_path: str, segment_id: str) -> Optional[int]:
 
 
 # Divergence threshold: chromadb's HNSW flushes asynchronously, so HNSW
-# typically lags sqlite by up to ``sync_threshold`` (default 1000) records
-# under active write load — that's the *brute-force batch* that hasn't
-# been compacted into HNSW yet, plus the un-persisted tail beyond the
-# last sync. Two synchronization windows worth (2 × sync_threshold = 2000)
-# is a safe steady-state ceiling; anything past that is real divergence,
-# not flush-lag.
+# typically lags sqlite by up to ``sync_threshold`` records under active
+# write load — that's the *brute-force batch* that hasn't been compacted
+# into HNSW yet, plus the un-persisted tail beyond the last sync. Two
+# synchronization windows worth (2 × sync_threshold) is a safe steady-
+# state ceiling; anything past that is real divergence, not flush-lag.
 #
-# The #1222 case was 176 613 missing out of 192 997 (91% gone) — orders
-# of magnitude past 2000. A typical post-mine palace shows a few hundred
-# to ~1000 missing, well under threshold.
-_HNSW_DIVERGENCE_ABSOLUTE = 2000
+# The threshold floor scales with whatever ``hnsw:sync_threshold`` the
+# collection was created with (read via :func:`_read_sync_threshold`).
+# ``_HNSW_DIVERGENCE_FALLBACK_FLOOR`` is the floor used when we can't
+# read the collection metadata (older palaces missing the row, sqlite
+# unreadable). 2000 = 2 × chromadb's default sync_threshold of 1000.
+#
+# Why dynamic: PR #1191 set ``hnsw:sync_threshold = 50_000`` to prevent
+# index bloat, which means flush-lag can grow up to 50K naturally. A
+# fixed 2000 floor would flag every actively-written palace as DIVERGED
+# the moment its queue exceeded 10% of sqlite_count, even though chromadb
+# is behaving correctly. The floor must scale with sync_threshold to
+# distinguish real corruption (#1222 was 176 613 missing of 192 997 —
+# orders of magnitude past 2 × any reasonable sync_threshold) from
+# expected steady-state lag.
+_HNSW_DIVERGENCE_FALLBACK_FLOOR = 2000
 _HNSW_DIVERGENCE_FRACTION = 0.10
+
+
+def _read_sync_threshold(palace_path: str, collection_name: str) -> int:
+    """Return the ``hnsw:sync_threshold`` for a collection, or 1000 default.
+
+    The configured sync_threshold drives chromadb's HNSW flush cadence —
+    larger values mean fewer, bigger flushes (less index-bloat risk per
+    PR #1191) but also larger steady-state lag between
+    ``index_metadata.pickle`` and the live sqlite count. The divergence
+    probe scales its tolerance to ``2 × sync_threshold`` so that lag is
+    not mistaken for corruption.
+
+    Falls back to 1000 (chromadb's own default) if the collection has no
+    explicit setting — matches what older mempalace palaces were created
+    with before PR #1191.
+    """
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return 1000
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT cm.int_value
+                FROM collection_metadata cm
+                JOIN collections c ON cm.collection_id = c.id
+                WHERE c.name = ? AND cm.key = 'hnsw:sync_threshold'
+                """,
+                (collection_name,),
+            )
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                return int(row[0])
+            return 1000
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug("_read_sync_threshold failed", exc_info=True)
+        return 1000
 
 
 def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_drawers") -> dict:
@@ -431,13 +483,18 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
         hnsw_count = _hnsw_element_count(palace_path, seg_id)
         out["hnsw_count"] = hnsw_count
 
+        sync_threshold = _read_sync_threshold(palace_path, collection_name)
+        # Two synchronization windows worth — see comment above
+        # _HNSW_DIVERGENCE_FALLBACK_FLOOR for the rationale.
+        divergence_floor = max(_HNSW_DIVERGENCE_FALLBACK_FLOOR, 2 * sync_threshold)
+
         if hnsw_count is None:
             # No pickle yet — segment hasn't persisted metadata. Could be
             # fresh-but-unflushed (normal) or interrupted-mid-flush (bad).
             # We can't distinguish without the pickle, so only flag
             # divergence when sqlite holds clearly more than two flush
             # windows worth — same threshold as the with-pickle path.
-            if sqlite_count > _HNSW_DIVERGENCE_ABSOLUTE:
+            if sqlite_count > divergence_floor:
                 out["status"] = "diverged"
                 out["diverged"] = True
                 out["divergence"] = sqlite_count
@@ -452,7 +509,7 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
 
         divergence = sqlite_count - hnsw_count
         out["divergence"] = divergence
-        threshold = max(_HNSW_DIVERGENCE_ABSOLUTE, int(sqlite_count * _HNSW_DIVERGENCE_FRACTION))
+        threshold = max(divergence_floor, int(sqlite_count * _HNSW_DIVERGENCE_FRACTION))
         if divergence > threshold:
             out["status"] = "diverged"
             out["diverged"] = True
@@ -957,7 +1014,7 @@ class ChromaBackend(BaseBackend):
         )
 
         if cached is None or inode_changed or mtime_changed or mtime_appeared:
-            _fix_blob_seq_ids(palace_path)
+            ChromaBackend._prepare_palace_for_open(palace_path)
             cached = chromadb.PersistentClient(path=palace_path)
             self._clients[palace_path] = cached
             # Re-stat after the client constructor runs: chromadb creates
@@ -993,6 +1050,31 @@ class ChromaBackend(BaseBackend):
     _quarantined_paths: set[str] = set()
 
     @staticmethod
+    def _prepare_palace_for_open(palace_path: str) -> None:
+        """Run the pre-open safety pass shared by :meth:`make_client` and
+        :meth:`_client`.
+
+        Two steps, both required before constructing a ``PersistentClient``:
+
+        1. ``_fix_blob_seq_ids`` — repairs the BLOB seq_id quirk that bites
+           certain chromadb migrations.
+        2. ``quarantine_stale_hnsw`` — gated by :attr:`_quarantined_paths` so
+           it fires once per palace per process. This is the SIGSEGV
+           prevention path for stale HNSW segments (see #1121, #1132, #1263);
+           wiring it through this helper means CLI mining, search, repair,
+           and status all benefit, not just the legacy ``make_client``
+           callers.
+
+        Idempotent: safe to call from any code path that is about to open or
+        re-open a palace. The ``_quarantined_paths`` gate prevents thrash on
+        hot paths (e.g. ``_client()`` is called on every backend operation).
+        """
+        _fix_blob_seq_ids(palace_path)
+        if palace_path not in ChromaBackend._quarantined_paths:
+            quarantine_stale_hnsw(palace_path)
+            ChromaBackend._quarantined_paths.add(palace_path)
+
+    @staticmethod
     def make_client(palace_path: str):
         """Create a fresh ``PersistentClient`` (fixes BLOB seq_ids first).
 
@@ -1004,10 +1086,7 @@ class ChromaBackend(BaseBackend):
         :attr:`_quarantined_paths` for the rationale (cold-start protection
         vs. runtime thrash on steady-write daemons).
         """
-        _fix_blob_seq_ids(palace_path)
-        if palace_path not in ChromaBackend._quarantined_paths:
-            quarantine_stale_hnsw(palace_path)
-            ChromaBackend._quarantined_paths.add(palace_path)
+        ChromaBackend._prepare_palace_for_open(palace_path)
         return chromadb.PersistentClient(path=palace_path)
 
     @staticmethod
@@ -1058,15 +1137,18 @@ class ChromaBackend(BaseBackend):
         ef_kwargs = {"embedding_function": ef} if ef is not None else {}
 
         if create:
-            collection = client.get_or_create_collection(
-                collection_name,
-                metadata={
-                    "hnsw:space": hnsw_space,
-                    "hnsw:num_threads": 1,
-                    **_HNSW_BLOAT_GUARD,
-                },
-                **ef_kwargs,
-            )
+            try:
+                collection = client.get_collection(collection_name, **ef_kwargs)
+            except _ChromaNotFoundError:
+                collection = client.create_collection(
+                    collection_name,
+                    metadata={
+                        "hnsw:space": hnsw_space,
+                        "hnsw:num_threads": 1,
+                        **_HNSW_BLOAT_GUARD,
+                    },
+                    **ef_kwargs,
+                )
         else:
             collection = client.get_collection(collection_name, **ef_kwargs)
         _pin_hnsw_threads(collection)

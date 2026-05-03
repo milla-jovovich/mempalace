@@ -28,13 +28,23 @@ COLLECTION = "mempalace_drawers"
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
-def _seed_chroma_db(palace: str, sqlite_count: int, segment_id: str) -> None:
+def _seed_chroma_db(
+    palace: str,
+    sqlite_count: int,
+    segment_id: str,
+    sync_threshold: int | None = None,
+) -> None:
     """Create a minimal chroma.sqlite3 with one collection + VECTOR segment.
 
     Mirrors the columns the probe queries: ``segments``, ``collections``,
-    ``embeddings``, ``embedding_metadata``. Schema matches chromadb
-    1.5.x; column types are kept loose because we read with COUNT(*) and
-    SELECT key, *_value rather than driver-specific casts.
+    ``collection_metadata``, ``embeddings``, ``embedding_metadata``.
+    Schema matches chromadb 1.5.x; column types are kept loose because
+    we read with COUNT(*) and SELECT key, *_value rather than driver-
+    specific casts.
+
+    When ``sync_threshold`` is supplied, an ``hnsw:sync_threshold`` row
+    is added to ``collection_metadata`` so the divergence floor scales
+    accordingly. Omit to model an older palace that pre-dates PR #1191.
     """
     db_path = os.path.join(palace, "chroma.sqlite3")
     conn = sqlite3.connect(db_path)
@@ -44,6 +54,15 @@ def _seed_chroma_db(palace: str, sqlite_count: int, segment_id: str) -> None:
             CREATE TABLE collections (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL
+            );
+            CREATE TABLE collection_metadata (
+                collection_id TEXT REFERENCES collections(id) ON DELETE CASCADE,
+                key TEXT NOT NULL,
+                str_value TEXT,
+                int_value INTEGER,
+                float_value REAL,
+                bool_value INTEGER,
+                PRIMARY KEY (collection_id, key)
             );
             CREATE TABLE segments (
                 id TEXT PRIMARY KEY,
@@ -73,6 +92,12 @@ def _seed_chroma_db(palace: str, sqlite_count: int, segment_id: str) -> None:
         col_id = "col-test"
         meta_seg = "seg-meta"
         conn.execute("INSERT INTO collections (id, name) VALUES (?, ?)", (col_id, COLLECTION))
+        if sync_threshold is not None:
+            conn.execute(
+                """INSERT INTO collection_metadata (collection_id, key, int_value)
+                   VALUES (?, 'hnsw:sync_threshold', ?)""",
+                (col_id, sync_threshold),
+            )
         conn.execute(
             "INSERT INTO segments (id, collection, scope) VALUES (?, ?, 'VECTOR')",
             (segment_id, col_id),
@@ -227,6 +252,78 @@ def test_capacity_status_quiet_for_empty_palace(tmp_path):
     info = hnsw_capacity_status(str(tmp_path), COLLECTION)
     assert info["diverged"] is False
     assert info["status"] == "unknown"
+
+
+# ── Divergence threshold scales with hnsw:sync_threshold ───────────────
+
+
+def test_capacity_status_tolerates_lag_under_large_sync_threshold(tmp_path):
+    """Regression for the PR #1191 / PR #1227 conflict.
+
+    Palaces created via mempalace's _HNSW_BLOAT_GUARD (sync_threshold=
+    50_000) naturally accumulate up to ~50K queued entries between
+    flushes. The pickle-vs-sqlite probe must scale its tolerance to
+    ``2 × sync_threshold`` so this expected lag is not flagged as
+    corruption — otherwise vector search disables for ~80% of the
+    write cycle on any actively-mined ≥100K palace.
+    """
+    seg = "seg-bloat-guard"
+    _seed_chroma_db(str(tmp_path), sqlite_count=100_000, segment_id=seg, sync_threshold=50_000)
+    _write_pickle(str(tmp_path), seg, hnsw_count=50_000)
+    info = hnsw_capacity_status(str(tmp_path), COLLECTION)
+    # 50K divergence is exactly one flush window — well within 2× = 100K.
+    assert info["diverged"] is False, info["message"]
+    assert info["status"] == "ok"
+    assert info["divergence"] == 50_000
+
+
+def test_capacity_status_still_flags_real_corruption_under_large_sync(tmp_path):
+    """The dynamic floor must still catch genuine #1222-style corruption.
+
+    sqlite at 200K with HNSW frozen at 16K is the original #1222 shape —
+    any reasonable threshold should flag it, regardless of whether the
+    collection was created with sync_threshold=1000 or 50_000.
+    """
+    seg = "seg-1222-with-bloat-guard"
+    _seed_chroma_db(str(tmp_path), sqlite_count=200_000, segment_id=seg, sync_threshold=50_000)
+    _write_pickle(str(tmp_path), seg, hnsw_count=16_384)
+    info = hnsw_capacity_status(str(tmp_path), COLLECTION)
+    # 183,616 missing — far past 2 × 50K = 100K floor and 10% of 200K = 20K.
+    assert info["diverged"] is True
+    assert info["status"] == "diverged"
+    assert info["divergence"] == 183_616
+
+
+def test_capacity_status_default_threshold_when_no_sync_metadata(tmp_path):
+    """Older palaces without ``hnsw:sync_threshold`` fall back to 2000 floor.
+
+    Pre-PR-#1191 collections only carry ``hnsw:space``. The probe must
+    use chromadb's own default sync_threshold of 1000 → floor of 2000,
+    matching pre-fix behavior.
+    """
+    seg = "seg-legacy"
+    # No sync_threshold supplied — collection_metadata stays empty.
+    _seed_chroma_db(str(tmp_path), sqlite_count=10_000, segment_id=seg)
+    _write_pickle(str(tmp_path), seg, hnsw_count=7_500)
+    info = hnsw_capacity_status(str(tmp_path), COLLECTION)
+    # 2,500 divergence > max(2000 floor, 10% of 10K = 1000) → DIVERGED
+    assert info["diverged"] is True
+    assert info["divergence"] == 2_500
+
+
+def test_unflushed_path_also_uses_dynamic_floor(tmp_path):
+    """The never-flushed branch must scale with sync_threshold too.
+
+    A 30K-drawer collection under sync_threshold=50_000 hasn't reached
+    its first flush yet — pickle is absent. Pre-fix this would flag
+    DIVERGED (30K > fixed 2000 floor); post-fix the 30K stays under
+    the dynamic 100K floor.
+    """
+    seg = "seg-preflush-large"
+    _seed_chroma_db(str(tmp_path), sqlite_count=30_000, segment_id=seg, sync_threshold=50_000)
+    info = hnsw_capacity_status(str(tmp_path), COLLECTION)
+    assert info["hnsw_count"] is None
+    assert info["diverged"] is False, info["message"]
 
 
 # ── BM25-only sqlite fallback ─────────────────────────────────────────

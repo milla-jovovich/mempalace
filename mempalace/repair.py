@@ -559,6 +559,11 @@ def _compute_heuristic_seq_id(cur: sqlite3.Cursor, segment_id: str) -> int:
     already-indexed embeddings on next subscribe. That is an acceptable
     loss vs. resetting to 0 (which would re-process the entire queue and
     risk HNSW bloat from issue #1046).
+
+    ``embeddings.seq_id`` rows can be BLOB-typed on palaces where
+    chromadb 1.5.x has been writing seq_ids natively (8-byte big-endian
+    uint64). When SQLite's ``MAX`` returns such a row, decode it back to
+    an integer rather than crashing on ``int(bytes)``.
     """
     row = cur.execute(
         """
@@ -573,7 +578,10 @@ def _compute_heuristic_seq_id(cur: sqlite3.Cursor, segment_id: str) -> int:
     ).fetchone()
     if row is None or row[0] is None:
         return 0
-    return int(row[0])
+    val = row[0]
+    if isinstance(val, (bytes, bytearray)):
+        return int.from_bytes(val, "big")
+    return int(val)
 
 
 def _read_sidecar_seq_ids(sidecar_path: str) -> dict[str, int]:
