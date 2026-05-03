@@ -94,6 +94,7 @@ def _parse_args():
         metavar="PATH",
         help="Path to the palace directory (overrides config file and env var)",
     )
+    # Ignore unrelated argv flags so imports work cleanly under test runners.
     args, unknown = parser.parse_known_args()
     if unknown:
         logger.debug("Ignoring unknown args: %s", unknown)
@@ -1946,7 +1947,7 @@ def handle_request(request):
             "id": req_id,
             "result": {
                 "protocolVersion": negotiated,
-                "capabilities": {"tools": {}},
+                "capabilities": {"tools": {}, "prompts": {}},
                 "serverInfo": {"name": "mempalace", "version": __version__},
             },
         }
@@ -2025,9 +2026,60 @@ def handle_request(request):
                 "error": {"code": -32000, "message": "Internal tool error"},
             }
 
+    elif method == "prompts/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "prompts": [
+                    {
+                        "name": "mempalace_checkpoint",
+                        "description": (
+                            "Auto-save rule: every 10 user messages, save new decisions, "
+                            "findings, milestones, and next steps to mempalace using "
+                            "mempalace_add_drawer. Skip chatter and duplicates."
+                        ),
+                    }
+                ]
+            },
+        }
+    elif method == "prompts/get":
+        name = params.get("name", "")
+        if name == "mempalace_checkpoint":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "description": "Auto-save checkpoint rule for mempalace",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": {
+                                "type": "text",
+                                "text": (
+                                    "MEMPALACE AUTO-SAVE RULE (always active):\n"
+                                    "Every 10 user messages, before replying, call mempalace_add_drawer "
+                                    "to save any new decisions, findings, milestones, blockers, "
+                                    "architecture changes, code contracts, or actionable next steps "
+                                    "from this conversation. Skip duplicates and chatter. "
+                                    "Use the appropriate wing/room based on content type. "
+                                    "After saving, continue with your normal reply."
+                                ),
+                            },
+                        }
+                    ],
+                },
+            }
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {"code": -32602, "message": f"Unknown prompt: {name}"},
+        }
+
     # Notifications (missing id) must never get a response
     if req_id is None:
         return None
+
     return {
         "jsonrpc": "2.0",
         "id": req_id,
@@ -2066,12 +2118,11 @@ def main():
             request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            logger.error(f"Server error: {e}")
+                print(json.dumps(response), flush=True)
+        except (json.JSONDecodeError, EOFError):
+            continue
+        except Exception:
+            logger.exception("MCP Loop error")
 
 
 if __name__ == "__main__":
