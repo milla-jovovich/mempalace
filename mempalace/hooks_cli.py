@@ -16,6 +16,17 @@ from pathlib import Path
 
 SAVE_INTERVAL = 10
 STATE_DIR = Path.home() / ".mempalace" / "hook_state"
+MIRROR_STATE_FILE = STATE_DIR / "mirror_state.json"
+
+# Local memory dirs for each agent harness — scanned on Stop hook and mirrored
+# into mempalace as drawers. Override via MEMPAL_MIRROR_ROOTS env (colon-separated).
+DEFAULT_MIRROR_ROOTS = (
+    Path.home() / ".claude" / "projects",
+    Path.home() / ".codex" / "memories",
+    Path.home() / ".gemini" / "memory",
+    Path.home() / ".qwen" / "memory",
+)
+MIRROR_SKIP_FILENAMES = {"MEMORY.md", "CLAUDE.md", "GEMINI.md", "QWEN.md", "AGENTS.md"}
 
 
 def _mempalace_python() -> str:
@@ -752,6 +763,17 @@ def hook_stop(data: dict, harness: str):
     stop_hook_active = parsed["stop_hook_active"]
     transcript_path = parsed["transcript_path"]
 
+    # Always mirror local memory dirs first — runs even when we don't block,
+    # so .md files Claude writes get auto-replicated into mempalace drawers
+    # regardless of whether the LLM cooperated with the save protocol.
+    if os.environ.get("MEMPAL_MIRROR_DISABLED", "").lower() not in ("1", "true", "yes"):
+        try:
+            counts = _mirror_local_memory()
+            if counts.get("added") or counts.get("errors"):
+                _log(f"mirror: {counts}")
+        except Exception as exc:
+            _log(f"mirror: unexpected failure ({exc}); continuing")
+
     # If already in a block-mode save cycle, let through (infinite-loop prevention).
     # Silent mode saves directly without returning {"decision":"block"}, so there's
     # no loop to prevent — and Claude Code's plugin dispatch sets this flag on every
@@ -860,6 +882,145 @@ def hook_stop(data: dict, harness: str):
             _output({"decision": "block", "reason": reason})
     else:
         _output({})
+
+
+# =============================================================================
+# LOCAL MEMORY MIRROR — replicate per-agent .md memory dirs into mempalace
+# =============================================================================
+
+
+def _mirror_roots() -> list[Path]:
+    """Return list of memory roots to scan, honoring MEMPAL_MIRROR_ROOTS env."""
+    override = os.environ.get("MEMPAL_MIRROR_ROOTS", "").strip()
+    if override:
+        return [Path(p).expanduser() for p in override.split(":") if p.strip()]
+    return list(DEFAULT_MIRROR_ROOTS)
+
+
+def _load_mirror_state() -> dict:
+    """Read the {abs_path: mtime} map of files already mirrored."""
+    if not MIRROR_STATE_FILE.is_file():
+        return {}
+    try:
+        with open(MIRROR_STATE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_mirror_state(state: dict) -> None:
+    """Persist the {abs_path: mtime} map atomically."""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = MIRROR_STATE_FILE.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, MIRROR_STATE_FILE)
+    except OSError as exc:
+        _log(f"mirror_state write failed: {exc}")
+
+
+def _derive_wing_room(file_path: Path, root: Path) -> tuple[str, str]:
+    """Derive (wing, room) from a memory file's path relative to its root.
+
+    Conventions:
+    - Claude: ~/.claude/projects/<slug>/memory/<room>.md
+        slug like '-home-zapostolski-projects-ai-marketing' → wing 'ai-marketing'
+    - Gemini: ~/.gemini/memory/<wing>/<room>.md
+    - Codex/Qwen: ~/.codex/memories/<wing>/<room>.md or flat ~/.codex/memories/<room>.md
+
+    Falls back to:
+        wing = first directory under root, or 'misc'
+        room = filename stem
+    """
+    try:
+        rel = file_path.relative_to(root)
+    except ValueError:
+        return "misc", file_path.stem
+    parts = rel.parts
+    room = file_path.stem
+
+    if not parts:
+        return "misc", room
+
+    first = parts[0]
+    # Claude project slug: -home-...-projects-<wing>
+    if "-projects-" in first:
+        wing = first.rsplit("-projects-", 1)[1]
+    else:
+        # Strip leading dashes from agent slugs
+        wing = first.lstrip("-") or "misc"
+    return wing, room
+
+
+def _mirror_local_memory() -> dict:
+    """Mirror new/changed .md files from local memory dirs into mempalace drawers.
+
+    Idempotent: tracks (path, mtime) state in MIRROR_STATE_FILE. Catches all
+    errors so a mirror failure never blocks the harness. Returns counts for logging.
+    """
+    counts = {"scanned": 0, "added": 0, "skipped_dup": 0, "skipped_unchanged": 0, "errors": 0}
+    try:
+        from .mcp_server import tool_add_drawer
+    except Exception as exc:
+        _log(f"mirror: cannot import tool_add_drawer ({exc}); skipping")
+        return counts
+
+    state = _load_mirror_state()
+    new_state = dict(state)
+
+    for root in _mirror_roots():
+        if not root.is_dir():
+            continue
+        for md_path in root.rglob("*.md"):
+            if md_path.name in MIRROR_SKIP_FILENAMES:
+                continue
+            counts["scanned"] += 1
+            try:
+                mtime = md_path.stat().st_mtime
+            except OSError:
+                counts["errors"] += 1
+                continue
+            key = str(md_path)
+            if state.get(key) == mtime:
+                counts["skipped_unchanged"] += 1
+                continue
+            try:
+                content = md_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                counts["errors"] += 1
+                continue
+            if not content.strip():
+                new_state[key] = mtime
+                continue
+            wing, room = _derive_wing_room(md_path, root)
+            try:
+                result = tool_add_drawer(
+                    wing=wing,
+                    room=room,
+                    content=content,
+                    source_file=str(md_path),
+                    added_by="auto-mirror",
+                )
+            except Exception as exc:
+                _log(f"mirror: add_drawer raised for {md_path}: {exc}")
+                counts["errors"] += 1
+                continue
+            if result.get("success"):
+                counts["added"] += 1
+                new_state[key] = mtime
+            elif result.get("reason") == "duplicate":
+                counts["skipped_dup"] += 1
+                # Mark as seen so we don't keep re-checking unchanged dupes
+                new_state[key] = mtime
+            else:
+                counts["errors"] += 1
+                _log(f"mirror: add_drawer failed for {md_path}: {result}")
+
+    if new_state != state:
+        _save_mirror_state(new_state)
+    return counts
 
 
 def _wing_from_cwd(cwd: str) -> str:
