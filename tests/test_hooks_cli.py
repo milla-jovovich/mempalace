@@ -87,7 +87,12 @@ def test_count_skips_command_messages(tmp_path):
     _write_transcript(
         transcript,
         [
-            {"message": {"role": "user", "content": "<command-message>status</command-message>"}},
+            {
+                "message": {
+                    "role": "user",
+                    "content": "<command-message>status</command-message>",
+                }
+            },
             {"message": {"role": "user", "content": "real question"}},
         ],
     )
@@ -99,13 +104,93 @@ def test_count_handles_list_content(tmp_path):
     _write_transcript(
         transcript,
         [
-            {"message": {"role": "user", "content": [{"type": "text", "text": "hello"}]}},
+            {
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "hello"}],
+                }
+            },
             {
                 "message": {
                     "role": "user",
                     "content": [{"type": "text", "text": "<command-message>x</command-message>"}],
                 }
             },
+        ],
+    )
+    assert _count_human_messages(str(transcript)) == 1
+
+
+def test_count_skips_tool_results(tmp_path):
+    """Tool results arrive as role: 'user' but should not count as human messages."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [
+            {"message": {"role": "user", "content": "real human message"}},
+            {
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tu_1",
+                            "content": "file contents",
+                        },
+                    ],
+                }
+            },
+            {
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "tu_2", "content": "ok"},
+                        {"type": "tool_result", "tool_use_id": "tu_3", "content": "ok"},
+                    ],
+                }
+            },
+            {"message": {"role": "user", "content": "another real message"}},
+        ],
+    )
+    assert _count_human_messages(str(transcript)) == 2
+
+
+def test_count_mixed_content_not_skipped(tmp_path):
+    """Messages with both tool_result and text blocks should still count."""
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [
+            {
+                "message": {
+                    "role": "user",
+                    # Mixed content: a tool_result block alongside a text block.
+                    # The text block means a human actually typed something, so
+                    # this message should still count as a human exchange.
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "tu_1", "content": "ok"},
+                        {"type": "text", "text": "and here is my follow-up"},
+                    ],
+                }
+            },
+        ],
+    )
+    assert _count_human_messages(str(transcript)) == 1
+
+
+def test_count_skips_empty_content_list(tmp_path):
+    """Messages with content=[] are not human input.
+
+    Regression: ``all([])`` is vacuously True, which previously caused
+    empty-content user messages to slip past the tool_result guard and be
+    counted as human exchanges, undercounting the save trigger.
+    """
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(
+        transcript,
+        [
+            {"message": {"role": "user", "content": []}},
+            {"message": {"role": "user", "content": "real human message"}},
         ],
     )
     assert _count_human_messages(str(transcript)) == 1
@@ -170,7 +255,12 @@ def _capture_hook_output(hook_fn, data, harness="claude-code", state_dir=None):
     from unittest.mock import PropertyMock
 
     buf = io.StringIO()
-    patches = [patch("mempalace.hooks_cli._output", side_effect=lambda d: buf.write(json.dumps(d)))]
+    patches = [
+        patch(
+            "mempalace.hooks_cli._output",
+            side_effect=lambda d: buf.write(json.dumps(d)),
+        )
+    ]
     if state_dir:
         patches.append(patch("mempalace.hooks_cli.STATE_DIR", state_dir))
     # Mock MempalaceConfig so tests don't depend on user's ~/.mempalace/config.json
@@ -213,7 +303,11 @@ def test_stop_hook_passthrough_below_interval(tmp_path):
     )
     result = _capture_hook_output(
         hook_stop,
-        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        {
+            "session_id": "test",
+            "stop_hook_active": False,
+            "transcript_path": str(transcript),
+        },
         state_dir=tmp_path,
     )
     assert result == {}
@@ -264,7 +358,11 @@ def test_stop_hook_tracks_save_point(tmp_path):
         transcript,
         [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
-    data = {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)}
+    data = {
+        "session_id": "test",
+        "stop_hook_active": False,
+        "transcript_path": str(transcript),
+    }
 
     # First call saves silently with systemMessage notification
     save_result = {"count": 15, "themes": ["hooks"]}
@@ -678,7 +776,11 @@ def test_parse_harness_input_unknown():
 
 def test_parse_harness_input_valid():
     result = _parse_harness_input(
-        {"session_id": "abc-123", "stop_hook_active": True, "transcript_path": "/tmp/t.jsonl"},
+        {
+            "session_id": "abc-123",
+            "stop_hook_active": True,
+            "transcript_path": "/tmp/t.jsonl",
+        },
         "claude-code",
     )
     assert result["session_id"] == "abc-123"
@@ -828,7 +930,8 @@ def test_run_hook_dispatches_session_start(tmp_path):
 def test_run_hook_dispatches_stop(tmp_path):
     transcript = tmp_path / "t.jsonl"
     _write_transcript(
-        transcript, [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(3)]
+        transcript,
+        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(3)],
     )
     stdin_data = json.dumps(
         {
