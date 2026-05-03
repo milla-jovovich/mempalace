@@ -46,6 +46,14 @@ def _reset_mcp_cache():
             mcp_server._collection_cache = None
         except (ImportError, AttributeError):
             pass
+        try:
+            # Reset the per-process quarantine gate so tests don't leak
+            # state through ChromaBackend._quarantined_paths.
+            from mempalace.backends.chroma import ChromaBackend
+
+            ChromaBackend._quarantined_paths.clear()
+        except (ImportError, AttributeError):
+            pass
 
     _clear_cache()
     yield
@@ -101,7 +109,7 @@ def config(tmp_dir, palace_path):
 def collection(palace_path):
     """A ChromaDB collection pre-seeded in the temp palace."""
     client = chromadb.PersistentClient(path=palace_path)
-    col = client.get_or_create_collection("mempalace_drawers")
+    col = client.get_or_create_collection("mempalace_drawers", metadata={"hnsw:space": "cosine"})
     yield col
     client.delete_collection("mempalace_drawers")
     del client
@@ -169,7 +177,9 @@ def seeded_collection(collection):
 def kg(tmp_dir):
     """An isolated KnowledgeGraph using a temp SQLite file."""
     db_path = os.path.join(tmp_dir, "test_kg.sqlite3")
-    return KnowledgeGraph(db_path=db_path)
+    graph = KnowledgeGraph(db_path=db_path)
+    yield graph
+    graph.close()
 
 
 @pytest.fixture
