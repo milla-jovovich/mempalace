@@ -11,6 +11,7 @@ import pytest
 from mempalace.hooks_cli import (
     SAVE_INTERVAL,
     _count_human_messages,
+<<<<<<< HEAD
     _extract_recent_messages,
     _get_mine_targets,
     _log,
@@ -19,6 +20,9 @@ from mempalace.hooks_cli import (
     _mine_already_running,
     _mine_sync,
     _parse_harness_input,
+=======
+    _has_meaningful_updates,
+>>>>>>> 49f963d (feat(hooks): SessionStart loads palace context + protocol nudge)
     _sanitize_session_id,
     _validate_transcript_path,
     _wing_from_transcript_path,
@@ -127,6 +131,7 @@ def test_count_malformed_json_lines(tmp_path):
     assert _count_human_messages(str(transcript)) == 1
 
 
+<<<<<<< HEAD
 # --- _extract_recent_messages ---
 
 
@@ -159,6 +164,18 @@ def test_extract_recent_messages_skips_commands(tmp_path):
 
 def test_extract_recent_messages_missing_file():
     assert _extract_recent_messages("/nonexistent.jsonl") == []
+=======
+def test_meaningful_update_heuristic_skips_chatter():
+    assert _has_meaningful_updates(["continue", "ok", "thanks", "yes"]) is False
+
+
+def test_meaningful_update_heuristic_detects_real_work():
+    assert _has_meaningful_updates([
+        "Audit aws infra and confirm the ananas-hub RDS deployment status.",
+        "Fix the marketing route and replace the placeholder API with a real dataset query.",
+        "Document the architecture decision in /home/zapostolski/projects/ananas-hub/docs/architecture.md.",
+    ]) is True
+>>>>>>> 49f963d (feat(hooks): SessionStart loads palace context + protocol nudge)
 
 
 # --- hook_stop ---
@@ -221,9 +238,25 @@ def test_stop_hook_passthrough_below_interval(tmp_path):
 
 def test_stop_hook_saves_silently_at_interval(tmp_path):
     transcript = tmp_path / "t.jsonl"
+<<<<<<< HEAD
     _write_transcript(
         transcript,
         [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
+=======
+    _write_transcript(transcript, [
+        {
+            "message": {
+                "role": "user",
+                "content": f"Fix marketing data contract {i} and audit the Power BI dataset wiring.",
+            }
+        }
+        for i in range(SAVE_INTERVAL)
+    ])
+    result = _capture_hook_output(
+        hook_stop,
+        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        state_dir=tmp_path,
+>>>>>>> 49f963d (feat(hooks): SessionStart loads palace context + protocol nudge)
     )
     save_result = {"count": 15, "themes": ["hooks", "notifications"]}
     with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result) as mock_save:
@@ -258,12 +291,38 @@ def test_stop_hook_derives_wing_from_transcript_path(tmp_path):
     mock_save.assert_called_once_with(str(transcript), "test", wing="wing_myproject", toast=False)
 
 
+def test_stop_hook_skips_low_signal_at_interval(tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(transcript, [
+        {"message": {"role": "user", "content": "continue"}}
+        for _ in range(SAVE_INTERVAL)
+    ])
+    result = _capture_hook_output(
+        hook_stop,
+        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        state_dir=tmp_path,
+    )
+    assert result == {}
+
+
 def test_stop_hook_tracks_save_point(tmp_path):
     transcript = tmp_path / "t.jsonl"
+<<<<<<< HEAD
     _write_transcript(
         transcript,
         [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
     )
+=======
+    _write_transcript(transcript, [
+        {
+            "message": {
+                "role": "user",
+                "content": f"Implement aws audit step {i} and update /home/zapostolski/projects/ananas-hub/README.md.",
+            }
+        }
+        for i in range(SAVE_INTERVAL)
+    ])
+>>>>>>> 49f963d (feat(hooks): SessionStart loads palace context + protocol nudge)
     data = {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)}
 
     # First call saves silently with systemMessage notification
@@ -282,7 +341,32 @@ def test_stop_hook_tracks_save_point(tmp_path):
 # --- hook_session_start ---
 
 
-def test_session_start_passes_through(tmp_path):
+def test_session_start_injects_context(tmp_path, monkeypatch):
+    """SessionStart returns Claude-compatible additionalContext from wake-up + protocol nudge."""
+    import mempalace.hooks_cli as hc
+    monkeypatch.setattr(hc, "_build_session_start_context", lambda cwd, palace: "WAKE\n\nNUDGE")
+
+    result = _capture_hook_output(
+        hook_session_start,
+        {"session_id": "test", "cwd": "/tmp"},
+        state_dir=tmp_path,
+    )
+    out = result["hookSpecificOutput"]
+    assert out["hookEventName"] == "SessionStart"
+    assert "WAKE" in out["additionalContext"]
+    assert "NUDGE" in out["additionalContext"]
+
+
+def test_session_start_skips_when_palace_unresolvable(tmp_path, monkeypatch):
+    """If palace path resolution fails, SessionStart is a no-op (avoid breaking the harness)."""
+    import mempalace.hooks_cli as hc
+    import mempalace.config as config_mod
+
+    def _boom(*a, **kw):
+        raise RuntimeError("no palace configured")
+
+    monkeypatch.setattr(config_mod, "MempalaceConfig", _boom)
+
     result = _capture_hook_output(
         hook_session_start,
         {"session_id": "test"},
