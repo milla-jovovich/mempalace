@@ -3,7 +3,9 @@
 import datetime as _dt
 import logging
 import os
+import pickle
 import sqlite3
+from numbers import Integral
 from pathlib import Path
 from typing import Any, Optional
 
@@ -489,22 +491,17 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
         divergence_floor = max(_HNSW_DIVERGENCE_FALLBACK_FLOOR, 2 * sync_threshold)
 
         if hnsw_count is None:
-            # No pickle yet — segment hasn't persisted metadata. Could be
-            # fresh-but-unflushed (normal) or interrupted-mid-flush (bad).
-            # We can't distinguish without the pickle, so only flag
-            # divergence when sqlite holds clearly more than two flush
-            # windows worth — same threshold as the with-pickle path.
-            if sqlite_count > divergence_floor:
-                out["status"] = "diverged"
-                out["diverged"] = True
-                out["divergence"] = sqlite_count
-                out["message"] = (
-                    f"sqlite holds {sqlite_count:,} embeddings but the HNSW segment "
-                    "has never flushed metadata — vector search will return nothing "
-                    "until the segment is rebuilt. Run `mempalace repair`."
-                )
-            else:
-                out["message"] = "HNSW segment metadata not yet flushed; skipping"
+            # No pickle yet, so this probe cannot measure HNSW capacity.
+            # Chroma 1.5.x can have binary HNSW files without a flushed
+            # metadata pickle; absence of the pickle alone is not proof that
+            # vector search is unusable or dangerous. Keep the status unknown
+            # so MCP does not globally disable vectors on an inconclusive
+            # signal. Corrupt/invalid metadata, when present, is handled by
+            # quarantine_invalid_hnsw_metadata before Chroma opens.
+            out["message"] = (
+                "HNSW capacity unavailable: metadata has not been flushed; "
+                "leaving vector search enabled"
+            )
             return out
 
         divergence = sqlite_count - hnsw_count
@@ -589,6 +586,97 @@ def _pin_hnsw_threads(collection) -> None:
 
 
 _BLOB_FIX_MARKER = ".blob_seq_ids_migrated"
+
+
+def _valid_dimensionality(value: object) -> bool:
+    return isinstance(value, Integral) and not isinstance(value, bool) and int(value) > 0
+
+
+def _persisted_metadata_fields(obj: object) -> tuple[object, object]:
+    if isinstance(obj, dict):
+        return obj.get("dimensionality"), obj.get("id_to_label")
+    return getattr(obj, "dimensionality", None), getattr(obj, "id_to_label", None)
+
+
+def quarantine_invalid_hnsw_metadata(palace_path: str) -> list[str]:
+    """Quarantine segment dirs whose ``index_metadata.pickle`` is unreadable or invalid.
+
+    Chroma's persisted HNSW metadata is untrusted disk state. If a segment has
+    labels but no valid positive dimensionality, current Chroma versions can
+    accept the pickle and crash later in the Rust loader. We rename the entire
+    segment out of the way before ``PersistentClient`` opens so Chroma can
+    rebuild cleanly instead of touching known-bad metadata.
+    """
+    try:
+        entries = os.listdir(palace_path)
+    except OSError:
+        return []
+
+    moved: list[str] = []
+    for name in entries:
+        if "-" not in name or name.startswith(".") or ".drift-" in name or ".corrupt-" in name:
+            continue
+        seg_dir = os.path.join(palace_path, name)
+        if not os.path.isdir(seg_dir):
+            continue
+
+        meta_path = os.path.join(seg_dir, "index_metadata.pickle")
+        if not os.path.isfile(meta_path):
+            continue
+
+        reason = None
+        try:
+            persisted = _SafePersistentDataUnpickler.load(meta_path)
+        except (EOFError, OSError):
+            logger.debug(
+                "Skipping invalid-HNSW quarantine for transient metadata read in %s",
+                meta_path,
+                exc_info=True,
+            )
+            continue
+        except pickle.UnpicklingError as exc:
+            if "truncated" in str(exc).lower() or "ran out of input" in str(exc).lower():
+                logger.debug(
+                    "Skipping invalid-HNSW quarantine for transient metadata read in %s",
+                    meta_path,
+                    exc_info=True,
+                )
+                continue
+            reason = f"invalid index_metadata.pickle: {exc}"
+        except Exception as exc:
+            reason = f"invalid index_metadata.pickle: {exc}"
+        else:
+            if not isinstance(persisted, dict) and not (
+                hasattr(persisted, "dimensionality") or hasattr(persisted, "id_to_label")
+            ):
+                reason = f"unrecognized index_metadata.pickle payload: {type(persisted).__name__}"
+            else:
+                dimensionality, id_to_label = _persisted_metadata_fields(persisted)
+                if id_to_label is not None and not isinstance(id_to_label, dict):
+                    reason = f"invalid id_to_label type {type(id_to_label).__name__}"
+                else:
+                    has_labels = bool(id_to_label)
+                    if has_labels and not _valid_dimensionality(dimensionality):
+                        reason = (
+                            "labels present but dimensionality is missing or invalid "
+                            f"({dimensionality!r})"
+                        )
+                    elif dimensionality is not None and not _valid_dimensionality(dimensionality):
+                        reason = f"invalid dimensionality {dimensionality!r}"
+
+        if reason is None:
+            continue
+
+        stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        target = f"{seg_dir}.corrupt-{stamp}"
+        try:
+            os.rename(seg_dir, target)
+            moved.append(target)
+            logger.warning("Quarantined invalid HNSW metadata in %s: %s", seg_dir, reason)
+        except OSError:
+            logger.exception("Failed to quarantine invalid HNSW metadata in %s", seg_dir)
+
+    return moved
 
 
 def _fix_blob_seq_ids(palace_path: str) -> None:
@@ -994,6 +1082,12 @@ class ChromaBackend(BaseBackend):
 
         if cached is None or inode_changed or mtime_changed or mtime_appeared:
             _fix_blob_seq_ids(palace_path)
+            if inode_changed:
+                ChromaBackend._quarantined_paths.discard(palace_path)
+            if palace_path not in ChromaBackend._quarantined_paths:
+                quarantine_invalid_hnsw_metadata(palace_path)
+                quarantine_stale_hnsw(palace_path)
+                ChromaBackend._quarantined_paths.add(palace_path)
             cached = chromadb.PersistentClient(path=palace_path)
             self._clients[palace_path] = cached
             # Re-stat after the client constructor runs: chromadb creates
@@ -1006,26 +1100,27 @@ class ChromaBackend(BaseBackend):
     # Public static helpers (legacy; prefer :meth:`get_collection`)
     # ------------------------------------------------------------------
 
-    # Per-process record of palaces that have already had quarantine_stale_hnsw
-    # invoked at least once. The proactive drift check is a *cold-start*
-    # protection — it catches HNSW segments that arrived stale relative to
-    # ``chroma.sqlite3`` (e.g. cross-machine replication, partial restore,
-    # crashed-mid-write). Once a long-running process has opened the palace
-    # cleanly, re-firing on every reconnect is a *runtime thrash*: the
-    # daemon's own writes bump sqlite mtime but HNSW flushes batch on
-    # chromadb's internal cadence, so the mtime gap naturally exceeds the
-    # threshold under steady write load even though nothing is corrupt.
+    # Per-process record of palaces that have already had the cold-start
+    # quarantine invoked at least once. The proactive HNSW checks are a
+    # *cold-start* protection — they catch segments that arrive stale relative
+    # to ``chroma.sqlite3`` or invalid on disk (e.g. cross-machine replication,
+    # partial restore, crashed-mid-write). Once a long-running process has
+    # opened the palace cleanly, re-firing the stale check on every reconnect
+    # is a *runtime thrash*: the daemon's own writes bump sqlite mtime but HNSW
+    # flushes batch on chromadb's internal cadence, so the mtime gap naturally
+    # exceeds the threshold under steady write load even though nothing is
+    # corrupt.
     # Real runtime drift is still handled — palace-daemon's ``_auto_repair``
     # calls :func:`quarantine_stale_hnsw` directly on observed HNSW errors,
     # which bypasses this gate.
     #
     # Thread-safety: this set is mutated without a lock. Two concurrent
     # ``make_client()`` calls for the same palace can both pass the
-    # membership check and both invoke ``quarantine_stale_hnsw``. That's
-    # safe because the function is idempotent (mtime check + timestamped
-    # rename of distinct directories), so the worst-case race produces
-    # one redundant rename attempt that no-ops. Idempotency is the
-    # safety property; locking would add cost without correctness gain.
+    # membership check and both invoke the cold-start quarantine. That's
+    # safe because the functions are idempotent (mtime checks + timestamped
+    # rename of distinct directories), so the worst-case race produces one
+    # redundant rename attempt that no-ops. Idempotency is the safety
+    # property; locking would add cost without correctness gain.
     _quarantined_paths: set[str] = set()
 
     @staticmethod
@@ -1036,12 +1131,13 @@ class ChromaBackend(BaseBackend):
         own client cache. New code should obtain a collection through
         :meth:`get_collection` which manages caching internally.
 
-        Quarantines stale HNSW segments **once per palace per process**. See
+        Quarantines HNSW segments **once per palace per process**. See
         :attr:`_quarantined_paths` for the rationale (cold-start protection
         vs. runtime thrash on steady-write daemons).
         """
         _fix_blob_seq_ids(palace_path)
         if palace_path not in ChromaBackend._quarantined_paths:
+            quarantine_invalid_hnsw_metadata(palace_path)
             quarantine_stale_hnsw(palace_path)
             ChromaBackend._quarantined_paths.add(palace_path)
         return chromadb.PersistentClient(path=palace_path)
