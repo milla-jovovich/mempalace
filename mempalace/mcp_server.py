@@ -279,68 +279,86 @@ def _get_client():
 
 
 def _get_collection(create=False):
-    """Return the ChromaDB collection, caching the client between calls."""
-    global _collection_cache, _metadata_cache, _metadata_cache_time
-    try:
-        client = _get_client()
-        # ChromaDB 1.x persists the EF *identity* (its ``name()``) with the
-        # collection but not the EF *instance/configuration*. So a reader or
-        # writer that omits ``embedding_function=`` silently gets chromadb's
-        # built-in ``DefaultEmbeddingFunction`` — its ``name()`` matches the
-        # one we spoof in ``mempalace.embedding`` (both report ``"default"``,
-        # the identity check passes), but the *provider list* is chromadb's
-        # default rather than the user's resolved device. On bleeding-edge
-        # interpreters (#1299: python 3.14 + chromadb 1.5.x on Apple Silicon)
-        # that default provider selection can SIGSEGV the host process on
-        # first ``col.add()``. The miner / Stop hook ingest path avoids this
-        # because it routes through ``ChromaBackend.get_collection``, which
-        # resolves the EF via ``ChromaBackend._resolve_embedding_function``;
-        # the MCP server bypassed that abstraction. Resolve the EF inside the
-        # branches that actually open a collection so warm-cache reads stay
-        # zero-cost. Reuse the backend helper so the two call sites can't
-        # drift on logging or fallback semantics.
-        if create:
-            ef = ChromaBackend._resolve_embedding_function()
-            ef_kwargs = {"embedding_function": ef} if ef is not None else {}
-            # hnsw:num_threads=1 disables ChromaDB's multi-threaded ParallelFor
-            # HNSW insert path, which has a race in repairConnectionsForUpdate /
-            # addPoint (see issues #974, #965). Set via metadata on fresh
-            # collections and re-applied via _pin_hnsw_threads() for legacy
-            # palaces whose collections were created before this fix (the
-            # runtime config does not persist cross-process in chromadb 1.5.x,
-            # so the retrofit runs every time _get_collection opens a cache).
-            #
-            # ChromaDB 1.5.x's Rust binding SIGSEGVs when get_or_create_collection
-            # is called with metadata that differs from what's stored. The split
-            # below skips the metadata-comparison codepath for existing
-            # collections, mirroring the backend-layer fix from #1262.
-            try:
+    """Return the ChromaDB collection, caching the client between calls.
+
+    On failure, log the exception (so the operator can see what broke
+    instead of a silent ``None``) and retry once after clearing the
+    client/collection caches — this lets a stale cache, e.g. left
+    behind after a transient ChromaDB error, self-heal on the next
+    tool call rather than requiring a process restart.
+    """
+    global _client_cache, _collection_cache, _metadata_cache, _metadata_cache_time
+    for attempt in range(2):
+        try:
+            client = _get_client()
+            # ChromaDB 1.x persists the EF *identity* (its ``name()``) with the
+            # collection but not the EF *instance/configuration*. So a reader or
+            # writer that omits ``embedding_function=`` silently gets chromadb's
+            # built-in ``DefaultEmbeddingFunction`` — its ``name()`` matches the
+            # one we spoof in ``mempalace.embedding`` (both report ``"default"``,
+            # the identity check passes), but the *provider list* is chromadb's
+            # default rather than the user's resolved device. On bleeding-edge
+            # interpreters (#1299: python 3.14 + chromadb 1.5.x on Apple Silicon)
+            # that default provider selection can SIGSEGV the host process on
+            # first ``col.add()``. The miner / Stop hook ingest path avoids this
+            # because it routes through ``ChromaBackend.get_collection``, which
+            # resolves the EF via ``ChromaBackend._resolve_embedding_function``;
+            # the MCP server bypassed that abstraction. Resolve the EF inside the
+            # branches that actually open a collection so warm-cache reads stay
+            # zero-cost. Reuse the backend helper so the two call sites can't
+            # drift on logging or fallback semantics.
+            if create:
+                ef = ChromaBackend._resolve_embedding_function()
+                ef_kwargs = {"embedding_function": ef} if ef is not None else {}
+                # hnsw:num_threads=1 disables ChromaDB's multi-threaded ParallelFor
+                # HNSW insert path, which has a race in repairConnectionsForUpdate /
+                # addPoint (see issues #974, #965). Set via metadata on fresh
+                # collections and re-applied via _pin_hnsw_threads() for legacy
+                # palaces whose collections were created before this fix (the
+                # runtime config does not persist cross-process in chromadb 1.5.x,
+                # so the retrofit runs every time _get_collection opens a cache).
+                #
+                # ChromaDB 1.5.x's Rust binding SIGSEGVs when get_or_create_collection
+                # is called with metadata that differs from what's stored. The split
+                # below skips the metadata-comparison codepath for existing
+                # collections, mirroring the backend-layer fix from #1262.
+                try:
+                    raw = client.get_collection(_config.collection_name, **ef_kwargs)
+                except _ChromaNotFoundError:
+                    raw = client.create_collection(
+                        _config.collection_name,
+                        metadata={
+                            "hnsw:space": "cosine",
+                            "hnsw:num_threads": 1,
+                            **_HNSW_BLOAT_GUARD,
+                        },
+                        **ef_kwargs,
+                    )
+                _pin_hnsw_threads(raw)
+                _collection_cache = ChromaCollection(raw)
+                _metadata_cache = None
+                _metadata_cache_time = 0
+            elif _collection_cache is None:
+                ef = ChromaBackend._resolve_embedding_function()
+                ef_kwargs = {"embedding_function": ef} if ef is not None else {}
                 raw = client.get_collection(_config.collection_name, **ef_kwargs)
-            except _ChromaNotFoundError:
-                raw = client.create_collection(
-                    _config.collection_name,
-                    metadata={
-                        "hnsw:space": "cosine",
-                        "hnsw:num_threads": 1,
-                        **_HNSW_BLOAT_GUARD,
-                    },
-                    **ef_kwargs,
-                )
-            _pin_hnsw_threads(raw)
-            _collection_cache = ChromaCollection(raw)
-            _metadata_cache = None
-            _metadata_cache_time = 0
-        elif _collection_cache is None:
-            ef = ChromaBackend._resolve_embedding_function()
-            ef_kwargs = {"embedding_function": ef} if ef is not None else {}
-            raw = client.get_collection(_config.collection_name, **ef_kwargs)
-            _pin_hnsw_threads(raw)
-            _collection_cache = ChromaCollection(raw)
-            _metadata_cache = None
-            _metadata_cache_time = 0
-        return _collection_cache
-    except Exception:
-        return None
+                _pin_hnsw_threads(raw)
+                _collection_cache = ChromaCollection(raw)
+                _metadata_cache = None
+                _metadata_cache_time = 0
+            return _collection_cache
+        except Exception:
+            logger.exception(
+                "_get_collection attempt %d failed (palace=%s)",
+                attempt + 1,
+                _config.palace_path,
+            )
+            if attempt == 0:
+                _client_cache = None
+                _collection_cache = None
+                _metadata_cache = None
+                _metadata_cache_time = 0
+    return None
 
 
 def _get_session_recovery_collection(create=False):
