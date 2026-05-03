@@ -104,12 +104,10 @@ if _args.palace:
     os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
 
 _config = MempalaceConfig()
-# Only override KG path when --palace is explicitly provided; otherwise use
-# KnowledgeGraph's default (~/.mempalace/knowledge_graph.sqlite3).
-if _args.palace:
-    _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
-else:
-    _kg = KnowledgeGraph()
+# Always co-locate the KG with the palace so layers.py (wake-up) and MCP
+# tools read/write the same database. The old default (~/.mempalace/knowledge_graph.sqlite3)
+# caused a split where kg_add wrote to root KG but session wake-up read palace KG.
+_kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
 
 
 _client_cache = None
