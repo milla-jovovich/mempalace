@@ -37,7 +37,26 @@ import time
 from datetime import datetime
 from typing import Optional
 
+from ._runtime import using_local_chroma
 from .backends.chroma import ChromaBackend, hnsw_capacity_status
+
+
+class BackendUnsupportedError(RuntimeError):
+    """Raised when a repair op is meaningless against the active backend.
+
+    HTTP-mode palaces don't have a local ``chroma.sqlite3`` for the
+    operator to back up, no local HNSW segment to quarantine, and no
+    ``max_seq_id`` table to mutate — those are server-side artifacts.
+    Operations that would need direct filesystem access raise this so
+    the CLI can surface a clear refusal message instead of crashing.
+    """
+
+
+_HTTP_REFUSAL_HINT = (
+    "this operation manipulates ChromaDB's internal storage, which "
+    "lives on the remote chromadb server in HTTP mode. Run the "
+    "diagnostic against the server, not the client."
+)
 
 
 COLLECTION_NAME = "mempalace_drawers"
@@ -333,11 +352,18 @@ def sqlite_drawer_count(palace_path: str) -> "int | None":
 def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     """Rebuild the HNSW index from scratch.
 
-    1. Extract all drawers via ChromaDB get()
-    2. Cross-check against the SQLite ground truth (#1208 guard)
-    3. Back up ONLY chroma.sqlite3 (not the bloated HNSW files)
-    4. Delete and recreate the collection with hnsw:space=cosine
-    5. Upsert all drawers back
+    Local mode:
+      1. Extract all drawers via ChromaDB ``get()``
+      2. Cross-check against the SQLite ground truth (#1208 guard)
+      3. Back up ONLY ``chroma.sqlite3`` (not the bloated HNSW files)
+      4. Delete and recreate the collection with ``hnsw:space=cosine``
+      5. Upsert all drawers back
+
+    HTTP mode:
+      Steps 2 (sqlite cross-check) and 3 (sqlite backup) become
+      ``collection.count()`` cross-check and a "snapshot the chromadb
+      server before this rebuild" warning respectively. Everything
+      else flows through the chromadb HTTP API unchanged.
 
     ``confirm_truncation_ok`` overrides the safety guard from step 2.
     Set to ``True`` only when you have independently verified that the
@@ -345,8 +371,9 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     (typically only a concern for palaces sized at exactly 10 000 rows).
     """
     palace_path = palace_path or _get_palace_path()
+    is_local = using_local_chroma()
 
-    if not os.path.isdir(palace_path):
+    if is_local and not os.path.isdir(palace_path):
         print(f"\n  No palace found at {palace_path}")
         return
 
@@ -354,8 +381,21 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     print("  MemPalace Repair — Index Rebuild")
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
+    if not is_local:
+        print("  Backend: chroma_http (remote)")
+        print(
+            "  WARNING: cannot back up chroma.sqlite3 from the client side.\n"
+            "  Snapshot the chromadb server before continuing if you need\n"
+            "  a recovery point."
+        )
 
-    backend = ChromaBackend()
+    if is_local:
+        backend = ChromaBackend()
+    else:
+        from .backends.chroma_http import HttpChromaBackend
+
+        backend = HttpChromaBackend()
+
     try:
         col = backend.get_collection(palace_path, COLLECTION_NAME)
         total = col.count()
@@ -387,20 +427,36 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
         offset += len(batch["ids"])
     print(f"  Extracted {len(all_ids)} drawers")
 
-    # ── #1208 guard ──────────────────────────────────────────────────
-    # Refuse to ``delete_collection`` + rebuild when extraction looks
-    # short of the SQLite ground truth (or when extraction == chromadb
-    # default get() cap and the SQLite check couldn't run).
-    try:
-        check_extraction_safety(palace_path, len(all_ids), confirm_truncation_ok)
-    except TruncationDetected as e:
-        print(e.message)
-        return
+    # ── Extraction-completeness guard ────────────────────────────────
+    # Local mode: cross-check against ``chroma.sqlite3``'s row count
+    # (``check_extraction_safety``).
+    # HTTP mode: cross-check against ``collection.count()`` we already
+    # captured into ``total`` above. The chromadb-default-cap signal
+    # (#1208) only applies in local mode where the count is read from
+    # the same in-process chromadb client.
+    if is_local:
+        try:
+            check_extraction_safety(palace_path, len(all_ids), confirm_truncation_ok)
+        except TruncationDetected as e:
+            print(e.message)
+            return
+    else:
+        if len(all_ids) < total and not confirm_truncation_ok:
+            print(
+                f"\n  ABORT: chromadb collection.count() reports {total:,} drawers "
+                f"but only {len(all_ids):,}\n"
+                "  came back through paginated get(). The remote chromadb segment\n"
+                "  may be stale or the get() loop hit a server-side cap.\n"
+                "  Re-run with --confirm-truncation-ok if you have independently\n"
+                "  verified the count.\n"
+            )
+            return
 
-    # Back up ONLY the SQLite database, not the bloated HNSW files
+    # Back up ONLY the SQLite database (local mode only — HTTP mode has
+    # no client-side filesystem to copy to).
     sqlite_path = os.path.join(palace_path, "chroma.sqlite3")
     backup_path = sqlite_path + ".backup"
-    if os.path.exists(sqlite_path):
+    if is_local and os.path.exists(sqlite_path):
         print(f"  Backing up chroma.sqlite3 ({os.path.getsize(sqlite_path) / 1e6:.0f} MB)...")
         shutil.copy2(sqlite_path, backup_path)
         print(f"  Backup: {backup_path}")
@@ -422,11 +478,16 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     except Exception as e:
         print(f"\n  ERROR during rebuild: {e}")
         print(f"  Only {filed}/{len(all_ids)} drawers were re-filed.")
-        if os.path.exists(backup_path):
+        if is_local and os.path.exists(backup_path):
             print(f"  Restoring from backup: {backup_path}")
             backend.delete_collection(palace_path, COLLECTION_NAME)
             shutil.copy2(backup_path, sqlite_path)
             print("  Backup restored. Palace is back to pre-repair state.")
+        elif not is_local:
+            print(
+                "  HTTP-mode rebuild cannot self-restore. If you snapshotted\n"
+                "  the chromadb server before this rebuild, restore it now."
+            )
         else:
             print("  No backup available. Re-mine from source files to recover.")
         raise
@@ -450,6 +511,10 @@ def status(palace_path=None) -> dict:
     hnswlib — it reads ``chroma.sqlite3`` and ``index_metadata.pickle``
     directly via :func:`mempalace.backends.chroma.hnsw_capacity_status`.
 
+    HTTP mode: returns ``status="unsupported"`` because the segment
+    files live on the remote chromadb server and have no client-side
+    counterpart. The CLI surfaces this as a clear refusal.
+
     Returns the capacity-status dict (also printed). Returns a dict with
     ``status="unknown"`` when no palace exists at the given path.
     """
@@ -458,6 +523,15 @@ def status(palace_path=None) -> dict:
     print("  MemPalace Repair — Status")
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
+
+    if not using_local_chroma():
+        print("  Backend: chroma_http (remote)")
+        print(f"  {_HTTP_REFUSAL_HINT}\n")
+        return {
+            "status": "unsupported",
+            "backend": "chroma_http",
+            "message": _HTTP_REFUSAL_HINT,
+        }
 
     if not os.path.isdir(palace_path):
         print("  No palace found.\n")
@@ -650,6 +724,18 @@ def repair_max_seq_id(
         print(f"  Segment: {segment}")
     if from_sidecar:
         print(f"  Sidecar: {from_sidecar}")
+
+    if not using_local_chroma():
+        print(f"\n  Backend: chroma_http (remote)")
+        print(f"  {_HTTP_REFUSAL_HINT}")
+        print(
+            "  The max_seq_id table lives inside the chromadb server's\n"
+            "  internal sqlite. Re-run this on the chromadb host."
+        )
+        result["aborted"] = True
+        result["reason"] = "backend-unsupported"
+        result["backend"] = "chroma_http"
+        return result
 
     if not os.path.isdir(palace_path):
         print(f"  No palace found at {palace_path}")

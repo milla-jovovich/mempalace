@@ -652,6 +652,7 @@ def cmd_repair_status(args):
 def cmd_repair(args):
     """Rebuild palace vector index from SQLite metadata."""
     import shutil
+    from ._runtime import using_local_chroma
     from .backends.chroma import ChromaBackend
     from .migrate import confirm_destructive_action, contains_palace_database
     from .repair import TruncationDetected, check_extraction_safety
@@ -670,6 +671,19 @@ def cmd_repair(args):
             backup=getattr(args, "backup", True),
             dry_run=getattr(args, "dry_run", False),
             assume_yes=getattr(args, "yes", False),
+        )
+        return
+
+    # HTTP-mode rebuild delegates to repair.rebuild_index, which knows
+    # how to skip the sqlite cross-check, the file-system backup, and
+    # the recovery-from-backup branch. The CLI-level palace-dir backup
+    # below requires local filesystem access and so is local-only.
+    if not using_local_chroma():
+        from .repair import rebuild_index
+
+        rebuild_index(
+            palace_path=palace_path,
+            confirm_truncation_ok=getattr(args, "confirm_truncation_ok", False),
         )
         return
 
