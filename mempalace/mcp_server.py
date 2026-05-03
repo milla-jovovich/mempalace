@@ -864,7 +864,7 @@ def tool_add_drawer(
             ],
         )
         _metadata_cache = None
-        logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
+        logger.info(f"Filed drawer: {drawer_id} -> {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -1239,7 +1239,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
                 }
             ],
         )
-        logger.info(f"Diary entry: {entry_id} → {wing}/diary/{topic}")
+        logger.info(f"Diary entry: {entry_id} -> {wing}/diary/{topic}")
         return {
             "success": True,
             "entry_id": entry_id,
