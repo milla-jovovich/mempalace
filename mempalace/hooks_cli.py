@@ -861,9 +861,21 @@ def hook_stop(data: dict, harness: str):
                     tag = " \u2014 " + ", ".join(themes)
                 else:
                     tag = ""
+                
+                # KG Integration: Include a fact summary in the silent feedback
+                # to keep the agent's knowledge of entities fresh mid-session.
+                try:
+                    from .layers import MemoryStack
+                    from .config import MempalaceConfig
+                    stack = MemoryStack(palace_path=MempalaceConfig().palace_path)
+                    kg_summary = stack.lkg.generate(limit=5)
+                    kg_note = f"\n\n{kg_summary}" if "No current" not in kg_summary else ""
+                except Exception:
+                    kg_note = ""
+
                 _output(
                     {
-                        "systemMessage": f"\u2726 {count} memories woven into the palace{tag}",
+                        "systemMessage": f"\u2726 {count} memories woven into the palace{tag}{kg_note}",
                     }
                 )
             else:
@@ -1126,12 +1138,31 @@ def hook_precompact(data: dict, harness: str):
     if transcript_path:
         _ingest_transcript(transcript_path)
 
-    # Mine MEMPAL_DIR synchronously so project data lands before
-    # compaction proceeds. Transcript convos were already kicked off
-    # above via _ingest_transcript.
+    # Mine MEMPAL_DIR synchronously
     _mine_sync()
 
-    _output({})
+    # KG Integration: Check behavior mode for blocking
+    # Supported: block (always), block_once (per session), proceed (never)
+    mode = os.environ.get("MEMPAL_PRECOMPACT_MODE", "").lower()
+    if not mode:
+        # Default: proceed for Claude/Gemini (avoid hangs), block for others
+        mode = "proceed" if harness in ("claude-code", "gemini") else "block"
+
+    if mode == "proceed":
+        _output({})
+        return
+
+    # Check session-once state if needed
+    if mode == "block_once":
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        flag = STATE_DIR / f"{session_id}_precompact_blocked"
+        if flag.exists():
+            _output({})
+            return
+        flag.touch()
+
+    # Block and force manual KG/Drawer save
+    _output({"decision": "block", "reason": PRECOMPACT_BLOCK_REASON})
 
 
 def run_hook(hook_name: str, harness: str):
