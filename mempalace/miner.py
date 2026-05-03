@@ -63,6 +63,10 @@ SKIP_FILENAMES = {
     "mempal.yml",
     ".gitignore",
     "package-lock.json",
+    "pnpm-lock.yaml",
+    ".pnpm-debug.log",
+    "pnpm-debug.log",
+    "pnpm-workspace.yaml",
 }
 
 CHUNK_SIZE = 800  # chars per drawer
