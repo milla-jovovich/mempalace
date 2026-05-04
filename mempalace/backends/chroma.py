@@ -129,9 +129,13 @@ def _segment_appears_healthy(seg_dir: str) -> bool:
     return len(head) == 2 and head[0] == 0x80 and tail == b"\x2e"
 
 
-def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> list[str]:
+def quarantine_stale_hnsw(
+    palace_path: str,
+    stale_seconds: float = 300.0,
+    force_stale_seconds: float = 7200.0,
+) -> list[str]:
     """Rename HNSW segment dirs that are both stale-by-mtime AND fail an
-    integrity sniff-test.
+    integrity sniff-test, or that are extremely stale regardless of metadata.
 
     Catches the segfault failure mode from #823 (semantic search stale
     after ``add_drawer``), observed at neo-cortex-mcp#2 (SIGSEGV on
@@ -147,33 +151,36 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
 
     2. **Integrity gate** (``_segment_appears_healthy``). Even when the
        mtime gap exceeds the threshold, a segment whose
-       ``index_metadata.pickle`` passes a format sniff-test is healthy:
-       chromadb 1.5.x flushes HNSW state asynchronously and a clean
-       shutdown does NOT force-flush, so the on-disk HNSW is *always*
-       somewhat older than ``chroma.sqlite3``. Production observation
-       (2026-04-26 disks daemon): three of three segments quarantined
-       on every cold start, with 538-557s gaps, leaving the 151K-drawer
-       palace with vector_ranked=0 until rebuild. Renaming a healthy
-       segment based on mtime alone destroys a valid index — chromadb
-       creates an empty replacement, orphaning every drawer in sqlite
-       from vector recall until the operator runs ``mempalace repair
-       --mode rebuild`` (15+ min on a 151K palace).
+       ``index_metadata.pickle`` passes a format sniff-test is passed
+       through — chromadb 1.5.x flushes HNSW state asynchronously and a
+       clean shutdown does NOT force-flush, so the on-disk HNSW is
+       *always* somewhat older than ``chroma.sqlite3``. Production
+       observation (2026-04-26 disks daemon): three of three segments
+       quarantined on every cold start, with 538-557s gaps, leaving the
+       151K-drawer palace with vector_ranked=0 until rebuild. Renaming a
+       healthy segment based on mtime alone destroys a valid index.
+
+       **Exception — force quarantine.** If the mtime gap exceeds
+       ``force_stale_seconds`` (default 2 h), the segment is quarantined
+       regardless of metadata health. ChromaDB's async flush-lag is
+       measured in seconds, never hours. A gap of 2+ hours indicates the
+       segment was written by a previous process that no longer holds an
+       open handle; the metadata sniff-test cannot detect all binary
+       incompatibilities between ChromaDB versions that cause SIGSEGV on
+       load (observed with chromadb 0.6.x loading segments written under
+       earlier versions).
 
     Only segments that pass stage 1 (suspiciously stale) AND fail stage
-    2 (metadata file truncated, zero-filled, or absent-with-data) are
-    renamed to ``<uuid>.drift-<timestamp>``. The original directory is
-    renamed, not deleted, so recovery remains possible if the heuristic
-    misfires.
-
-    The default threshold (5 min) is advisory under daemon-strict; the
-    integrity gate is what actually distinguishes corruption from flush
-    lag. The threshold still matters for the cross-machine replication
-    case (#823), where it bounds how stale a Syncthing-replicated
-    segment can be before we look harder at it.
+    2 (metadata file truncated, zero-filled, or absent-with-data), or
+    that exceed ``force_stale_seconds``, are renamed to
+    ``<uuid>.drift-<timestamp>``. The original directory is renamed, not
+    deleted, so recovery remains possible if the heuristic misfires.
 
     Args:
         palace_path: path to the palace directory containing ``chroma.sqlite3``
         stale_seconds: minimum mtime gap to *consider* a segment for quarantine
+        force_stale_seconds: mtime gap above which quarantine is forced even
+            when the metadata sniff-test passes (default 2 h)
 
     Returns:
         List of paths that were quarantined (empty if nothing actually
@@ -211,18 +218,31 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
 
         # Stage 2: integrity gate. mtime drift is necessary but not
         # sufficient — chromadb's async flush makes drift the steady-
-        # state condition. A healthy segment metadata file proves
-        # chromadb can open the segment without segfault; don't
-        # quarantine a healthy index.
-        if _segment_appears_healthy(seg_dir):
+        # state condition. A healthy segment metadata file normally
+        # proves chromadb can open the segment without segfault.
+        # Exception: very large gaps (>force_stale_seconds) are forced
+        # through regardless — flush-lag is never measured in hours, and
+        # chromadb version mismatches can cause SIGSEGV even on metadata-
+        # healthy segments when the gap is this large.
+        gap = sqlite_mtime - hnsw_mtime
+        if _segment_appears_healthy(seg_dir) and gap < force_stale_seconds:
             logger.info(
                 "HNSW mtime gap %.0fs on %s exceeds threshold but segment "
                 "metadata file is intact — flush-lag, not corruption. "
                 "Leaving in place.",
-                sqlite_mtime - hnsw_mtime,
+                gap,
                 seg_dir,
             )
             continue
+        if _segment_appears_healthy(seg_dir):
+            logger.warning(
+                "HNSW mtime gap %.0fs on %s exceeds force-quarantine threshold "
+                "(%.0fs) — quarantining despite intact metadata to prevent "
+                "potential SIGSEGV on chromadb version mismatch.",
+                gap,
+                seg_dir,
+                force_stale_seconds,
+            )
 
         stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         target = f"{seg_dir}.drift-{stamp}"
