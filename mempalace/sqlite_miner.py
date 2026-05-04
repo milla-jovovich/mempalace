@@ -261,11 +261,15 @@ def mine_sqlite(
     limit: int = 0,
     dry_run: bool = False,
 ):
-    """Mine SQLite3 files in a directory into the palace."""
+    """Mine SQLite3 files in a directory (or a single file) into the palace."""
     dir_path = Path(directory).expanduser().resolve()
     if not wing:
         wing = normalize_wing_name(dir_path.name)
-    files = scan_sqlite_files(directory)
+    # Handle single file path directly
+    if dir_path.is_file() and dir_path.suffix.lower() in {".db", ".sqlite", ".sqlite3", ".db3"}:
+        files = [dir_path]
+    else:
+        files = scan_sqlite_files(directory)
     if limit > 0:
         files = files[:limit]
     print(f"\n{'=' * 55}")
