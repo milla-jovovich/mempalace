@@ -35,6 +35,14 @@ SKIP_DIRS = {
     ".eggs",
     "htmlcov",
     "target",
+    # Tooling/plugin config directories that hold bundled JS/CSS the
+    # mine has no business indexing as user content. .obsidian alone
+    # produced 26K+ contaminated drawers in a real Obsidian vault — a
+    # single plugin (excalidraw) contributed 11.9K. Vendored deps land
+    # here too. Closes #1329.
+    ".obsidian",
+    ".terraform",
+    "vendor",
 }
 
 _DEFAULT_BACKEND = ChromaBackend()

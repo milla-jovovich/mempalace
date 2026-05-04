@@ -121,6 +121,7 @@ SKIP_DIRS = {
     ".terraform",
     "vendor",
     "target",
+    ".obsidian",
 }
 
 # Files whose content is boilerplate prose — poisons entity detection.

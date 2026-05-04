@@ -53,6 +53,7 @@ SKIP_DIRS = {
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
+    ".obsidian",
 }
 
 MAX_DEPTH = 6

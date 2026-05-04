@@ -117,6 +117,9 @@ def detect_rooms_from_folders(project_dir: str) -> list:
         "build",
         ".next",
         "coverage",
+        ".obsidian",
+        ".terraform",
+        "vendor",
     }
 
     # Check top-level directories first (most reliable signal)
@@ -200,7 +203,18 @@ def detect_rooms_from_files(project_dir: str) -> list:
     project_path = Path(project_dir).expanduser().resolve()
     keyword_counts = defaultdict(int)
 
-    SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build"}
+    SKIP_DIRS = {
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        ".obsidian",
+        ".terraform",
+        "vendor",
+    }
 
     for root, dirs, filenames in os.walk(project_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
