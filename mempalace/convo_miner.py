@@ -279,12 +279,26 @@ def detect_convo_room(content: str) -> str:
 # =============================================================================
 
 
-def scan_convos(convo_dir: str) -> list:
-    """Find all potential conversation files."""
+def scan_convos(convo_dir: str, include_subagents: bool = False) -> list:
+    """Find all potential conversation files.
+
+    By default, directories named ``subagents`` are skipped: Claude Code
+    records Explore/Plan/Grep subagent transcripts there, and on typical
+    workspaces they outnumber main session files by one to two orders of
+    magnitude. Pass ``include_subagents=True`` to mine them anyway.
+
+    The match is case-insensitive on the directory name only (``subagents``
+    or ``Subagents``), so directories like ``mysubagents`` or
+    ``subagentsbackup`` are not affected.
+    """
     convo_path = Path(convo_dir).expanduser().resolve()
     files = []
     for root, dirs, filenames in os.walk(convo_path):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in SKIP_DIRS and (include_subagents or d.lower() != "subagents")
+        ]
         for filename in filenames:
             if filename.endswith(".meta.json"):
                 continue
@@ -384,12 +398,16 @@ def mine_convos(
     limit: int = 0,
     dry_run: bool = False,
     extract_mode: str = "exchange",
+    include_subagents: bool = False,
 ):
     """Mine a directory of conversation files into the palace.
 
     extract_mode:
         "exchange" — default exchange-pair chunking (Q+A = one unit)
         "general"  — general extractor: decisions, preferences, milestones, problems, emotions
+    include_subagents:
+        False (default) — skip Claude Code ``subagents/`` directories
+        True            — also mine subagent transcripts
     """
 
     convo_path = Path(convo_dir).expanduser().resolve()
@@ -398,7 +416,7 @@ def mine_convos(
 
         wing = normalize_wing_name(convo_path.name)
 
-    files = scan_convos(convo_dir)
+    files = scan_convos(convo_dir, include_subagents=include_subagents)
     if limit > 0:
         files = files[:limit]
 

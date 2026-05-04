@@ -47,7 +47,7 @@ import json  # noqa: E402
 import logging  # noqa: E402
 import hashlib  # noqa: E402
 import time  # noqa: E402
-from datetime import datetime  # noqa: E402
+from datetime import date, datetime  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Optional  # noqa: E402
 
@@ -56,6 +56,7 @@ from .config import (  # noqa: E402
     sanitize_kg_value,
     sanitize_name,
     sanitize_content,
+    validate_iso_date,
 )
 from .version import __version__  # noqa: E402
 from chromadb.errors import NotFoundError as _ChromaNotFoundError  # noqa: E402
@@ -67,6 +68,7 @@ from .backends.chroma import (  # noqa: E402
     _pin_hnsw_threads,
     hnsw_capacity_status,
 )
+from .embedding import get_embedding_function  # noqa: E402
 from .query_sanitizer import sanitize_query  # noqa: E402
 from .searcher import search_memories  # noqa: E402
 from .palace_graph import (  # noqa: E402
@@ -92,6 +94,7 @@ def _parse_args():
         metavar="PATH",
         help="Path to the palace directory (overrides config file and env var)",
     )
+    # Ignore unrelated argv flags so imports work cleanly under test runners.
     args, unknown = parser.parse_known_args()
     if unknown:
         logger.debug("Ignoring unknown args: %s", unknown)
@@ -104,12 +107,10 @@ if _args.palace:
     os.environ["MEMPALACE_PALACE_PATH"] = os.path.abspath(_args.palace)
 
 _config = MempalaceConfig()
-# Only override KG path when --palace is explicitly provided; otherwise use
-# KnowledgeGraph's default (~/.mempalace/knowledge_graph.sqlite3).
-if _args.palace:
-    _kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
-else:
-    _kg = KnowledgeGraph()
+# Always co-locate the KG with the palace so layers.py (wake-up) and MCP
+# tools read/write the same database. The old default (~/.mempalace/knowledge_graph.sqlite3)
+# caused a split where kg_add wrote to root KG but session wake-up read palace KG.
+_kg = KnowledgeGraph(db_path=os.path.join(_config.palace_path, "knowledge_graph.sqlite3"))
 
 
 _client_cache = None
@@ -142,7 +143,7 @@ def _refresh_vector_disabled_flag() -> None:
     """
     global _vector_disabled, _vector_disabled_reason, _vector_capacity_status
     try:
-        info = hnsw_capacity_status(_config.palace_path, "mempalace_drawers")
+        info = hnsw_capacity_status(_config.palace_path, _config.collection_name)
     except Exception:
         logger.debug("HNSW capacity probe raised", exc_info=True)
         return
@@ -279,6 +280,22 @@ def _get_collection(create=False):
     global _collection_cache, _metadata_cache, _metadata_cache_time
     try:
         client = _get_client()
+        # ChromaDB 1.x does not persist the embedding function with the
+        # collection, so a reader/writer that omits ``embedding_function=``
+        # silently gets the chromadb-built-in default. On bleeding-edge
+        # interpreters (#1299: python 3.14 + chromadb 1.5.x on Apple Silicon)
+        # the default's lazy ONNX provider selection can SIGSEGV the host
+        # process on first ``col.add()``. The miner / Stop hook ingest path
+        # avoids this because it routes through ``ChromaBackend.get_collection``
+        # which resolves the EF via ``mempalace.embedding.get_embedding_function``.
+        # The MCP server bypassed that abstraction; mirror its behaviour so
+        # ``tool_diary_write`` / ``tool_add_drawer`` get the same EF as mining.
+        try:
+            ef = get_embedding_function()
+        except Exception:
+            logger.exception("Failed to build embedding function; using chromadb default")
+            ef = None
+        ef_kwargs = {"embedding_function": ef} if ef is not None else {}
         if create:
             # hnsw:num_threads=1 disables ChromaDB's multi-threaded ParallelFor
             # HNSW insert path, which has a race in repairConnectionsForUpdate /
@@ -293,7 +310,7 @@ def _get_collection(create=False):
             # below skips the metadata-comparison codepath for existing
             # collections, mirroring the backend-layer fix from #1262.
             try:
-                raw = client.get_collection(_config.collection_name)
+                raw = client.get_collection(_config.collection_name, **ef_kwargs)
             except _ChromaNotFoundError:
                 raw = client.create_collection(
                     _config.collection_name,
@@ -302,15 +319,16 @@ def _get_collection(create=False):
                         "hnsw:num_threads": 1,
                         **_HNSW_BLOAT_GUARD,
                     },
+                    **ef_kwargs,
                 )
             _pin_hnsw_threads(raw)
-            _collection_cache = ChromaCollection(raw)
+            _collection_cache = ChromaCollection(raw, palace_path=_config.palace_path)
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
-            raw = client.get_collection(_config.collection_name)
+            raw = client.get_collection(_config.collection_name, **ef_kwargs)
             _pin_hnsw_threads(raw)
-            _collection_cache = ChromaCollection(raw)
+            _collection_cache = ChromaCollection(raw, palace_path=_config.palace_path)
             _metadata_cache = None
             _metadata_cache_time = 0
         return _collection_cache
@@ -392,6 +410,7 @@ def _tool_status_via_sqlite() -> dict:
     db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
     if not os.path.isfile(db_path):
         return _no_palace()
+    collection_name = _config.collection_name
 
     wings: dict = {}
     rooms: dict = {}
@@ -405,8 +424,9 @@ def _tool_status_via_sqlite() -> dict:
                 FROM embeddings e
                 JOIN segments s ON e.segment_id = s.id
                 JOIN collections c ON s.collection = c.id
-                WHERE c.name = 'mempalace_drawers'
-                """
+                WHERE c.name = ?
+                """,
+                (collection_name,),
             ).fetchone()
             total = int(row[0]) if row and row[0] is not None else 0
             for key, target in (("wing", wings), ("room", rooms)):
@@ -417,12 +437,12 @@ def _tool_status_via_sqlite() -> dict:
                     JOIN embeddings e ON em.id = e.id
                     JOIN segments s ON e.segment_id = s.id
                     JOIN collections c ON s.collection = c.id
-                    WHERE c.name = 'mempalace_drawers'
+                    WHERE c.name = ?
                       AND em.key = ?
                       AND em.string_value IS NOT NULL
                     GROUP BY em.string_value
                     """,
-                    (key,),
+                    (collection_name, key),
                 ):
                     target[value] = count
         finally:
@@ -624,6 +644,7 @@ def tool_search(
         n_results=limit,
         max_distance=dist,
         vector_disabled=_vector_disabled,
+        collection_name=_config.collection_name,
     )
     if _vector_disabled:
         result["vector_disabled"] = True
@@ -825,8 +846,8 @@ def tool_add_drawer(
 
     # Idempotency: if the deterministic ID already exists, return success as a no-op.
     try:
-        existing = col.get(ids=[drawer_id])
-        if existing and existing["ids"]:
+        existing = col.get(ids=[drawer_id], include=[])
+        if existing.ids:
             return {"success": True, "reason": "already_exists", "drawer_id": drawer_id}
     except Exception:
         pass
@@ -846,6 +867,12 @@ def tool_add_drawer(
                 }
             ],
         )
+        inserted = col.get(ids=[drawer_id], include=[])
+        if not inserted.ids:
+            raise RuntimeError(
+                "Drawer write was acknowledged but the new ID is not readable. "
+                "The palace index may be stale; run reconnect or repair."
+            )
         _metadata_cache = None
         logger.info(f"Filed drawer: {drawer_id} → {wing}/{room}")
         return {"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}
@@ -1033,6 +1060,7 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
     """Query the knowledge graph for an entity's relationships."""
     try:
         entity = sanitize_kg_value(entity, "entity")
+        as_of = validate_iso_date(as_of, "as_of")
     except ValueError as e:
         return {"error": str(e)}
     if direction not in ("outgoing", "incoming", "both"):
@@ -1042,13 +1070,31 @@ def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
 
 
 def tool_kg_add(
-    subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
+    subject: str,
+    predicate: str,
+    object: str,
+    valid_from: str = None,
+    valid_to: str = None,
+    source_closet: str = None,
+    source_file: str = None,
+    source_drawer_id: str = None,
 ):
-    """Add a relationship to the knowledge graph."""
+    """Add a relationship to the knowledge graph.
+
+    All temporal and provenance fields are optional. ``valid_to`` lets callers
+    backfill historical facts with a known end date in a single call (instead
+    of a separate ``kg_invalidate``). ``source_file`` and ``source_drawer_id``
+    are RFC 002 §5.5 provenance fields populated by adapters / bulk importers.
+
+    TODO(#1283): once the ISO-8601 validation PR lands, wire ``validate_iso_date``
+    over ``valid_from`` / ``valid_to`` here so malformed dates fail fast at the
+    MCP boundary instead of silently producing empty query results.
+    """
     try:
         subject = sanitize_kg_value(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
         object = sanitize_kg_value(object, "object")
+        valid_from = validate_iso_date(valid_from, "valid_from")
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -1059,32 +1105,57 @@ def tool_kg_add(
             "predicate": predicate,
             "object": object,
             "valid_from": valid_from,
+            "valid_to": valid_to,
             "source_closet": source_closet,
+            "source_file": source_file,
+            "source_drawer_id": source_drawer_id,
         },
     )
     triple_id = _kg.add_triple(
-        subject, predicate, object, valid_from=valid_from, source_closet=source_closet
+        subject,
+        predicate,
+        object,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        source_closet=source_closet,
+        source_file=source_file,
+        source_drawer_id=source_drawer_id,
     )
     return {"success": True, "triple_id": triple_id, "fact": f"{subject} → {predicate} → {object}"}
 
 
 def tool_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
-    """Mark a fact as no longer true (set end date)."""
+    """Mark a fact as no longer true (set end date).
+
+    Returns the actual ``ended`` date that was stored — when the caller omits
+    ``ended``, the underlying graph stamps ``date.today()``, and the response
+    reflects that resolved value (instead of the literal string ``"today"``)
+    so callers can verify what was persisted.
+
+    TODO(#1283): apply ``validate_iso_date`` to ``ended`` once that PR lands.
+    """
     try:
         subject = sanitize_kg_value(subject, "subject")
         predicate = sanitize_name(predicate, "predicate")
         object = sanitize_kg_value(object, "object")
+        ended = validate_iso_date(ended, "ended")
     except ValueError as e:
         return {"success": False, "error": str(e)}
+    resolved_ended = ended or date.today().isoformat()
     _wal_log(
         "kg_invalidate",
-        {"subject": subject, "predicate": predicate, "object": object, "ended": ended},
+        {
+            "subject": subject,
+            "predicate": predicate,
+            "object": object,
+            "ended": resolved_ended,
+        },
     )
-    _kg.invalidate(subject, predicate, object, ended=ended)
+    _kg.invalidate(subject, predicate, object, ended=resolved_ended)
     return {
         "success": True,
         "fact": f"{subject} → {predicate} → {object}",
-        "ended": ended or "today",
+        "ended": resolved_ended,
     }
 
 
@@ -1114,9 +1185,13 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
 
     This is the agent's personal journal — observations, thoughts,
     what it worked on, what it noticed, what it thinks matters.
+
+    Note: ``agent_name`` is normalized to lowercase before storage so
+    that diary reads are case-insensitive (see #1243). "Claude",
+    "claude", and "CLAUDE" all resolve to the same agent.
     """
     try:
-        agent_name = sanitize_name(agent_name, "agent_name")
+        agent_name = sanitize_name(agent_name, "agent_name").lower()
         entry = sanitize_content(entry)
         topic = sanitize_name(topic, "topic")
     except ValueError as e:
@@ -1125,7 +1200,7 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
     if wing:
         wing = sanitize_name(wing)
     else:
-        wing = f"wing_{agent_name.lower().replace(' ', '_')}"
+        wing = f"wing_{agent_name.replace(' ', '_')}"
     room = "diary"
     col = _get_collection(create=True)
     if not col:
@@ -1190,9 +1265,14 @@ def tool_diary_read(agent_name: str, last_n: int = 10, wing: str = ""):
     written to. Diary writes from hooks land in project-derived wings
     (``wing_<project>``), so requiring a specific wing on read would
     silo those entries from agent-initiated reads.
+
+    Note: ``agent_name`` is normalized to lowercase before filtering so
+    that reads are case-insensitive (see #1243). Entries written under
+    pre-fix mixed-case agent names will not match the lowercase filter;
+    use ``mempalace repair`` to migrate legacy data if needed.
     """
     try:
-        agent_name = sanitize_name(agent_name, "agent_name")
+        agent_name = sanitize_name(agent_name, "agent_name").lower()
         if wing:
             wing = sanitize_name(wing)
     except ValueError as e:
@@ -1336,6 +1416,30 @@ def tool_reconnect():
         _palace_db_mtime, \
         _vector_disabled, \
         _vector_disabled_reason
+    from . import palace as palace_module
+
+    close_errors = []
+    try:
+        palace_module._DEFAULT_BACKEND.close_palace(_config.palace_path)
+    except Exception as exc:
+        logger.debug("Failed to close shared palace backend during reconnect", exc_info=True)
+        close_errors.append(f"backend close_palace failed: {exc}")
+    try:
+        from chromadb.api.client import SharedSystemClient
+
+        clear_system_cache = getattr(SharedSystemClient, "clear_system_cache", None)
+        if callable(clear_system_cache):
+            clear_system_cache()
+        else:
+            logger.debug(
+                "SharedSystemClient.clear_system_cache is unavailable; skipping shared Chroma cache clear during reconnect"
+            )
+    except Exception as exc:
+        logger.debug(
+            "Failed to clear Chroma shared system cache during reconnect",
+            exc_info=True,
+        )
+        close_errors.append(f"shared Chroma cache clear failed: {exc}")
     _client_cache = None
     _collection_cache = None
     _palace_db_inode = 0
@@ -1348,11 +1452,23 @@ def tool_reconnect():
     try:
         col = _get_collection()
         if col is None:
-            return {
+            result = {
                 "success": False,
                 "message": "No palace found after reconnect",
                 "drawers": 0,
                 "vector_disabled": _vector_disabled,
+            }
+            if close_errors:
+                result["error"] = "; ".join(close_errors)
+            return result
+        if close_errors:
+            return {
+                "success": False,
+                "message": "Reconnect reopened the palace but failed to fully reset cached handles",
+                "drawers": col.count(),
+                "vector_disabled": _vector_disabled,
+                "vector_disabled_reason": _vector_disabled_reason,
+                "error": "; ".join(close_errors),
             }
         return {
             "success": True,
@@ -1421,7 +1537,7 @@ TOOLS = {
         "handler": tool_kg_query,
     },
     "mempalace_kg_add": {
-        "description": "Add a fact to the knowledge graph. Subject → predicate → object with optional time window. E.g. ('Max', 'started_school', 'Year 7', valid_from='2026-09-01').",
+        "description": "Add a fact to the knowledge graph. Subject → predicate → object with optional time window. E.g. ('Max', 'started_school', 'Year 7', valid_from='2026-09-01'). Pass valid_to to backfill an already-ended historical fact in a single call.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1435,9 +1551,21 @@ TOOLS = {
                     "type": "string",
                     "description": "When this became true (YYYY-MM-DD, optional)",
                 },
+                "valid_to": {
+                    "type": "string",
+                    "description": "When this stopped being true (YYYY-MM-DD, optional). Use for backfilling already-ended historical facts.",
+                },
                 "source_closet": {
                     "type": "string",
                     "description": "Closet ID where this fact appears (optional)",
+                },
+                "source_file": {
+                    "type": "string",
+                    "description": "Source file path the fact was extracted from (optional)",
+                },
+                "source_drawer_id": {
+                    "type": "string",
+                    "description": "Drawer ID the fact was extracted from (optional, RFC 002 §5.5 provenance)",
                 },
             },
             "required": ["subject", "predicate", "object"],
@@ -1819,7 +1947,7 @@ def handle_request(request):
             "id": req_id,
             "result": {
                 "protocolVersion": negotiated,
-                "capabilities": {"tools": {}},
+                "capabilities": {"tools": {}, "prompts": {}},
                 "serverInfo": {"name": "mempalace", "version": __version__},
             },
         }
@@ -1898,9 +2026,60 @@ def handle_request(request):
                 "error": {"code": -32000, "message": "Internal tool error"},
             }
 
+    elif method == "prompts/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "prompts": [
+                    {
+                        "name": "mempalace_checkpoint",
+                        "description": (
+                            "Auto-save rule: every 10 user messages, save new decisions, "
+                            "findings, milestones, and next steps to mempalace using "
+                            "mempalace_add_drawer. Skip chatter and duplicates."
+                        ),
+                    }
+                ]
+            },
+        }
+    elif method == "prompts/get":
+        name = params.get("name", "")
+        if name == "mempalace_checkpoint":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "description": "Auto-save checkpoint rule for mempalace",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": {
+                                "type": "text",
+                                "text": (
+                                    "MEMPALACE AUTO-SAVE RULE (always active):\n"
+                                    "Every 10 user messages, before replying, call mempalace_add_drawer "
+                                    "to save any new decisions, findings, milestones, blockers, "
+                                    "architecture changes, code contracts, or actionable next steps "
+                                    "from this conversation. Skip duplicates and chatter. "
+                                    "Use the appropriate wing/room based on content type. "
+                                    "After saving, continue with your normal reply."
+                                ),
+                            },
+                        }
+                    ],
+                },
+            }
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {"code": -32602, "message": f"Unknown prompt: {name}"},
+        }
+
     # Notifications (missing id) must never get a response
     if req_id is None:
         return None
+
     return {
         "jsonrpc": "2.0",
         "id": req_id,
@@ -1939,12 +2118,11 @@ def main():
             request = json.loads(line)
             response = handle_request(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            logger.error(f"Server error: {e}")
+                print(json.dumps(response), flush=True)
+        except (json.JSONDecodeError, EOFError):
+            continue
+        except Exception:
+            logger.exception("MCP Loop error")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [3.3.5] — unreleased
+
+### Bug Fixes
+
+- **`mempalace_diary_read` silently dropped entries on agent-name case mismatch.** `tool_diary_write` stored the `agent` metadata verbatim after `sanitize_name`, which preserves case, while `tool_diary_read` filtered by exact match. Writing as `"Claude"` and reading as `"claude"` (or vice-versa) returned zero rows. Both endpoints now lowercase `agent_name` immediately after sanitization, so reads are case-insensitive and the default per-agent wing slug is stable across casings. **Behavior change:** entries written prior to this fix under mixed-case agent names will not match the new lowercase filter; run `mempalace repair` if you need to migrate legacy diary metadata. (#1243)
+
+---
+
 ## [3.3.4] — 2026-04-30
 
 ### Added
@@ -19,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Bug Fixes
 
+- **MCP server `tool_diary_write` SIGSEGV when EF default differs.** `mcp_server._get_collection` bypassed `ChromaBackend.get_collection` and called `client.get_collection` / `client.create_collection` without `embedding_function=`. ChromaDB 1.x does not persist the EF identity, so the MCP server silently bound chromadb's `DefaultEmbeddingFunction` while the miner bound `mempalace.embedding.get_embedding_function()`. On bleeding-edge interpreters (python 3.14 + chromadb 1.5.x) this SIGSEGV'd the MCP server on first `col.add()`. `_get_collection` now resolves and passes the EF explicitly. (#1299, follow-up to #1262/#1289)
 - **Cross-wing topic tunnels for hyphenated dir names.** `mempalace init` recorded the `topics_by_wing` registry key under the raw directory name (e.g. `mempalace-public`), while `mempalace.yaml`'s `wing` field used the lower-cased + separator-collapsed slug (`mempalace_public`). At mine time the miner read the slug from the yaml and missed the registry, so `_compute_topic_tunnels_for_wing` returned `0` silently. Real-world: any project whose folder contained a hyphen or space lost every topic tunnel. Producer side: `cmd_init`, `room_detector_local`, `miner.load_config` no-yaml fallback, and `convo_miner` now all route through a shared `normalize_wing_name()` in `config.py` so future writes use the same key. Lookup side: `palace_graph.create_tunnel`, `list_tunnels`, `follow_tunnels`, and `find_tunnels` normalize incoming wing names too, so existing palaces with raw-name keys on disk also recover. (#1194, #1195, #1197, follow-up to #1180)
 - **HNSW index bloat from repeated resize+persist cycles.** ChromaDB's HNSW segment was growing into the tens of GB on palaces past ~15K drawers because `link_lists.bin` was being re-allocated on every flush. Setting `hnsw:batch_size` and `hnsw:sync_threshold` on collection metadata via the new `_HNSW_BLOAT_GUARD` constant pins the segment to one allocation per batch instead. Empirical: a fresh 39,792-drawer palace went from 30 GB on disk and segfaulting `mempalace status` to 376 MB and instant. Migration note — already-bloated palaces still need a `mempalace repair` or full re-mine; HNSW config is honoured at collection-create time only. (#1191, supersedes #346)
 - **`max_seq_id` poisoning from old `_fix_blob_seq_ids` shim.** The 0.6.x → 1.5.x BLOB-to-INTEGER migration was running `int.from_bytes(blob, 'big')` over chromadb 1.5.x's native `b'\x11\x11' + ASCII-digit` `max_seq_id` format, yielding ~1.23e18 integers that silently suppressed every subsequent `embeddings_queue` write for the affected segment. The shim is now narrowed to the `embeddings` table only, with an additional defense-in-depth guard that skips sysdb-10-prefixed BLOBs even there. New `mempalace repair --mode max-seq-id` un-poisons existing palaces either from a pre-corruption sidecar DB (exact restore) or heuristically (`MAX(embeddings.seq_id)` over the owning collection). (#1135)

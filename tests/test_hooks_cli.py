@@ -13,6 +13,7 @@ from mempalace.hooks_cli import (
     _count_human_messages,
     _extract_recent_messages,
     _get_mine_targets,
+    _has_meaningful_updates,
     _log,
     _maybe_auto_ingest,
     _mempalace_python,
@@ -161,6 +162,18 @@ def test_extract_recent_messages_missing_file():
     assert _extract_recent_messages("/nonexistent.jsonl") == []
 
 
+def test_meaningful_update_heuristic_skips_chatter():
+    assert _has_meaningful_updates(["continue", "ok", "thanks", "yes"]) is False
+
+
+def test_meaningful_update_heuristic_detects_real_work():
+    assert _has_meaningful_updates([
+        "Audit aws infra and confirm the ananas-hub RDS deployment status.",
+        "Fix the marketing route and replace the placeholder API with a real dataset query.",
+        "Document the architecture decision in /home/zapostolski/projects/ananas-hub/docs/architecture.md.",
+    ]) is True
+
+
 # --- hook_stop ---
 
 
@@ -221,10 +234,15 @@ def test_stop_hook_passthrough_below_interval(tmp_path):
 
 def test_stop_hook_saves_silently_at_interval(tmp_path):
     transcript = tmp_path / "t.jsonl"
-    _write_transcript(
-        transcript,
-        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
-    )
+    _write_transcript(transcript, [
+        {
+            "message": {
+                "role": "user",
+                "content": f"Fix marketing data contract {i} and audit the Power BI dataset wiring.",
+            }
+        }
+        for i in range(SAVE_INTERVAL)
+    ])
     save_result = {"count": 15, "themes": ["hooks", "notifications"]}
     with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result) as mock_save:
         result = _capture_hook_output(
@@ -246,7 +264,15 @@ def test_stop_hook_derives_wing_from_transcript_path(tmp_path):
     transcript = project_dir / "session.jsonl"
     _write_transcript(
         transcript,
-        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
+        [
+            {
+                "message": {
+                    "role": "user",
+                    "content": f"Implement aws audit step {i} and update /home/zapostolski/projects/ananas-hub/README.md.",
+                }
+            }
+            for i in range(SAVE_INTERVAL)
+        ],
     )
     save_result = {"count": 15, "themes": []}
     with patch("mempalace.hooks_cli._save_diary_direct", return_value=save_result) as mock_save:
@@ -258,12 +284,31 @@ def test_stop_hook_derives_wing_from_transcript_path(tmp_path):
     mock_save.assert_called_once_with(str(transcript), "test", wing="wing_myproject", toast=False)
 
 
+def test_stop_hook_skips_low_signal_at_interval(tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(transcript, [
+        {"message": {"role": "user", "content": "continue"}}
+        for _ in range(SAVE_INTERVAL)
+    ])
+    result = _capture_hook_output(
+        hook_stop,
+        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        state_dir=tmp_path,
+    )
+    assert result == {}
+
+
 def test_stop_hook_tracks_save_point(tmp_path):
     transcript = tmp_path / "t.jsonl"
-    _write_transcript(
-        transcript,
-        [{"message": {"role": "user", "content": f"msg {i}"}} for i in range(SAVE_INTERVAL)],
-    )
+    _write_transcript(transcript, [
+        {
+            "message": {
+                "role": "user",
+                "content": f"Implement aws audit step {i} and update /home/zapostolski/projects/ananas-hub/README.md.",
+            }
+        }
+        for i in range(SAVE_INTERVAL)
+    ])
     data = {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)}
 
     # First call saves silently with systemMessage notification
@@ -282,13 +327,177 @@ def test_stop_hook_tracks_save_point(tmp_path):
 # --- hook_session_start ---
 
 
-def test_session_start_passes_through(tmp_path):
+def test_session_start_injects_context(tmp_path, monkeypatch):
+    """SessionStart returns Claude-compatible additionalContext from wake-up + protocol nudge."""
+    import mempalace.hooks_cli as hc
+    monkeypatch.setattr(hc, "_build_session_start_context", lambda cwd, palace: "WAKE\n\nNUDGE")
+
+    result = _capture_hook_output(
+        hook_session_start,
+        {"session_id": "test", "cwd": "/tmp"},
+        state_dir=tmp_path,
+    )
+    out = result["hookSpecificOutput"]
+    assert out["hookEventName"] == "SessionStart"
+    assert "WAKE" in out["additionalContext"]
+    assert "NUDGE" in out["additionalContext"]
+
+
+def test_session_start_skips_when_palace_unresolvable(tmp_path, monkeypatch):
+    """If palace path resolution fails, SessionStart is a no-op (avoid breaking the harness)."""
+    import mempalace.hooks_cli as hc
+    import mempalace.config as config_mod
+
+    def _boom(*a, **kw):
+        raise RuntimeError("no palace configured")
+
+    monkeypatch.setattr(config_mod, "MempalaceConfig", _boom)
+
     result = _capture_hook_output(
         hook_session_start,
         {"session_id": "test"},
         state_dir=tmp_path,
     )
     assert result == {}
+
+
+# --- _mirror_local_memory ---
+
+
+def _make_md(path: Path, body: str = "# decision\n\nUse Postgres for ledger.\n"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+
+
+def test_mirror_skips_index_files(tmp_path, monkeypatch):
+    """MEMORY.md / CLAUDE.md / GEMINI.md are skipped — they're indexes, not content."""
+    import mempalace.hooks_cli as hc
+    root = tmp_path / "claude" / "projects"
+    _make_md(root / "-home-zap-projects-foo" / "MEMORY.md", "- pointer\n")
+    _make_md(root / "-home-zap-projects-foo" / "CLAUDE.md", "context\n")
+    _make_md(root / "-home-zap-projects-foo" / "memory" / "real.md")
+
+    seen_calls = []
+
+    def fake_add(wing, room, content, source_file=None, added_by="mcp"):
+        seen_calls.append((wing, room))
+        return {"success": True, "drawer_id": f"d_{wing}_{room}"}
+
+    monkeypatch.setattr(hc, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(hc, "MIRROR_STATE_FILE", tmp_path / "state" / "mirror.json")
+    monkeypatch.setattr(hc, "DEFAULT_MIRROR_ROOTS", (root,))
+    monkeypatch.setattr("mempalace.mcp_server.tool_add_drawer", fake_add)
+
+    counts = hc._mirror_local_memory()
+    assert counts["added"] == 1
+    assert seen_calls == [("foo", "real")]
+
+
+def test_mirror_idempotent_on_unchanged(tmp_path, monkeypatch):
+    """Second run with no changes adds nothing."""
+    import mempalace.hooks_cli as hc
+    root = tmp_path / "claude" / "projects"
+    _make_md(root / "-home-zap-projects-bar" / "memory" / "decision.md")
+
+    monkeypatch.setattr(hc, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(hc, "MIRROR_STATE_FILE", tmp_path / "state" / "mirror.json")
+    monkeypatch.setattr(hc, "DEFAULT_MIRROR_ROOTS", (root,))
+    monkeypatch.setattr(
+        "mempalace.mcp_server.tool_add_drawer",
+        lambda **kw: {"success": True, "drawer_id": "d1"},
+    )
+
+    first = hc._mirror_local_memory()
+    second = hc._mirror_local_memory()
+    assert first["added"] == 1
+    assert second["added"] == 0
+    assert second["skipped_unchanged"] == 1
+
+
+def test_mirror_re_adds_when_mtime_changes(tmp_path, monkeypatch):
+    """Editing a file bumps mtime → re-mirrored."""
+    import mempalace.hooks_cli as hc
+    root = tmp_path / "claude" / "projects"
+    md = root / "-home-zap-projects-baz" / "memory" / "plan.md"
+    _make_md(md)
+
+    add_calls = []
+    monkeypatch.setattr(hc, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(hc, "MIRROR_STATE_FILE", tmp_path / "state" / "mirror.json")
+    monkeypatch.setattr(hc, "DEFAULT_MIRROR_ROOTS", (root,))
+    monkeypatch.setattr(
+        "mempalace.mcp_server.tool_add_drawer",
+        lambda **kw: add_calls.append(kw) or {"success": True, "drawer_id": "d"},
+    )
+
+    hc._mirror_local_memory()
+    # bump mtime
+    os.utime(md, (md.stat().st_atime, md.stat().st_mtime + 10))
+    hc._mirror_local_memory()
+    assert len(add_calls) == 2
+
+
+def test_mirror_handles_dup_response(tmp_path, monkeypatch):
+    """When mempalace says duplicate, we still record state to avoid retry."""
+    import mempalace.hooks_cli as hc
+    root = tmp_path / "claude" / "projects"
+    _make_md(root / "-home-zap-projects-qux" / "memory" / "x.md")
+
+    monkeypatch.setattr(hc, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(hc, "MIRROR_STATE_FILE", tmp_path / "state" / "mirror.json")
+    monkeypatch.setattr(hc, "DEFAULT_MIRROR_ROOTS", (root,))
+    monkeypatch.setattr(
+        "mempalace.mcp_server.tool_add_drawer",
+        lambda **kw: {"success": False, "reason": "duplicate", "matches": []},
+    )
+
+    first = hc._mirror_local_memory()
+    second = hc._mirror_local_memory()
+    assert first["skipped_dup"] == 1
+    assert second["skipped_unchanged"] == 1
+
+
+def test_derive_wing_room_claude_slug():
+    import mempalace.hooks_cli as hc
+    root = Path("/home/u/.claude/projects")
+    p = root / "-home-u-projects-ai-marketing" / "memory" / "decisions.md"
+    assert hc._derive_wing_room(p, root) == ("ai-marketing", "decisions")
+
+
+def test_derive_wing_room_gemini_layout():
+    import mempalace.hooks_cli as hc
+    root = Path("/home/u/.gemini/memory")
+    p = root / "ananas-crm" / "GEMINI.md"  # GEMINI.md filtered earlier; testing derivation only
+    assert hc._derive_wing_room(p, root) == ("ananas-crm", "GEMINI")
+
+
+def test_mirror_disabled_via_env(tmp_path, monkeypatch):
+    """MEMPAL_MIRROR_DISABLED=1 in hook_stop short-circuits the mirror."""
+    import mempalace.hooks_cli as hc
+    root = tmp_path / "claude" / "projects"
+    _make_md(root / "-home-zap-projects-skip" / "memory" / "x.md")
+
+    monkeypatch.setenv("MEMPAL_MIRROR_DISABLED", "1")
+    monkeypatch.setattr(hc, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(hc, "MIRROR_STATE_FILE", tmp_path / "state" / "mirror.json")
+    monkeypatch.setattr(hc, "DEFAULT_MIRROR_ROOTS", (root,))
+
+    called = {"n": 0}
+
+    def boom(*a, **kw):
+        called["n"] += 1
+        raise AssertionError("mirror should not have run")
+
+    monkeypatch.setattr(hc, "_mirror_local_memory", boom)
+
+    transcript = tmp_path / "t.jsonl"
+    _write_transcript(transcript, [{"message": {"role": "user", "content": "ok"}}])
+    _capture_hook_output(
+        hook_stop,
+        {"session_id": "test", "stop_hook_active": False, "transcript_path": str(transcript)},
+        state_dir=tmp_path,
+    )
+    assert called["n"] == 0
 
 
 # --- hook_precompact ---
@@ -504,7 +713,7 @@ def test_maybe_auto_ingest_ignores_transcript_arg_path(tmp_path):
     Transcript convos are handled by _ingest_transcript (called separately
     in hook handlers). _maybe_auto_ingest only handles MEMPAL_DIR — even
     when invoked in a context where a transcript is also being processed,
-    no second spawn for the transcript dir should appear here.
+    no second_spawn for the transcript dir should appear here.
     """
     convo_dir = tmp_path / "convos"
     convo_dir.mkdir()

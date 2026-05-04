@@ -3,7 +3,13 @@ import json
 import tempfile
 
 import pytest
-from mempalace.config import MempalaceConfig, normalize_wing_name, sanitize_kg_value, sanitize_name
+from mempalace.config import (
+    MempalaceConfig,
+    normalize_wing_name,
+    sanitize_kg_value,
+    sanitize_name,
+    validate_iso_date,
+)
 
 
 def test_default_config():
@@ -212,3 +218,133 @@ def test_kg_value_rejects_null_bytes():
 def test_kg_value_rejects_over_length():
     with pytest.raises(ValueError):
         sanitize_kg_value("a" * 129)
+
+
+# --- validate_iso_date ---
+
+
+def test_validate_iso_date_accepts_none():
+    assert validate_iso_date(None) is None
+
+
+def test_validate_iso_date_accepts_empty_string():
+    assert validate_iso_date("") is None
+
+
+def test_validate_iso_date_accepts_whitespace_only():
+    assert validate_iso_date("   ") is None
+
+
+def test_validate_iso_date_accepts_full_date():
+    assert validate_iso_date("2025-01-01") == "2025-01-01"
+
+
+def test_validate_iso_date_accepts_year_month():
+    assert validate_iso_date("2025-01") == "2025-01"
+
+
+def test_validate_iso_date_accepts_year_only():
+    assert validate_iso_date("2025") == "2025"
+
+
+def test_validate_iso_date_strips_whitespace():
+    assert validate_iso_date("  2025-06-15  ") == "2025-06-15"
+
+
+def test_validate_iso_date_rejects_natural_language():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("March 2026")
+
+
+def test_validate_iso_date_rejects_partial_date():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("2025-1")
+
+
+def test_validate_iso_date_rejects_invalid_month():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("2025-13-01")
+
+
+def test_validate_iso_date_rejects_invalid_day():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("2025-02-32")
+
+
+def test_validate_iso_date_rejects_garbage():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("not-a-date")
+
+
+def test_validate_iso_date_custom_param_name():
+    with pytest.raises(ValueError, match="as_of="):
+        validate_iso_date("Jan 2025", "as_of")
+
+
+def test_validate_iso_date_edge_case_december():
+    assert validate_iso_date("2025-12-31") == "2025-12-31"
+
+
+def test_validate_iso_date_edge_case_january():
+    assert validate_iso_date("2025-01-01") == "2025-01-01"
+
+
+def test_validate_iso_date_leap_year():
+    assert validate_iso_date("2024-02-29") == "2024-02-29"
+
+
+def test_validate_iso_date_non_leap_year_feb_29():
+    """2025 is not a leap year — Feb 29 should still pass regex (no calendar check)."""
+    # The regex validates format, not calendar correctness.
+    # This is intentional — calendar validation is out of scope.
+    assert validate_iso_date("2025-02-29") == "2025-02-29"
+
+
+def test_validate_iso_date_rejects_slash_format():
+    """YYYY/MM/DD is not ISO-8601."""
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("2025/01/01")
+
+
+def test_validate_iso_date_rejects_dot_format():
+    """DD.MM.YYYY is not ISO-8601."""
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("01.01.2025")
+
+
+def test_validate_iso_date_rejects_time_component():
+    """ISO-8601 datetime with time should be rejected (date only)."""
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("2025-01-01T12:00:00")
+
+
+def test_validate_iso_date_rejects_month_zero():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("2025-00-01")
+
+
+def test_validate_iso_date_rejects_day_zero():
+    with pytest.raises(ValueError, match="not a valid ISO-8601"):
+        validate_iso_date("2025-01-00")
+
+
+def test_validate_iso_date_accepts_max_month_day():
+    assert validate_iso_date("2025-12-31") == "2025-12-31"
+
+
+def test_validate_iso_date_non_string_input():
+    """Non-string input should return None (treated as missing)."""
+    assert validate_iso_date(123) is None
+    assert validate_iso_date(3.14) is None
+
+
+def test_validate_iso_date_param_name_in_error():
+    """Custom param name appears in the error message."""
+    with pytest.raises(ValueError, match="ended="):
+        validate_iso_date("bad-date", "ended")
+
+
+def test_validate_iso_date_param_name_default():
+    """Default param name is 'date'."""
+    with pytest.raises(ValueError, match="date="):
+        validate_iso_date("bad-date")

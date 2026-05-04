@@ -1,22 +1,6 @@
 #!/bin/bash
-# MEMPALACE PRE-COMPACT HOOK — Emergency save before compaction
-#
-# Claude Code "PreCompact" hook. Fires RIGHT BEFORE the conversation
-# gets compressed to free up context window space.
-#
-# === INSTALL ===
-# Add to .claude/settings.local.json:
-#
-#   "hooks": {
-#     "PreCompact": [{
-#       "hooks": [{
-#         "type": "command",
-#         "command": "/absolute/path/to/mempal_precompact_hook.sh",
-#         "timeout": 30
-#       }]
-#     }]
-#   }
-
+# MEMPALACE SESSION-START HOOK
+# Loads palace context (wake-up + cwd-matched wing) and a protocol nudge into the session.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,5 +21,16 @@ case "$PARENT_CMD" in
   opencode|Opencode) HARNESS="opencode" ;;
   *) ;;
 esac
+printf '%s' "$INPUT" | "$MEMPAL_PYTHON" -m mempalace hook run --hook session-start --harness "$HARNESS"
 
-printf '%s' "$INPUT" | "$MEMPAL_PYTHON" -m mempalace hook run --hook precompact --harness "$HARNESS"
+# Pre-warm ChromaDB in background so the first Stop hook doesn't cold-start
+"$MEMPAL_PYTHON" -c "
+import os, sys
+sys.path.insert(0, os.environ.get('PYTHONPATH','').split(':')[0])
+try:
+    from mempalace.backends.chroma import ChromaBackend
+    b = ChromaBackend()
+    b.get_collection(os.path.expanduser('~/.mempalace/palace'), 'mempalace_drawers', create=False)
+except Exception:
+    pass
+" >/dev/null 2>&1 &

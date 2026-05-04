@@ -37,10 +37,13 @@ import time
 from datetime import datetime
 from typing import Optional
 
+from chromadb.errors import NotFoundError as ChromaNotFoundError
+
 from .backends.chroma import ChromaBackend, hnsw_capacity_status
 
 
 COLLECTION_NAME = "mempalace_drawers"
+REPAIR_TEMP_COLLECTION = f"{COLLECTION_NAME}__repair_tmp"
 
 
 def _get_palace_path():
@@ -52,6 +55,16 @@ def _get_palace_path():
     except Exception:
         default = os.path.join(os.path.expanduser("~"), ".mempalace", "palace")
         return default
+
+
+def _get_collection_name() -> str:
+    """Resolve drawers collection name from config."""
+    try:
+        from .config import get_configured_collection_name
+
+        return get_configured_collection_name()
+    except Exception:
+        return COLLECTION_NAME
 
 
 def _paginate_ids(col, where=None):
@@ -83,7 +96,111 @@ def _paginate_ids(col, where=None):
     return ids
 
 
-def scan_palace(palace_path=None, only_wing=None):
+def _extract_drawers(col, total: int, batch_size: int):
+    all_ids = []
+    all_docs = []
+    all_metas = []
+    offset = 0
+    while offset < total:
+        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        if not batch["ids"]:
+            break
+        all_ids.extend(batch["ids"])
+        all_docs.extend(batch["documents"])
+        all_metas.extend(batch["metadatas"])
+        offset += len(batch["ids"])
+    return all_ids, all_docs, all_metas
+
+
+def _verify_collection_count(col, expected: int, label: str) -> None:
+    actual = col.count()
+    if actual != expected:
+        raise RuntimeError(f"{label} count mismatch: expected {expected}, got {actual}")
+
+
+def _is_missing_collection_value_error(exc: ValueError) -> bool:
+    message = str(exc).lower()
+    return "does not exist" in message or "not found" in message
+
+
+def _delete_collection_if_exists(backend, palace_path: str, collection_name: str) -> None:
+    try:
+        backend.delete_collection(palace_path, collection_name)
+    except ValueError as exc:
+        if _is_missing_collection_value_error(exc):
+            return
+        raise
+    except (FileNotFoundError, ChromaNotFoundError):
+        return
+
+
+class RebuildCollectionError(RuntimeError):
+    """Raised when temp rebuild fails, carrying whether the live swap happened."""
+
+    def __init__(self, message: str, *, live_replaced: bool):
+        super().__init__(message)
+        self.live_replaced = live_replaced
+
+
+def _rebuild_collection_via_temp(
+    backend,
+    palace_path: str,
+    all_ids,
+    all_docs,
+    all_metas,
+    batch_size: int,
+    collection_name: Optional[str] = None,
+    progress=print,
+) -> int:
+    expected = len(all_ids)
+    collection_name = collection_name or _get_collection_name()
+    temp_name = f"{collection_name}__repair_tmp"
+    live_replaced = False
+
+    try:
+        _delete_collection_if_exists(backend, palace_path, temp_name)
+
+        progress(f"  Building temporary collection: {temp_name}")
+        temp_col = backend.create_collection(palace_path, temp_name)
+        staged = 0
+        for i in range(0, expected, batch_size):
+            batch_ids = all_ids[i : i + batch_size]
+            batch_docs = all_docs[i : i + batch_size]
+            batch_metas = all_metas[i : i + batch_size]
+            temp_col.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
+            staged += len(batch_ids)
+            progress(f"  Staged {staged}/{expected} drawers...")
+        _verify_collection_count(temp_col, expected, "temporary rebuild")
+
+        progress("  Rebuilding live collection...")
+        backend.delete_collection(palace_path, collection_name)
+        live_replaced = True
+        new_col = backend.create_collection(palace_path, collection_name)
+
+        rebuilt = 0
+        for i in range(0, expected, batch_size):
+            batch_ids = all_ids[i : i + batch_size]
+            batch_docs = all_docs[i : i + batch_size]
+            batch_metas = all_metas[i : i + batch_size]
+            new_col.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
+            rebuilt += len(batch_ids)
+            progress(f"  Re-filed {rebuilt}/{expected} drawers...")
+        _verify_collection_count(new_col, expected, "rebuilt live collection")
+
+        try:
+            _delete_collection_if_exists(backend, palace_path, temp_name)
+        except Exception:
+            pass
+        return rebuilt
+    except Exception as exc:
+        try:
+            _delete_collection_if_exists(backend, palace_path, temp_name)
+        except Exception:
+            pass
+        raise RebuildCollectionError(str(exc), live_replaced=live_replaced) from exc
+
+
+def scan_palace(palace_path=None, only_wing=None, collection_name: Optional[str] = None):
     """Scan the palace for corrupt/unfetchable IDs.
 
     Probes in batches of 100, falls back to per-ID on failure.
@@ -92,14 +209,15 @@ def scan_palace(palace_path=None, only_wing=None):
     Returns (good_set, bad_set).
     """
     palace_path = palace_path or _get_palace_path()
+    collection_name = collection_name or _get_collection_name()
     print(f"\n  Palace: {palace_path}")
     print("  Loading...")
 
-    col = ChromaBackend().get_collection(palace_path, COLLECTION_NAME)
+    col = ChromaBackend().get_collection(palace_path, collection_name)
 
     where = {"wing": only_wing} if only_wing else None
     total = col.count()
-    print(f"  Collection: {COLLECTION_NAME}, total: {total:,}")
+    print(f"  Collection: {collection_name}, total: {total:,}")
     if only_wing:
         print(f"  Scanning wing: {only_wing}")
 
@@ -160,9 +278,10 @@ def scan_palace(palace_path=None, only_wing=None):
     return good_set, bad_set
 
 
-def prune_corrupt(palace_path=None, confirm=False):
+def prune_corrupt(palace_path=None, confirm=False, collection_name: Optional[str] = None):
     """Delete corrupt IDs listed in corrupt_ids.txt."""
     palace_path = palace_path or _get_palace_path()
+    collection_name = collection_name or _get_collection_name()
     bad_file = os.path.join(palace_path, "corrupt_ids.txt")
 
     if not os.path.exists(bad_file):
@@ -178,7 +297,7 @@ def prune_corrupt(palace_path=None, confirm=False):
         print("  Re-run with --confirm to actually delete.")
         return
 
-    col = ChromaBackend().get_collection(palace_path, COLLECTION_NAME)
+    col = ChromaBackend().get_collection(palace_path, collection_name)
     before = col.count()
     print(f"  Collection size before: {before:,}")
 
@@ -232,7 +351,10 @@ class TruncationDetected(Exception):
 
 
 def check_extraction_safety(
-    palace_path: str, extracted: int, confirm_truncation_ok: bool = False
+    palace_path: str,
+    extracted: int,
+    confirm_truncation_ok: bool = False,
+    collection_name: Optional[str] = None,
 ) -> None:
     """Cross-check that ``extracted`` matches the SQLite ground truth.
 
@@ -254,7 +376,8 @@ def check_extraction_safety(
     if confirm_truncation_ok:
         return
 
-    sqlite_count = sqlite_drawer_count(palace_path)
+    collection_name = collection_name or _get_collection_name()
+    sqlite_count = sqlite_drawer_count(palace_path, collection_name)
     cap_signal = extracted == CHROMADB_DEFAULT_GET_LIMIT
 
     if sqlite_count is not None and sqlite_count > extracted:
@@ -290,7 +413,7 @@ def check_extraction_safety(
         raise TruncationDetected(message, sqlite_count, extracted)
 
 
-def sqlite_drawer_count(palace_path: str) -> "int | None":
+def sqlite_drawer_count(palace_path: str, collection_name: Optional[str] = None) -> "int | None":
     """Count rows in ``chroma.sqlite3.embeddings`` for the drawers collection.
 
     Used as an independent ground-truth check against the chromadb
@@ -302,6 +425,7 @@ def sqlite_drawer_count(palace_path: str) -> "int | None":
     drift, missing tables, locked file). Callers treat ``None`` as
     "unknown" and fall back to the cap-detection check.
     """
+    collection_name = collection_name or _get_collection_name()
     sqlite_path = os.path.join(palace_path, "chroma.sqlite3")
     if not os.path.exists(sqlite_path):
         return None
@@ -318,7 +442,7 @@ def sqlite_drawer_count(palace_path: str) -> "int | None":
                 JOIN collections c ON s.collection = c.id
                 WHERE c.name = ?
                 """,
-                (COLLECTION_NAME,),
+                (collection_name,),
             ).fetchone()
             return int(row[0]) if row and row[0] is not None else None
         finally:
@@ -330,7 +454,11 @@ def sqlite_drawer_count(palace_path: str) -> "int | None":
         return None
 
 
-def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
+def rebuild_index(
+    palace_path=None,
+    confirm_truncation_ok: bool = False,
+    collection_name: Optional[str] = None,
+):
     """Rebuild the HNSW index from scratch.
 
     1. Extract all drawers via ChromaDB get()
@@ -345,6 +473,7 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     (typically only a concern for palaces sized at exactly 10 000 rows).
     """
     palace_path = palace_path or _get_palace_path()
+    collection_name = collection_name or _get_collection_name()
 
     if not os.path.isdir(palace_path):
         print(f"\n  No palace found at {palace_path}")
@@ -357,7 +486,7 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
 
     backend = ChromaBackend()
     try:
-        col = backend.get_collection(palace_path, COLLECTION_NAME)
+        col = backend.get_collection(palace_path, collection_name)
         total = col.count()
     except Exception as e:
         print(f"  Error reading palace: {e}")
@@ -373,18 +502,7 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     # Extract all drawers in batches
     print("\n  Extracting drawers...")
     batch_size = 5000
-    all_ids = []
-    all_docs = []
-    all_metas = []
-    offset = 0
-    while offset < total:
-        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
-        if not batch["ids"]:
-            break
-        all_ids.extend(batch["ids"])
-        all_docs.extend(batch["documents"])
-        all_metas.extend(batch["metadatas"])
-        offset += len(batch["ids"])
+    all_ids, all_docs, all_metas = _extract_drawers(col, total, batch_size)
     print(f"  Extracted {len(all_ids)} drawers")
 
     # ── #1208 guard ──────────────────────────────────────────────────
@@ -392,7 +510,12 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     # short of the SQLite ground truth (or when extraction == chromadb
     # default get() cap and the SQLite check couldn't run).
     try:
-        check_extraction_safety(palace_path, len(all_ids), confirm_truncation_ok)
+        check_extraction_safety(
+            palace_path,
+            len(all_ids),
+            confirm_truncation_ok,
+            collection_name=collection_name,
+        )
     except TruncationDetected as e:
         print(e.message)
         return
@@ -407,28 +530,34 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
 
     # Rebuild with correct HNSW settings
     print("  Rebuilding collection with hnsw:space=cosine...")
-    backend.delete_collection(palace_path, COLLECTION_NAME)
-    new_col = backend.create_collection(palace_path, COLLECTION_NAME)
-
-    filed = 0
     try:
-        for i in range(0, len(all_ids), batch_size):
-            batch_ids = all_ids[i : i + batch_size]
-            batch_docs = all_docs[i : i + batch_size]
-            batch_metas = all_metas[i : i + batch_size]
-            new_col.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
-            filed += len(batch_ids)
-            print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
-    except Exception as e:
+        filed = _rebuild_collection_via_temp(
+            backend,
+            palace_path,
+            all_ids,
+            all_docs,
+            all_metas,
+            batch_size,
+            collection_name=collection_name,
+            progress=print,
+        )
+    except RebuildCollectionError as e:
         print(f"\n  ERROR during rebuild: {e}")
-        print(f"  Only {filed}/{len(all_ids)} drawers were re-filed.")
-        if os.path.exists(backup_path):
+        print("  Rebuild aborted before completion.")
+        if e.live_replaced and os.path.exists(backup_path):
             print(f"  Restoring from backup: {backup_path}")
-            backend.delete_collection(palace_path, COLLECTION_NAME)
-            shutil.copy2(backup_path, sqlite_path)
-            print("  Backup restored. Palace is back to pre-repair state.")
-        else:
+            try:
+                _close_chroma_handles(palace_path, backend=backend)
+                _delete_collection_if_exists(backend, palace_path, collection_name)
+                shutil.copy2(backup_path, sqlite_path)
+                print("  Backup restored. Palace is back to pre-repair state.")
+            except Exception as restore_error:
+                print(f"  Backup restore failed: {restore_error}")
+                print(f"  Manual restore required from: {backup_path}")
+        elif e.live_replaced:
             print("  No backup available. Re-mine from source files to recover.")
+        else:
+            print("  Live collection was not replaced; leaving the original palace untouched.")
         raise
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
@@ -436,7 +565,7 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     print(f"\n{'=' * 55}\n")
 
 
-def status(palace_path=None) -> dict:
+def status(palace_path=None, collection_name: Optional[str] = None) -> dict:
     """Read-only health check: compare sqlite vs HNSW element counts.
 
     Catches the #1222 failure mode where chromadb's HNSW segment freezes
@@ -454,6 +583,7 @@ def status(palace_path=None) -> dict:
     ``status="unknown"`` when no palace exists at the given path.
     """
     palace_path = palace_path or _get_palace_path()
+    collection_name = collection_name or _get_collection_name()
     print(f"\n{'=' * 55}")
     print("  MemPalace Repair — Status")
     print(f"{'=' * 55}\n")
@@ -463,7 +593,7 @@ def status(palace_path=None) -> dict:
         print("  No palace found.\n")
         return {"status": "unknown", "message": "no palace at path"}
 
-    drawers = hnsw_capacity_status(palace_path, "mempalace_drawers")
+    drawers = hnsw_capacity_status(palace_path, collection_name)
     closets = hnsw_capacity_status(palace_path, "mempalace_closets")
 
     for label, info in (("drawers", drawers), ("closets", closets)):
@@ -494,12 +624,18 @@ def status(palace_path=None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _close_chroma_handles(palace_path: str) -> None:
-    """Drop ChromaBackend + chromadb singleton caches so OS mmap handles release."""
+def _close_chroma_handles(palace_path: str, backend: ChromaBackend | None = None) -> None:
+    """Drop ChromaBackend + chromadb singleton caches so OS mmap handles release.
+
+    When ``backend`` is provided, close the live instance so rollback/restore
+    releases the handles it was already using. Otherwise fall back to a
+    transient backend instance for the max-seq-id repair path.
+    """
     import gc
 
     try:
-        ChromaBackend().close_palace(palace_path)
+        closer = backend if backend is not None else ChromaBackend()
+        closer.close_palace(palace_path)
     except Exception:
         pass
     try:
@@ -546,7 +682,10 @@ def _detect_poisoned_max_seq_ids(
                 "SELECT segment_id, seq_id FROM max_seq_id WHERE seq_id > ?",
                 (threshold,),
             ).fetchall()
-    return [(str(sid), int(val)) for sid, val in rows]
+    return [
+        (str(sid), (int.from_bytes(val, "big") if isinstance(val, (bytes, bytearray)) else int(val)))
+        for sid, val in rows
+    ]
 
 
 def _compute_heuristic_seq_id(cur: sqlite3.Cursor, segment_id: str) -> int:

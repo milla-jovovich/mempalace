@@ -310,8 +310,7 @@ def cmd_init(args):
                 )
         except LLMError as e:
             print(
-                f"  LLM init failed ({e}). "
-                f"Running heuristics-only — pass --no-llm to silence this."
+                f"  LLM init failed ({e}). Running heuristics-only — pass --no-llm to silence this."
             )
 
     # Pass 0: detect whether the corpus is AI-dialogue. Writes
@@ -505,6 +504,7 @@ def cmd_mine(args):
             limit=args.limit,
             dry_run=args.dry_run,
             extract_mode=args.extract,
+            include_subagents=args.include_subagents,
         )
     else:
         from .miner import mine
@@ -648,10 +648,19 @@ def cmd_repair(args):
     import shutil
     from .backends.chroma import ChromaBackend
     from .migrate import confirm_destructive_action, contains_palace_database
-    from .repair import TruncationDetected, check_extraction_safety
+    from .repair import (
+        RebuildCollectionError,
+        TruncationDetected,
+        _close_chroma_handles,
+        _extract_drawers,
+        _rebuild_collection_via_temp,
+        check_extraction_safety,
+    )
 
+    config = MempalaceConfig()
+    collection_name = config.collection_name
     palace_path = os.path.abspath(
-        os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
+        os.path.expanduser(args.palace) if args.palace else config.palace_path
     )
 
     if getattr(args, "mode", "legacy") == "max-seq-id":
@@ -685,7 +694,7 @@ def cmd_repair(args):
 
     # Try to read existing drawers
     try:
-        col = backend.get_collection(palace_path, "mempalace_drawers")
+        col = backend.get_collection(palace_path, collection_name)
         total = col.count()
         print(f"  Drawers found: {total}")
     except Exception as e:
@@ -705,18 +714,7 @@ def cmd_repair(args):
     # Extract all drawers in batches
     print("\n  Extracting drawers...")
     batch_size = 5000
-    all_ids = []
-    all_docs = []
-    all_metas = []
-    offset = 0
-    while offset < total:
-        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
-        if not batch["ids"]:
-            break
-        all_ids.extend(batch["ids"])
-        all_docs.extend(batch["documents"])
-        all_metas.extend(batch["metadatas"])
-        offset += len(batch["ids"])
+    all_ids, all_docs, all_metas = _extract_drawers(col, total, batch_size)
     print(f"  Extracted {len(all_ids)} drawers")
 
     # ── #1208 guard ──────────────────────────────────────────────────
@@ -731,12 +729,12 @@ def cmd_repair(args):
             palace_path,
             len(all_ids),
             confirm_truncation_ok=getattr(args, "confirm_truncation_ok", False),
+            collection_name=collection_name,
         )
     except TruncationDetected as e:
         print(e.message)
         return
 
-    # Backup and rebuild
     palace_path = os.path.normpath(palace_path)
     backup_path = palace_path + ".backup"
     if os.path.exists(backup_path):
@@ -750,18 +748,34 @@ def cmd_repair(args):
     print(f"  Backing up to {backup_path}...")
     shutil.copytree(palace_path, backup_path)
 
-    print("  Rebuilding collection...")
-    backend.delete_collection(palace_path, "mempalace_drawers")
-    new_col = backend.create_collection(palace_path, "mempalace_drawers")
-
-    filed = 0
-    for i in range(0, len(all_ids), batch_size):
-        batch_ids = all_ids[i : i + batch_size]
-        batch_docs = all_docs[i : i + batch_size]
-        batch_metas = all_metas[i : i + batch_size]
-        new_col.add(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
-        filed += len(batch_ids)
-        print(f"  Re-filed {filed}/{len(all_ids)} drawers...")
+    try:
+        filed = _rebuild_collection_via_temp(
+            backend,
+            palace_path,
+            all_ids,
+            all_docs,
+            all_metas,
+            batch_size,
+            collection_name=collection_name,
+            progress=print,
+        )
+    except RebuildCollectionError as e:
+        print(f"  Repair failed: {e}")
+        if getattr(e, "live_replaced", False):
+            print("  Live collection was already replaced; restoring from backup...")
+            try:
+                _close_chroma_handles(palace_path, backend=backend)
+                if os.path.exists(palace_path):
+                    shutil.rmtree(palace_path)
+                shutil.copytree(backup_path, palace_path)
+                print(f"  Restore complete from backup: {backup_path}")
+            except Exception as restore_error:
+                print(f"  Automatic restore failed: {restore_error}")
+                print("  Manual recovery required:")
+                print(f"    1. Remove or rename the broken directory: {palace_path}")
+                print(f"    2. Restore the backup directory to: {palace_path}")
+                print(f"       Backup location: {backup_path}")
+        sys.exit(1)
 
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print(f"  Backup saved at {backup_path}")
@@ -902,6 +916,15 @@ def cmd_compress(args):
     # Store compressed versions (unless dry-run)
     if not args.dry_run:
         try:
+            # Drop and recreate the compressed collection on each run.
+            # Repeated upserts in chromadb 1.5.8 cause the HNSW link_lists.bin
+            # sparse file to grow without GC; rebuilding the index from scratch
+            # each compress run keeps disk size proportional to entry count.
+            # See #1092 for the broader concurrent-writer report.
+            try:
+                backend.delete_collection(palace_path, "mempalace_compressed")
+            except Exception:
+                pass
             comp_col = backend.get_or_create_collection(palace_path, "mempalace_compressed")
             for doc_id, compressed, meta, stats in compressed_entries:
                 comp_meta = dict(meta)
@@ -1079,6 +1102,17 @@ def main():
         default="exchange",
         help="Extraction strategy for convos mode: 'exchange' (default) or 'general' (5 memory types)",
     )
+    p_mine.add_argument(
+        "--include-subagents",
+        action="store_true",
+        default=False,
+        help=(
+            "Also mine Claude Code subagent transcripts (subagents/ dirs). "
+            "Excluded by default: these are short ephemeral exchanges "
+            "(Explore/Plan/Grep agents) already summarized in the parent "
+            "session, and on typical workspaces they dominate file counts."
+        ),
+    )
 
     # sweep
     p_sweep = sub.add_parser(
@@ -1153,7 +1187,7 @@ def main():
     p_hook_run.add_argument(
         "--harness",
         required=True,
-        choices=["claude-code", "codex"],
+        choices=["claude-code", "codex", "opencode", "gemini", "qwen", "deepseek"],
         help="Harness type (determines stdin JSON format)",
     )
 

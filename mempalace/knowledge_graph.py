@@ -171,6 +171,15 @@ class KnowledgeGraph:
             add_triple("Max", "does", "swimming", valid_from="2025-01-01")
             add_triple("Alice", "worried_about", "Max injury", valid_from="2026-01", valid_to="2026-02")
         """
+        # Reject inverted intervals: a triple with valid_to < valid_from
+        # would never satisfy `valid_from <= as_of AND valid_to >= as_of`,
+        # so it would be invisible to every query — silently corrupt.
+        if valid_from is not None and valid_to is not None and valid_to < valid_from:
+            raise ValueError(
+                f"valid_to={valid_to!r} is before valid_from={valid_from!r}; "
+                "an inverted interval would be invisible to every KG query"
+            )
+
         sub_id = self._entity_id(subject)
         obj_id = self._entity_id(obj)
         pred = predicate.lower().replace(" ", "_")
@@ -389,6 +398,34 @@ class KnowledgeGraph:
             "expired_facts": expired,
             "relationship_types": predicates,
         }
+
+    def get_summary(self, limit: int = 20) -> str:
+        """Return a compact text summary of the most recent N current facts."""
+        with self._lock:
+            conn = self._conn()
+            rows = conn.execute(
+                """
+                SELECT s.name as sub_name, t.predicate, o.name as obj_name, t.valid_from
+                FROM triples t
+                JOIN entities s ON t.subject = s.id
+                JOIN entities o ON t.object = o.id
+                WHERE t.valid_to IS NULL
+                ORDER BY t.extracted_at DESC
+                LIMIT ?
+            """,
+                (limit,),
+            ).fetchall()
+
+        if not rows:
+            return "No current knowledge graph facts."
+
+        lines = ["## KG — CURRENT RELATIONSHIPS"]
+        for r in rows:
+            line = f"  - {r['sub_name']} \u2192 {r['predicate']} \u2192 {r['obj_name']}"
+            if r["valid_from"]:
+                line += f" (since {r['valid_from']})"
+            lines.append(line)
+        return "\n".join(lines)
 
     # ── Seed from known facts ─────────────────────────────────────────────
 

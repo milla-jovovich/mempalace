@@ -14,8 +14,19 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-SAVE_INTERVAL = 15
+SAVE_INTERVAL = 10
 STATE_DIR = Path.home() / ".mempalace" / "hook_state"
+MIRROR_STATE_FILE = STATE_DIR / "mirror_state.json"
+
+# Local memory dirs for each agent harness — scanned on Stop hook and mirrored
+# into mempalace as drawers. Override via MEMPAL_MIRROR_ROOTS env (colon-separated).
+DEFAULT_MIRROR_ROOTS = (
+    Path.home() / ".claude" / "projects",
+    Path.home() / ".codex" / "memories",
+    Path.home() / ".gemini" / "memory",
+    Path.home() / ".qwen" / "memory",
+)
+MIRROR_SKIP_FILENAMES = {"MEMORY.md", "CLAUDE.md", "GEMINI.md", "QWEN.md", "AGENTS.md"}
 
 
 def _mempalace_python() -> str:
@@ -94,46 +105,146 @@ def _validate_transcript_path(transcript_path: str) -> Path:
     return path
 
 
-def _count_human_messages(transcript_path: str) -> int:
-    """Count human messages in a JSONL transcript, skipping command-messages."""
+def _normalize_text(text: str) -> str:
+    """Normalize transcript text for lightweight heuristics."""
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _extract_text(content) -> str:
+    """Flatten transcript content blocks into plain text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        blocks = []
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text", "")
+                if isinstance(text, str):
+                    blocks.append(text)
+        return " ".join(blocks)
+    return ""
+
+
+def _iter_real_messages(transcript_path: str):
+    """Yield normalized user/assistant messages, excluding command chatter."""
     path = _validate_transcript_path(transcript_path)
-    if path is None:
-        if transcript_path:
-            _log(f"WARNING: transcript_path rejected by validator: {transcript_path!r}")
-        return 0
-    if not path.is_file():
-        return 0
-    count = 0
+    if path is None or not path.is_file():
+        return
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 try:
                     entry = json.loads(line)
                     msg = entry.get("message", {})
-                    if isinstance(msg, dict) and msg.get("role") == "user":
-                        content = msg.get("content", "")
-                        if isinstance(content, str):
-                            if "<command-message>" in content:
-                                continue
-                        elif isinstance(content, list):
-                            text = " ".join(
-                                b.get("text", "") for b in content if isinstance(b, dict)
-                            )
-                            if "<command-message>" in text:
-                                continue
-                        count += 1
-                    # Also handle Codex CLI transcript format
-                    # {"type": "event_msg", "payload": {"type": "user_message", "message": "..."}}
-                    elif entry.get("type") == "event_msg":
-                        payload = entry.get("payload", {})
-                        if isinstance(payload, dict) and payload.get("type") == "user_message":
-                            msg_text = payload.get("message", "")
-                            if isinstance(msg_text, str) and "<command-message>" not in msg_text:
-                                count += 1
                 except (json.JSONDecodeError, AttributeError):
-                    pass
+                    continue
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role")
+                if role not in {"user", "assistant"}:
+                    continue
+                text = _normalize_text(_extract_text(msg.get("content", "")))
+                if not text or "<command-message>" in text:
+                    continue
+                yield role, text
     except OSError:
-        return 0
+        return
+
+
+def _iter_real_messages_any(transcript_path: str):
+    """Yield user/assistant messages from ANY transcript format.
+    
+    Tries multiple schemas in order:
+    1. Claude Code JSONL: {"message": {"role": ..., "content": ...}}
+    2. Qwen JSONL: {"message": {"role": ..., "parts": [{"text": ...}]}}
+    3. JSON files (Gemini, Claude sessions): via normalize.py
+    4. normalize.py fallback for any format
+    """
+    path = _validate_transcript_path(transcript_path)
+    if path is None or not path.is_file():
+        return
+
+    ext = path.suffix.lower()
+
+    # Try Qwen JSONL schema: {"message": {"role": "...", "parts": [{"text": "..."}]}}
+    if ext == ".jsonl":
+        try:
+            found = False
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                    except (json.JSONDecodeError, AttributeError):
+                        continue
+                    msg = entry.get("message", {})
+                    if not isinstance(msg, dict):
+                        continue
+                    role = msg.get("role")
+                    if role not in {"user", "assistant"}:
+                        continue
+                    parts = msg.get("parts", [])
+                    text = ""
+                    if isinstance(parts, list):
+                        text = " ".join(p.get("text", "") for p in parts if isinstance(p, dict))
+                    if text and "<command-message>" not in text:
+                        found = True
+                        yield role, _normalize_text(text)
+            if found:
+                return
+        except OSError:
+            pass
+
+    # Try standard JSONL schema (Claude Code, Codex)
+    for role, text in _iter_real_messages(str(path)):
+        yield role, text
+
+    # For JSON files (Gemini, Claude session files), use normalize.py
+    if ext == ".json":
+        try:
+            from mempalace.normalize import normalize
+            transcript = normalize(str(path))
+            if transcript and "> " in transcript:
+                lines = transcript.split("\n")
+                i = 0
+                while i < len(lines):
+                    if lines[i].startswith("> "):
+                        yield "user", lines[i][2:].strip()
+                        i += 1
+                        if i < len(lines) and lines[i].strip() and not lines[i].startswith("> "):
+                            yield "assistant", lines[i].strip()
+                            i += 1
+                    else:
+                        i += 1
+                return
+        except Exception:
+            pass
+
+    # Final fallback: normalize.py for any format
+    try:
+        from mempalace.normalize import normalize
+        transcript = normalize(str(path))
+        if transcript and "> " in transcript:
+            lines = transcript.split("\n")
+            i = 0
+            while i < len(lines):
+                if lines[i].startswith("> "):
+                    yield "user", lines[i][2:].strip()
+                    i += 1
+                    if i < len(lines) and lines[i].strip() and not lines[i].startswith("> "):
+                        yield "assistant", lines[i].strip()
+                        i += 1
+                else:
+                    i += 1
+    except Exception:
+        pass
+
+
+def _count_human_messages(transcript_path: str) -> int:
+    """Count human messages in any transcript format, skipping command chatter."""
+    count = 0
+    for role, _text in _iter_real_messages_any(transcript_path) or []:
+        if role == "user":
+            count += 1
     return count
 
 
@@ -337,41 +448,11 @@ def _desktop_toast(body: str, title: str = "MemPalace"):
 
 
 def _extract_recent_messages(transcript_path: str, count: int = _RECENT_MSG_COUNT) -> list[str]:
-    """Extract the last N user messages from a JSONL transcript."""
-    path = Path(transcript_path).expanduser()
-    if not path.is_file():
-        return []
+    """Extract the last N user messages from any transcript format."""
     messages = []
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    # Claude Code format
-                    msg = entry.get("message") or entry.get("event_message") or {}
-                    if isinstance(msg, dict) and msg.get("role") == "user":
-                        content = msg.get("content", "")
-                        if isinstance(content, list):
-                            content = " ".join(
-                                b.get("text", "") for b in content if isinstance(b, dict)
-                            )
-                        if not isinstance(content, str) or not content.strip():
-                            continue
-                        if "<command-message>" in content or "<system-reminder>" in content:
-                            continue
-                        messages.append(content.strip()[:200])
-                    # Codex CLI format
-                    elif entry.get("type") == "event_msg":
-                        payload = entry.get("payload", {})
-                        if isinstance(payload, dict) and payload.get("type") == "user_message":
-                            text = payload.get("message", "")
-                            if isinstance(text, str) and text.strip():
-                                if "<command-message>" not in text:
-                                    messages.append(text.strip()[:200])
-                except (json.JSONDecodeError, AttributeError):
-                    pass
-    except OSError:
-        return []
+    for role, text in _iter_real_messages_any(transcript_path) or []:
+        if role == "user" and text.strip():
+            messages.append(text.strip()[:200])
     return messages[-count:]
 
 
@@ -465,8 +546,12 @@ def _save_diary_direct(
 
 def _ingest_transcript(transcript_path: str):
     """Mine a Claude Code session transcript into the palace as a conversation."""
-    path = Path(transcript_path).expanduser()
-    if not path.is_file() or path.stat().st_size < 100:
+    path = _validate_transcript_path(transcript_path)
+    if path is None or not path.is_file() or path.stat().st_size < 100:
+        return
+
+    if _mine_already_running():
+        _log(f"Skipping transcript ingest: mine already running")
         return
 
     from .config import MempalaceConfig
@@ -480,7 +565,7 @@ def _ingest_transcript(transcript_path: str):
         log_path = STATE_DIR / "hook.log"
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         with open(log_path, "a") as log_f:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 [
                     _mempalace_python(),
                     "-m",
@@ -495,12 +580,138 @@ def _ingest_transcript(transcript_path: str):
                 stdout=log_f,
                 stderr=log_f,
             )
-        _log(f"Transcript ingest started: {path.name}")
+        _MINE_PID_FILE.write_text(str(proc.pid))
+        _log(f"Transcript ingest started: {path.name} (pid={proc.pid})")
     except OSError:
         pass
 
 
-SUPPORTED_HARNESSES = {"claude-code", "codex"}
+def _maybe_sync_obsidian():
+    """Mirror recent memory changes into the Obsidian vault when available."""
+    sync_script = Path.home() / "obsidian-vault" / "sync.py"
+    if not sync_script.is_file():
+        return
+    try:
+        log_path = STATE_DIR / "hook.log"
+        with open(log_path, "a") as log_f:
+            subprocess.Popen(
+                [sys.executable, str(sync_script), "--quick"],
+                stdout=log_f,
+                stderr=log_f,
+            )
+    except OSError:
+        pass
+
+
+SUPPORTED_HARNESSES = {"claude-code", "claude", "codex", "opencode", "gemini", "qwen", "deepseek"}
+SIGNAL_KEYWORDS = (
+    "decision",
+    "plan",
+    "fix",
+    "build",
+    "implement",
+    "found",
+    "finding",
+    "audit",
+    "error",
+    "blocker",
+    "risk",
+    "deploy",
+    "architecture",
+    "infra",
+    "database",
+    "metric",
+    "source",
+    "query",
+    "report",
+    "powerbi",
+    "portal",
+    "aws",
+    "rds",
+    "ecs",
+    "mcp",
+    "api",
+    "route",
+    "component",
+    "dataset",
+    "dax",
+    "migration",
+    "verify",
+    "passed",
+    "failed",
+)
+ARTIFACT_HINT_RE = re.compile(
+    r"`[^`]+`|/[\w./-]+|\b[\w.-]+\.(?:ts|tsx|js|jsx|py|sh|md|sql|json|ya?ml|tf)\b|https?://",
+    re.IGNORECASE,
+)
+TRIVIAL_MESSAGE_RE = re.compile(
+    r"^(?:"
+    r"continue|resume|go on|keep going|proceed|"
+    r"ok(?:ay)?|k|yes|yep|no|nah|"
+    r"thanks|thank you|good|sounds good|do it|go ahead|"
+    r"continue please|switch and continue|"
+    r"codex resume --last"
+    r")(?:[.!? ]+)?$",
+    re.IGNORECASE,
+)
+
+
+def _collect_unsaved_messages(transcript_path: str, last_save: int) -> list[str]:
+    """Collect the message slice after the last checkpointed user message."""
+    messages: list[str] = []
+    user_count = 0
+    for role, text in _iter_real_messages_any(transcript_path) or []:
+        if role == "user":
+            user_count += 1
+            if user_count <= last_save:
+                continue
+        elif user_count <= last_save:
+            continue
+        messages.append(text)
+    return messages
+
+
+def _looks_trivial(text: str) -> bool:
+    """Treat short acknowledgements as low signal."""
+    normalized = _normalize_text(text).lower()
+    if not normalized:
+        return True
+    if TRIVIAL_MESSAGE_RE.fullmatch(normalized):
+        return True
+    return len(normalized) < 8
+
+
+def _has_meaningful_updates(messages: list[str]) -> bool:
+    """Avoid blocking on chatter-only windows."""
+    substantive: list[str] = []
+    keyword_hits = 0
+    artifact_hits = 0
+
+    for text in messages:
+        if _looks_trivial(text):
+            continue
+        lower = text.lower()
+        has_keyword = any(keyword in lower for keyword in SIGNAL_KEYWORDS)
+        artifact_count = len(list(ARTIFACT_HINT_RE.finditer(text)))
+        if has_keyword:
+            keyword_hits += 1
+        artifact_hits += artifact_count
+        if len(text) >= 30 or has_keyword or artifact_count:
+            substantive.append(text)
+
+    if not substantive:
+        return False
+
+    char_count = sum(len(text) for text in substantive)
+    if keyword_hits >= 2:
+        return True
+    if artifact_hits >= 2:
+        return True
+    if len(substantive) >= 4 and char_count >= 300:
+        return True
+    if len(substantive) >= 2 and char_count >= 500:
+        return True
+    return False
 
 
 def _parse_harness_input(data: dict, harness: str) -> dict:
@@ -512,6 +723,8 @@ def _parse_harness_input(data: dict, harness: str) -> dict:
         "session_id": _sanitize_session_id(str(data.get("session_id", "unknown"))),
         "stop_hook_active": data.get("stop_hook_active", False),
         "transcript_path": str(data.get("transcript_path", "")),
+        "cwd": str(data.get("cwd", "")),
+        "source": str(data.get("source", "")),
     }
 
 
@@ -548,12 +761,40 @@ def _wing_from_transcript_path(transcript_path: str) -> str:
     return "wing_sessions"
 
 
+def _auto_kg_write(session_id: str, themes: list[str]) -> None:
+    """Add session-to-topic KG relationships for extracted themes."""
+    try:
+        from .mcp_server import tool_kg_add
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        for theme in themes[:3]:
+            tool_kg_add(
+                subject=f"session-{date_str}",
+                predicate="covered_topic",
+                object=theme,
+                valid_from=date_str,
+            )
+        _log(f"KG auto-write: session-{date_str} → {themes[:3]}")
+    except Exception as exc:
+        _log(f"KG auto-write failed: {exc}")
+
+
 def hook_stop(data: dict, harness: str):
     """Stop hook: block every N messages for auto-save."""
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
     stop_hook_active = parsed["stop_hook_active"]
     transcript_path = parsed["transcript_path"]
+
+    # Always mirror local memory dirs first — runs even when we don't block,
+    # so .md files Claude writes get auto-replicated into mempalace drawers
+    # regardless of whether the LLM cooperated with the save protocol.
+    if os.environ.get("MEMPAL_MIRROR_DISABLED", "").lower() not in ("1", "true", "yes"):
+        try:
+            counts = _mirror_local_memory()
+            if counts.get("added") or counts.get("errors"):
+                _log(f"mirror: {counts}")
+        except Exception as exc:
+            _log(f"mirror: unexpected failure ({exc}); continuing")
 
     # If already in a block-mode save cycle, let through (infinite-loop prevention).
     # Silent mode saves directly without returning {"decision":"block"}, so there's
@@ -597,10 +838,20 @@ def hook_stop(data: dict, harness: str):
     _log(f"Session {session_id}: {exchange_count} exchanges, {since_last} since last save")
 
     if since_last >= SAVE_INTERVAL and exchange_count > 0:
+        unsaved_messages = _collect_unsaved_messages(transcript_path, last_save)
+        if not _has_meaningful_updates(unsaved_messages):
+            _log(f"SKIPPING SAVE at exchange {exchange_count}: low-signal window")
+            _output({})
+            return
+
         _log(f"TRIGGERING SAVE at exchange {exchange_count}")
 
         # Read hook settings from config
         from .config import MempalaceConfig
+        
+        # Optional: auto-ingest if MEMPAL_DIR is set
+        _maybe_auto_ingest()
+        _maybe_sync_obsidian()
 
         try:
             config = MempalaceConfig()
@@ -613,6 +864,14 @@ def hook_stop(data: dict, harness: str):
         project_wing = _wing_from_transcript_path(transcript_path)
 
         if silent:
+            # Skip diary save if a mine subprocess is running — concurrent
+            # ChromaDB writes cause "another mine already running" failures.
+            # Don't advance last_save so next Stop hook retries.
+            if _mine_already_running():
+                _log("Skipping diary save: mine running. Will retry on next stop.")
+                _output({})
+                return
+
             # Save directly via Python API — systemMessage renders in terminal
             result = {"count": 0}
             if transcript_path:
@@ -620,7 +879,6 @@ def hook_stop(data: dict, harness: str):
                     transcript_path, session_id, wing=project_wing, toast=toast
                 )
                 _ingest_transcript(transcript_path)
-            _maybe_auto_ingest()
             # Only advance save marker after successful save
             count = result.get("count", 0)
             if count > 0:
@@ -633,9 +891,24 @@ def hook_stop(data: dict, harness: str):
                     tag = " \u2014 " + ", ".join(themes)
                 else:
                     tag = ""
+
+                # Auto-write session topics to KG
+                if themes:
+                    _auto_kg_write(session_id, themes)
+
+                # Include recent KG facts in system message to keep agent context fresh.
+                try:
+                    from .layers import MemoryStack
+                    from .config import MempalaceConfig
+                    stack = MemoryStack(palace_path=MempalaceConfig().palace_path)
+                    kg_summary = stack.lkg.generate(limit=5)
+                    kg_note = f"\n\n{kg_summary}" if "No current" not in kg_summary else ""
+                except Exception:
+                    kg_note = ""
+
                 _output(
                     {
-                        "systemMessage": f"\u2726 {count} memories woven into the palace{tag}",
+                        "systemMessage": f"\u2726 {count} memories woven into the palace{tag}{kg_note}",
                     }
                 )
             else:
@@ -650,25 +923,240 @@ def hook_stop(data: dict, harness: str):
                 pass
             if transcript_path:
                 _ingest_transcript(transcript_path)
-            _maybe_auto_ingest()
             reason = STOP_BLOCK_REASON + f" Write diary entry to wing={project_wing}."
             _output({"decision": "block", "reason": reason})
     else:
         _output({})
 
 
+# =============================================================================
+# LOCAL MEMORY MIRROR — replicate per-agent .md memory dirs into mempalace
+# =============================================================================
+
+
+def _mirror_roots() -> list[Path]:
+    """Return list of memory roots to scan, honoring MEMPAL_MIRROR_ROOTS env."""
+    override = os.environ.get("MEMPAL_MIRROR_ROOTS", "").strip()
+    if override:
+        return [Path(p).expanduser() for p in override.split(":") if p.strip()]
+    return list(DEFAULT_MIRROR_ROOTS)
+
+
+def _load_mirror_state() -> dict:
+    """Read the {abs_path: mtime} map of files already mirrored."""
+    if not MIRROR_STATE_FILE.is_file():
+        return {}
+    try:
+        with open(MIRROR_STATE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_mirror_state(state: dict) -> None:
+    """Persist the {abs_path: mtime} map atomically."""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = MIRROR_STATE_FILE.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, MIRROR_STATE_FILE)
+    except OSError as exc:
+        _log(f"mirror_state write failed: {exc}")
+
+
+def _derive_wing_room(file_path: Path, root: Path) -> tuple[str, str]:
+    """Derive (wing, room) from a memory file's path relative to its root.
+
+    Conventions:
+    - Claude: ~/.claude/projects/<slug>/memory/<room>.md
+        slug like '-home-zapostolski-projects-ai-marketing' → wing 'ai-marketing'
+    - Gemini: ~/.gemini/memory/<wing>/<room>.md
+    - Codex/Qwen: ~/.codex/memories/<wing>/<room>.md or flat ~/.codex/memories/<room>.md
+
+    Falls back to:
+        wing = first directory under root, or 'misc'
+        room = filename stem
+    """
+    try:
+        rel = file_path.relative_to(root)
+    except ValueError:
+        return "misc", file_path.stem
+    parts = rel.parts
+    room = file_path.stem
+
+    if not parts:
+        return "misc", room
+
+    first = parts[0]
+    # Claude project slug: -home-...-projects-<wing>
+    if "-projects-" in first:
+        wing = first.rsplit("-projects-", 1)[1]
+    else:
+        # Strip leading dashes from agent slugs
+        wing = first.lstrip("-") or "misc"
+    return wing, room
+
+
+def _mirror_local_memory() -> dict:
+    """Mirror new/changed .md files from local memory dirs into mempalace drawers.
+
+    Idempotent: tracks (path, mtime) state in MIRROR_STATE_FILE. Catches all
+    errors so a mirror failure never blocks the harness. Returns counts for logging.
+    """
+    counts = {"scanned": 0, "added": 0, "skipped_dup": 0, "skipped_unchanged": 0, "errors": 0}
+    try:
+        from .mcp_server import tool_add_drawer
+    except Exception as exc:
+        _log(f"mirror: cannot import tool_add_drawer ({exc}); skipping")
+        return counts
+
+    state = _load_mirror_state()
+    new_state = dict(state)
+
+    for root in _mirror_roots():
+        if not root.is_dir():
+            continue
+        for md_path in root.rglob("*.md"):
+            if md_path.name in MIRROR_SKIP_FILENAMES:
+                continue
+            counts["scanned"] += 1
+            try:
+                mtime = md_path.stat().st_mtime
+            except OSError:
+                counts["errors"] += 1
+                continue
+            key = str(md_path)
+            if state.get(key) == mtime:
+                counts["skipped_unchanged"] += 1
+                continue
+            try:
+                content = md_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                counts["errors"] += 1
+                continue
+            if not content.strip():
+                new_state[key] = mtime
+                continue
+            wing, room = _derive_wing_room(md_path, root)
+            try:
+                result = tool_add_drawer(
+                    wing=wing,
+                    room=room,
+                    content=content,
+                    source_file=str(md_path),
+                    added_by="auto-mirror",
+                )
+            except Exception as exc:
+                _log(f"mirror: add_drawer raised for {md_path}: {exc}")
+                counts["errors"] += 1
+                continue
+            if result.get("success"):
+                counts["added"] += 1
+                new_state[key] = mtime
+            elif result.get("reason") == "duplicate":
+                counts["skipped_dup"] += 1
+                # Mark as seen so we don't keep re-checking unchanged dupes
+                new_state[key] = mtime
+            else:
+                counts["errors"] += 1
+                _log(f"mirror: add_drawer failed for {md_path}: {result}")
+
+    if new_state != state:
+        _save_mirror_state(new_state)
+    return counts
+
+
+def _wing_from_cwd(cwd: str) -> str:
+    """Best-effort match of cwd to a known palace wing.
+
+    Strategy: take cwd's basename and check it against the wings reported by
+    `tool_status()`. Wings live in metadata, not on disk, so a directory check
+    is unreliable.
+    """
+    if not cwd:
+        return ""
+    candidate = os.path.basename(cwd.rstrip("/"))
+    if not candidate:
+        return ""
+    try:
+        from .mcp_server import tool_status
+        wings = tool_status().get("wings", {}) or {}
+    except Exception:
+        return ""
+    return candidate if candidate in wings else ""
+
+
+PROTOCOL_NUDGE = (
+    "MemPalace protocol: BEFORE responding about projects/people/decisions, "
+    "call mempalace_kg_query or mempalace_search to verify. WHEN making "
+    "decisions/plans/architecture changes, call mempalace_add_drawer "
+    "(room='decisions' or 'plans') and mempalace_kg_add for the relationships. "
+    "AFTER each session, the Stop hook will prompt you to checkpoint — route "
+    "those into the palace, not local files."
+)
+
+
+def _build_session_start_context(cwd: str, palace_path: str) -> str:
+    """Build SessionStart additionalContext: wake-up text + protocol nudge.
+
+    Wing match is based on the cwd's basename matching a palace wing directory.
+    """
+    sections: list[str] = []
+    wing = _wing_from_cwd(cwd)
+    try:
+        from .layers import MemoryStack
+        stack = MemoryStack(palace_path=palace_path)
+        wake_text = stack.wake_up(wing=wing) if wing else stack.wake_up()
+        if wake_text:
+            header = (
+                f"# MemPalace wake-up (wing={wing})"
+                if wing else "# MemPalace wake-up"
+            )
+            sections.append(f"{header}\n\n{wake_text}")
+    except Exception as exc:
+        sections.append(f"# MemPalace wake-up unavailable: {exc}")
+    sections.append(PROTOCOL_NUDGE)
+    return "\n\n".join(sections)
+
+
+def _wrap_session_start_output(harness: str, context: str) -> dict:
+    """Format additionalContext per harness expectations.
+
+    Claude Code uses hookSpecificOutput.additionalContext. Other harnesses
+    that mimic Claude's schema accept the same shape; harnesses that don't
+    will see a no-op (the unknown key is ignored).
+    """
+    if not context:
+        return {}
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": context,
+        }
+    }
+
+
 def hook_session_start(data: dict, harness: str):
-    """Session start hook: initialize session tracking state."""
+    """Session start hook: inject palace context (status + wing match + protocol nudge)."""
     parsed = _parse_harness_input(data, harness)
     session_id = parsed["session_id"]
+    cwd = parsed["cwd"]
 
-    _log(f"SESSION START for session {session_id}")
-
-    # Initialize session state directory
+    _log(f"SESSION START for session {session_id} cwd={cwd!r} harness={harness}")
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Pass through — no blocking on session start
-    _output({})
+    try:
+        from .config import MempalaceConfig
+        palace_path = MempalaceConfig().palace_path
+    except Exception as exc:
+        _log(f"SessionStart: cannot resolve palace_path ({exc}); skipping context inject")
+        _output({})
+        return
+
+    context = _build_session_start_context(cwd, palace_path)
+    _output(_wrap_session_start_output(harness, context))
 
 
 def hook_precompact(data: dict, harness: str):
@@ -683,12 +1171,32 @@ def hook_precompact(data: dict, harness: str):
     if transcript_path:
         _ingest_transcript(transcript_path)
 
-    # Mine MEMPAL_DIR synchronously so project data lands before
-    # compaction proceeds. Transcript convos were already kicked off
-    # above via _ingest_transcript.
+    # Mine MEMPAL_DIR synchronously
     _mine_sync()
 
-    _output({})
+    # KG Integration: Check behavior mode for blocking
+    # Supported: block (always), block_once (per session), proceed (never)
+    mode = os.environ.get("MEMPAL_PRECOMPACT_MODE", "").lower()
+    if not mode:
+        # block_once per session for all harnesses: saves before compaction
+        # without risking infinite loops (flag is per session_id).
+        mode = "block_once"
+
+    if mode == "proceed":
+        _output({})
+        return
+
+    # Check session-once state if needed
+    if mode == "block_once":
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        flag = STATE_DIR / f"{session_id}_precompact_blocked"
+        if flag.exists():
+            _output({})
+            return
+        flag.touch()
+
+    # Block and force manual KG/Drawer save
+    _output({"decision": "block", "reason": PRECOMPACT_BLOCK_REASON})
 
 
 def run_hook(hook_name: str, harness: str):

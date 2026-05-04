@@ -2,7 +2,7 @@
 
 import os
 import sqlite3
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -26,6 +26,16 @@ def test_get_palace_path_fallback():
         mock_get.return_value = os.path.join(os.path.expanduser("~"), ".mempalace", "palace")
         result = mock_get()
         assert ".mempalace" in result
+
+
+def test_get_collection_name_from_config():
+    from mempalace.config import get_configured_collection_name
+
+    get_configured_collection_name.cache_clear()
+    with patch("mempalace.config.MempalaceConfig") as mock_config_cls:
+        mock_config_cls.return_value.collection_name = "custom_drawers"
+        assert repair._get_collection_name() == "custom_drawers"
+    get_configured_collection_name.cache_clear()
 
 
 # ── _paginate_ids ─────────────────────────────────────────────────────
@@ -229,8 +239,11 @@ def test_rebuild_index_success(mock_backend_cls, mock_shutil, tmp_path):
     }
 
     mock_new_col = MagicMock()
+    mock_new_col.count.return_value = 2
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
     mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
-    mock_backend.create_collection.return_value = mock_new_col
+    mock_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
 
     repair.rebuild_index(palace_path=str(tmp_path))
 
@@ -239,12 +252,72 @@ def test_rebuild_index_success(mock_backend_cls, mock_shutil, tmp_path):
     assert "chroma.sqlite3" in str(mock_shutil.copy2.call_args)
 
     # Verify: deleted and recreated (cosine is the backend default)
-    mock_backend.delete_collection.assert_called_once_with(str(tmp_path), "mempalace_drawers")
-    mock_backend.create_collection.assert_called_once_with(str(tmp_path), "mempalace_drawers")
+    assert mock_backend.create_collection.call_args_list == [
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+        call(str(tmp_path), "mempalace_drawers"),
+    ]
+    assert mock_backend.delete_collection.call_args_list == [
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+        call(str(tmp_path), "mempalace_drawers"),
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+    ]
 
     # Verify: used upsert not add
+    mock_temp_col.upsert.assert_called_once()
     mock_new_col.upsert.assert_called_once()
     mock_new_col.add.assert_not_called()
+
+
+@patch("mempalace.repair.shutil")
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_ignores_missing_temp_collection_at_start(
+    mock_backend_cls, mock_shutil, tmp_path
+):
+    sqlite_path = tmp_path / "chroma.sqlite3"
+    sqlite_path.write_text("fake")
+
+    def _fake_copy2(src, dst):
+        with open(dst, "w") as handle:
+            handle.write("backup")
+
+    mock_shutil.copy2.side_effect = _fake_copy2
+
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [{"wing": "a"}, {"wing": "b"}],
+    }
+
+    mock_new_col = MagicMock()
+    mock_new_col.count.return_value = 2
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
+    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
+    mock_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
+    mock_backend.delete_collection.side_effect = [
+        ValueError("Collection [mempalace_drawers__repair_tmp] does not exist"),
+        None,
+        None,
+    ]
+
+    repair.rebuild_index(palace_path=str(tmp_path))
+
+    assert mock_shutil.copy2.call_count == 1
+    assert mock_backend.delete_collection.call_args_list == [
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+        call(str(tmp_path), "mempalace_drawers"),
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+    ]
+
+
+def test_delete_collection_if_exists_reraises_unexpected_value_error():
+    mock_backend = MagicMock()
+    mock_backend.delete_collection.side_effect = ValueError("invalid collection name")
+
+    with pytest.raises(ValueError, match="invalid collection name"):
+        repair._delete_collection_if_exists(mock_backend, "/palace", "bad/name")
 
 
 @patch("mempalace.repair.shutil")
@@ -265,6 +338,21 @@ def test_check_extraction_safety_passes_when_counts_match(tmp_path):
     """SQLite reports same count as extracted → no exception."""
     with patch("mempalace.repair.sqlite_drawer_count", return_value=500):
         repair.check_extraction_safety(str(tmp_path), 500)
+
+
+def test_check_extraction_safety_uses_configured_collection(tmp_path):
+    with patch("mempalace.repair.sqlite_drawer_count", return_value=500) as count:
+        repair.check_extraction_safety(str(tmp_path), 500, collection_name="custom_drawers")
+    count.assert_called_once_with(str(tmp_path), "custom_drawers")
+
+
+def test_check_extraction_safety_default_uses_configured_collection(tmp_path):
+    with (
+        patch("mempalace.repair._get_collection_name", return_value="custom_drawers"),
+        patch("mempalace.repair.sqlite_drawer_count", return_value=500) as count,
+    ):
+        repair.check_extraction_safety(str(tmp_path), 500)
+    count.assert_called_once_with(str(tmp_path), "custom_drawers")
 
 
 def test_check_extraction_safety_passes_when_sqlite_unreadable_and_under_cap(tmp_path):
@@ -323,6 +411,73 @@ def test_sqlite_drawer_count_returns_none_on_unreadable_schema(tmp_path):
 
 @patch("mempalace.repair.shutil")
 @patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_default_uses_configured_collection(mock_backend_cls, mock_shutil, tmp_path):
+    sqlite_path = tmp_path / "chroma.sqlite3"
+    sqlite_path.write_text("fake")
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [{"wing": "a"}, {"wing": "b"}],
+    }
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
+    mock_new_col = MagicMock()
+    mock_new_col.count.return_value = 2
+    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
+    mock_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
+
+    with (
+        patch("mempalace.repair._get_collection_name", return_value="custom_drawers"),
+        patch("mempalace.repair.sqlite_drawer_count", return_value=2) as count,
+    ):
+        repair.rebuild_index(palace_path=str(tmp_path))
+
+    mock_backend.get_collection.assert_called_once_with(str(tmp_path), "custom_drawers")
+    count.assert_called_once_with(str(tmp_path), "custom_drawers")
+    assert mock_backend.create_collection.call_args_list == [
+        call(str(tmp_path), "custom_drawers__repair_tmp"),
+        call(str(tmp_path), "custom_drawers"),
+    ]
+    assert mock_backend.delete_collection.call_args_list == [
+        call(str(tmp_path), "custom_drawers__repair_tmp"),
+        call(str(tmp_path), "custom_drawers"),
+        call(str(tmp_path), "custom_drawers__repair_tmp"),
+    ]
+
+
+def test_status_default_uses_configured_drawer_collection(tmp_path):
+    with (
+        patch("mempalace.repair._get_collection_name", return_value="custom_drawers"),
+        patch("mempalace.repair.hnsw_capacity_status") as capacity_status,
+    ):
+        capacity_status.side_effect = [
+            {
+                "sqlite_count": 1,
+                "hnsw_count": 1,
+                "divergence": 0,
+                "diverged": False,
+                "status": "ok",
+                "message": "",
+            },
+            {
+                "sqlite_count": 0,
+                "hnsw_count": 0,
+                "divergence": 0,
+                "diverged": False,
+                "status": "ok",
+                "message": "",
+            },
+        ]
+        repair.status(palace_path=str(tmp_path))
+
+    assert capacity_status.call_args_list[0].args == (str(tmp_path), "custom_drawers")
+    assert capacity_status.call_args_list[1].args == (str(tmp_path), "mempalace_closets")
+
+
+@patch("mempalace.repair.shutil")
+@patch("mempalace.repair.ChromaBackend")
 def test_rebuild_index_aborts_on_truncation_signal(mock_backend_cls, mock_shutil, tmp_path):
     """rebuild_index honors the safety guard: SQLite says 67k, get() returns
     10k → no delete_collection, no upsert, no backup."""
@@ -365,17 +520,259 @@ def test_rebuild_index_proceeds_with_override(mock_backend_cls, mock_shutil, tmp
         },
         {"ids": [], "documents": [], "metadatas": []},
     ]
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 10_000
     mock_new_col = MagicMock()
+    mock_new_col.count.return_value = 10_000
     mock_backend.get_collection.return_value = mock_col
-    mock_backend.create_collection.return_value = mock_new_col
+    mock_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
     mock_backend_cls.return_value = mock_backend
 
     with patch("mempalace.repair.sqlite_drawer_count", return_value=67_580):
         repair.rebuild_index(palace_path=str(tmp_path), confirm_truncation_ok=True)
 
-    mock_backend.delete_collection.assert_called_once()
-    mock_backend.create_collection.assert_called_once()
+    assert mock_backend.delete_collection.call_count == 3
+    assert mock_backend.create_collection.call_count == 2
+    mock_temp_col.upsert.assert_called()
     mock_new_col.upsert.assert_called()
+
+
+@patch("mempalace.repair.shutil")
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_stage_failure_leaves_live_collection_untouched(
+    mock_backend_cls, mock_shutil, tmp_path
+):
+    sqlite_path = tmp_path / "chroma.sqlite3"
+    sqlite_path.write_text("fake")
+
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [{"wing": "a"}, {"wing": "b"}],
+    }
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 1
+    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
+    mock_backend.create_collection.return_value = mock_temp_col
+
+    with pytest.raises(repair.RebuildCollectionError) as excinfo:
+        repair.rebuild_index(palace_path=str(tmp_path))
+
+    assert excinfo.value.live_replaced is False
+    assert mock_shutil.copy2.call_count == 1
+    assert mock_backend.delete_collection.call_args_list == [
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+    ]
+
+
+@patch("mempalace.repair.shutil")
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_live_failure_restores_backup(mock_backend_cls, mock_shutil, tmp_path):
+    sqlite_path = tmp_path / "chroma.sqlite3"
+    sqlite_path.write_text("fake")
+
+    def _fake_copy2(src, dst):
+        with open(dst, "w") as handle:
+            handle.write("backup")
+
+    mock_shutil.copy2.side_effect = _fake_copy2
+
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [{"wing": "a"}, {"wing": "b"}],
+    }
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
+    mock_new_col = MagicMock()
+    mock_new_col.upsert.side_effect = RuntimeError("live upsert failed")
+    active_backend = MagicMock()
+    active_backend.get_collection.return_value = mock_col
+    active_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
+    helper_backend = MagicMock()
+    mock_backend_cls.side_effect = [active_backend, helper_backend]
+
+    with pytest.raises(repair.RebuildCollectionError) as excinfo:
+        repair.rebuild_index(palace_path=str(tmp_path))
+
+    assert excinfo.value.live_replaced is True
+    assert mock_shutil.copy2.call_count == 2
+    assert active_backend.delete_collection.call_args_list == [
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+        call(str(tmp_path), "mempalace_drawers"),
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+        call(str(tmp_path), "mempalace_drawers"),
+    ]
+    active_backend.close_palace.assert_called_once_with(str(tmp_path))
+    helper_backend.close_palace.assert_not_called()
+
+
+@patch("mempalace.repair.shutil")
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_live_delete_missing_still_restores_backup(
+    mock_backend_cls, mock_shutil, tmp_path
+):
+    sqlite_path = tmp_path / "chroma.sqlite3"
+    sqlite_path.write_text("fake")
+
+    def _fake_copy2(src, dst):
+        with open(dst, "w") as handle:
+            handle.write("backup")
+
+    mock_shutil.copy2.side_effect = _fake_copy2
+
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [{"wing": "a"}, {"wing": "b"}],
+    }
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
+    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
+    mock_backend.create_collection.side_effect = [mock_temp_col, RuntimeError("create failed")]
+    mock_backend.delete_collection.side_effect = [
+        None,
+        None,
+        None,
+        repair.ChromaNotFoundError("missing"),
+    ]
+
+    with pytest.raises(repair.RebuildCollectionError) as excinfo:
+        repair.rebuild_index(palace_path=str(tmp_path))
+
+    assert excinfo.value.live_replaced is True
+    assert mock_shutil.copy2.call_count == 2
+    assert mock_backend.delete_collection.call_args_list == [
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+        call(str(tmp_path), "mempalace_drawers"),
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+        call(str(tmp_path), "mempalace_drawers"),
+    ]
+
+
+@patch("mempalace.repair.shutil")
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_restore_failure_preserves_original_error(
+    mock_backend_cls, mock_shutil, tmp_path, capsys
+):
+    sqlite_path = tmp_path / "chroma.sqlite3"
+    sqlite_path.write_text("fake")
+
+    def _copy2_side_effect(src, dst):
+        if str(src).endswith(".backup"):
+            raise PermissionError("locked sqlite")
+        with open(dst, "w") as handle:
+            handle.write("backup")
+
+    mock_shutil.copy2.side_effect = _copy2_side_effect
+
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [{"wing": "a"}, {"wing": "b"}],
+    }
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
+    mock_new_col = MagicMock()
+    mock_new_col.upsert.side_effect = RuntimeError("live upsert failed")
+    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
+    mock_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
+
+    with pytest.raises(repair.RebuildCollectionError) as excinfo:
+        repair.rebuild_index(palace_path=str(tmp_path))
+
+    out = capsys.readouterr().out
+    assert "locked sqlite" in out
+    assert "Manual restore required" in out
+    assert "live upsert failed" in str(excinfo.value)
+
+
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_collection_via_temp_keeps_original_error_when_cleanup_fails(
+    mock_backend_cls,
+):
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
+    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
+    mock_backend.create_collection.side_effect = [mock_temp_col, RuntimeError("live build failed")]
+    mock_backend.delete_collection.side_effect = [
+        None,
+        None,
+        RuntimeError("cleanup failed"),
+    ]
+
+    with pytest.raises(repair.RebuildCollectionError) as excinfo:
+        repair._rebuild_collection_via_temp(
+            mock_backend,
+            "/palace",
+            ["id1", "id2"],
+            ["doc1", "doc2"],
+            [{"wing": "a"}, {"wing": "b"}],
+            batch_size=5000,
+            progress=lambda *args, **kwargs: None,
+        )
+
+    assert "live build failed" in str(excinfo.value)
+    assert excinfo.value.live_replaced is True
+    assert mock_backend.delete_collection.call_args_list == [
+        call("/palace", "mempalace_drawers__repair_tmp"),
+        call("/palace", "mempalace_drawers"),
+        call("/palace", "mempalace_drawers__repair_tmp"),
+    ]
+
+
+@patch("mempalace.repair.shutil")
+@patch("mempalace.repair.ChromaBackend")
+def test_rebuild_index_ignores_temp_cleanup_failure_after_success(
+    mock_backend_cls, mock_shutil, tmp_path
+):
+    sqlite_path = tmp_path / "chroma.sqlite3"
+    sqlite_path.write_text("fake")
+
+    def _fake_copy2(src, dst):
+        with open(dst, "w") as handle:
+            handle.write("backup")
+
+    mock_shutil.copy2.side_effect = _fake_copy2
+
+    mock_col = MagicMock()
+    mock_col.count.return_value = 2
+    mock_col.get.return_value = {
+        "ids": ["id1", "id2"],
+        "documents": ["doc1", "doc2"],
+        "metadatas": [{"wing": "a"}, {"wing": "b"}],
+    }
+    mock_temp_col = MagicMock()
+    mock_temp_col.count.return_value = 2
+    mock_new_col = MagicMock()
+    mock_new_col.count.return_value = 2
+    mock_backend = _install_mock_backend(mock_backend_cls, mock_col)
+    mock_backend.create_collection.side_effect = [mock_temp_col, mock_new_col]
+    mock_backend.delete_collection.side_effect = [
+        None,
+        None,
+        RuntimeError("cleanup failed"),
+    ]
+
+    repair.rebuild_index(palace_path=str(tmp_path))
+
+    assert mock_shutil.copy2.call_count == 1
+    assert mock_backend.delete_collection.call_args_list == [
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+        call(str(tmp_path), "mempalace_drawers"),
+        call(str(tmp_path), "mempalace_drawers__repair_tmp"),
+    ]
 
 
 # ── repair_max_seq_id ─────────────────────────────────────────────────
