@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-Detailed parameter schemas for all 29 MCP tools.
+Detailed parameter schemas for all 30 MCP tools.
 
 ## Palace — Read Tools
 
@@ -379,3 +379,21 @@ Force a reconnect to the palace database. Use this after external scripts or CLI
 **Parameters:** None
 
 **Returns:** `{ success, message, drawers, vector_disabled[, vector_disabled_reason] }` (on no-palace: `{ success: false, message, drawers, vector_disabled }`; on exception: `{ success: false, error }`)
+
+---
+
+## Sync Tools
+
+### `mempalace_sync_status`
+
+Check whether palace memories are up to date with their source files. Scans all drawers, compares stored `content_hash` values against current file content, and returns a freshness report. Read-only — no side effects.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `directory` | string | No | Scope the check to files under this path. Omit to check all source files. |
+
+**Returns:** `{ status, total_source_files, fresh, stale, missing, no_hash_legacy, stale_files, remine_commands, message }`
+
+`status` values: `fresh` | `stale` | `missing` | `unknown` | `empty` | `error`
+
+`status: unknown` is returned when all drawers lack `content_hash` (mined before sync support). Re-mine with the latest version to enable freshness tracking.

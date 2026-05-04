@@ -745,6 +745,160 @@ def tool_graph_stats():
     return graph_stats(col=col)
 
 
+# ==================== SYNC / FRESHNESS ====================
+
+
+def _resolve_path_safe(p: str) -> str:
+    """Resolve symlinks safely (macOS /var → /private/var)."""
+    try:
+        return str(Path(p).resolve())
+    except OSError:
+        return p
+
+
+def tool_sync_status(directory: str = None):  # noqa: C901
+    """Check palace freshness — detect stale, missing, and fresh source files.
+
+    Compares content_hash stored in drawer metadata against current file content.
+    Returns actionable re-mine commands for any stale files found.
+    """
+    import os
+
+    col = _get_collection()
+    if not col:
+        return _no_palace()
+
+    total = col.count()
+    if total == 0:
+        return {"status": "empty", "message": "Palace is empty. Nothing to sync."}
+
+    # Scan all source files and their content hashes
+    source_files = {}
+    batch_size = 500
+    offset = 0
+    while offset < total:
+        batch = col.get(limit=batch_size, offset=offset, include=["metadatas"])
+        if not batch["ids"]:
+            break
+        for drawer_id, meta in zip(batch["ids"], batch["metadatas"]):
+            sf = meta.get("source_file", "")
+            if not sf:
+                continue
+            if sf not in source_files:
+                source_files[sf] = {
+                    "hash": meta.get("content_hash", ""),
+                    "drawer_count": 0,
+                    "wing": meta.get("wing", ""),
+                    "ingest_mode": meta.get("ingest_mode", ""),
+                }
+            elif not source_files[sf]["hash"]:
+                source_files[sf]["hash"] = meta.get("content_hash", "")
+            source_files[sf]["drawer_count"] += 1
+        offset += len(batch["ids"])
+
+    # Filter by directory if specified
+    if directory:
+        dir_resolved = str(Path(directory).expanduser().resolve())
+        if not dir_resolved.endswith(os.sep):
+            dir_resolved += os.sep
+        source_files = {
+            sf: info
+            for sf, info in source_files.items()
+            if _resolve_path_safe(sf).startswith(dir_resolved)
+        }
+
+    stale = []
+    missing = []
+    fresh = 0
+    no_hash = 0
+
+    for sf, info in source_files.items():
+        if not os.path.exists(sf):
+            missing.append({"file": sf, "drawers": info["drawer_count"], "wing": info["wing"]})
+            continue
+        if not info["hash"]:
+            no_hash += 1
+            continue
+        try:
+            content = Path(sf).read_text(encoding="utf-8", errors="replace").strip()
+            current_hash = hashlib.md5(
+                content.encode(), usedforsecurity=False
+            ).hexdigest()
+        except OSError:
+            missing.append({"file": sf, "drawers": info["drawer_count"], "wing": info["wing"]})
+            continue
+        if current_hash != info["hash"]:
+            stale.append({"file": sf, "drawers": info["drawer_count"], "wing": info["wing"]})
+        else:
+            fresh += 1
+
+    # Build re-mine commands for stale files
+    remine_commands = []
+    if stale:
+        seen_dirs = set()
+        for item in stale:
+            parent = str(Path(item["file"]).parent)
+            wing = item["wing"]
+            mode = source_files[item["file"]].get("ingest_mode", "")
+            key = (parent, wing, mode)
+            if key not in seen_dirs:
+                seen_dirs.add(key)
+                cmd = f"mempalace mine {parent} --wing {wing}"
+                if mode == "convos":
+                    cmd = f"mempalace mine {parent} --mode convos --wing {wing}"
+                remine_commands.append(cmd)
+
+    result = {
+        "total_source_files": len(source_files),
+        "fresh": fresh,
+        "stale": len(stale),
+        "missing": len(missing),
+        "no_hash_legacy": no_hash,
+    }
+    if stale:
+        result["stale_files"] = [
+            {"file": s["file"], "drawers": s["drawers"], "wing": s["wing"]}
+            for s in stale[:20]
+        ]
+        result["remine_commands"] = remine_commands
+    if missing:
+        result["missing_files"] = [
+            {"file": Path(m["file"]).name, "drawers": m["drawers"]}
+            for m in missing[:10]
+        ]
+    if no_hash == len(source_files):
+        result["status"] = "unknown"
+        result["message"] = (
+            f"All {no_hash} source files lack content_hash (mined before sync support). "
+            "Re-mine with latest version to enable freshness tracking."
+        )
+    elif stale:
+        result["status"] = "stale"
+        result["message"] = (
+            f"{len(stale)} files changed since last mine. "
+            "Run the remine_commands to refresh."
+        )
+    elif missing:
+        result["status"] = "orphaned"
+        result["message"] = (
+            f"{len(missing)} source files no longer exist. "
+            "Use 'mempalace sync --clean' to remove orphaned drawers."
+        )
+    elif fresh == len(source_files):
+        result["status"] = "fresh"
+        result["message"] = "All source files are up to date."
+    elif no_hash > 0:
+        result["status"] = "partial"
+        result["message"] = (
+            f"{fresh} files verified fresh, {no_hash} files unverifiable (no hash). "
+            "Re-mine legacy files to enable tracking."
+        )
+    else:
+        result["status"] = "fresh"
+        result["message"] = "All source files are up to date."
+    return result
+
+
 def tool_create_tunnel(
     source_wing: str,
     source_room: str,
@@ -1600,6 +1754,24 @@ TOOLS = {
         "description": "Palace graph overview: total rooms, tunnel connections, edges between wings.",
         "input_schema": {"type": "object", "properties": {}},
         "handler": tool_graph_stats,
+    },
+    "mempalace_sync_status": {
+        "description": (
+            "Check palace freshness — are source files still current or have they "
+            "changed since last mine? Returns stale/fresh/missing counts and re-mine "
+            "commands. Call this to know if the palace memories are up to date before "
+            "trusting search results."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "directory": {
+                    "type": "string",
+                    "description": "Only check files under this directory (optional — checks all by default)",
+                },
+            },
+        },
+        "handler": tool_sync_status,
     },
     "mempalace_create_tunnel": {
         "description": "Create a cross-wing tunnel linking two palace locations. Use when content in one project relates to another — e.g., an API design in project_api connects to a database schema in project_database.",

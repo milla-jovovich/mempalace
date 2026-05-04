@@ -1143,3 +1143,230 @@ class TestCacheInvalidation:
         for kwargs in captured["get"]:
             assert "embedding_function" in kwargs
             assert kwargs["embedding_function"] is not None
+
+
+class TestSyncStatusTool:
+    def _patch_sync(self, monkeypatch, config, palace_path, kg):
+        """Patch MCP server and reset collection cache for sync tests."""
+        from mempalace import mcp_server
+        config._file_config["palace_path"] = palace_path
+        _patch_mcp_server(monkeypatch, config, kg)
+        monkeypatch.setattr(mcp_server, "_client_cache", None)
+        monkeypatch.setattr(mcp_server, "_collection_cache", None)
+
+    def test_sync_status_empty_palace(self, monkeypatch, config, palace_path, kg):
+        self._patch_sync(monkeypatch, config, palace_path, kg)
+        _get_collection(palace_path, create=True)
+        from mempalace.mcp_server import tool_sync_status
+
+        result = tool_sync_status()
+        assert result["status"] == "empty"
+
+    def test_sync_status_no_palace(self, monkeypatch, config, kg):
+        self._patch_sync(monkeypatch, config, "/nonexistent/path", kg)
+        from mempalace.mcp_server import tool_sync_status
+
+        result = tool_sync_status()
+        assert "error" in result
+
+    def test_sync_status_fresh_files(self, monkeypatch, config, palace_path, kg, tmp_path):
+        """Source files unchanged since mining — all should be fresh."""
+        self._patch_sync(monkeypatch, config, palace_path, kg)
+        import hashlib
+
+        # Create real source files
+        src_file = tmp_path / "code.py"
+        src_file.write_text("def hello(): return True")
+        content_hash = hashlib.md5("def hello(): return True".encode(), usedforsecurity=False).hexdigest()
+
+        _, col = _get_collection(palace_path, create=True)
+        col.add(
+            ids=["drawer_test_general_001"],
+            documents=["def hello(): return True"],
+            metadatas=[{
+                "wing": "test",
+                "room": "general",
+                "source_file": str(src_file),
+                "chunk_index": 0,
+                "added_by": "test",
+                "filed_at": "2026-01-01T00:00:00",
+                "content_hash": content_hash,
+            }],
+        )
+
+        from mempalace.mcp_server import tool_sync_status
+        result = tool_sync_status()
+        assert result["status"] == "fresh"
+        assert result["fresh"] == 1
+        assert result["stale"] == 0
+
+    def test_sync_status_stale_file(self, monkeypatch, config, palace_path, kg, tmp_path):
+        """Source file changed since mining — should be detected as stale."""
+        self._patch_sync(monkeypatch, config, palace_path, kg)
+        import hashlib
+
+        src_file = tmp_path / "code.py"
+        src_file.write_text("original content")
+        old_hash = hashlib.md5("original content".encode(), usedforsecurity=False).hexdigest()
+
+        _, col = _get_collection(palace_path, create=True)
+        col.add(
+            ids=["drawer_test_general_001"],
+            documents=["original content"],
+            metadatas=[{
+                "wing": "test",
+                "room": "general",
+                "source_file": str(src_file),
+                "chunk_index": 0,
+                "added_by": "test",
+                "filed_at": "2026-01-01T00:00:00",
+                "content_hash": old_hash,
+            }],
+        )
+
+        # Modify the file
+        src_file.write_text("updated content — different from original")
+
+        from mempalace.mcp_server import tool_sync_status
+        result = tool_sync_status()
+        assert result["status"] == "stale"
+        assert result["stale"] == 1
+        assert len(result["stale_files"]) == 1
+        assert result["stale_files"][0]["file"] == str(src_file)
+        assert "remine_commands" in result
+
+    def test_sync_status_missing_file(self, monkeypatch, config, palace_path, kg):
+        """Source file deleted — drawers should be reported as orphaned."""
+        self._patch_sync(monkeypatch, config, palace_path, kg)
+
+        _, col = _get_collection(palace_path, create=True)
+        col.add(
+            ids=["drawer_test_general_001"],
+            documents=["content from deleted file"],
+            metadatas=[{
+                "wing": "test",
+                "room": "general",
+                "source_file": "/tmp/nonexistent_file_12345.py",
+                "chunk_index": 0,
+                "added_by": "test",
+                "filed_at": "2026-01-01T00:00:00",
+                "content_hash": "abc123",
+            }],
+        )
+
+        from mempalace.mcp_server import tool_sync_status
+        result = tool_sync_status()
+        assert result["status"] == "orphaned"
+        assert result["missing"] == 1
+
+    def test_sync_status_legacy_no_hash(self, monkeypatch, config, palace_path, kg, tmp_path):
+        """Drawers without content_hash should be counted as no_hash_legacy."""
+        self._patch_sync(monkeypatch, config, palace_path, kg)
+
+        src_file = tmp_path / "old.py"
+        src_file.write_text("legacy code")
+
+        _, col = _get_collection(palace_path, create=True)
+        col.add(
+            ids=["drawer_test_general_001"],
+            documents=["legacy code"],
+            metadatas=[{
+                "wing": "test",
+                "room": "general",
+                "source_file": str(src_file),
+                "chunk_index": 0,
+                "added_by": "old_miner",
+                "filed_at": "2025-01-01T00:00:00",
+            }],
+        )
+
+        from mempalace.mcp_server import tool_sync_status
+        result = tool_sync_status()
+        assert result["no_hash_legacy"] == 1
+        assert result["status"] == "unknown"  # no hash = can't determine freshness
+
+    def test_sync_status_directory_filter(self, monkeypatch, config, palace_path, kg, tmp_path):
+        """Directory filter should only check files under the specified path."""
+        self._patch_sync(monkeypatch, config, palace_path, kg)
+        import hashlib
+
+        dir_a = tmp_path / "project_a"
+        dir_b = tmp_path / "project_b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+
+        file_a = dir_a / "a.py"
+        file_b = dir_b / "b.py"
+        file_a.write_text("code A")
+        file_b.write_text("code B")
+
+        _, col = _get_collection(palace_path, create=True)
+        for sf, content, wing in [
+            (str(file_a), "code A", "proj-a"),
+            (str(file_b), "code B", "proj-b"),
+        ]:
+            h = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
+            col.add(
+                ids=[f"drawer_{wing}_001"],
+                documents=[content],
+                metadatas=[{
+                    "wing": wing,
+                    "room": "general",
+                    "source_file": sf,
+                    "chunk_index": 0,
+                    "added_by": "test",
+                    "filed_at": "2026-01-01T00:00:00",
+                    "content_hash": h,
+                }],
+            )
+
+        from mempalace.mcp_server import tool_sync_status
+        result = tool_sync_status(directory=str(dir_a))
+        assert result["total_source_files"] == 1
+        assert result["fresh"] == 1
+    def test_diary_write_same_second_shared_prefix_no_collision(
+        self, monkeypatch, config, palace_path, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        _client, _col = _get_collection(palace_path, create=True)
+        del _client
+
+        from mempalace import mcp_server
+
+        class FrozenDateTime:
+            calls = [
+                datetime(2026, 4, 13, 22, 15, 30, 123456),
+                datetime(2026, 4, 13, 22, 15, 30, 123457),
+            ]
+            fallback = datetime(2026, 4, 13, 22, 15, 30, 123457)
+
+            @classmethod
+            def now(cls):
+                if cls.calls:
+                    return cls.calls.pop(0)
+                return cls.fallback
+
+        monkeypatch.setattr(mcp_server, "datetime", FrozenDateTime)
+
+        from mempalace.mcp_server import tool_diary_read, tool_diary_write
+
+        entry1 = "A" * 50 + " entry one"
+        entry2 = "A" * 50 + " entry two"
+
+        result1 = tool_diary_write(agent_name="TestAgent", entry=entry1, topic="status")
+        result2 = tool_diary_write(agent_name="TestAgent", entry=entry2, topic="status")
+
+        assert result1["success"] is True
+        assert result2["success"] is True
+        assert result1["entry_id"] != result2["entry_id"]
+
+        read_result = tool_diary_read(agent_name="TestAgent")
+        contents = [entry["content"] for entry in read_result["entries"]]
+        assert read_result["total"] == 2
+        assert entry1 in contents
+        assert entry2 in contents
+
+
+# ── Cache Invalidation (inode/mtime) ──────────────────────────────────
+
+
