@@ -682,7 +682,10 @@ def _detect_poisoned_max_seq_ids(
                 "SELECT segment_id, seq_id FROM max_seq_id WHERE seq_id > ?",
                 (threshold,),
             ).fetchall()
-    return [(str(sid), int(val)) for sid, val in rows]
+    return [
+        (str(sid), (int.from_bytes(val, "big") if isinstance(val, (bytes, bytearray)) else int(val)))
+        for sid, val in rows
+    ]
 
 
 def _compute_heuristic_seq_id(cur: sqlite3.Cursor, segment_id: str) -> int:

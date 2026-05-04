@@ -550,6 +550,10 @@ def _ingest_transcript(transcript_path: str):
     if path is None or not path.is_file() or path.stat().st_size < 100:
         return
 
+    if _mine_already_running():
+        _log(f"Skipping transcript ingest: mine already running")
+        return
+
     from .config import MempalaceConfig
 
     try:
@@ -561,7 +565,7 @@ def _ingest_transcript(transcript_path: str):
         log_path = STATE_DIR / "hook.log"
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         with open(log_path, "a") as log_f:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 [
                     _mempalace_python(),
                     "-m",
@@ -576,7 +580,8 @@ def _ingest_transcript(transcript_path: str):
                 stdout=log_f,
                 stderr=log_f,
             )
-        _log(f"Transcript ingest started: {path.name}")
+        _MINE_PID_FILE.write_text(str(proc.pid))
+        _log(f"Transcript ingest started: {path.name} (pid={proc.pid})")
     except OSError:
         pass
 
@@ -756,6 +761,23 @@ def _wing_from_transcript_path(transcript_path: str) -> str:
     return "wing_sessions"
 
 
+def _auto_kg_write(session_id: str, themes: list[str]) -> None:
+    """Add session-to-topic KG relationships for extracted themes."""
+    try:
+        from .mcp_server import tool_kg_add
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        for theme in themes[:3]:
+            tool_kg_add(
+                subject=f"session-{date_str}",
+                predicate="covered_topic",
+                object=theme,
+                valid_from=date_str,
+            )
+        _log(f"KG auto-write: session-{date_str} → {themes[:3]}")
+    except Exception as exc:
+        _log(f"KG auto-write failed: {exc}")
+
+
 def hook_stop(data: dict, harness: str):
     """Stop hook: block every N messages for auto-save."""
     parsed = _parse_harness_input(data, harness)
@@ -842,6 +864,14 @@ def hook_stop(data: dict, harness: str):
         project_wing = _wing_from_transcript_path(transcript_path)
 
         if silent:
+            # Skip diary save if a mine subprocess is running — concurrent
+            # ChromaDB writes cause "another mine already running" failures.
+            # Don't advance last_save so next Stop hook retries.
+            if _mine_already_running():
+                _log("Skipping diary save: mine running. Will retry on next stop.")
+                _output({})
+                return
+
             # Save directly via Python API — systemMessage renders in terminal
             result = {"count": 0}
             if transcript_path:
@@ -861,9 +891,12 @@ def hook_stop(data: dict, harness: str):
                     tag = " \u2014 " + ", ".join(themes)
                 else:
                     tag = ""
-                
-                # KG Integration: Include a fact summary in the silent feedback
-                # to keep the agent's knowledge of entities fresh mid-session.
+
+                # Auto-write session topics to KG
+                if themes:
+                    _auto_kg_write(session_id, themes)
+
+                # Include recent KG facts in system message to keep agent context fresh.
                 try:
                     from .layers import MemoryStack
                     from .config import MempalaceConfig
@@ -1145,8 +1178,9 @@ def hook_precompact(data: dict, harness: str):
     # Supported: block (always), block_once (per session), proceed (never)
     mode = os.environ.get("MEMPAL_PRECOMPACT_MODE", "").lower()
     if not mode:
-        # Default: proceed for Claude/Gemini (avoid hangs), block for others
-        mode = "proceed" if harness in ("claude-code", "gemini") else "block"
+        # block_once per session for all harnesses: saves before compaction
+        # without risking infinite loops (flag is per session_id).
+        mode = "block_once"
 
     if mode == "proceed":
         _output({})
