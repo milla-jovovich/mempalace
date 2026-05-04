@@ -22,3 +22,15 @@ case "$PARENT_CMD" in
   *) ;;
 esac
 printf '%s' "$INPUT" | "$MEMPAL_PYTHON" -m mempalace hook run --hook session-start --harness "$HARNESS"
+
+# Pre-warm ChromaDB in background so the first Stop hook doesn't cold-start
+"$MEMPAL_PYTHON" -c "
+import os, sys
+sys.path.insert(0, os.environ.get('PYTHONPATH','').split(':')[0])
+try:
+    from mempalace.backends.chroma import ChromaBackend
+    b = ChromaBackend()
+    b.get_collection(os.path.expanduser('~/.mempalace/palace'), 'mempalace_drawers', create=False)
+except Exception:
+    pass
+" >/dev/null 2>&1 &
