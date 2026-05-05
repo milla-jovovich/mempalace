@@ -31,17 +31,7 @@ class TestAdocScan:
 
 class TestPreprocessAdoc:
     def test_strips_block_delimiters(self):
-        content = (
-            "== Section\n"
-            "\n"
-            "Some text.\n"
-            "\n"
-            "----\n"
-            "code here\n"
-            "----\n"
-            "\n"
-            "More text.\n"
-        )
+        content = "== Section\n\nSome text.\n\n----\ncode here\n----\n\nMore text.\n"
         result = preprocess_adoc(content)
         assert "----" not in result
         assert "code here" in result
@@ -118,3 +108,65 @@ class TestPreprocessAdoc:
         result = preprocess_adoc(content)
         assert "Time: 10 minutes" in result
         assert "Note: important detail" in result
+
+    def test_strips_include_directives(self):
+        content = (
+            "include::{gls_snippets_dir}/before_you_begin.adoc[]\n"
+            "\n"
+            "Body text.\n"
+            "\n"
+            "ifdef::backend-html5[]\n"
+            "HTML only.\n"
+            "endif::backend-html5[]\n"
+            "\n"
+            "ifndef::ebook[]\n"
+            "Not ebook.\n"
+            "endif::[]\n"
+        )
+        result = preprocess_adoc(content)
+        assert "include::" not in result
+        assert "ifdef::" not in result
+        assert "ifndef::" not in result
+        assert "endif::" not in result
+        assert "Body text." in result
+
+    def test_strips_callout_markers(self):
+        content = (
+            "data_in: Input[Artifact], <1>\n"
+            "data_out: Output[Artifact] <2>\n"
+            "regular line with no callout\n"
+        )
+        result = preprocess_adoc(content)
+        assert "<1>" not in result
+        assert "<2>" not in result
+        assert "data_in: Input[Artifact]," in result
+        assert "regular line with no callout" in result
+
+    def test_simplifies_inline_macros(self):
+        content = (
+            "Click btn:[Create run] to start.\n"
+            "Go to menu:Actions[Create run].\n"
+            "Use pass:a,n[{gls_res_outcomes}] for outcomes.\n"
+        )
+        result = preprocess_adoc(content)
+        assert "btn:[" not in result
+        assert "Create run" in result
+        assert "menu:" not in result
+        assert "Actions > Create run" in result
+        assert "pass:a,n[" not in result
+
+    def test_preserves_section_headers(self):
+        content = "== Section One\n\n=== Subsection\n\nBody text.\n"
+        result = preprocess_adoc(content)
+        assert "== Section One" in result
+        assert "=== Subsection" in result
+
+    def test_preserves_comments(self):
+        content = (
+            "// ARCH REVIEW: Does the API support OCI connections?\n"
+            "// DEVELOPER: Leave as is for now.\n"
+            "Body text.\n"
+        )
+        result = preprocess_adoc(content)
+        assert "ARCH REVIEW" in result
+        assert "DEVELOPER" in result

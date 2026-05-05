@@ -428,6 +428,15 @@ def preprocess_adoc(content: str) -> str:
         # Block attribute lines: [source,python], [role='Checklist'], etc.
         if re.match(r"^\[.+\]\s*$", stripped) and not stripped.startswith("[["):
             continue
+        # Include, ifdef, ifndef, endif, ifeval directives
+        if re.match(r"^(include|ifdef|ifndef|endif|ifeval)::", stripped):
+            continue
+        # Strip callout markers at end of line
+        line = re.sub(r"\s*<\d+>\s*$", "", line)
+        # Simplify inline macros
+        line = re.sub(r"btn:\[([^\]]+)\]", r"\1", line)
+        line = re.sub(r"menu:(\w+)\[([^\]]+)\]", r"\1 > \2", line)
+        line = re.sub(r"pass:[a-z,]*\[[^\]]*\]", "", line)
         cleaned.append(line)
     return "\n".join(cleaned)
 
