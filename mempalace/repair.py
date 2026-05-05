@@ -100,16 +100,31 @@ def _extract_drawers(col, total: int, batch_size: int):
     all_ids = []
     all_docs = []
     all_metas = []
+    all_embeddings = []
     offset = 0
     while offset < total:
-        batch = col.get(limit=batch_size, offset=offset, include=["documents", "metadatas"])
+        batch = col.get(
+            limit=batch_size,
+            offset=offset,
+            include=["documents", "metadatas", "embeddings"],
+        )
         if not batch["ids"]:
             break
         all_ids.extend(batch["ids"])
         all_docs.extend(batch["documents"])
         all_metas.extend(batch["metadatas"])
+        # embeddings may be None when the HNSW segment is unreadable (the
+        # exact scenario we are trying to repair).  Fall back to None so the
+        # caller can pass embeddings=None and let ChromaDB recompute them.
+        batch_embeddings = batch.get("embeddings")
+        if batch_embeddings is not None and any(e is None for e in batch_embeddings):
+            batch_embeddings = None
+        all_embeddings.extend(batch_embeddings if batch_embeddings is not None else [None] * len(batch["ids"]))
         offset += len(batch["ids"])
-    return all_ids, all_docs, all_metas
+    # If any embedding slot is None the whole list is unusable for direct
+    # upsert — signal that to the caller with None so ChromaDB recomputes.
+    has_all = all_embeddings and all(e is not None for e in all_embeddings)
+    return all_ids, all_docs, all_metas, all_embeddings if has_all else None
 
 
 def _verify_collection_count(col, expected: int, label: str) -> None:
@@ -151,11 +166,17 @@ def _rebuild_collection_via_temp(
     batch_size: int,
     collection_name: Optional[str] = None,
     progress=print,
+    all_embeddings=None,
 ) -> int:
     expected = len(all_ids)
     collection_name = collection_name or _get_collection_name()
     temp_name = f"{collection_name}__repair_tmp"
     live_replaced = False
+
+    if all_embeddings is not None:
+        progress("  Re-using stored embeddings (no recomputation needed).")
+    else:
+        progress("  Stored embeddings unavailable — will recompute during rebuild.")
 
     try:
         _delete_collection_if_exists(backend, palace_path, temp_name)
@@ -167,7 +188,10 @@ def _rebuild_collection_via_temp(
             batch_ids = all_ids[i : i + batch_size]
             batch_docs = all_docs[i : i + batch_size]
             batch_metas = all_metas[i : i + batch_size]
-            temp_col.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
+            kwargs = {"documents": batch_docs, "ids": batch_ids, "metadatas": batch_metas}
+            if all_embeddings is not None:
+                kwargs["embeddings"] = all_embeddings[i : i + batch_size]
+            temp_col.upsert(**kwargs)
             staged += len(batch_ids)
             progress(f"  Staged {staged}/{expected} drawers...")
         _verify_collection_count(temp_col, expected, "temporary rebuild")
@@ -182,7 +206,10 @@ def _rebuild_collection_via_temp(
             batch_ids = all_ids[i : i + batch_size]
             batch_docs = all_docs[i : i + batch_size]
             batch_metas = all_metas[i : i + batch_size]
-            new_col.upsert(documents=batch_docs, ids=batch_ids, metadatas=batch_metas)
+            kwargs = {"documents": batch_docs, "ids": batch_ids, "metadatas": batch_metas}
+            if all_embeddings is not None:
+                kwargs["embeddings"] = all_embeddings[i : i + batch_size]
+            new_col.upsert(**kwargs)
             rebuilt += len(batch_ids)
             progress(f"  Re-filed {rebuilt}/{expected} drawers...")
         _verify_collection_count(new_col, expected, "rebuilt live collection")
@@ -502,8 +529,9 @@ def rebuild_index(
     # Extract all drawers in batches
     print("\n  Extracting drawers...")
     batch_size = 5000
-    all_ids, all_docs, all_metas = _extract_drawers(col, total, batch_size)
-    print(f"  Extracted {len(all_ids)} drawers")
+    all_ids, all_docs, all_metas, all_embeddings = _extract_drawers(col, total, batch_size)
+    emb_status = "with stored embeddings" if all_embeddings is not None else "without embeddings (will recompute)"
+    print(f"  Extracted {len(all_ids)} drawers ({emb_status})")
 
     # ── #1208 guard ──────────────────────────────────────────────────
     # Refuse to ``delete_collection`` + rebuild when extraction looks
@@ -540,6 +568,7 @@ def rebuild_index(
             batch_size,
             collection_name=collection_name,
             progress=print,
+            all_embeddings=all_embeddings,
         )
     except RebuildCollectionError as e:
         print(f"\n  ERROR during rebuild: {e}")

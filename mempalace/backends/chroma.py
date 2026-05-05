@@ -416,8 +416,17 @@ def _hnsw_element_count(palace_path: str, segment_id: str) -> Optional[int]:
 # distinguish real corruption (#1222 was 176 613 missing of 192 997 —
 # orders of magnitude past 2 × any reasonable sync_threshold) from
 # expected steady-state lag.
+#
+# However, the 2 × sync_threshold floor must itself be capped so that a
+# large sync_threshold (e.g. 50 000) does not create a tolerance window
+# (100 000) that exceeds the collection size — making DIVERGED
+# unreachable until the palace has > 1 M drawers.  The cap is set to
+# 10 000 (≈ one sync_threshold at the default of 1 000 or a small
+# fraction of any realistic palace) so that a 47 % drift is always
+# flagged regardless of the configured sync_threshold.
 _HNSW_DIVERGENCE_FALLBACK_FLOOR = 2000
-_HNSW_DIVERGENCE_FRACTION = 0.10
+_HNSW_DIVERGENCE_FLOOR_CAP = 10_000
+_HNSW_DIVERGENCE_FRACTION = 0.05
 
 
 def _read_sync_threshold(palace_path: str, collection_name: str) -> int:
@@ -509,7 +518,10 @@ def hnsw_capacity_status(palace_path: str, collection_name: str = "mempalace_dra
         sync_threshold = _read_sync_threshold(palace_path, collection_name)
         # Two synchronization windows worth — see comment above
         # _HNSW_DIVERGENCE_FALLBACK_FLOOR for the rationale.
-        divergence_floor = max(_HNSW_DIVERGENCE_FALLBACK_FLOOR, 2 * sync_threshold)
+        divergence_floor = min(
+            max(_HNSW_DIVERGENCE_FALLBACK_FLOOR, 2 * sync_threshold),
+            _HNSW_DIVERGENCE_FLOOR_CAP,
+        )
 
         if hnsw_count is None:
             # No pickle yet, so this probe cannot measure HNSW capacity.
