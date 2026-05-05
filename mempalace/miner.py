@@ -8,6 +8,7 @@ Stores verbatim chunks as drawers. No summaries. Ever.
 """
 
 import os
+import re
 import sys
 import shlex
 import hashlib
@@ -410,6 +411,19 @@ def chunk_text(content: str, source_file: str) -> list:
         start = end - CHUNK_OVERLAP if end < len(content) else end
 
     return chunks
+
+
+def preprocess_adoc(content: str) -> str:
+    """Strip AsciiDoc structural markup that adds noise to embeddings."""
+    lines = content.split("\n")
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        # Block delimiters: ----, ====, ...., ++++, ****
+        if re.match(r"^(-{4,}|={4,}|\.{4,}|\+{4,}|\*{4,})$", stripped):
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned)
 
 
 # =============================================================================

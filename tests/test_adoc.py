@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from mempalace.miner import scan_project
+from mempalace.miner import preprocess_adoc, scan_project
 
 
 def write_file(path: Path, content: str):
@@ -27,3 +27,51 @@ class TestAdocScan:
         )
         assert "docs/lecture.adoc" in scanned_files(project_root)
         assert "src/app.py" in scanned_files(project_root)
+
+
+class TestPreprocessAdoc:
+    def test_strips_block_delimiters(self):
+        content = (
+            "== Section\n"
+            "\n"
+            "Some text.\n"
+            "\n"
+            "----\n"
+            "code here\n"
+            "----\n"
+            "\n"
+            "More text.\n"
+        )
+        result = preprocess_adoc(content)
+        assert "----" not in result
+        assert "code here" in result
+        assert "Some text." in result
+        assert "More text." in result
+
+    def test_strips_various_block_delimiters(self):
+        content = (
+            "====\n"
+            "Admonition text.\n"
+            "====\n"
+            "\n"
+            "....\n"
+            "Literal block.\n"
+            "....\n"
+            "\n"
+            "++++\n"
+            "Passthrough.\n"
+            "++++\n"
+            "\n"
+            "****\n"
+            "Sidebar.\n"
+            "****\n"
+        )
+        result = preprocess_adoc(content)
+        assert "====" not in result
+        assert "...." not in result
+        assert "++++" not in result
+        assert "****" not in result
+        assert "Admonition text." in result
+        assert "Literal block." in result
+        assert "Passthrough." in result
+        assert "Sidebar." in result
