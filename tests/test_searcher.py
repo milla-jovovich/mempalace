@@ -250,9 +250,9 @@ class TestSearchCLI:
         captured = capsys.readouterr()
         first_block, _, _ = captured.out.partition("[2]")
         # Lexical match must rank first
-        assert "b.md" in first_block, (
-            f"expected lexical match 'b.md' at rank 1, got:\n{captured.out}"
-        )
+        assert (
+            "b.md" in first_block
+        ), f"expected lexical match 'b.md' at rank 1, got:\n{captured.out}"
         # Non-zero bm25 reported
         assert "bm25=" in first_block
         assert "bm25=0.0" not in first_block
