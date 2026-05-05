@@ -422,6 +422,12 @@ def preprocess_adoc(content: str) -> str:
         # Block delimiters: ----, ====, ...., ++++, ****
         if re.match(r"^(-{4,}|={4,}|\.{4,}|\+{4,}|\*{4,})$", stripped):
             continue
+        # Attribute definitions: :key: or :key: value
+        if re.match(r"^:[a-zA-Z_][\w-]*:(\s|$)", stripped):
+            continue
+        # Block attribute lines: [source,python], [role='Checklist'], etc.
+        if re.match(r"^\[.+\]\s*$", stripped) and not stripped.startswith("[["):
+            continue
         cleaned.append(line)
     return "\n".join(cleaned)
 

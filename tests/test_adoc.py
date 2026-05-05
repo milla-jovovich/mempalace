@@ -75,3 +75,46 @@ class TestPreprocessAdoc:
         assert "Literal block." in result
         assert "Passthrough." in result
         assert "Sidebar." in result
+
+    def test_strips_attribute_definitions(self):
+        content = (
+            ":gls_prefix:\n"
+            ":exercise_path: ~/course/labs/{gls_lab_script}\n"
+            ":experimental:\n"
+            "\n"
+            "== Section Title\n"
+            "\n"
+            "Body text here.\n"
+        )
+        result = preprocess_adoc(content)
+        assert ":gls_prefix:" not in result
+        assert ":exercise_path:" not in result
+        assert ":experimental:" not in result
+        assert "== Section Title" in result
+        assert "Body text here." in result
+
+    def test_strips_block_attributes(self):
+        content = (
+            "== Code Example\n"
+            "\n"
+            "[source,python]\n"
+            "print('hello')\n"
+            "\n"
+            "[subs=+quotes]\n"
+            "some code\n"
+            "\n"
+            "[role='Checklist']\n"
+            "== Instructions\n"
+        )
+        result = preprocess_adoc(content)
+        assert "[source,python]" not in result
+        assert "[subs=+quotes]" not in result
+        assert "[role='Checklist']" not in result
+        assert "print('hello')" in result
+        assert "== Instructions" in result
+
+    def test_preserves_non_attribute_colons(self):
+        content = "Time: 10 minutes\nNote: important detail\n"
+        result = preprocess_adoc(content)
+        assert "Time: 10 minutes" in result
+        assert "Note: important detail" in result
