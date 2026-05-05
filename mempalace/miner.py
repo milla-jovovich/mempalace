@@ -34,6 +34,7 @@ from .palace import (
 READABLE_EXTENSIONS = {
     ".txt",
     ".md",
+    ".adoc",
     ".py",
     ".js",
     ".ts",
