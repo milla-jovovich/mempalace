@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from mempalace.miner import chunk_adoc, preprocess_adoc, scan_project
+import chromadb
+import yaml
+
+from mempalace.miner import chunk_adoc, mine, preprocess_adoc, scan_project
 
 
 def write_file(path: Path, content: str):
@@ -259,3 +262,106 @@ class TestChunkAdoc:
         chunks = chunk_adoc(content, "test.adoc")
         assert len(chunks) >= 1
         assert all("chunk_index" in c for c in chunks)
+
+
+class TestAdocMiningEndToEnd:
+    def test_mine_adoc_file_creates_drawers(self, tmp_path):
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        write_file(
+            project_root / "docs" / "lecture.adoc",
+            (
+                ":gls_prefix:\n"
+                "\n"
+                "== Authentication\n"
+                "\n"
+                "Use the /auth endpoint to authenticate.\n"
+                "This is enough text to pass the minimum chunk size.\n"
+                "\n"
+                "----\n"
+                "curl -X POST http://api.example.com/auth\n"
+                "----\n"
+                "\n"
+                "== User Endpoints\n"
+                "\n"
+                "The /users endpoint returns a list of users.\n"
+                "It supports pagination and filtering by role.\n"
+            ),
+        )
+        with open(project_root / "mempalace.yaml", "w") as f:
+            yaml.dump(
+                {
+                    "wing": "test_course",
+                    "rooms": [{"name": "docs", "description": "Documentation"}],
+                },
+                f,
+            )
+
+        palace_path = tmp_path / "palace"
+        mine(str(project_root), str(palace_path))
+
+        client = chromadb.PersistentClient(path=str(palace_path))
+        col = client.get_collection("mempalace_drawers")
+        assert col.count() > 0
+
+        # Verify drawers don't contain AsciiDoc noise
+        results = col.get()
+        all_text = " ".join(results["documents"])
+        assert "----" not in all_text
+        assert ":gls_prefix:" not in all_text
+        # Verify actual content IS present
+        assert "Authentication" in all_text
+        assert "User Endpoints" in all_text
+
+    def test_mine_adoc_with_preprocessed_content(self, tmp_path):
+        """Verify inline macros are cleaned before storage."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        write_file(
+            project_root / "guide.adoc",
+            (
+                "== Instructions\n"
+                "\n"
+                "Click btn:[Create run] to start the pipeline.\n"
+                "Go to menu:Actions[Create run] for more options.\n"
+                "This text needs to be long enough to pass the size filter.\n"
+            ),
+        )
+        with open(project_root / "mempalace.yaml", "w") as f:
+            yaml.dump(
+                {
+                    "wing": "test_course",
+                    "rooms": [{"name": "general", "description": "General"}],
+                },
+                f,
+            )
+
+        palace_path = tmp_path / "palace"
+        mine(str(project_root), str(palace_path))
+
+        client = chromadb.PersistentClient(path=str(palace_path))
+        col = client.get_collection("mempalace_drawers")
+        results = col.get()
+        all_text = " ".join(results["documents"])
+        assert "btn:[" not in all_text
+        assert "menu:" not in all_text
+        assert "Create run" in all_text
+        assert "Actions > Create run" in all_text
+
+    def test_mine_adoc_dry_run_no_crash(self, tmp_path):
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        write_file(
+            project_root / "lecture.adoc",
+            ("== Section\n\nBody text that is long enough.\n" * 5),
+        )
+        with open(project_root / "mempalace.yaml", "w") as f:
+            yaml.dump(
+                {
+                    "wing": "test_course",
+                    "rooms": [{"name": "general", "description": "General"}],
+                },
+                f,
+            )
+        palace_path = tmp_path / "palace"
+        mine(str(project_root), str(palace_path), dry_run=True)

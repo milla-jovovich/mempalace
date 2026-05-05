@@ -897,8 +897,16 @@ def process_file(
     if len(content) < MIN_CHUNK_SIZE:
         return 0, "general"
 
+    # AsciiDoc preprocessing: strip markup noise before embedding
+    if filepath.suffix.lower() == ".adoc":
+        content = preprocess_adoc(content)
+
     room = detect_room(filepath, content, rooms, project_path)
-    chunks = chunk_text(content, source_file)
+
+    if filepath.suffix.lower() == ".adoc":
+        chunks = chunk_adoc(content, source_file)
+    else:
+        chunks = chunk_text(content, source_file)
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} -> room:{room} ({len(chunks)} drawers)")

@@ -476,9 +476,9 @@ class TestWriteTools:
 
         assert result1["success"] is True
         assert result2["success"] is True
-        assert (
-            result1["drawer_id"] != result2["drawer_id"]
-        ), "Documents with shared header but different content must have distinct drawer IDs"
+        assert result1["drawer_id"] != result2["drawer_id"], (
+            "Documents with shared header but different content must have distinct drawer IDs"
+        )
 
     def test_delete_drawer(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
@@ -1128,9 +1128,9 @@ class TestCacheInvalidation:
         all_calls = captured["get"] + captured["create"]
         assert all_calls, "expected get_collection or create_collection to be called"
         for kwargs in all_calls:
-            assert (
-                "embedding_function" in kwargs
-            ), f"missing embedding_function= in chromadb call: {kwargs}"
+            assert "embedding_function" in kwargs, (
+                f"missing embedding_function= in chromadb call: {kwargs}"
+            )
             assert kwargs["embedding_function"] is not None
 
         # Same expectation on the create=False (cache-miss) reopen path.

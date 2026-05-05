@@ -985,9 +985,9 @@ def test_cmd_compress_stores_results(mock_config_cls, capsys):
     # Verify the compress output goes to the closets collection so that
     # palace.get_closets_collection() / searcher can read it back (#1244).
     (call_args, _kwargs) = mock_backend.get_or_create_collection.call_args
-    assert (
-        call_args[1] == "mempalace_closets"
-    ), f"compress should write to mempalace_closets, got {call_args[1]!r}"
+    assert call_args[1] == "mempalace_closets", (
+        f"compress should write to mempalace_closets, got {call_args[1]!r}"
+    )
     assert "mempalace_closets" in out
 
 
