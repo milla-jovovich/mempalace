@@ -158,6 +158,12 @@ class TestPreprocessAdoc:
         assert "Actions > Create run" in result
         assert "pass:a,n[" not in result
 
+    def test_simplifies_menu_macro_with_multi_word_path(self):
+        content = "Go to menu:File Operations[Save As].\n"
+        result = preprocess_adoc(content)
+        assert "menu:" not in result
+        assert "File Operations > Save As" in result
+
     def test_preserves_section_headers(self):
         content = "== Section One\n\n=== Subsection\n\nBody text.\n"
         result = preprocess_adoc(content)
@@ -222,7 +228,7 @@ class TestChunkAdoc:
         assert "preamble" in chunks[0]["content"]
         assert "First Section" in chunks[1]["content"]
 
-    def test_tiny_sections_are_skipped(self):
+    def test_small_sections_preserved_for_structure(self):
         content = (
             "== Real Section\n"
             "\n"
@@ -235,6 +241,7 @@ class TestChunkAdoc:
         chunks = chunk_adoc(content, "test.adoc")
         contents = " ".join(c["content"] for c in chunks)
         assert "Real Section" in contents
+        assert "Tiny" in contents
 
     def test_handles_mixed_header_levels(self):
         content = (

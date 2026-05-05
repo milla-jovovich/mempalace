@@ -413,35 +413,37 @@ def chunk_text(content: str, source_file: str) -> list:
     return chunks
 
 
+_ADOC_BLOCK_DELIM_RE = re.compile(r"^(-{4,}|={4,}|\.{4,}|\+{4,}|\*{4,})$")
+_ADOC_ATTR_DEF_RE = re.compile(r"^:[a-zA-Z_][\w-]*:(\s|$)")
+_ADOC_BLOCK_ATTR_RE = re.compile(r"^\[.+\]\s*$")
+_ADOC_DIRECTIVE_RE = re.compile(r"^(include|ifdef|ifndef|endif|ifeval)::")
+_ADOC_CALLOUT_RE = re.compile(r"\s*<\d+>\s*$")
+_ADOC_BTN_RE = re.compile(r"btn:\[([^\]]+)\]")
+_ADOC_MENU_RE = re.compile(r"menu:([^\[]+)\[([^\]]+)\]")
+_ADOC_PASS_RE = re.compile(r"pass:[a-z,]*\[[^\]]*\]")
+_ADOC_SECTION_RE = re.compile(r"^(={2,})\s+\S", re.MULTILINE)
+
+
 def preprocess_adoc(content: str) -> str:
     """Strip AsciiDoc structural markup that adds noise to embeddings."""
     lines = content.split("\n")
     cleaned = []
     for line in lines:
         stripped = line.strip()
-        # Block delimiters: ----, ====, ...., ++++, ****
-        if re.match(r"^(-{4,}|={4,}|\.{4,}|\+{4,}|\*{4,})$", stripped):
+        if _ADOC_BLOCK_DELIM_RE.match(stripped):
             continue
-        # Attribute definitions: :key: or :key: value
-        if re.match(r"^:[a-zA-Z_][\w-]*:(\s|$)", stripped):
+        if _ADOC_ATTR_DEF_RE.match(stripped):
             continue
-        # Block attribute lines: [source,python], [role='Checklist'], etc.
-        if re.match(r"^\[.+\]\s*$", stripped) and not stripped.startswith("[["):
+        if _ADOC_BLOCK_ATTR_RE.match(stripped) and not stripped.startswith("[["):
             continue
-        # Include, ifdef, ifndef, endif, ifeval directives
-        if re.match(r"^(include|ifdef|ifndef|endif|ifeval)::", stripped):
+        if _ADOC_DIRECTIVE_RE.match(stripped):
             continue
-        # Strip callout markers at end of line
-        line = re.sub(r"\s*<\d+>\s*$", "", line)
-        # Simplify inline macros
-        line = re.sub(r"btn:\[([^\]]+)\]", r"\1", line)
-        line = re.sub(r"menu:(\w+)\[([^\]]+)\]", r"\1 > \2", line)
-        line = re.sub(r"pass:[a-z,]*\[[^\]]*\]", "", line)
+        line = _ADOC_CALLOUT_RE.sub("", line)
+        line = _ADOC_BTN_RE.sub(r"\1", line)
+        line = _ADOC_MENU_RE.sub(r"\1 > \2", line)
+        line = _ADOC_PASS_RE.sub("", line)
         cleaned.append(line)
     return "\n".join(cleaned)
-
-
-_ADOC_SECTION_RE = re.compile(r"^(={2,})\s+\S", re.MULTILINE)
 
 
 def chunk_adoc(content: str, source_file: str) -> list:
@@ -897,16 +899,12 @@ def process_file(
     if len(content) < MIN_CHUNK_SIZE:
         return 0, "general"
 
-    # AsciiDoc preprocessing: strip markup noise before embedding
-    if filepath.suffix.lower() == ".adoc":
+    is_adoc = filepath.suffix.lower() == ".adoc"
+    if is_adoc:
         content = preprocess_adoc(content)
 
     room = detect_room(filepath, content, rooms, project_path)
-
-    if filepath.suffix.lower() == ".adoc":
-        chunks = chunk_adoc(content, source_file)
-    else:
-        chunks = chunk_text(content, source_file)
+    chunks = chunk_adoc(content, source_file) if is_adoc else chunk_text(content, source_file)
 
     if dry_run:
         print(f"    [DRY RUN] {filepath.name} -> room:{room} ({len(chunks)} drawers)")
