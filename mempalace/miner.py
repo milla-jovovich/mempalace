@@ -217,8 +217,10 @@ def is_gitignored(path: Path, matchers: list, is_dir: bool = False) -> bool:
     return ignored
 
 
-def should_skip_dir(dirname: str) -> bool:
+def should_skip_dir(dirname: str, extra_skip_dirs: set = None) -> bool:
     """Skip known generated/cache directories before gitignore matching."""
+    if extra_skip_dirs and dirname in extra_skip_dirs:
+        return True
     return dirname in SKIP_DIRS or dirname.endswith(".egg-info")
 
 
@@ -918,9 +920,15 @@ def scan_project(
     project_dir: str,
     respect_gitignore: bool = True,
     include_ignored: list = None,
+    extra_extensions: list = None,
+    extra_skip_dirs: list = None,
 ) -> list:
     """Return list of all readable file paths."""
     project_path = Path(project_dir).expanduser().resolve()
+    allowed = set(READABLE_EXTENSIONS)
+    if extra_extensions:
+        allowed.update(f".{e.lstrip('.').lower()}" for e in extra_extensions)
+    skip_set = set(extra_skip_dirs) if extra_skip_dirs else None
     files = []
     active_matchers = []
     matcher_cache = {}
@@ -943,7 +951,7 @@ def scan_project(
             d
             for d in dirs
             if is_force_included(root_path / d, project_path, include_paths)
-            or not should_skip_dir(d)
+            or not should_skip_dir(d, skip_set)
         ]
         if respect_gitignore and active_matchers:
             dirs[:] = [
@@ -960,7 +968,7 @@ def scan_project(
 
             if not force_include and filename in SKIP_FILENAMES:
                 continue
-            if filepath.suffix.lower() not in READABLE_EXTENSIONS and not exact_force_include:
+            if filepath.suffix.lower() not in allowed and not exact_force_include:
                 continue
             if respect_gitignore and active_matchers and not force_include:
                 if is_gitignored(filepath, active_matchers, is_dir=False):
@@ -1054,12 +1062,16 @@ def _mine_impl(
 
     wing = wing_override or config["wing"]
     rooms = config.get("rooms", [{"name": "general", "description": "All project files"}])
+    extra_extensions = config.get("extensions", [])
+    extra_skip_dirs = config.get("skip_dirs", [])
 
     if files is None:
         files = scan_project(
             project_dir,
             respect_gitignore=respect_gitignore,
             include_ignored=include_ignored,
+            extra_extensions=extra_extensions,
+            extra_skip_dirs=extra_skip_dirs,
         )
     if limit > 0:
         files = files[:limit]
