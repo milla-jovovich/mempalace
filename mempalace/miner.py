@@ -441,6 +441,54 @@ def preprocess_adoc(content: str) -> str:
     return "\n".join(cleaned)
 
 
+_ADOC_SECTION_RE = re.compile(r"^(={2,})\s+\S", re.MULTILINE)
+
+
+def chunk_adoc(content: str, source_file: str) -> list:
+    """
+    Split AsciiDoc content into chunks on section header boundaries.
+    Falls back to chunk_text() when no headers are found or for
+    oversized sections.
+    """
+    content = content.strip()
+    if not content:
+        return []
+
+    # Find all section header positions
+    headers = list(_ADOC_SECTION_RE.finditer(content))
+    if not headers:
+        return chunk_text(content, source_file)
+
+    # Build sections: content between consecutive headers
+    sections = []
+    # Preamble before first header
+    if headers[0].start() > 0:
+        sections.append(content[: headers[0].start()])
+    for i, match in enumerate(headers):
+        start = match.start()
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(content)
+        sections.append(content[start:end])
+
+    chunks = []
+    chunk_index = 0
+    for section in sections:
+        section = section.strip()
+        if not section:
+            continue
+        if len(section) <= CHUNK_SIZE:
+            chunks.append({"content": section, "chunk_index": chunk_index})
+            chunk_index += 1
+        else:
+            # Sub-chunk oversized sections using paragraph-boundary logic
+            sub_chunks = chunk_text(section, source_file)
+            for sc in sub_chunks:
+                sc["chunk_index"] = chunk_index
+                chunks.append(sc)
+                chunk_index += 1
+
+    return chunks
+
+
 # =============================================================================
 # PALACE — ChromaDB operations
 # =============================================================================

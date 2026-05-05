@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from mempalace.miner import preprocess_adoc, scan_project
+from mempalace.miner import chunk_adoc, preprocess_adoc, scan_project
 
 
 def write_file(path: Path, content: str):
@@ -170,3 +170,92 @@ class TestPreprocessAdoc:
         result = preprocess_adoc(content)
         assert "ARCH REVIEW" in result
         assert "DEVELOPER" in result
+
+
+class TestChunkAdoc:
+    def test_splits_on_section_headers(self):
+        content = (
+            "== Authentication\n"
+            "\n"
+            "Use the /auth endpoint to authenticate.\n"
+            "\n"
+            "== User Endpoints\n"
+            "\n"
+            "The /users endpoint returns a list of users.\n"
+            "\n"
+            "== Admin Endpoints\n"
+            "\n"
+            "Admin-only endpoints require elevated permissions.\n"
+        )
+        chunks = chunk_adoc(content, "api.adoc")
+        assert len(chunks) == 3
+        assert "Authentication" in chunks[0]["content"]
+        assert "User Endpoints" in chunks[1]["content"]
+        assert "Admin Endpoints" in chunks[2]["content"]
+
+    def test_section_header_included_in_chunk(self):
+        content = "== My Section\n\nBody text here.\n"
+        chunks = chunk_adoc(content, "test.adoc")
+        assert len(chunks) == 1
+        assert chunks[0]["content"].startswith("== My Section")
+
+    def test_sequential_chunk_indices(self):
+        content = "== A\n\nText A.\n\n== B\n\nText B.\n\n== C\n\nText C.\n"
+        chunks = chunk_adoc(content, "test.adoc")
+        indices = [c["chunk_index"] for c in chunks]
+        assert indices == [0, 1, 2]
+
+    def test_oversized_section_gets_sub_chunked(self):
+        long_body = "This is a long paragraph of text. " * 100  # ~3400 chars
+        content = f"== Big Section\n\n{long_body}\n"
+        chunks = chunk_adoc(content, "test.adoc")
+        assert len(chunks) > 1
+        assert "== Big Section" in chunks[0]["content"]
+
+    def test_content_before_first_header_becomes_chunk(self):
+        content = "Document preamble text here.\n\n== First Section\n\nSection body.\n"
+        chunks = chunk_adoc(content, "test.adoc")
+        assert len(chunks) == 2
+        assert "preamble" in chunks[0]["content"]
+        assert "First Section" in chunks[1]["content"]
+
+    def test_tiny_sections_are_skipped(self):
+        content = (
+            "== Real Section\n"
+            "\n"
+            "Enough text to pass the minimum chunk size threshold for filtering.\n"
+            "\n"
+            "== Tiny\n"
+            "\n"
+            "x\n"
+        )
+        chunks = chunk_adoc(content, "test.adoc")
+        contents = " ".join(c["content"] for c in chunks)
+        assert "Real Section" in contents
+
+    def test_handles_mixed_header_levels(self):
+        content = (
+            "== Top Level\n"
+            "\n"
+            "Top body.\n"
+            "\n"
+            "=== Sub Level\n"
+            "\n"
+            "Sub body.\n"
+            "\n"
+            "== Another Top\n"
+            "\n"
+            "Another body.\n"
+        )
+        chunks = chunk_adoc(content, "test.adoc")
+        assert len(chunks) == 3
+
+    def test_empty_content_returns_empty(self):
+        assert chunk_adoc("", "test.adoc") == []
+        assert chunk_adoc("   \n\n  ", "test.adoc") == []
+
+    def test_no_headers_falls_back_to_paragraph_chunking(self):
+        content = "Just plain text without any AsciiDoc headers.\n" * 30
+        chunks = chunk_adoc(content, "test.adoc")
+        assert len(chunks) >= 1
+        assert all("chunk_index" in c for c in chunks)
