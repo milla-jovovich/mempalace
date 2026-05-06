@@ -825,7 +825,12 @@ def search_memories(
                 matched_via = "drawer+closet"
                 closet_preview = c_preview
 
-        effective_dist = dist - boost
+        # Clamp to the valid cosine-distance range [0, 2]. When a strong
+        # closet boost (up to 0.40) exceeds the raw distance, the subtraction
+        # can go negative — which (a) yields ``similarity > 1.0`` downstream
+        # and (b) makes the sort key land *below* ordinary positive distances,
+        # inverting the ranking so the best hybrid matches sort last.
+        effective_dist = max(0.0, min(2.0, dist - boost))
         entry = {
             "text": doc,
             "wing": meta.get("wing", "unknown"),
