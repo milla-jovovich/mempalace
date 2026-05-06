@@ -21,6 +21,9 @@ rather than hard-failing — mining must still work on a laptop without CUDA.
 from __future__ import annotations
 
 import logging
+import hashlib
+import math
+import re
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -46,6 +49,62 @@ _AUTO_ORDER = [
 
 _EF_CACHE: dict = {}
 _WARNED: set = set()
+_HASH_DIMENSIONS = 384
+_TOKEN_RE = re.compile(r"[a-zA-Z0-9_]{2,}")
+
+
+class _HashEmbeddingFunction:
+    """Local lexical embedding function used when ONNX Runtime is unavailable."""
+
+    def __call__(self, input):
+        embeddings = []
+        for document in input:
+            embeddings.append(self._embed(str(document or "")))
+        return embeddings
+
+    def embed_query(self, input):
+        return self.__call__(input)
+
+    def embed_documents(self, input):
+        return self.__call__(input)
+
+    @staticmethod
+    def name() -> str:
+        return "default"
+
+    @staticmethod
+    def build_from_config(config):
+        return _HashEmbeddingFunction()
+
+    def get_config(self):
+        return {"provider": "mempalace-hash-v1", "dimensions": _HASH_DIMENSIONS}
+
+    def default_space(self):
+        return "cosine"
+
+    def supported_spaces(self):
+        return ["cosine", "l2", "ip"]
+
+    @staticmethod
+    def _embed(text: str) -> list[float]:
+        vec = [0.0] * _HASH_DIMENSIONS
+        tokens = _TOKEN_RE.findall(text.lower())
+        if not tokens:
+            vec[0] = 1.0
+            return vec
+
+        for token in tokens[:4000]:
+            digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+            value = int.from_bytes(digest, "little", signed=False)
+            idx = value % _HASH_DIMENSIONS
+            sign = 1.0 if (value >> 63) else -1.0
+            vec[idx] += sign
+
+        norm = math.sqrt(sum(v * v for v in vec))
+        if norm == 0.0:
+            vec[0] = 1.0
+            return vec
+        return [v / norm for v in vec]
 
 
 def _resolve_providers(device: str) -> tuple[list, str]:
@@ -55,6 +114,8 @@ def _resolve_providers(device: str) -> tuple[list, str]:
     accelerator is not compiled into the installed ``onnxruntime``.
     """
     device = (device or "auto").strip().lower()
+    if device in {"hash", "lexical"}:
+        return (["HashEmbeddingProvider"], "hash")
 
     try:
         import onnxruntime as ort
@@ -133,6 +194,12 @@ def get_embedding_function(device: Optional[str] = None):
     cached = _EF_CACHE.get(cache_key)
     if cached is not None:
         return cached
+
+    if effective == "hash":
+        ef = _HashEmbeddingFunction()
+        _EF_CACHE[cache_key] = ef
+        logger.info("Embedding function initialized (device=hash providers=%s)", providers)
+        return ef
 
     ef_cls = _build_ef_class()
     ef = ef_cls(preferred_providers=providers)

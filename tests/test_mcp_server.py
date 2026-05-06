@@ -290,6 +290,22 @@ class TestReadTools:
         assert result["wings"]["project"] == 3
         assert result["wings"]["notes"] == 1
 
+    def test_list_wings_uses_sqlite_for_large_read_path(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server,
+            "_get_collection",
+            lambda *args, **kwargs: pytest.fail("list_wings should not open ChromaDB"),
+        )
+
+        result = mcp_server.tool_list_wings()
+        assert result["wings"]["project"] == 3
+        assert result["wings"]["notes"] == 1
+
     def test_list_rooms_all(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_list_rooms
@@ -316,6 +332,23 @@ class TestReadTools:
         assert result["taxonomy"]["project"]["frontend"] == 1
         assert result["taxonomy"]["notes"]["planning"] == 1
 
+    def test_graph_stats_uses_sqlite_for_large_read_path(
+        self, monkeypatch, config, palace_path, seeded_collection, kg
+    ):
+        _patch_mcp_server(monkeypatch, config, kg)
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server,
+            "_get_collection",
+            lambda *args, **kwargs: pytest.fail("graph_stats should not open ChromaDB"),
+        )
+
+        result = mcp_server.tool_graph_stats()
+        assert result["total_rooms"] == 3
+        assert result["rooms_per_wing"]["project"] == 2
+        assert result["rooms_per_wing"]["notes"] == 1
+
     def test_no_palace_returns_error(self, monkeypatch, config, kg):
         _patch_mcp_server(monkeypatch, config, kg)
         from mempalace.mcp_server import tool_status
@@ -338,6 +371,27 @@ class TestSearchTool:
         # Top result should be the auth drawer
         top = result["results"][0]
         assert "JWT" in top["text"] or "authentication" in top["text"].lower()
+
+    def test_search_hash_embedding_device_uses_sqlite_bm25(
+        self, monkeypatch, palace_path, seeded_collection, kg
+    ):
+        from mempalace import mcp_server
+
+        class _Cfg:
+            collection_name = "mempalace_drawers"
+            embedding_device = "hash"
+
+        _Cfg.palace_path = palace_path
+
+        monkeypatch.setattr(mcp_server, "_config", _Cfg())
+        monkeypatch.setattr(mcp_server, "_kg", kg)
+        monkeypatch.setattr(mcp_server, "_vector_disabled", False)
+        monkeypatch.setattr(mcp_server, "_vector_disabled_reason", "")
+
+        result = mcp_server.tool_search(query="JWT authentication tokens", limit=3)
+        assert result["fallback"] == "bm25_only_via_sqlite"
+        assert result["fallback_reason"] == "embedding_device=hash"
+        assert "JWT" in result["results"][0]["text"]
 
     def test_search_with_wing_filter(self, monkeypatch, config, palace_path, seeded_collection, kg):
         _patch_mcp_server(monkeypatch, config, kg)
