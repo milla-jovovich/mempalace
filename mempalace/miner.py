@@ -68,9 +68,16 @@ SKIP_FILENAMES = {
     "package-lock.json",
 }
 
-CHUNK_SIZE = 800  # chars per drawer
-CHUNK_OVERLAP = 100  # overlap between chunks
-MIN_CHUNK_SIZE = 50  # skip tiny chunks
+# Re-export the shared defaults from ``config`` so legacy callers that
+# import ``CHUNK_SIZE`` / ``CHUNK_OVERLAP`` / ``MIN_CHUNK_SIZE`` from
+# ``mempalace.miner`` keep working unchanged. Single source of truth
+# lives in ``config.DEFAULT_CHUNK_*``.
+from .config import (  # noqa: E402  (kept here for the legacy alias)
+    DEFAULT_CHUNK_SIZE as CHUNK_SIZE,
+    DEFAULT_CHUNK_OVERLAP as CHUNK_OVERLAP,
+    DEFAULT_MIN_CHUNK_SIZE as MIN_CHUNK_SIZE,
+)
+
 DRAWER_UPSERT_BATCH_SIZE = 1000
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB — skip files larger than this.
 # Long Claude Code sessions and large transcript exports routinely exceed
@@ -391,6 +398,27 @@ def chunk_text(
         chunk_overlap = CHUNK_OVERLAP
     if min_chunk_size is None:
         min_chunk_size = MIN_CHUNK_SIZE
+
+    # Defensive invariant guard. ``MempalaceConfig.chunk_*`` already
+    # enforces these and falls back to defaults on bad config.json
+    # values, but ``chunk_text`` is a public function — direct callers
+    # (tests, library users, future caller paths) might still pass
+    # values that would loop forever. Fail fast and loud rather than
+    # hang. See review feedback on #1024.
+    if not isinstance(chunk_size, int) or chunk_size <= 0:
+        raise ValueError(f"chunk_size must be a positive int, got {chunk_size!r}")
+    if not isinstance(chunk_overlap, int) or chunk_overlap < 0:
+        raise ValueError(f"chunk_overlap must be a non-negative int, got {chunk_overlap!r}")
+    if chunk_overlap >= chunk_size:
+        # ``start = end - chunk_overlap`` would not advance (or would go
+        # backward) when overlap >= size, producing an infinite loop on
+        # any non-empty input.
+        raise ValueError(
+            f"chunk_overlap ({chunk_overlap}) must be less than chunk_size "
+            f"({chunk_size}); equality or greater would loop forever"
+        )
+    if not isinstance(min_chunk_size, int) or min_chunk_size < 0:
+        raise ValueError(f"min_chunk_size must be a non-negative int, got {min_chunk_size!r}")
 
     # Clean up
     content = content.strip()

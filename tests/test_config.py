@@ -284,3 +284,144 @@ def test_iso_date_rejects_non_string():
 def test_iso_date_error_names_field():
     with pytest.raises(ValueError, match="valid_from"):
         sanitize_iso_date("yesterday", "valid_from")
+
+
+# ── Chunk-config validation ────────────────────────────────────────────
+# Backs the validated chunk_* properties added in #1024. Every property
+# resolves through ``_validated_chunk_config`` which (a) coerces to int
+# (or falls back to the documented default), (b) enforces the invariants
+# ``chunk_text()`` needs (chunk_size >= 1, chunk_overlap < chunk_size,
+# min_chunk_size <= chunk_size). A bad config.json must NEVER hang
+# ingest — repair, don't raise.
+
+
+def _write_config(tmp_path, **values):
+    """Helper: drop a config.json with the given keys into tmp_path."""
+    with open(tmp_path / "config.json", "w") as f:
+        json.dump(values, f)
+    return MempalaceConfig(config_dir=str(tmp_path))
+
+
+def test_chunk_config_defaults_when_unset(tmp_path):
+    """No config.json → documented defaults."""
+    cfg = MempalaceConfig(config_dir=str(tmp_path))
+    assert cfg.chunk_size == 800
+    assert cfg.chunk_overlap == 100
+    assert cfg.min_chunk_size == 50
+
+
+def test_chunk_config_user_overrides_honored(tmp_path):
+    """Valid file values pass through unchanged."""
+    cfg = _write_config(tmp_path, chunk_size=1200, chunk_overlap=200, min_chunk_size=80)
+    assert cfg.chunk_size == 1200
+    assert cfg.chunk_overlap == 200
+    assert cfg.min_chunk_size == 80
+
+
+def test_chunk_config_string_coerced_to_int(tmp_path):
+    """Hand-edited config can drop quotes around numbers — accept ``"1500"``."""
+    cfg = _write_config(tmp_path, chunk_size="1500", chunk_overlap="50")
+    assert cfg.chunk_size == 1500
+    assert cfg.chunk_overlap == 50
+
+
+def test_chunk_config_garbage_string_falls_back_to_default(tmp_path):
+    cfg = _write_config(tmp_path, chunk_size="not a number")
+    assert cfg.chunk_size == 800  # default, not a crash
+
+
+def test_chunk_config_bool_falls_back_to_default(tmp_path):
+    """``bool`` is a subclass of ``int`` in Python — a JSON ``true``
+    would otherwise coerce to 1 and quietly break ingest. Treat as bad
+    input."""
+    cfg = _write_config(tmp_path, chunk_size=True)
+    assert cfg.chunk_size == 800
+
+
+def test_chunk_config_negative_falls_back(tmp_path):
+    """Negative chunk_size/min_chunk_size violates ``minimum`` and reverts."""
+    cfg = _write_config(tmp_path, chunk_size=-100, min_chunk_size=-5)
+    assert cfg.chunk_size == 800
+    assert cfg.min_chunk_size == 50
+
+
+def test_chunk_config_zero_chunk_size_falls_back(tmp_path):
+    """``chunk_size=0`` would loop forever — must revert to default."""
+    cfg = _write_config(tmp_path, chunk_size=0)
+    assert cfg.chunk_size == 800
+
+
+def test_chunk_config_overlap_at_or_above_size_repaired(tmp_path):
+    """``chunk_overlap >= chunk_size`` is the hang condition; repair to
+    the documented default when the default fits, otherwise to
+    ``chunk_size - 1``."""
+    cfg = _write_config(tmp_path, chunk_size=900, chunk_overlap=900)
+    assert cfg.chunk_size == 900
+    # 100 (default) fits inside 900 → use the default.
+    assert cfg.chunk_overlap == 100
+    assert cfg.chunk_overlap < cfg.chunk_size
+
+
+def test_chunk_config_overlap_repair_when_default_doesnt_fit(tmp_path):
+    """Tiny chunk_size where the default overlap (100) wouldn't fit:
+    repair to ``chunk_size - 1`` instead."""
+    cfg = _write_config(tmp_path, chunk_size=50, chunk_overlap=100)
+    assert cfg.chunk_size == 50
+    assert cfg.chunk_overlap == 49  # max(0, chunk_size - 1)
+    assert cfg.chunk_overlap < cfg.chunk_size
+
+
+def test_chunk_config_min_chunk_size_above_size_repaired(tmp_path):
+    """``min_chunk_size > chunk_size`` would silently produce 0 drawers
+    on every ingest — repair to default if it fits, else clamp to
+    chunk_size."""
+    cfg = _write_config(tmp_path, chunk_size=1000, min_chunk_size=2000)
+    assert cfg.min_chunk_size == 50  # default fits inside 1000
+
+    cfg2 = _write_config(tmp_path, chunk_size=20, min_chunk_size=200)
+    assert cfg2.min_chunk_size == 20  # default (50) > chunk_size, clamp
+
+
+def test_chunk_text_rejects_non_positive_chunk_size():
+    """Direct callers (tests, library users) that pass ``chunk_size <= 0``
+    must hit a clear ValueError, not loop forever."""
+    from mempalace.miner import chunk_text
+
+    with pytest.raises(ValueError, match="chunk_size"):
+        chunk_text("some content", "src.txt", chunk_size=0)
+    with pytest.raises(ValueError, match="chunk_size"):
+        chunk_text("some content", "src.txt", chunk_size=-1)
+
+
+def test_chunk_text_rejects_overlap_at_or_above_size():
+    from mempalace.miner import chunk_text
+
+    with pytest.raises(ValueError, match="chunk_overlap"):
+        chunk_text("some content", "src.txt", chunk_size=100, chunk_overlap=100)
+    with pytest.raises(ValueError, match="chunk_overlap"):
+        chunk_text("some content", "src.txt", chunk_size=100, chunk_overlap=200)
+
+
+def test_chunk_text_rejects_negative_overlap():
+    from mempalace.miner import chunk_text
+
+    with pytest.raises(ValueError, match="chunk_overlap"):
+        chunk_text("some content", "src.txt", chunk_overlap=-1)
+
+
+def test_miner_constants_alias_config_defaults():
+    """Single source of truth: the legacy ``CHUNK_SIZE`` / ``CHUNK_OVERLAP``
+    / ``MIN_CHUNK_SIZE`` re-exports in ``mempalace.miner`` must equal the
+    canonical ``DEFAULT_CHUNK_*`` constants in ``mempalace.config``.
+    Pinned by this test so a future drift would surface as a unit failure.
+    """
+    from mempalace.miner import CHUNK_SIZE, CHUNK_OVERLAP, MIN_CHUNK_SIZE
+    from mempalace.config import (
+        DEFAULT_CHUNK_SIZE,
+        DEFAULT_CHUNK_OVERLAP,
+        DEFAULT_MIN_CHUNK_SIZE,
+    )
+
+    assert CHUNK_SIZE == DEFAULT_CHUNK_SIZE == 800
+    assert CHUNK_OVERLAP == DEFAULT_CHUNK_OVERLAP == 100
+    assert MIN_CHUNK_SIZE == DEFAULT_MIN_CHUNK_SIZE == 50

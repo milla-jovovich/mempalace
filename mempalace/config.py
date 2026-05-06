@@ -127,6 +127,15 @@ def sanitize_content(value: str, max_length: int = 100_000) -> str:
 DEFAULT_PALACE_PATH = os.path.expanduser("~/.mempalace/palace")
 DEFAULT_COLLECTION_NAME = "mempalace_drawers"
 
+# Single source of truth for chunking defaults. ``mempalace.miner``
+# imports these so the legacy module-level ``CHUNK_SIZE`` /
+# ``CHUNK_OVERLAP`` / ``MIN_CHUNK_SIZE`` constants stay in sync with
+# ``MempalaceConfig.chunk_*``. Putting them here (not in miner.py) keeps
+# the config layer self-contained and avoids circular imports.
+DEFAULT_CHUNK_SIZE = 800
+DEFAULT_CHUNK_OVERLAP = 100
+DEFAULT_MIN_CHUNK_SIZE = 50
+
 DEFAULT_TOPIC_WINGS = [
     "emotions",
     "consciousness",
@@ -242,20 +251,75 @@ class MempalaceConfig:
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
-    @property
-    def chunk_size(self):
-        """Characters per drawer chunk."""
-        return self._file_config.get("chunk_size", 800)
+    def _coerce_config_int(self, key: str, default: int, minimum=None) -> int:
+        """Read an int config value, falling back to ``default`` on bad input.
+
+        Hand-edited ``config.json`` is the most common source of garbage:
+        a string, a bool, a negative number, or a JSON null. None of those
+        should crash mining or hang ``chunk_text()`` — fall back silently
+        to the documented default rather than letting a typo break ingest.
+        """
+        value = self._file_config.get(key, default)
+        if isinstance(value, bool):
+            return default
+        try:
+            if isinstance(value, str):
+                value = value.strip()
+                if not value:
+                    return default
+            value = int(value)
+        except (TypeError, ValueError):
+            return default
+        if minimum is not None and value < minimum:
+            return default
+        return value
+
+    def _validated_chunk_config(self):
+        """Return ``(chunk_size, chunk_overlap, min_chunk_size)`` post-validation.
+
+        Enforces the invariants the miner relies on:
+          * ``chunk_size >= 1``
+          * ``0 <= chunk_overlap < chunk_size`` — equality would loop forever
+          * ``min_chunk_size <= chunk_size`` — otherwise no chunk is ever
+            large enough to file, and ingest silently produces 0 drawers
+
+        Repairs (rather than raises) on violation so a single bad
+        config.json key doesn't take ingest down.
+        """
+        chunk_size = self._coerce_config_int("chunk_size", DEFAULT_CHUNK_SIZE, minimum=1)
+        chunk_overlap = self._coerce_config_int("chunk_overlap", DEFAULT_CHUNK_OVERLAP, minimum=0)
+        min_chunk_size = self._coerce_config_int(
+            "min_chunk_size", DEFAULT_MIN_CHUNK_SIZE, minimum=0
+        )
+
+        if chunk_overlap >= chunk_size:
+            chunk_overlap = (
+                DEFAULT_CHUNK_OVERLAP
+                if DEFAULT_CHUNK_OVERLAP < chunk_size
+                else max(0, chunk_size - 1)
+            )
+
+        if min_chunk_size > chunk_size:
+            min_chunk_size = (
+                DEFAULT_MIN_CHUNK_SIZE if DEFAULT_MIN_CHUNK_SIZE <= chunk_size else chunk_size
+            )
+
+        return chunk_size, chunk_overlap, min_chunk_size
 
     @property
-    def chunk_overlap(self):
-        """Overlap between adjacent chunks."""
-        return self._file_config.get("chunk_overlap", 100)
+    def chunk_size(self) -> int:
+        """Characters per drawer chunk (validated, ``>= 1``)."""
+        return self._validated_chunk_config()[0]
 
     @property
-    def min_chunk_size(self):
-        """Minimum chunk size — skip smaller chunks."""
-        return self._file_config.get("min_chunk_size", 50)
+    def chunk_overlap(self) -> int:
+        """Overlap between adjacent chunks (validated, ``< chunk_size``)."""
+        return self._validated_chunk_config()[1]
+
+    @property
+    def min_chunk_size(self) -> int:
+        """Minimum chunk size — skip smaller chunks (validated, ``<= chunk_size``)."""
+        return self._validated_chunk_config()[2]
 
     @property
     def entity_languages(self):
