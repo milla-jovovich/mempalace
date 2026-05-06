@@ -330,6 +330,71 @@ def sqlite_drawer_count(palace_path: str) -> "int | None":
         return None
 
 
+def sqlite_integrity_errors(palace_path: str) -> list[str]:
+    """Return SQLite quick_check errors for chroma.sqlite3.
+
+    The repair rebuild path eventually calls Chroma's delete_collection().
+    If the SQLite layer has corrupt secondary indexes or FTS5 shadow pages,
+    Chroma can raise an opaque SQLITE_CORRUPT_INDEX / code 779 error before
+    repair reaches the HNSW rebuild.
+
+    Run a direct SQLite quick_check first so repair can fail with a clear,
+    actionable message before invoking Chroma's destructive collection-delete
+    path.
+    """
+
+    sqlite_path = os.path.join(palace_path, "chroma.sqlite3")
+    if not os.path.exists(sqlite_path):
+        return []
+
+    try:
+        with sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True) as conn:
+            rows = conn.execute("PRAGMA quick_check").fetchall()
+    except sqlite3.Error as e:
+        return [f"PRAGMA quick_check failed: {e}"]
+
+    errors: list[str] = []
+    for row in rows:
+        if not row:
+            continue
+        message = str(row[0])
+        if message.lower() != "ok":
+            errors.append(message)
+
+    return errors
+
+
+def print_sqlite_integrity_abort(palace_path: str, errors: list[str]) -> None:
+    """Print a clear repair abort message for SQLite-layer corruption."""
+
+    sqlite_path = os.path.join(palace_path, "chroma.sqlite3")
+    preview = errors[:5]
+
+    print("\n ABORT: SQLite-layer corruption detected before repair rebuild.")
+    print(" `mempalace repair` will not call Chroma delete_collection() because")
+    print(" the SQLite database failed `PRAGMA quick_check`.")
+    print()
+    print(f" Database: {sqlite_path}")
+    print()
+    print(" quick_check output:")
+    for message in preview:
+        print(f"  - {message}")
+    if len(errors) > len(preview):
+        print(f"  ... and {len(errors) - len(preview)} more issue(s)")
+    print()
+    print(" This often means derived SQLite structures, such as secondary indexes")
+    print(" or FTS5 shadow tables, are corrupt while the underlying rows may still")
+    print(" be recoverable.")
+    print()
+    print(" Suggested recovery:")
+    print("  1. Stop all MemPalace writers / MCP clients.")
+    print("  2. Back up the entire palace directory.")
+    print("  3. Recover chroma.sqlite3 offline with sqlite3 `.recover` or `.dump`.")
+    print("  4. Recreate the FTS5 virtual table from intact embedding_metadata rows.")
+    print("  5. Verify `PRAGMA integrity_check` returns `ok`.")
+    print("  6. Re-run `mempalace repair --yes`.")
+
+
 def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     """Rebuild the HNSW index from scratch.
 
@@ -395,6 +460,11 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
         check_extraction_safety(palace_path, len(all_ids), confirm_truncation_ok)
     except TruncationDetected as e:
         print(e.message)
+        return
+
+    sqlite_errors = sqlite_integrity_errors(palace_path)
+    if sqlite_errors:
+        print_sqlite_integrity_abort(palace_path, sqlite_errors)
         return
 
     # Back up ONLY the SQLite database, not the bloated HNSW files
