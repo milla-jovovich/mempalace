@@ -118,8 +118,21 @@ def _resolve_kg_path() -> str:
     return DEFAULT_KG_PATH
 
 
+def _canonicalize_kg_path(path: str) -> str:
+    """Canonicalize a KG cache key so aliases collapse onto one entry.
+
+    ``realpath`` resolves symlinks: two tenants pointing at the same
+    SQLite file via different layouts (``/srv/A`` and
+    ``/srv/link-to-A``) hit a single cached ``KnowledgeGraph`` rather
+    than opening duplicate connections. ``normcase`` normalizes Windows
+    drive-letter casing (``C:\\palace`` vs ``c:\\palace``) and
+    path-separator style; on POSIX it returns the input unchanged.
+    """
+    return os.path.normcase(os.path.realpath(path))
+
+
 def _get_kg() -> KnowledgeGraph:
-    path = os.path.abspath(_resolve_kg_path())
+    path = _canonicalize_kg_path(_resolve_kg_path())
     kg = _kg_by_path.get(path)
     if kg is not None:
         return kg
@@ -155,7 +168,7 @@ def _call_kg(op):
             return op(kg)
         except sqlite3.ProgrammingError:
             if attempt == 0:
-                path = os.path.abspath(_resolve_kg_path())
+                path = _canonicalize_kg_path(_resolve_kg_path())
                 with _kg_cache_lock:
                     if _kg_by_path.get(path) is kg:
                         _kg_by_path.pop(path, None)

@@ -1493,7 +1493,7 @@ class TestKGLazyCache:
             def query_entity(self, entity, **kwargs):
                 return [{"entity": entity}]
 
-        cache = {os.path.abspath(path): _ClosedKG()}
+        cache = {mcp_server._canonicalize_kg_path(path): _ClosedKG()}
         monkeypatch.setattr(mcp_server, "_kg_by_path", cache)
 
         # Second _get_kg() call (after the cache eviction) constructs a new
@@ -1503,7 +1503,7 @@ class TestKGLazyCache:
         result = mcp_server._call_kg(lambda kg: kg.query_entity("Alice"))
         assert result == [{"entity": "Alice"}]
         # The closed instance must be evicted; the fresh one must be cached.
-        assert isinstance(cache[os.path.abspath(path)], _FreshKG)
+        assert isinstance(cache[mcp_server._canonicalize_kg_path(path)], _FreshKG)
 
     def test_call_kg_does_not_retry_on_other_errors(self, monkeypatch):
         """Non-ProgrammingError exceptions must propagate without retry —
@@ -1520,7 +1520,9 @@ class TestKGLazyCache:
                 calls["count"] += 1
                 raise ValueError("bad input")
 
-        monkeypatch.setattr(mcp_server, "_kg_by_path", {os.path.abspath(path): _FailingKG()})
+        monkeypatch.setattr(
+            mcp_server, "_kg_by_path", {mcp_server._canonicalize_kg_path(path): _FailingKG()}
+        )
         monkeypatch.setattr(mcp_server, "KnowledgeGraph", lambda **_: _FailingKG())
 
         with pytest.raises(ValueError, match="bad input"):
@@ -1551,3 +1553,82 @@ class TestKGLazyCache:
         with pytest.raises(_sqlite3.ProgrammingError):
             mcp_server._call_kg(lambda kg: kg.query_entity("Alice"))
         assert calls["count"] == 2, "expected exactly one retry beyond the initial attempt"
+
+    def test_canonicalize_kg_path_collapses_symlink_alias(self, tmp_path):
+        """A symlink layer over the palace directory must collapse to one
+        cache key — otherwise two tenants pointing at /srv/A and
+        /srv/link-to-A open duplicate sqlite3.Connections over the same
+        file."""
+        if sys.platform == "win32":
+            pytest.skip("symlink creation requires admin privileges on Windows runners")
+
+        from mempalace import mcp_server
+
+        target = tmp_path / "real"
+        target.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(target)
+
+        real_db = str(target / "knowledge_graph.sqlite3")
+        link_db = str(link / "knowledge_graph.sqlite3")
+
+        assert mcp_server._canonicalize_kg_path(real_db) == mcp_server._canonicalize_kg_path(
+            link_db
+        )
+
+    def test_canonicalize_kg_path_routes_through_normcase(self, monkeypatch):
+        """``_canonicalize_kg_path`` must apply ``os.path.normcase`` so the
+        cache key collapses Windows drive-letter casing
+        (``C:\\palace`` vs ``c:\\palace``). On POSIX runners normcase is a
+        no-op, so we monkeypatch it to verify the wiring rather than the
+        OS behaviour."""
+        from mempalace import mcp_server
+
+        seen: list = []
+
+        def fake_normcase(p: str) -> str:
+            seen.append(p)
+            return p.lower()
+
+        monkeypatch.setattr(os.path, "normcase", fake_normcase)
+
+        result = mcp_server._canonicalize_kg_path("/Some/Path/KG.sqlite3")
+
+        assert seen, "expected normcase to be invoked"
+        assert result == seen[-1].lower()
+
+    def test_get_kg_dedupes_symlink_alias_end_to_end(self, tmp_path, monkeypatch):
+        """End-to-end: two ``_get_kg()`` calls via different symlink layers
+        return the same cached instance and construct only one
+        ``KnowledgeGraph``."""
+        if sys.platform == "win32":
+            pytest.skip("symlink creation requires admin privileges on Windows runners")
+
+        from mempalace import mcp_server
+
+        target = tmp_path / "real"
+        target.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(target)
+
+        real_db = str(target / "knowledge_graph.sqlite3")
+        link_db = str(link / "knowledge_graph.sqlite3")
+
+        constructed: list = []
+
+        class _StubKG:
+            def __init__(self, db_path=None):
+                constructed.append(db_path)
+
+        monkeypatch.setattr(mcp_server, "_kg_by_path", {})
+        monkeypatch.setattr(mcp_server, "KnowledgeGraph", _StubKG)
+
+        paths = iter([real_db, link_db])
+        monkeypatch.setattr(mcp_server, "_resolve_kg_path", lambda: next(paths))
+
+        kg1 = mcp_server._get_kg()
+        kg2 = mcp_server._get_kg()
+
+        assert kg1 is kg2, "symlink alias must hit the cached KG, not construct a duplicate"
+        assert len(constructed) == 1, f"expected 1 KG construction, got {len(constructed)}"
+        assert len(mcp_server._kg_by_path) == 1
