@@ -161,14 +161,22 @@ def _call_kg(op):
     KG. Beyond one retry give up: a second close means we're losing a
     sustained race we won't win in this loop, and a hung loop is worse
     than a clear failure surface.
+
+    The eviction path is captured once before the retry loop rather than
+    re-canonicalized inside the ``except`` branch. Doing it there would
+    let ``realpath`` raise ``OSError`` on a transient FS hiccup (Windows
+    junction loss, mount remap) and mask the original
+    ``sqlite3.ProgrammingError``; it would also let canonicalization
+    drift between insert and evict, leaving the closed handle in the
+    cache under a key the lookup no longer matches.
     """
+    path = _canonicalize_kg_path(_resolve_kg_path())
     for attempt in range(2):
         kg = _get_kg()
         try:
             return op(kg)
         except sqlite3.ProgrammingError:
             if attempt == 0:
-                path = _canonicalize_kg_path(_resolve_kg_path())
                 with _kg_cache_lock:
                     if _kg_by_path.get(path) is kg:
                         _kg_by_path.pop(path, None)
