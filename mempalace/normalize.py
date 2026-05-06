@@ -8,6 +8,7 @@ Supported:
     - ChatGPT conversations.json
     - Claude Code JSONL (with tool_use/tool_result block capture)
     - OpenAI Codex CLI JSONL
+    - Gemini CLI JSONL (~/.gemini/tmp/<project_hash>/chats/session-*.jsonl)
     - Slack JSON export
     - Plain text (pass through for paragraph chunking)
 
@@ -19,6 +20,12 @@ import os
 import re
 from pathlib import Path
 from typing import Optional
+
+# Provenance footer appended to Slack transcript output so downstream consumers
+# know the speaker roles are positionally assigned, not verified.
+_SLACK_PROVENANCE_FOOTER = (
+    "\n[source: slack-export | multi-party chat — speaker roles are positional, not verified]"
+)
 
 
 # ─── Noise stripping ─────────────────────────────────────────────────────
@@ -111,14 +118,14 @@ def normalize(filepath: str) -> str:
     try:
         file_size = os.path.getsize(filepath)
     except OSError as e:
-        raise IOError(f"Could not read {filepath}: {e}")
+        raise IOError(f"Could not read {filepath}: {e}") from e
     if file_size > 500 * 1024 * 1024:  # 500 MB safety limit
         raise IOError(f"File too large ({file_size // (1024 * 1024)} MB): {filepath}")
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
     except OSError as e:
-        raise IOError(f"Could not read {filepath}: {e}")
+        raise IOError(f"Could not read {filepath}: {e}") from e
 
     if not content.strip():
         return content
@@ -148,6 +155,10 @@ def _try_normalize_json(content: str) -> Optional[str]:
         return normalized
 
     normalized = _try_codex_jsonl(content)
+    if normalized:
+        return normalized
+
+    normalized = _try_gemini_jsonl(content)
     if normalized:
         return normalized
 
@@ -274,6 +285,74 @@ def _try_codex_jsonl(content: str) -> Optional[str]:
     return None
 
 
+def _try_gemini_jsonl(content: str) -> Optional[str]:
+    """Gemini CLI sessions (~/.gemini/tmp/<project_hash>/chats/session-*.jsonl).
+
+    Schema (per google-gemini/gemini-cli#15292): a session_metadata record
+    on the first line, then a stream of ``{"type": "user", "content":
+    [{"text": "..."}]}`` and ``{"type": "gemini", "content": [...]}``
+    records, with optional ``message_update`` records carrying token
+    counts only.
+
+    Detection requires a ``session_metadata`` record so this parser does
+    not false-positive against Claude Code or Codex JSONL passed through
+    the dispatch chain. Any ``user``/``gemini`` lines that appear before
+    ``session_metadata`` are discarded — they are treated as preamble
+    noise, not conversational turns. ``message_update`` entries are
+    skipped — they have no message text. Multiple text blocks within a
+    single message's content array are concatenated in order, separated
+    by newlines.
+    """
+    lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
+    messages = []
+    has_session_metadata = False
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+
+        entry_type = entry.get("type", "")
+        if entry_type == "session_metadata":
+            has_session_metadata = True
+            continue
+
+        # Discard everything (including user/gemini turns) until the
+        # session_metadata sentinel has been seen.
+        if not has_session_metadata:
+            continue
+
+        if entry_type not in ("user", "gemini"):
+            # Skips message_update, system events, anything else.
+            continue
+
+        content_blocks = entry.get("content", [])
+        if not isinstance(content_blocks, list):
+            continue
+
+        parts = []
+        for block in content_blocks:
+            if not isinstance(block, dict):
+                continue
+            text = block.get("text", "")
+            if isinstance(text, str) and text.strip():
+                parts.append(text)
+        if not parts:
+            continue
+        joined = "\n".join(parts)
+
+        if entry_type == "user":
+            messages.append(("user", joined))
+        else:  # "gemini"
+            messages.append(("assistant", joined))
+
+    if len(messages) >= 2 and has_session_metadata:
+        return _messages_to_transcript(messages)
+    return None
+
+
 def _try_claude_ai_json(data) -> Optional[str]:
     """Claude.ai JSON export: flat messages list or privacy export with chat_messages."""
     if isinstance(data, dict):
@@ -367,8 +446,13 @@ def _try_chatgpt_json(data) -> Optional[str]:
 def _try_slack_json(data) -> Optional[str]:
     """
     Slack channel export: [{"type": "message", "user": "...", "text": "..."}]
-    Optimized for 2-person DMs. In channels with 3+ people, alternating
-    speakers are labeled user/assistant to preserve the exchange structure.
+
+    Slack exports are multi-party chats where no speaker is inherently the
+    "user" or "assistant".  To preserve exchange-pair chunking (which relies
+    on ``>`` markers from the ``user`` role), we still alternate roles, but
+    prefix each message with the speaker ID so downstream consumers can
+    distinguish the original author.  A provenance header marks the
+    transcript as a Slack import.
     """
     if not isinstance(data, list):
         return None
@@ -378,7 +462,10 @@ def _try_slack_json(data) -> Optional[str]:
     for item in data:
         if not isinstance(item, dict) or item.get("type") != "message":
             continue
-        user_id = item.get("user", item.get("username", ""))
+        raw_user_id = item.get("user", item.get("username", ""))
+        # Sanitize speaker ID: strip brackets, newlines, and control chars
+        # to prevent chunk-boundary injection via crafted exports
+        user_id = re.sub(r"[\[\]\n\r\x00-\x1f]", "_", raw_user_id).strip()
         text = item.get("text", "").strip()
         if not text or not user_id:
             continue
@@ -391,9 +478,10 @@ def _try_slack_json(data) -> Optional[str]:
             else:
                 seen_users[user_id] = "user"
         last_role = seen_users[user_id]
-        messages.append((seen_users[user_id], text))
+        # Prefix with speaker ID so the original author is preserved
+        messages.append((seen_users[user_id], f"[{user_id}] {text}"))
     if len(messages) >= 2:
-        return _messages_to_transcript(messages)
+        return _messages_to_transcript(messages) + _SLACK_PROVENANCE_FOOTER
     return None
 
 
