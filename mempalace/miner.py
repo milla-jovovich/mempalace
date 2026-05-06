@@ -23,6 +23,7 @@ from .palace import (
     SKIP_DIRS,
     MineAlreadyRunning,
     build_closet_lines,
+    detect_palace_holder,
     file_already_mined,
     get_closets_collection,
     get_collection,
@@ -1019,6 +1020,24 @@ def mine(
             files=files,
         )
 
+    # Pre-flight: detect a concurrent writer (typically `mempalace.mcp_server`)
+    # holding chroma.sqlite3 BEFORE any other output. Without this check
+    # `mine` would print the auto-defaults stderr warning, then attempt its
+    # first chroma write, hit lock contention or a Rust-binding SIGSEGV,
+    # and exit with no diagnostic visible (issue #1264). `mine_palace_lock`
+    # below only catches mine-vs-mine; the structural lock-at-backend fix
+    # lives in #1162. This pre-flight closes the operator-visible gap on
+    # POSIX and degrades silently on Windows / when `lsof` is unavailable.
+    holder = detect_palace_holder(palace_path)
+    if holder is not None:
+        print(
+            f"mempalace mine: cannot start — palace at {palace_path} is held by "
+            f"{holder['kind']} (PID {holder['pid']}). "
+            "Wait for it to finish, or stop the holder before mining.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     try:
         with mine_palace_lock(palace_path):
             return _mine_impl(
@@ -1034,11 +1053,11 @@ def mine(
             )
     except MineAlreadyRunning:
         print(
-            f"mempalace: another `mine` is already running against "
-            f"{palace_path} — exiting cleanly.",
+            f"mempalace mine: cannot start — another `mempalace mine` is already "
+            f"running against {palace_path}. Wait for it to finish before mining.",
             file=sys.stderr,
         )
-        return
+        sys.exit(1)
 
 
 def _mine_impl(

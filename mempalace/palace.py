@@ -9,7 +9,10 @@ import hashlib
 import logging
 import os
 import re
+import subprocess
+import sys
 import threading
+from typing import Optional
 
 from .backends.chroma import ChromaBackend
 
@@ -273,6 +276,89 @@ def upsert_closet_lines(closets_col, closet_id_base, lines, metadata):
 
     _flush()
     return closets_written
+
+
+def detect_palace_holder(palace_path: str) -> Optional[dict]:
+    """Best-effort detection of a process holding ``<palace>/chroma.sqlite3`` open.
+
+    Used by ``mine`` as a pre-flight check before opening ChromaDB so a
+    concurrent writer (typically ``mempalace.mcp_server``) is reported with
+    a clear stderr error instead of a silent SIGSEGV / lock contention.
+
+    POSIX implementation: shells out to ``lsof``. On Windows or if ``lsof``
+    is unavailable, returns ``None`` (graceful degrade — the caller proceeds
+    as before). Never raises; never blocks more than ~3s.
+
+    Returns a dict ``{"pid": int, "command": str, "kind": str}`` for the
+    first non-self holder found, or ``None`` when no holder is detected.
+
+    ``kind`` is a coarse classification — one of:
+      * ``"mempalace.mcp_server"`` — MCP server process
+      * ``"mempalace mine"`` — concurrent ``mine`` invocation
+      * the raw command name otherwise
+    """
+    db_path = os.path.join(os.path.expanduser(palace_path), "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return None
+    if sys.platform == "win32":
+        return None
+    try:
+        result = subprocess.run(
+            ["lsof", "-Fpcn", "--", db_path],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if result.returncode not in (0, 1):
+        # lsof returns 1 when no holders are found on some platforms;
+        # any other non-zero is a real failure — degrade silently.
+        return None
+
+    self_pid = os.getpid()
+    pid: Optional[int] = None
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        tag, value = line[0], line[1:]
+        if tag == "p":
+            try:
+                pid = int(value)
+            except ValueError:
+                pid = None
+        elif tag == "c" and pid is not None:
+            if pid == self_pid:
+                pid = None
+                continue
+            kind = _classify_palace_holder(pid, value)
+            return {"pid": pid, "command": value, "kind": kind}
+    return None
+
+
+def _classify_palace_holder(pid: int, command: str) -> str:
+    """Return a coarse process kind by inspecting full argv via ``ps``.
+
+    Falls back to the command name from ``lsof`` when ``ps`` is unavailable
+    or fails. Best-effort only — never raises.
+    """
+    if sys.platform == "win32":
+        return command or "unknown"
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "args="],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return command or "unknown"
+    args = result.stdout.strip()
+    if "mempalace.mcp_server" in args or " mcp" in f" {args}":
+        return "mempalace.mcp_server"
+    if "mempalace mine" in args or "mempalace sweep" in args:
+        return "mempalace mine"
+    return command or "unknown"
 
 
 @contextlib.contextmanager
