@@ -15,7 +15,10 @@ import os
 import re
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
+from .backends.chroma import hnsw_capacity_status
+from .config import MempalaceConfig
 from .palace import get_closets_collection, get_collection
 
 # Closet pointer line format: "topic|entities|→drawer_id_a,drawer_id_b"
@@ -281,11 +284,70 @@ def _warn_if_legacy_metric(col) -> None:
     )
 
 
+def _sqlite_bm25_reason(palace_path: str) -> Optional[str]:
+    """Return the reason CLI search should bypass Chroma vector query."""
+    try:
+        embedding_device = (MempalaceConfig().embedding_device or "auto").strip().lower()
+    except Exception:
+        embedding_device = "auto"
+    if embedding_device in {"hash", "lexical"}:
+        return f"embedding_device={embedding_device}"
+
+    info = hnsw_capacity_status(palace_path, "mempalace_drawers")
+    if info.get("diverged"):
+        return info.get("message") or "vector_search_disabled"
+    return None
+
+
+def _print_bm25_cli_results(query: str, out: dict, wing: str = None, room: str = None):
+    if out.get("error"):
+        print(f"\n  Search error: {out['error']}")
+        raise SearchError(f"Search error: {out['error']}")
+
+    hits = out.get("results", [])
+    if not hits:
+        print(f'\n  No results found for: "{query}"')
+        return
+
+    print(f"\n{'=' * 60}")
+    print(f'  Results for: "{query}"')
+    if wing:
+        print(f"  Wing: {wing}")
+    if room:
+        print(f"  Room: {room}")
+    print(f"  Backend: sqlite BM25 ({out.get('fallback_reason', 'fallback')})")
+    print(f"{'=' * 60}\n")
+
+    for i, hit in enumerate(hits, 1):
+        print(f"  [{i}] {hit.get('wing', '?')} / {hit.get('room', '?')}")
+        print(f"      Source: {hit.get('source_file', '?')}")
+        print(f"      Match:  bm25={hit.get('bm25_score', 0.0)}")
+        print()
+        for line in (hit.get("text") or "").strip().split("\n"):
+            print(f"      {line}")
+        print()
+        print(f"  {'─' * 56}")
+    print()
+
+
 def search(query: str, palace_path: str, wing: str = None, room: str = None, n_results: int = 5):
     """
     Search the palace. Returns verbatim drawer content.
     Optionally filter by wing (project) or room (aspect).
     """
+    bm25_reason = _sqlite_bm25_reason(palace_path)
+    if bm25_reason:
+        out = _bm25_only_via_sqlite(
+            query,
+            palace_path,
+            wing=wing,
+            room=room,
+            n_results=n_results,
+            fallback_reason=bm25_reason,
+        )
+        _print_bm25_cli_results(query, out, wing=wing, room=room)
+        return out
+
     try:
         col = get_collection(palace_path, create=False)
     except Exception:
@@ -372,6 +434,7 @@ def _bm25_only_via_sqlite(
     room: str = None,
     n_results: int = 5,
     max_candidates: int = 500,
+    fallback_reason: str = "vector_search_disabled",
 ) -> dict:
     """BM25-only search reading drawers directly from chroma.sqlite3.
 
@@ -414,6 +477,7 @@ def _bm25_only_via_sqlite(
                     SELECT rowid
                     FROM embedding_fulltext_search
                     WHERE embedding_fulltext_search MATCH ?
+                    ORDER BY rank
                     LIMIT ?
                     """,
                     (fts_query, max_candidates),
@@ -541,7 +605,7 @@ def _bm25_only_via_sqlite(
         "total_before_filter": len(candidates),
         "results": hits,
         "fallback": "bm25_only_via_sqlite",
-        "fallback_reason": "vector_search_disabled",
+        "fallback_reason": fallback_reason,
     }
 
 
@@ -553,6 +617,7 @@ def search_memories(
     n_results: int = 5,
     max_distance: float = 0.0,
     vector_disabled: bool = False,
+    fallback_reason: str = "vector_search_disabled",
 ) -> dict:
     """Programmatic search — returns a dict instead of printing.
 
@@ -580,6 +645,7 @@ def search_memories(
             wing=wing,
             room=room,
             n_results=n_results,
+            fallback_reason=fallback_reason,
         )
 
     try:

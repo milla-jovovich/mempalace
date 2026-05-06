@@ -280,6 +280,8 @@ def _get_collection(create=False):
     try:
         client = _get_client()
         if create:
+            ef = ChromaBackend._resolve_embedding_function()
+            ef_kwargs = {"embedding_function": ef} if ef is not None else {}
             # hnsw:num_threads=1 disables ChromaDB's multi-threaded ParallelFor
             # HNSW insert path, which has a race in repairConnectionsForUpdate /
             # addPoint (see issues #974, #965). Set via metadata on fresh
@@ -293,7 +295,7 @@ def _get_collection(create=False):
             # below skips the metadata-comparison codepath for existing
             # collections, mirroring the backend-layer fix from #1262.
             try:
-                raw = client.get_collection(_config.collection_name)
+                raw = client.get_collection(_config.collection_name, **ef_kwargs)
             except _ChromaNotFoundError:
                 raw = client.create_collection(
                     _config.collection_name,
@@ -302,13 +304,16 @@ def _get_collection(create=False):
                         "hnsw:num_threads": 1,
                         **_HNSW_BLOAT_GUARD,
                     },
+                    **ef_kwargs,
                 )
             _pin_hnsw_threads(raw)
             _collection_cache = ChromaCollection(raw)
             _metadata_cache = None
             _metadata_cache_time = 0
         elif _collection_cache is None:
-            raw = client.get_collection(_config.collection_name)
+            ef = ChromaBackend._resolve_embedding_function()
+            ef_kwargs = {"embedding_function": ef} if ef is not None else {}
+            raw = client.get_collection(_config.collection_name, **ef_kwargs)
             _pin_hnsw_threads(raw)
             _collection_cache = ChromaCollection(raw)
             _metadata_cache = None
@@ -379,13 +384,12 @@ def _sanitize_optional_name(value: str = None, field_name: str = "name") -> str:
 
 
 def _tool_status_via_sqlite() -> dict:
-    """Pure-sqlite status reader for the #1222 fallback path.
+    """Pure-sqlite status reader.
 
-    When the HNSW capacity probe detects divergence, opening the chromadb
-    persistent client can segfault. This reader pulls the same wing/room
-    breakdown directly from ``embedding_metadata`` so the operator still
-    gets a working status response — and crucially the
-    ``vector_disabled`` flag — without us touching the vector segment.
+    Status is an overview query, not a semantic-search query. Reading the
+    wing/room breakdown directly from ``embedding_metadata`` avoids pulling
+    every metadata row through ChromaDB, which can take longer than MCP's
+    default tool timeout on large local palaces.
     """
     import sqlite3 as _sqlite3
 
@@ -437,7 +441,7 @@ def _tool_status_via_sqlite() -> dict:
         "palace_path": _config.palace_path,
         "protocol": PALACE_PROTOCOL,
         "aaak_dialect": AAAK_SPEC,
-        "vector_disabled": True,
+        "vector_disabled": _vector_disabled,
         "vector_disabled_reason": _vector_disabled_reason,
     }
     if _vector_capacity_status:
@@ -449,15 +453,220 @@ def _tool_status_via_sqlite() -> dict:
     return result
 
 
+def _sqlite_metadata_counts(key: str, wing: str = None) -> Optional[dict]:
+    """Read metadata counts directly from sqlite for large overview tools."""
+    import sqlite3 as _sqlite3
+
+    db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return None
+
+    collection_name = getattr(_config, "collection_name", "mempalace_drawers")
+    wing_join = ""
+    wing_clause = ""
+    params = [collection_name, key]
+    if wing:
+        wing_join = """
+        JOIN embedding_metadata wing_filter
+          ON wing_filter.id = e.id
+         AND wing_filter.key = 'wing'
+        """
+        wing_clause = "AND wing_filter.string_value = ?"
+        params.append(wing)
+
+    try:
+        conn = _sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT target.string_value, COUNT(*)
+                FROM embeddings e
+                JOIN segments s ON e.segment_id = s.id
+                JOIN collections c ON s.collection = c.id
+                JOIN embedding_metadata target
+                  ON target.id = e.id
+                 AND target.key = ?
+                {wing_join}
+                WHERE c.name = ?
+                  AND target.string_value IS NOT NULL
+                  {wing_clause}
+                GROUP BY target.string_value
+                """,
+                [params[1], params[0], *params[2:]],
+            ).fetchall()
+        finally:
+            conn.close()
+    except _sqlite3.Error:
+        logger.exception("sqlite metadata count read failed")
+        return None
+
+    return {value: count for value, count in rows}
+
+
+def _sqlite_taxonomy() -> Optional[dict]:
+    """Read wing -> room counts without opening ChromaDB/HNSW."""
+    import sqlite3 as _sqlite3
+
+    db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return None
+
+    collection_name = getattr(_config, "collection_name", "mempalace_drawers")
+    try:
+        conn = _sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                  COALESCE(wing.string_value, 'unknown') AS wing,
+                  COALESCE(room.string_value, 'unknown') AS room,
+                  COUNT(*)
+                FROM embeddings e
+                JOIN segments s ON e.segment_id = s.id
+                JOIN collections c ON s.collection = c.id
+                LEFT JOIN embedding_metadata wing
+                  ON wing.id = e.id
+                 AND wing.key = 'wing'
+                LEFT JOIN embedding_metadata room
+                  ON room.id = e.id
+                 AND room.key = 'room'
+                WHERE c.name = ?
+                GROUP BY wing, room
+                """,
+                (collection_name,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except _sqlite3.Error:
+        logger.exception("sqlite taxonomy read failed")
+        return None
+
+    taxonomy: dict = {}
+    for wing, room, count in rows:
+        taxonomy.setdefault(wing, {})[room] = count
+    return taxonomy
+
+
+def _sqlite_graph_stats() -> Optional[dict]:
+    """Build graph stats from grouped sqlite metadata.
+
+    The ChromaDB implementation paginates every drawer metadata row. On
+    six-figure palaces that can exceed MCP's tool timeout even though graph
+    stats only need grouped room/wing/hall metadata.
+    """
+    import sqlite3 as _sqlite3
+
+    db_path = os.path.join(_config.palace_path, "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return None
+
+    collection_name = getattr(_config, "collection_name", "mempalace_drawers")
+    try:
+        conn = _sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                  room.string_value AS room,
+                  wing.string_value AS wing,
+                  hall.string_value AS hall,
+                  date_meta.string_value AS date,
+                  COUNT(*) AS drawer_count
+                FROM embeddings e
+                JOIN segments s ON e.segment_id = s.id
+                JOIN collections c ON s.collection = c.id
+                JOIN embedding_metadata room
+                  ON room.id = e.id
+                 AND room.key = 'room'
+                JOIN embedding_metadata wing
+                  ON wing.id = e.id
+                 AND wing.key = 'wing'
+                LEFT JOIN embedding_metadata hall
+                  ON hall.id = e.id
+                 AND hall.key = 'hall'
+                LEFT JOIN embedding_metadata date_meta
+                  ON date_meta.id = e.id
+                 AND date_meta.key = 'date'
+                WHERE c.name = ?
+                  AND room.string_value IS NOT NULL
+                  AND room.string_value != 'general'
+                  AND wing.string_value IS NOT NULL
+                GROUP BY room.string_value, wing.string_value, hall.string_value, date_meta.string_value
+                """,
+                (collection_name,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except _sqlite3.Error:
+        logger.exception("sqlite graph stats read failed")
+        return None
+
+    from collections import Counter as _Counter
+    from collections import defaultdict as _defaultdict
+
+    nodes_raw = _defaultdict(lambda: {"wings": set(), "halls": set(), "count": 0, "dates": set()})
+    for room, wing, hall, date, count in rows:
+        data = nodes_raw[room]
+        data["wings"].add(wing)
+        if hall:
+            data["halls"].add(hall)
+        if date:
+            data["dates"].add(date)
+        data["count"] += count
+
+    nodes = {}
+    for room, data in nodes_raw.items():
+        nodes[room] = {
+            "wings": sorted(data["wings"]),
+            "halls": sorted(data["halls"]),
+            "count": data["count"],
+            "dates": sorted(data["dates"])[-5:] if data["dates"] else [],
+        }
+
+    edges = []
+    for room, data in nodes.items():
+        wings = data["wings"]
+        if len(wings) < 2:
+            continue
+        for i, wing_a in enumerate(wings):
+            for wing_b in wings[i + 1 :]:
+                for hall in data["halls"]:
+                    edges.append(
+                        {
+                            "room": room,
+                            "wing_a": wing_a,
+                            "wing_b": wing_b,
+                            "hall": hall,
+                            "count": data["count"],
+                        }
+                    )
+
+    wing_counts = _Counter()
+    for data in nodes.values():
+        for wing in data["wings"]:
+            wing_counts[wing] += 1
+
+    return {
+        "total_rooms": len(nodes),
+        "tunnel_rooms": sum(1 for n in nodes.values() if len(n["wings"]) >= 2),
+        "total_edges": len(edges),
+        "rooms_per_wing": dict(wing_counts.most_common()),
+        "top_tunnels": [
+            {"room": room, "wings": data["wings"], "count": data["count"]}
+            for room, data in sorted(nodes.items(), key=lambda item: -len(item[1]["wings"]))[:10]
+            if len(data["wings"]) >= 2
+        ],
+    }
+
+
 def tool_status():
-    # Run the safe sqlite/pickle probe before we touch chromadb. In the
-    # #1222 failure mode, opening the persistent client to call .count()
-    # can segfault — short-circuit to a pure-sqlite path when divergence
-    # is detected so status stays reachable.
+    # Run the safe sqlite/pickle probe before any ChromaDB access. Status
+    # itself uses SQLite too: it is faster for aggregate counts and stays
+    # responsive even when the palace has hundreds of thousands of drawers.
     db_exists = os.path.isfile(os.path.join(_config.palace_path, "chroma.sqlite3"))
     _refresh_vector_disabled_flag()
 
-    if _vector_disabled:
+    if db_exists:
         return _tool_status_via_sqlite()
 
     # Use create=True only when a palace DB already exists on disk -- this
@@ -526,6 +735,10 @@ When WRITING AAAK: use entity codes, mark emotions, keep structure tight."""
 
 
 def tool_list_wings():
+    sqlite_counts = _sqlite_metadata_counts("wing")
+    if sqlite_counts is not None:
+        return {"wings": sqlite_counts}
+
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -549,6 +762,10 @@ def tool_list_rooms(wing: str = None):
         wing = _sanitize_optional_name(wing, "wing")
     except ValueError as e:
         return {"error": str(e)}
+    sqlite_counts = _sqlite_metadata_counts("room", wing=wing)
+    if sqlite_counts is not None:
+        return {"wing": wing or "all", "rooms": sqlite_counts}
+
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -569,6 +786,10 @@ def tool_list_rooms(wing: str = None):
 
 
 def tool_get_taxonomy():
+    sqlite_taxonomy = _sqlite_taxonomy()
+    if sqlite_taxonomy is not None:
+        return {"taxonomy": sqlite_taxonomy}
+
     col = _get_collection()
     if not col:
         return _no_palace()
@@ -616,6 +837,11 @@ def tool_search(
     # here would defeat the fallback — it constructs a PersistentClient
     # which can segfault on segment load in the #1222 failure mode.
     _refresh_vector_disabled_flag()
+    embedding_device = str(getattr(_config, "embedding_device", "auto") or "auto").strip().lower()
+    use_bm25_sqlite = _vector_disabled or embedding_device in {"hash", "lexical"}
+    fallback_reason = (
+        _vector_disabled_reason if _vector_disabled else f"embedding_device={embedding_device}"
+    )
     result = search_memories(
         sanitized["clean_query"],
         palace_path=_config.palace_path,
@@ -623,7 +849,8 @@ def tool_search(
         room=room,
         n_results=limit,
         max_distance=dist,
-        vector_disabled=_vector_disabled,
+        vector_disabled=use_bm25_sqlite,
+        fallback_reason=fallback_reason,
     )
     if _vector_disabled:
         result["vector_disabled"] = True
@@ -722,6 +949,10 @@ def tool_find_tunnels(wing_a: str = None, wing_b: str = None):
 
 def tool_graph_stats():
     """Palace graph overview: nodes, tunnels, edges, connectivity."""
+    sqlite_stats = _sqlite_graph_stats()
+    if sqlite_stats is not None:
+        return sqlite_stats
+
     col = _get_collection()
     if not col:
         return _no_palace()

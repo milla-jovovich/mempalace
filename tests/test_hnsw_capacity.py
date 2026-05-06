@@ -410,6 +410,37 @@ def test_bm25_fallback_returns_matches(palace_with_drawers):
     assert top["distance"] is None
 
 
+def test_bm25_fallback_orders_fts_candidates_by_rank(tmp_path):
+    """FTS candidate selection must not stop at low-rowid partial matches."""
+    seg = "seg-ranked-fts"
+    _seed_chroma_db(str(tmp_path), sqlite_count=0, segment_id=seg)
+    distractors = [
+        (
+            f"database maintenance note {i}",
+            {"wing": "old", "room": "logs", "source_file": f"/x/old-{i}.md"},
+            f"d-old-{i}",
+        )
+        for i in range(6)
+    ]
+    drawers = [
+        *distractors,
+        (
+            "mempalace reindex database hnsw embeddings repair notes",
+            {"wing": "ops", "room": "repair", "source_file": "/x/repair.md"},
+            "d-relevant",
+        ),
+    ]
+    _seed_drawers(str(tmp_path), seg, drawers)
+
+    out = _bm25_only_via_sqlite(
+        "mempalace reindex database hnsw embeddings",
+        str(tmp_path),
+        n_results=1,
+        max_candidates=3,
+    )
+    assert out["results"][0]["source_file"] == "repair.md"
+
+
 def test_bm25_fallback_filters_by_wing(palace_with_drawers):
     out = _bm25_only_via_sqlite(
         "memory palace recall", str(palace_with_drawers), wing="design", n_results=5

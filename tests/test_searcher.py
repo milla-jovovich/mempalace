@@ -211,6 +211,19 @@ class TestSearchCLI:
         # Should have output with at least one result block
         assert "[1]" in captured.out
 
+    def test_search_hash_embedding_device_uses_sqlite_bm25(
+        self, monkeypatch, palace_path, seeded_collection, capsys
+    ):
+        import mempalace.searcher as searcher
+
+        monkeypatch.setattr(searcher, "_sqlite_bm25_reason", lambda palace_path: "embedding_device=hash")
+
+        result = search("JWT authentication tokens", palace_path, n_results=3)
+        captured = capsys.readouterr()
+        assert result["fallback"] == "bm25_only_via_sqlite"
+        assert "Backend: sqlite BM25 (embedding_device=hash)" in captured.out
+        assert "JWT" in captured.out
+
     def test_search_applies_bm25_hybrid_rerank(self, capsys):
         """CLI search must call the same hybrid rerank that the MCP path uses.
 
