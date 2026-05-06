@@ -303,10 +303,26 @@ def _edit_distance(s1: str, s2: str) -> int:
     return prev[-1]
 
 
+def _reconfigure_stdio_utf8_on_windows():
+    """Decode --stdin payload as UTF-8 on Windows.
+
+    Thin wrapper around the shared helper in ``mempalace._stdio``. Mirrors
+    the primary CLI policy: stdout/stderr use ``replace`` because
+    extracted fact text can include surrogate halves round-tripped from
+    filenames -- ``strict`` would raise UnicodeEncodeError mid-print.
+    stdin keeps the default ``surrogateescape``.
+    """
+    from ._stdio import reconfigure_stdio_utf8_on_windows
+
+    reconfigure_stdio_utf8_on_windows(stdout_errors="replace", stderr_errors="replace")
+
+
 if __name__ == "__main__":
     import argparse
     import json
     import sys
+
+    _reconfigure_stdio_utf8_on_windows()
 
     parser = argparse.ArgumentParser(
         description="Check text against known facts in the MemPalace palace.",

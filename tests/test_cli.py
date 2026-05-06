@@ -1042,3 +1042,58 @@ def test_cmd_repair_trailing_slash_does_not_recurse():
     palace_path = os.path.expanduser(args.palace).rstrip(os.sep)
     backup_path = palace_path + ".backup"
     assert not backup_path.startswith(palace_path + os.sep)
+
+
+# ── stdio reconfigure on Windows ─────────────────────────────────────
+
+
+class _ReconfigurableStringIO:
+    def __init__(self):
+        self.reconfigure_calls = []
+
+    def reconfigure(self, **kwargs):
+        self.reconfigure_calls.append(kwargs)
+
+
+def test_reconfigures_stdio_to_utf8_on_windows():
+    """Windows `mempalace` CLI must decode/encode stdio as UTF-8.
+
+    Without this, piped non-ASCII input (`mempalace search ... < q.txt`)
+    or piped non-ASCII output (`mempalace search "..." > out.txt`) is
+    mojibaked through the system ANSI codepage on non-Latin Windows
+    locales (cp1252/cp1251/cp950).
+    """
+    from mempalace.cli import _reconfigure_stdio_utf8_on_windows
+
+    stdin = _ReconfigurableStringIO()
+    stdout = _ReconfigurableStringIO()
+    stderr = _ReconfigurableStringIO()
+    with (
+        patch.object(sys, "platform", "win32"),
+        patch.object(sys, "stdin", stdin),
+        patch.object(sys, "stdout", stdout),
+        patch.object(sys, "stderr", stderr),
+    ):
+        _reconfigure_stdio_utf8_on_windows()
+
+    # Per-stream errors policy: stdin survives bad bytes via
+    # surrogateescape so a redirected non-UTF-8 file does not crash
+    # the read; stdout/stderr use replace so a drawer carrying a
+    # round-tripped surrogate half does not crash mid-print.
+    assert stdin.reconfigure_calls == [{"encoding": "utf-8", "errors": "surrogateescape"}]
+    assert stdout.reconfigure_calls == [{"encoding": "utf-8", "errors": "replace"}]
+    assert stderr.reconfigure_calls == [{"encoding": "utf-8", "errors": "replace"}]
+
+
+def test_reconfigure_stdio_is_noop_off_windows():
+    """Linux/macOS already default to UTF-8 stdio -- helper must not touch streams."""
+    from mempalace.cli import _reconfigure_stdio_utf8_on_windows
+
+    stdin = _ReconfigurableStringIO()
+    with (
+        patch.object(sys, "platform", "linux"),
+        patch.object(sys, "stdin", stdin),
+    ):
+        _reconfigure_stdio_utf8_on_windows()
+
+    assert stdin.reconfigure_calls == []

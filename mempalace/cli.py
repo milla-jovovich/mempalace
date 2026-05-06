@@ -935,7 +935,25 @@ def cmd_compress(args):
         print("  (dry run -- nothing stored)")
 
 
+def _reconfigure_stdio_utf8_on_windows():
+    """Decode stdio as UTF-8 on Windows for the primary `mempalace` CLI.
+
+    Thin wrapper around the shared helper in ``mempalace._stdio``. The CLI
+    overrides stdout/stderr to ``replace`` because ``mempalace search``
+    prints verbatim drawer text that may carry surrogate halves
+    round-tripped from filenames -- ``strict`` would crash mid-print and
+    lose the rest of the search result block. stdin keeps the default
+    ``surrogateescape`` so a redirected non-UTF-8 file does not kill the
+    read on the first bad byte.
+    """
+    from ._stdio import reconfigure_stdio_utf8_on_windows
+
+    reconfigure_stdio_utf8_on_windows(stdout_errors="replace", stderr_errors="replace")
+
+
 def main():
+    _reconfigure_stdio_utf8_on_windows()
+
     version_label = f"MemPalace {__version__}"
     parser = argparse.ArgumentParser(
         description="MemPalace — Give your AI a memory. No API key required.",
