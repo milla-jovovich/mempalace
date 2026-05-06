@@ -34,13 +34,55 @@ import os
 import shutil
 import sqlite3
 import time
+from collections import defaultdict
 from datetime import datetime
-from typing import Optional
+from typing import Iterator, Optional
 
 from .backends.chroma import ChromaBackend, hnsw_capacity_status
 
 
 COLLECTION_NAME = "mempalace_drawers"
+
+# The closets collection (AAAK index layer) is intentionally fixed —
+# closets reference drawer IDs by string and live alongside drawers in the
+# same palace; renaming the closets collection per-deployment would break
+# cross-palace AAAK lookups. Drawer collection name comes from config
+# (see ``_recoverable_collections``).
+CLOSETS_COLLECTION_NAME = "mempalace_closets"
+
+
+def _drawers_collection_name() -> str:
+    """Resolve the drawers collection name from user config, falling back
+    to the module default ``COLLECTION_NAME`` if config is unreadable.
+
+    Recovery flows must honor ``MempalaceConfig().collection_name`` so a
+    user with a non-default drawer collection (e.g. multi-palace setups)
+    rebuilds the right rows. Closets remain fixed — see
+    ``CLOSETS_COLLECTION_NAME``.
+    """
+    try:
+        from .config import MempalaceConfig
+
+        return MempalaceConfig().collection_name or COLLECTION_NAME
+    except Exception:
+        return COLLECTION_NAME
+
+
+def _recoverable_collections() -> tuple[str, ...]:
+    """Collections rebuilt by ``rebuild_from_sqlite``, in upsert order.
+
+    Drawers first (bulk data), then closets (AAAK index layer that
+    references drawer IDs by string in their documents — no
+    foreign-key validation, so ordering is informational, not
+    load-bearing).
+    """
+    return (_drawers_collection_name(), CLOSETS_COLLECTION_NAME)
+
+
+# Back-compat alias for callers that imported the constant. New code
+# should call ``_recoverable_collections()`` so config changes are picked
+# up at call time.
+RECOVERABLE_COLLECTIONS = (COLLECTION_NAME, CLOSETS_COLLECTION_NAME)
 
 
 def _get_palace_path():
@@ -434,6 +476,379 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     print(f"\n  Repair complete. {filed} drawers rebuilt.")
     print("  HNSW index is now clean with cosine distance metric.")
     print(f"\n{'=' * 55}\n")
+
+
+class RebuildPartialError(Exception):
+    """Raised when ``rebuild_from_sqlite`` fails partway through upserts.
+
+    Carries enough state for the user (or CLI) to recover: the
+    per-collection counts that succeeded, the collection that failed,
+    the dest path holding the partial palace, and the archive path
+    (when an in-place rebuild had moved the original aside). Re-raises
+    the underlying chromadb error as ``__cause__``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        partial_counts: dict[str, int],
+        failed_collection: str,
+        dest_palace: str,
+        archive_path: Optional[str],
+    ):
+        super().__init__(message)
+        self.message = message
+        self.partial_counts = partial_counts
+        self.failed_collection = failed_collection
+        self.dest_palace = dest_palace
+        self.archive_path = archive_path
+
+
+def _rebuild_one_collection(
+    *,
+    backend: ChromaBackend,
+    source_palace: str,
+    dest_palace: str,
+    collection_name: str,
+    batch_size: int,
+    archive_path: Optional[str],
+    counts_so_far: dict[str, int],
+) -> int:
+    """Stream rows for one collection from SQLite and upsert into a
+    freshly-created collection at ``dest_palace``. Returns rows
+    upserted. Raises :class:`RebuildPartialError` (with the underlying
+    chromadb exception as ``__cause__``) on any upsert failure so the
+    caller can stop the loop and print recovery instructions instead of
+    silently shipping a partial palace.
+    """
+    ids: list[str] = []
+    docs: list[str] = []
+    metas: list[dict] = []
+    upserted = 0
+    col = None
+
+    def _flush() -> int:
+        nonlocal upserted
+        if not ids:
+            return upserted
+        col.upsert(ids=list(ids), documents=list(docs), metadatas=list(metas))
+        upserted += len(ids)
+        print(f"    upserted {upserted}")
+        ids.clear()
+        docs.clear()
+        metas.clear()
+        return upserted
+
+    try:
+        # ``create_collection`` lives inside the try so a Chroma-side
+        # "Collection already exists" failure (which can happen when the
+        # process-wide System cache still holds a pre-archive schema) is
+        # reported as a structured ``RebuildPartialError`` carrying
+        # ``archive_path`` — instead of an unstructured exception that
+        # strands the user without recovery instructions.
+        col = backend.create_collection(dest_palace, collection_name)
+
+        for emb_id, doc, meta in extract_via_sqlite(source_palace, collection_name):
+            ids.append(emb_id)
+            docs.append(doc or "")
+            # chromadb 1.5.x rejects None entries in the metadatas list
+            # but accepts empty dicts. Mempalace drawers always carry at
+            # least wing/room, so this branch is defensive — corruption
+            # in embedding_metadata could yield an emb_id with no rows.
+            metas.append(meta if meta else {})
+            if len(ids) >= batch_size:
+                _flush()
+        _flush()
+    except Exception as exc:  # noqa: BLE001 — chromadb raises many shapes
+        partial = dict(counts_so_far)
+        partial[collection_name] = upserted
+        msg_parts = [
+            f"Upsert failed in collection {collection_name!r} after {upserted} rows: {exc!r}",
+            f"Partial palace left at: {dest_palace}",
+        ]
+        if archive_path is not None:
+            msg_parts.append(f"Original palace archived at: {archive_path}")
+            msg_parts.append(
+                "  Recover by removing the partial dest and re-running with "
+                f"--source {archive_path}"
+            )
+        else:
+            msg_parts.append("  Source palace is unchanged. Remove the partial dest and re-run.")
+        message = "\n  ".join(msg_parts)
+        print(f"\n  ERROR: {message}")
+        raise RebuildPartialError(
+            message,
+            partial_counts=partial,
+            failed_collection=collection_name,
+            dest_palace=dest_palace,
+            archive_path=archive_path,
+        ) from exc
+
+    return upserted
+
+
+def extract_via_sqlite(palace_path: str, collection_name: str) -> Iterator[tuple[str, str, dict]]:
+    """Yield ``(embedding_id, document, metadata)`` for every row in
+    ``collection_name``'s metadata segment by reading ``chroma.sqlite3``
+    directly.
+
+    Bypasses the chromadb client entirely — never opens a
+    ``PersistentClient``, never imports hnswlib, never invokes the
+    HNSW segment writer. This is the recovery path for palaces where
+    ``Collection.count()`` / ``Collection.get()`` raise ``InternalError``
+    because the compactor cannot apply WAL logs to the HNSW segment
+    (#1308). The drawer rows are still on disk in
+    ``embeddings`` + ``embedding_metadata``; the corruption lives in the
+    on-disk index files, not the SQLite tables.
+
+    Resolution rule for chromadb's typed metadata columns: each
+    ``embedding_metadata`` row stores its value in exactly one of
+    ``string_value`` / ``int_value`` / ``float_value`` / ``bool_value``;
+    we pick the first non-NULL column in that order. Rows where every
+    typed column is NULL are dropped (chromadb never writes that shape).
+    The ``chroma:document`` key is removed from the metadata dict and
+    returned as the document; this matches how chromadb itself stores
+    ``add(documents=...)``.
+
+    Silent on missing palace, missing ``chroma.sqlite3``, or unknown
+    collection name — yields nothing. Callers that need to distinguish
+    "empty collection" from "collection not present" should query
+    :func:`sqlite_drawer_count` first.
+    """
+    sqlite_path = os.path.join(palace_path, "chroma.sqlite3")
+    if not os.path.isfile(sqlite_path):
+        return
+
+    conn = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+    try:
+        seg_row = conn.execute(
+            """
+            SELECT s.id FROM segments s
+            JOIN collections c ON s.collection = c.id
+            WHERE c.name = ? AND s.scope = 'METADATA'
+            """,
+            (collection_name,),
+        ).fetchone()
+        if not seg_row:
+            return
+        segment_id = seg_row[0]
+
+        per_id: dict[str, dict] = defaultdict(dict)
+        order: list[str] = []
+        for emb_id, key, sv, iv, fv, bv in conn.execute(
+            """
+            SELECT e.embedding_id, em.key, em.string_value, em.int_value,
+                   em.float_value, em.bool_value
+            FROM embedding_metadata em
+            JOIN embeddings e ON em.id = e.id
+            WHERE e.segment_id = ?
+            ORDER BY em.id
+            """,
+            (segment_id,),
+        ):
+            if emb_id not in per_id:
+                order.append(emb_id)
+            if sv is not None:
+                per_id[emb_id][key] = sv
+            elif iv is not None:
+                per_id[emb_id][key] = iv
+            elif fv is not None:
+                per_id[emb_id][key] = fv
+            elif bv is not None:
+                per_id[emb_id][key] = bool(bv)
+
+        for emb_id in order:
+            kv = per_id[emb_id]
+            doc = kv.pop("chroma:document", "")
+            yield emb_id, doc, kv
+    finally:
+        conn.close()
+
+
+def rebuild_from_sqlite(
+    source_palace: str,
+    dest_palace: str,
+    *,
+    archive_existing_dest: bool = False,
+    batch_size: int = 1000,
+) -> dict[str, int]:
+    """Rebuild a palace by reading drawers from ``source_palace``'s
+    ``chroma.sqlite3`` and upserting them into a fresh palace at
+    ``dest_palace``.
+
+    Recovery path for the #1308 failure mode: the chromadb client raises
+    ``InternalError: Failed to apply logs to the hnsw segment writer``
+    on every operation that touches the index (``count``, ``get``,
+    ``query``), but the underlying SQLite tables are intact. Both the
+    legacy ``rebuild_index`` and the inline ``cli.cmd_repair`` path call
+    ``Collection.count()`` as their first read — exactly the call that
+    fails — so neither can recover this class of corruption. This
+    function bypasses the chromadb read path entirely via
+    :func:`extract_via_sqlite`.
+
+    Re-embeds documents at upsert time using the configured embedding
+    function; the original HNSW vectors are not preserved (they live in
+    the corrupt ``data_level0.bin`` / ``link_lists.bin``, not in
+    SQLite). Acceptable for a corruption-recovery flow because the
+    embedding model is deterministic — same model + same document text
+    yields semantically equivalent search results.
+
+    ``archive_existing_dest`` controls behavior when ``dest_palace``
+    already exists:
+
+    * ``False`` (default) — refuse with a clear message. Callers must
+      manually move the existing palace aside first.
+    * ``True`` — rename ``dest_palace`` to
+      ``<dest_palace>.pre-rebuild-<timestamp>`` and read from there
+      instead. Used by the in-place CLI flow where ``--source`` defaults
+      to the same path as ``--palace``.
+
+    Returns a ``{collection_name: row_count}`` dict so callers (CLI,
+    tests) can verify the per-collection rebuild count without parsing
+    stdout. A successful rebuild always returns a dict with one key per
+    recoverable collection (values may be ``0`` when a collection is
+    legitimately empty in the source). The empty dict ``{}`` is reserved
+    for validation refusals (missing source DB, refusing to overwrite an
+    existing dest, in-place mode without ``archive_existing_dest``); CLI
+    callers should treat ``{}`` as an error and exit non-zero so CI and
+    scripts can distinguish "invalid inputs" from "successful recovery
+    that found zero rows." Raises :class:`RebuildPartialError` if a
+    chromadb upsert fails partway through; the dest palace is left in
+    place so the user can inspect what landed, and the in-place archive
+    (when applicable) is reported in the error so the user can re-run
+    against it.
+
+    .. warning::
+
+       In-place mode (``source_palace == dest_palace`` with
+       ``archive_existing_dest=True``) calls
+       ``chromadb.api.client.SharedSystemClient.clear_system_cache()`` to
+       drop chromadb's process-wide System registry — required because
+       an existing cached System built against the original palace will
+       refuse ``create_collection`` after the dir is renamed (chromadb
+       still thinks the collections exist). This invalidates any
+       PersistentClient instances held elsewhere in the same process for
+       *any* palace, not just this one. Do not call this function from
+       inside a long-running mempalace process (MCP server, daemon)
+       while other callers hold live ``PersistentClient`` references —
+       use the CLI in a separate process instead. Cross-palace use
+       (``source != dest``) does not touch the cache.
+
+    Note on metadata fidelity: the resolution rule
+    (``string_value`` → ``int_value`` → ``float_value`` → ``bool_value``)
+    matches the precedent in :mod:`mempalace.migrate`. ChromaDB 0.4.x
+    occasionally wrote booleans as ``int_value=0/1``; those will
+    round-trip as ``int`` rather than ``bool`` after this rebuild. This
+    is a known divergence and matches the existing migrate-path
+    behavior.
+    """
+    source_palace = os.path.abspath(os.path.expanduser(source_palace))
+    dest_palace = os.path.abspath(os.path.expanduser(dest_palace))
+
+    src_db = os.path.join(source_palace, "chroma.sqlite3")
+
+    in_place = source_palace == dest_palace
+
+    print(f"\n{'=' * 55}")
+    print("  MemPalace Repair — Rebuild from SQLite")
+    print(f"{'=' * 55}\n")
+    print(f"  Source: {source_palace}")
+    print(f"  Dest:   {dest_palace}")
+
+    # Validate source BEFORE any destructive moves. An earlier draft
+    # archived the dest first and surfaced the missing-chroma.sqlite3
+    # error after — leaving the user with a renamed dir to manually undo
+    # when the archive itself was empty. Validate first so a user error
+    # (--source pointing at a non-palace dir) bails cleanly.
+    if in_place:
+        if not archive_existing_dest:
+            print(
+                "\n  Source and dest are the same path. Pass "
+                "archive_existing_dest=True (CLI: --archive-existing) to move "
+                "the existing palace aside, or pass a different source_palace= "
+                "(CLI: --source)."
+            )
+            return {}
+        if not os.path.isfile(src_db):
+            print(f"\n  Source palace has no chroma.sqlite3 at {src_db}")
+            return {}
+    else:
+        if not os.path.isfile(src_db):
+            print(f"\n  Source palace has no chroma.sqlite3 at {src_db}")
+            return {}
+        if os.path.exists(dest_palace):
+            print(
+                f"\n  Refusing to rebuild into existing path: {dest_palace}\n"
+                "  Move it aside, pass a different dest, or set "
+                "archive_existing_dest=True if rebuilding in place "
+                "(source_palace == dest_palace)."
+            )
+            return {}
+
+    archive_path: Optional[str] = None
+    if in_place:
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        archive_path = f"{dest_palace}.pre-rebuild-{ts}"
+        print(f"  Archiving {dest_palace} → {archive_path}")
+        shutil.move(dest_palace, archive_path)
+        source_palace = archive_path
+        src_db = os.path.join(source_palace, "chroma.sqlite3")
+
+        # In-place only: drop chromadb's process-wide System registry so
+        # the new client at dest_palace builds a fresh System. Without
+        # this, ``create_collection`` raises "Collection already exists"
+        # because the cached System still holds the pre-rename schema.
+        # Cross-palace mode does not need this and would needlessly
+        # invalidate other callers' clients (see docstring warning).
+        try:
+            from chromadb.api.client import SharedSystemClient
+
+            SharedSystemClient.clear_system_cache()
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"  Warning: could not clear chromadb system cache ({exc!r}); "
+                "in-place rebuild may fail with 'Collection already exists'."
+            )
+
+    os.makedirs(dest_palace, exist_ok=True)
+
+    # Backend lifetime is wrapped in try/finally so the dest palace's
+    # PersistentClient handle (opened lazily inside ``create_collection``
+    # / ``get_collection``) is released on every exit path: success,
+    # ``RebuildPartialError``, or any unexpected exception. Without this,
+    # a long-running process that calls ``rebuild_from_sqlite`` would
+    # leak SQLite/HNSW file handles into Chroma's ``SharedSystemClient``
+    # cache, surfacing later as "Collection already exists" on the next
+    # in-place rebuild or as a Windows file-lock failure on cleanup
+    # (cf. #1285's lifecycle hardening for the legacy rebuild path).
+    backend = ChromaBackend()
+    counts: dict[str, int] = {}
+    try:
+        for cname in _recoverable_collections():
+            print(f"\n  [{cname}]")
+            upserted = _rebuild_one_collection(
+                backend=backend,
+                source_palace=source_palace,
+                dest_palace=dest_palace,
+                collection_name=cname,
+                batch_size=batch_size,
+                archive_path=archive_path,
+                counts_so_far=counts,
+            )
+            counts[cname] = upserted
+            if upserted == 0:
+                print(f"    no rows found for {cname} in source palace")
+            else:
+                print(f"    done: {upserted} rows in {cname}")
+
+        print(f"\n  Rebuild complete. {sum(counts.values())} total rows.")
+        if archive_path is not None:
+            print(f"  Original palace archived at: {archive_path}")
+        print(f"{'=' * 55}\n")
+        return counts
+    finally:
+        backend.close()
 
 
 def status(palace_path=None) -> dict:

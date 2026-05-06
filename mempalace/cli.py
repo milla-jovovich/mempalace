@@ -673,6 +673,57 @@ def cmd_repair(args):
         )
         return
 
+    if getattr(args, "mode", "legacy") == "from-sqlite":
+        from .migrate import confirm_destructive_action
+        from .repair import RebuildPartialError, rebuild_from_sqlite
+
+        source_path = getattr(args, "source", None)
+        source_path = (
+            os.path.abspath(os.path.expanduser(source_path)) if source_path else palace_path
+        )
+        archive_existing = getattr(args, "archive_existing", False)
+
+        # Gate any path that touches the user's existing palace dir
+        # behind confirm_destructive_action. The legacy mode already
+        # gates; from-sqlite needs the same protection because:
+        # (a) --archive-existing renames the existing palace,
+        # (b) --source PATH writes into --palace dir which the user
+        #     may not realize is also a palace.
+        # No prompt when source != dest AND dest does not exist (pure
+        # extract-into-fresh-dir case is non-destructive to existing
+        # palaces).
+        is_destructive_to_dest = source_path == palace_path or os.path.exists(palace_path)
+        if is_destructive_to_dest and not confirm_destructive_action(
+            "Rebuild from SQLite", palace_path, assume_yes=getattr(args, "yes", False)
+        ):
+            return
+
+        try:
+            counts = rebuild_from_sqlite(
+                source_palace=source_path,
+                dest_palace=palace_path,
+                archive_existing_dest=archive_existing,
+            )
+        except RebuildPartialError as exc:
+            # The error itself was already printed by rebuild_from_sqlite
+            # with recovery instructions; surface a non-zero exit so
+            # scripts and CI gates see the failure.
+            print(
+                "\n  Rebuild partial — see message above. "
+                f"Failed in collection: {exc.failed_collection}"
+            )
+            sys.exit(1)
+        # An empty counts dict is rebuild_from_sqlite's documented signal
+        # for a validation refusal (missing source, existing dest,
+        # in-place without --archive-existing). The library already
+        # printed an actionable message; exit non-zero so unattended
+        # scripts/CI distinguish "invalid inputs" from a successful
+        # rebuild that legitimately found zero rows (which still returns
+        # a populated dict with 0-valued counts).
+        if not counts:
+            sys.exit(1)
+        return
+
     db_path = os.path.join(palace_path, "chroma.sqlite3")
 
     if not os.path.isdir(palace_path):
@@ -1213,11 +1264,31 @@ def main():
     )
     p_repair.add_argument(
         "--mode",
-        choices=["legacy", "max-seq-id"],
+        choices=["legacy", "max-seq-id", "from-sqlite"],
         default="legacy",
         help=(
-            "legacy: full-palace rebuild (default). "
-            "max-seq-id: un-poison max_seq_id rows corrupted by the legacy 0.6.x shim."
+            "legacy: full-palace rebuild via the chromadb client (default). "
+            "max-seq-id: un-poison max_seq_id rows corrupted by the legacy 0.6.x shim. "
+            "from-sqlite: rebuild by reading rows directly from chroma.sqlite3, "
+            "bypassing the chromadb client. Use when legacy mode bails because the "
+            "chromadb client cannot open the collection."
+        ),
+    )
+    p_repair.add_argument(
+        "--source",
+        default=None,
+        help=(
+            "Source palace path for --mode from-sqlite (defaults to --palace). "
+            "Use when extracting from an archived corrupt palace into a new location."
+        ),
+    )
+    p_repair.add_argument(
+        "--archive-existing",
+        action="store_true",
+        help=(
+            "For --mode from-sqlite when --source equals --palace: rename the "
+            "existing palace to <palace>.pre-rebuild-<timestamp> before "
+            "rebuilding so the corrupt copy is preserved."
         ),
     )
     p_repair.add_argument(

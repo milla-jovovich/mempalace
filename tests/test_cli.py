@@ -1097,3 +1097,64 @@ def test_reconfigure_stdio_is_noop_off_windows():
         _reconfigure_stdio_utf8_on_windows()
 
     assert stdin.reconfigure_calls == []
+
+
+# ── cmd_repair: from-sqlite mode exit codes ──────────────────────────
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_repair_from_sqlite_validation_refusal_exits_nonzero(mock_config_cls, tmp_path, capsys):
+    """When ``rebuild_from_sqlite`` returns ``{}`` for a validation
+    refusal (missing source DB, in-place without --archive-existing,
+    refusing to overwrite an existing dest), the CLI must surface a
+    non-zero exit so unattended scripts and CI distinguish "invalid
+    inputs" from "successful recovery that found zero rows."
+
+    Catches: a regression where the CLI treats the validation-refusal
+    sentinel as success, leaving CI green on a no-op repair that should
+    have alerted an operator.
+    """
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+    mock_config_cls.return_value.palace_path = str(palace_dir)
+
+    args = argparse.Namespace(
+        palace=str(palace_dir),
+        mode="from-sqlite",
+        source=None,
+        archive_existing=False,
+        yes=True,
+    )
+    with patch("mempalace.repair.rebuild_from_sqlite", return_value={}):
+        with pytest.raises(SystemExit) as excinfo:
+            cmd_repair(args)
+    assert excinfo.value.code == 1
+
+
+@patch("mempalace.cli.MempalaceConfig")
+def test_cmd_repair_from_sqlite_success_does_not_exit(mock_config_cls, tmp_path):
+    """A successful from-sqlite rebuild — even one that finds zero rows
+    in a legitimately empty source palace — must NOT call ``sys.exit``.
+    A populated counts dict (with ``0`` values) is the success signal;
+    only the empty dict ``{}`` is reserved for validation refusal.
+
+    Catches: a regression where ``if not counts`` is replaced by
+    ``if not sum(counts.values())`` or similar, conflating "empty source"
+    with "validation refused" and breaking idempotent recovery scripts.
+    """
+    palace_dir = tmp_path / "palace"
+    palace_dir.mkdir()
+    mock_config_cls.return_value.palace_path = str(palace_dir)
+
+    args = argparse.Namespace(
+        palace=str(palace_dir),
+        mode="from-sqlite",
+        source=None,
+        archive_existing=False,
+        yes=True,
+    )
+    # Zero rows but per-collection keys present → success, no exit.
+    fake_counts = {"mempalace_drawers": 0, "mempalace_closets": 0}
+    with patch("mempalace.repair.rebuild_from_sqlite", return_value=fake_counts):
+        # Should return cleanly; no SystemExit raised.
+        cmd_repair(args)
