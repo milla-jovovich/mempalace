@@ -590,7 +590,20 @@ def cmd_wakeup(args):
     from .layers import MemoryStack
 
     palace_path = os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
-    stack = MemoryStack(palace_path=palace_path)
+
+    # Resolve per-agent identity. Precedence: --identity-file overrides --agent,
+    # --agent looks up ~/.mempalace/identities/<name>.txt, and if neither is
+    # set (or the per-agent file does not exist), MemoryStack falls back to
+    # the global ~/.mempalace/identity.txt via its own default.
+    identity_path = None
+    if args.identity_file:
+        identity_path = os.path.expanduser(args.identity_file)
+    elif args.agent:
+        per_agent = os.path.expanduser(f"~/.mempalace/identities/{args.agent}.txt")
+        if os.path.exists(per_agent):
+            identity_path = per_agent
+
+    stack = MemoryStack(palace_path=palace_path, identity_path=identity_path)
 
     text = stack.wake_up(wing=args.wing)
     tokens = len(text) // 4
@@ -1137,6 +1150,16 @@ def main():
     # wake-up
     p_wakeup = sub.add_parser("wake-up", help="Show L0 + L1 wake-up context (~600-900 tokens)")
     p_wakeup.add_argument("--wing", default=None, help="Wake-up for a specific project/wing")
+    p_wakeup.add_argument(
+        "--agent",
+        default=None,
+        help="Load per-agent identity from ~/.mempalace/identities/<agent>.txt (falls back to global identity.txt if missing)",
+    )
+    p_wakeup.add_argument(
+        "--identity-file",
+        default=None,
+        help="Explicit path to an identity file (overrides --agent)",
+    )
 
     # split
     p_split = sub.add_parser(
