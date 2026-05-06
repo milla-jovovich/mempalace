@@ -118,8 +118,35 @@ def _resolve_kg_path() -> str:
     return DEFAULT_KG_PATH
 
 
-def _get_kg() -> KnowledgeGraph:
-    path = os.path.abspath(_resolve_kg_path())
+def _canonicalize_kg_path(path: str) -> str:
+    """Canonicalize a KG cache key so aliases collapse onto one entry.
+
+    ``realpath`` resolves symlinks: two tenants pointing at the same
+    SQLite file via different layouts (``/srv/A`` and
+    ``/srv/link-to-A``) hit a single cached ``KnowledgeGraph`` rather
+    than opening duplicate connections. ``normcase`` normalizes Windows
+    drive-letter casing (``C:\\palace`` vs ``c:\\palace``) and
+    path-separator style; on POSIX it returns the input unchanged.
+    """
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _get_kg(canonical_path=None) -> KnowledgeGraph:
+    """Return the cached ``KnowledgeGraph`` for the resolved palace.
+
+    When ``canonical_path`` is ``None`` (default), the path is resolved
+    from module state and canonicalized. Callers like :func:`_call_kg`
+    that have already captured a canonical key before entering a retry
+    loop should pass it through here so the dict insertion uses the same
+    key the caller will later use for eviction. Recomputing the key
+    inside this function would let ``MEMPALACE_PALACE_PATH`` rotation,
+    a symlink remap, or a mount remap between the captured value and
+    this call drift the insert and evict keys apart, stranding a closed
+    handle under one key while the lookup probes another.
+    """
+    path = (
+        canonical_path if canonical_path is not None else _canonicalize_kg_path(_resolve_kg_path())
+    )
     kg = _kg_by_path.get(path)
     if kg is not None:
         return kg
@@ -148,14 +175,24 @@ def _call_kg(op):
     KG. Beyond one retry give up: a second close means we're losing a
     sustained race we won't win in this loop, and a hung loop is worse
     than a clear failure surface.
+
+    The canonical path is captured once at the top and threaded through
+    every ``_get_kg`` call plus the eviction lookup. Doing canonicalize
+    only here means an ``OSError`` from ``realpath`` (transient Windows
+    junction loss, broken mount) surfaces cleanly before any handler
+    runs instead of masking a ``sqlite3.ProgrammingError`` mid-retry.
+    Passing the captured key through to ``_get_kg`` also locks the
+    insert key to the evict key even if FS or env state mutates between
+    attempts, preventing a closed handle from leaking under a stale
+    key the lookup no longer matches.
     """
+    path = _canonicalize_kg_path(_resolve_kg_path())
     for attempt in range(2):
-        kg = _get_kg()
+        kg = _get_kg(path)
         try:
             return op(kg)
         except sqlite3.ProgrammingError:
             if attempt == 0:
-                path = os.path.abspath(_resolve_kg_path())
                 with _kg_cache_lock:
                     if _kg_by_path.get(path) is kg:
                         _kg_by_path.pop(path, None)

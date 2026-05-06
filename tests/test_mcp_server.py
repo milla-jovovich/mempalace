@@ -20,7 +20,9 @@ def _patch_mcp_server(monkeypatch, config, kg):
     from mempalace import mcp_server
 
     monkeypatch.setattr(mcp_server, "_config", config)
-    monkeypatch.setattr(mcp_server, "_get_kg", lambda: kg)
+    # Accept varargs because production ``_get_kg`` now takes an optional
+    # canonical_path; ``_call_kg`` passes the captured key through.
+    monkeypatch.setattr(mcp_server, "_get_kg", lambda *a, **kw: kg)
 
 
 def _get_collection(palace_path, create=False):
@@ -1493,7 +1495,7 @@ class TestKGLazyCache:
             def query_entity(self, entity, **kwargs):
                 return [{"entity": entity}]
 
-        cache = {os.path.abspath(path): _ClosedKG()}
+        cache = {mcp_server._canonicalize_kg_path(path): _ClosedKG()}
         monkeypatch.setattr(mcp_server, "_kg_by_path", cache)
 
         # Second _get_kg() call (after the cache eviction) constructs a new
@@ -1503,7 +1505,7 @@ class TestKGLazyCache:
         result = mcp_server._call_kg(lambda kg: kg.query_entity("Alice"))
         assert result == [{"entity": "Alice"}]
         # The closed instance must be evicted; the fresh one must be cached.
-        assert isinstance(cache[os.path.abspath(path)], _FreshKG)
+        assert isinstance(cache[mcp_server._canonicalize_kg_path(path)], _FreshKG)
 
     def test_call_kg_does_not_retry_on_other_errors(self, monkeypatch):
         """Non-ProgrammingError exceptions must propagate without retry —
@@ -1520,7 +1522,9 @@ class TestKGLazyCache:
                 calls["count"] += 1
                 raise ValueError("bad input")
 
-        monkeypatch.setattr(mcp_server, "_kg_by_path", {os.path.abspath(path): _FailingKG()})
+        monkeypatch.setattr(
+            mcp_server, "_kg_by_path", {mcp_server._canonicalize_kg_path(path): _FailingKG()}
+        )
         monkeypatch.setattr(mcp_server, "KnowledgeGraph", lambda **_: _FailingKG())
 
         with pytest.raises(ValueError, match="bad input"):
@@ -1551,3 +1555,172 @@ class TestKGLazyCache:
         with pytest.raises(_sqlite3.ProgrammingError):
             mcp_server._call_kg(lambda kg: kg.query_entity("Alice"))
         assert calls["count"] == 2, "expected exactly one retry beyond the initial attempt"
+
+    def test_call_kg_passes_captured_path_through_resolve_drift(self, monkeypatch):
+        """``_call_kg`` must thread its captured canonical path through
+        ``_get_kg`` so insertion and eviction agree on the cache key even
+        when FS or env state would otherwise drift between attempts. The
+        end-to-end invariant: after the retry, the closed handle that was
+        cached under the captured path is gone (evicted) and the cache no
+        longer holds it under the stale key.
+        """
+        import sqlite3 as _sqlite3
+        from mempalace import mcp_server
+
+        class _ClosedKG:
+            def query_entity(self, entity, **kwargs):
+                raise _sqlite3.ProgrammingError("Cannot operate on a closed database")
+
+        class _FreshKG:
+            def query_entity(self, entity, **kwargs):
+                return [{"entity": entity}]
+
+        # _resolve_kg_path returns shifting values (env rotation between
+        # attempts). _canonicalize_kg_path is identity so paths flow
+        # through verbatim.
+        resolved_seq = iter(["/path/v1", "/path/v2", "/path/v3"])
+        monkeypatch.setattr(mcp_server, "_resolve_kg_path", lambda: next(resolved_seq))
+        monkeypatch.setattr(mcp_server, "_canonicalize_kg_path", lambda p: p)
+
+        closed = _ClosedKG()
+        cache = {"/path/v1": closed}
+        monkeypatch.setattr(mcp_server, "_kg_by_path", cache)
+
+        get_kg_args: list = []
+
+        def spy_get_kg(canonical_path=None):
+            get_kg_args.append(canonical_path)
+            return cache.get(canonical_path) if canonical_path in cache else _FreshKG()
+
+        monkeypatch.setattr(mcp_server, "_get_kg", spy_get_kg)
+
+        result = mcp_server._call_kg(lambda kg: kg.query_entity("Alice"))
+
+        assert result == [{"entity": "Alice"}]
+        # Both _get_kg calls received the captured path "/path/v1" rather
+        # than the drifted "/path/v2". Without pass-through, the second
+        # call would have used "/path/v2" and the closed handle at
+        # "/path/v1" would never have been evicted.
+        assert get_kg_args == ["/path/v1", "/path/v1"], (
+            f"expected both _get_kg calls to receive captured '/path/v1', "
+            f"got {get_kg_args} -- captured-path pass-through broken"
+        )
+        # Eviction landed under the captured key: the closed handle is
+        # gone from the cache. With drift the closed handle would still
+        # be at "/path/v1" because eviction would have probed "/path/v2".
+        assert "/path/v1" not in cache, (
+            f"closed handle leaked under captured key after retry; "
+            f"cache state: {[(k, type(v).__name__) for k, v in cache.items()]}"
+        )
+
+    def test_call_kg_oserror_at_top_propagates_unmasked(self, monkeypatch):
+        """``OSError`` from ``_canonicalize_kg_path`` at the top of
+        ``_call_kg`` (e.g. transient Windows realpath hiccup on a stale
+        junction) must propagate unchanged. The fix-rationale invariant:
+        capturing the canonical path before the retry loop means an FS
+        error surfaces cleanly to the dispatcher's exception envelope
+        instead of getting raised inside the ``except`` branch where it
+        would mask a ``sqlite3.ProgrammingError``.
+        """
+        from mempalace import mcp_server
+
+        monkeypatch.setattr(mcp_server, "_resolve_kg_path", lambda: "/fake/path")
+        monkeypatch.setattr(
+            mcp_server,
+            "_canonicalize_kg_path",
+            lambda p: (_ for _ in ()).throw(OSError("simulated realpath failure")),
+        )
+
+        op_calls = {"n": 0}
+
+        def op(kg):
+            op_calls["n"] += 1
+            return None
+
+        with pytest.raises(OSError, match="simulated realpath failure"):
+            mcp_server._call_kg(op)
+        assert op_calls["n"] == 0, "op must not run if canonicalize fails at top"
+
+    def test_canonicalize_kg_path_collapses_symlink_alias(self, tmp_path):
+        """A symlink layer over the palace directory must collapse to one
+        cache key — otherwise two tenants pointing at /srv/A and
+        /srv/link-to-A open duplicate sqlite3.Connections over the same
+        file."""
+        if sys.platform == "win32":
+            pytest.skip("symlink creation requires admin privileges on Windows runners")
+
+        from mempalace import mcp_server
+
+        target = tmp_path / "real"
+        target.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(target)
+
+        real_db = str(target / "knowledge_graph.sqlite3")
+        link_db = str(link / "knowledge_graph.sqlite3")
+
+        assert mcp_server._canonicalize_kg_path(real_db) == mcp_server._canonicalize_kg_path(
+            link_db
+        )
+
+    def test_canonicalize_kg_path_routes_through_normcase(self, monkeypatch):
+        """``_canonicalize_kg_path`` must apply ``os.path.normcase`` so the
+        cache key collapses Windows drive-letter casing
+        (``C:\\palace`` vs ``c:\\palace``). On POSIX runners normcase is a
+        no-op, so we patch both ``realpath`` and ``normcase`` with sentinel
+        wrappers and assert the helper composes them as
+        ``normcase(realpath(p))`` -- swapping the order would leave Windows
+        symlinks under the original case, defeating the dedup.
+        """
+        from mempalace import mcp_server
+
+        def fake_realpath(p: str) -> str:
+            return f"<RP:{p}>"
+
+        def fake_normcase(p: str) -> str:
+            return f"<NC:{p}>"
+
+        monkeypatch.setattr(os.path, "realpath", fake_realpath)
+        monkeypatch.setattr(os.path, "normcase", fake_normcase)
+
+        result = mcp_server._canonicalize_kg_path("/some/Path/KG.sqlite3")
+
+        assert (
+            result == "<NC:<RP:/some/Path/KG.sqlite3>>"
+        ), f"expected normcase(realpath(p)) composition, got {result!r}"
+
+    def test_get_kg_dedupes_symlink_alias_end_to_end(self, tmp_path, monkeypatch):
+        """End-to-end: two ``_get_kg()`` calls via different symlink layers
+        return the same cached instance and construct only one
+        ``KnowledgeGraph``."""
+        if sys.platform == "win32":
+            pytest.skip("symlink creation requires admin privileges on Windows runners")
+
+        from mempalace import mcp_server
+
+        target = tmp_path / "real"
+        target.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(target)
+
+        real_db = str(target / "knowledge_graph.sqlite3")
+        link_db = str(link / "knowledge_graph.sqlite3")
+
+        constructed: list = []
+
+        class _StubKG:
+            def __init__(self, db_path=None):
+                constructed.append(db_path)
+
+        monkeypatch.setattr(mcp_server, "_kg_by_path", {})
+        monkeypatch.setattr(mcp_server, "KnowledgeGraph", _StubKG)
+
+        paths = iter([real_db, link_db])
+        monkeypatch.setattr(mcp_server, "_resolve_kg_path", lambda: next(paths))
+
+        kg1 = mcp_server._get_kg()
+        kg2 = mcp_server._get_kg()
+
+        assert kg1 is kg2, "symlink alias must hit the cached KG, not construct a duplicate"
+        assert len(constructed) == 1, f"expected 1 KG construction, got {len(constructed)}"
+        assert len(mcp_server._kg_by_path) == 1
