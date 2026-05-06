@@ -30,6 +30,51 @@ _REQUIRED_OPERATORS = frozenset({"$eq", "$ne", "$in", "$nin", "$and", "$or", "$c
 _OPTIONAL_OPERATORS = frozenset({"$gt", "$gte", "$lt", "$lte"})
 _SUPPORTED_OPERATORS = _REQUIRED_OPERATORS | _OPTIONAL_OPERATORS
 
+# A healthy HNSW payload should keep link_lists.bin proportional to
+# data_level0.bin. When link_lists.bin grows orders of magnitude larger than
+# data_level0.bin, Chroma/HNSW can segfault while opening the segment even if
+# index_metadata.pickle is structurally valid.
+#
+# The report in #1218 showed ratios above 300x, while healthy snapshots were far below 1x.
+# Treat only >10x as corruption so normal flush lag or small segments do not get
+# quarantined.
+_HNSW_LINK_TO_DATA_MAX_RATIO = 10.0
+
+
+def _hnsw_link_to_data_ratio(seg_dir: str) -> Optional[float]:
+    """Return link_lists.bin / data_level0.bin size ratio for a segment.
+
+    ``None`` means the ratio is not meaningful, usually because one file is
+    missing or data_level0.bin is empty. ``float("inf")`` means the files were
+    present but could not be statted safely, which should be treated as
+    suspicious by callers.
+    """
+
+    link_path = os.path.join(seg_dir, "link_lists.bin")
+    data_path = os.path.join(seg_dir, "data_level0.bin")
+
+    if not (os.path.isfile(link_path) and os.path.isfile(data_path)):
+        return None
+
+    try:
+        data_size = os.path.getsize(data_path)
+        link_size = os.path.getsize(link_path)
+    except OSError:
+        return float("inf")
+
+    if data_size <= 0:
+        return None
+
+    return link_size / data_size
+
+
+def _hnsw_payload_appears_sane(seg_dir: str) -> bool:
+    """Return False when HNSW payload files are structurally implausible."""
+
+    ratio = _hnsw_link_to_data_ratio(seg_dir)
+    return ratio is None or ratio <= _HNSW_LINK_TO_DATA_MAX_RATIO
+
+
 # HNSW tuning to prevent link_lists.bin bloat on large mines (#344).
 #
 # With default params (batch_size=100, sync_threshold=1000, initial capacity
@@ -107,6 +152,9 @@ def _segment_appears_healthy(seg_dir: str) -> bool:
     files and quarantine_stale_hnsw would conservatively rename them
     out of the way (lazy rebuild on next open recovers).
     """
+    if not _hnsw_payload_appears_sane(seg_dir):
+        return False
+
     meta_path = os.path.join(seg_dir, "index_metadata.pickle")
     if not os.path.isfile(meta_path):
         # No metadata file yet — segment hasn't flushed (fresh / empty).
@@ -128,64 +176,35 @@ def _segment_appears_healthy(seg_dir: str) -> bool:
 
 
 def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> list[str]:
-    """Rename HNSW segment dirs that are both stale-by-mtime AND fail an
-    integrity sniff-test.
+    """Rename HNSW segment dirs that look unsafe to open.
 
-    Catches the segfault failure mode from #823 (semantic search stale
-    after ``add_drawer``), observed at neo-cortex-mcp#2 (SIGSEGV on
-    ``count()`` with chromadb 1.5.5), and acknowledged as by-design at
-    chroma-core/chroma#2594. Renaming a corrupt segment lets chromadb
-    rebuild lazily on next open instead of segfaulting.
+    This catches two classes of HNSW corruption before ChromaDB opens the
+    native segment reader:
 
-    Two-stage check:
+    1. stale-by-mtime segments whose ``index_metadata.pickle`` fails the
+       existing format sniff-test;
+    2. structurally impossible HNSW payloads where ``link_lists.bin`` is much
+       larger than ``data_level0.bin``.
 
-    1. **mtime gate.** If ``chroma.sqlite3`` is less than
-       ``stale_seconds`` newer than the segment's ``data_level0.bin``,
-       skip — chromadb is in normal write-path territory.
+    The second check is intentionally not gated by mtime. A segment with a
+    300x link/data ratio is unsafe regardless of whether its mtime is recent;
+    letting Chroma open it can SIGSEGV before Python fallback code runs.
 
-    2. **Integrity gate** (``_segment_appears_healthy``). Even when the
-       mtime gap exceeds the threshold, a segment whose
-       ``index_metadata.pickle`` passes a format sniff-test is healthy:
-       chromadb 1.5.x flushes HNSW state asynchronously and a clean
-       shutdown does NOT force-flush, so the on-disk HNSW is *always*
-       somewhat older than ``chroma.sqlite3``. Production observation
-       (2026-04-26 disks daemon): three of three segments quarantined
-       on every cold start, with 538-557s gaps, leaving the 151K-drawer
-       palace with vector_ranked=0 until rebuild. Renaming a healthy
-       segment based on mtime alone destroys a valid index — chromadb
-       creates an empty replacement, orphaning every drawer in sqlite
-       from vector recall until the operator runs ``mempalace repair
-       --mode rebuild`` (15+ min on a 151K palace).
-
-    Only segments that pass stage 1 (suspiciously stale) AND fail stage
-    2 (metadata file truncated, zero-filled, or absent-with-data) are
-    renamed to ``<uuid>.drift-<timestamp>``. The original directory is
-    renamed, not deleted, so recovery remains possible if the heuristic
-    misfires.
-
-    The default threshold (5 min) is advisory under daemon-strict; the
-    integrity gate is what actually distinguishes corruption from flush
-    lag. The threshold still matters for the cross-machine replication
-    case (#823), where it bounds how stale a Syncthing-replicated
-    segment can be before we look harder at it.
-
-    Args:
-        palace_path: path to the palace directory containing ``chroma.sqlite3``
-        stale_seconds: minimum mtime gap to *consider* a segment for quarantine
-
-    Returns:
-        List of paths that were quarantined (empty if nothing actually
-        looked corrupt).
+    The original directory is renamed, not deleted, so recovery remains
+    possible if the heuristic ever misfires.
     """
+
     db_path = os.path.join(palace_path, "chroma.sqlite3")
     if not os.path.isfile(db_path):
         return []
+
     try:
         sqlite_mtime = os.path.getmtime(db_path)
     except OSError:
         return []
 
     moved: list[str] = []
+
     try:
         entries = os.listdir(palace_path)
     except OSError:
@@ -194,29 +213,34 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
     for name in entries:
         if "-" not in name or name.startswith(".") or ".drift-" in name:
             continue
+
         seg_dir = os.path.join(palace_path, name)
         if not os.path.isdir(seg_dir):
             continue
+
         hnsw_bin = os.path.join(seg_dir, "data_level0.bin")
         if not os.path.isfile(hnsw_bin):
             continue
+
         try:
             hnsw_mtime = os.path.getmtime(hnsw_bin)
         except OSError:
             continue
-        if sqlite_mtime - hnsw_mtime < stale_seconds:
+
+        payload_ratio = _hnsw_link_to_data_ratio(seg_dir)
+        payload_corrupt = payload_ratio is not None and payload_ratio > _HNSW_LINK_TO_DATA_MAX_RATIO
+
+        if not payload_corrupt and sqlite_mtime - hnsw_mtime < stale_seconds:
             continue
 
-        # Stage 2: integrity gate. mtime drift is necessary but not
-        # sufficient — chromadb's async flush makes drift the steady-
-        # state condition. A healthy segment metadata file proves
-        # chromadb can open the segment without segfault; don't
-        # quarantine a healthy index.
-        if _segment_appears_healthy(seg_dir):
+        # Stage 2: integrity gate. Mtime drift alone is not corruption because
+        # Chroma flushes HNSW asynchronously. A healthy metadata file proves the
+        # ordinary stale-by-mtime case is just flush lag.
+        if not payload_corrupt and _segment_appears_healthy(seg_dir):
             logger.info(
                 "HNSW mtime gap %.0fs on %s exceeds threshold but segment "
-                "metadata file is intact — flush-lag, not corruption. "
-                "Leaving in place.",
+                "metadata and payload size are intact — flush-lag, not "
+                "corruption. Leaving in place.",
                 sqlite_mtime - hnsw_mtime,
                 seg_dir,
             )
@@ -224,17 +248,30 @@ def quarantine_stale_hnsw(palace_path: str, stale_seconds: float = 300.0) -> lis
 
         stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         target = f"{seg_dir}.drift-{stamp}"
+
+        if payload_corrupt:
+            reason = (
+                f"link_lists.bin/data_level0.bin ratio {payload_ratio:.1f}x "
+                f"exceeds {_HNSW_LINK_TO_DATA_MAX_RATIO:.1f}x"
+            )
+        else:
+            reason = (
+                f"sqlite {sqlite_mtime - hnsw_mtime:.0f}s newer than HNSW "
+                "and integrity check failed"
+            )
+
         try:
             os.rename(seg_dir, target)
             moved.append(target)
             logger.warning(
-                "Quarantined corrupt HNSW segment %s (sqlite %.0fs newer than HNSW, integrity check failed); renamed to %s",
+                "Quarantined corrupt HNSW segment %s (%s); renamed to %s",
                 seg_dir,
-                sqlite_mtime - hnsw_mtime,
+                reason,
                 target,
             )
         except OSError:
             logger.exception("Failed to quarantine corrupt HNSW segment %s", seg_dir)
+
     return moved
 
 
