@@ -1580,22 +1580,27 @@ class TestKGLazyCache:
         """``_canonicalize_kg_path`` must apply ``os.path.normcase`` so the
         cache key collapses Windows drive-letter casing
         (``C:\\palace`` vs ``c:\\palace``). On POSIX runners normcase is a
-        no-op, so we monkeypatch it to verify the wiring rather than the
-        OS behaviour."""
+        no-op, so we patch both ``realpath`` and ``normcase`` with sentinel
+        wrappers and assert the helper composes them as
+        ``normcase(realpath(p))`` -- swapping the order would leave Windows
+        symlinks under the original case, defeating the dedup.
+        """
         from mempalace import mcp_server
 
-        seen: list = []
+        def fake_realpath(p: str) -> str:
+            return f"<RP:{p}>"
 
         def fake_normcase(p: str) -> str:
-            seen.append(p)
-            return p.lower()
+            return f"<NC:{p}>"
 
+        monkeypatch.setattr(os.path, "realpath", fake_realpath)
         monkeypatch.setattr(os.path, "normcase", fake_normcase)
 
-        result = mcp_server._canonicalize_kg_path("/Some/Path/KG.sqlite3")
+        result = mcp_server._canonicalize_kg_path("/some/Path/KG.sqlite3")
 
-        assert seen, "expected normcase to be invoked"
-        assert result == seen[-1].lower()
+        assert (
+            result == "<NC:<RP:/some/Path/KG.sqlite3>>"
+        ), f"expected normcase(realpath(p)) composition, got {result!r}"
 
     def test_get_kg_dedupes_symlink_alias_end_to_end(self, tmp_path, monkeypatch):
         """End-to-end: two ``_get_kg()`` calls via different symlink layers
