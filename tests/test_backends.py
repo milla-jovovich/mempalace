@@ -17,8 +17,10 @@ from mempalace.backends import (
 from mempalace.backends.chroma import (
     ChromaBackend,
     ChromaCollection,
+    _HNSW_MISSING_METADATA_DATA_FLOOR,
     _fix_blob_seq_ids,
     _pin_hnsw_threads,
+    _segment_appears_healthy,
     quarantine_stale_hnsw,
 )
 
@@ -683,9 +685,9 @@ def test_quarantine_stale_hnsw_leaves_healthy_segment_with_drift_alone(tmp_path)
     assert seg.exists()
 
 
-def test_quarantine_stale_hnsw_leaves_segment_without_metadata_alone(tmp_path):
-    """Segment with no metadata file is treated as fresh / never-flushed
-    and not quarantined — renaming an empty dir orphans nothing."""
+def test_quarantine_stale_hnsw_leaves_empty_segment_without_metadata_alone(tmp_path):
+    """Missing metadata is okay only when the segment has no meaningful data yet."""
+
     now = 1_700_000_000.0
     palace, seg = _make_palace_with_segment(
         tmp_path,
@@ -693,9 +695,55 @@ def test_quarantine_stale_hnsw_leaves_segment_without_metadata_alone(tmp_path):
         sqlite_mtime=now,
         meta_bytes=None,
     )
+
     moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
+
     assert moved == []
     assert seg.exists()
+
+
+def test_segment_without_metadata_but_with_nontrivial_data_is_unhealthy(tmp_path):
+    """Data without index_metadata.pickle is a partial flush, not a fresh segment."""
+
+    seg = tmp_path / "abcd-1234-5678"
+    seg.mkdir()
+    (seg / "data_level0.bin").write_bytes(b"\0" * (_HNSW_MISSING_METADATA_DATA_FLOOR + 1))
+
+    assert not _segment_appears_healthy(str(seg))
+
+
+def test_segment_without_metadata_and_tiny_data_is_still_treated_as_fresh(tmp_path):
+    """Tiny data payloads can occur before metadata has flushed; leave them alone."""
+
+    seg = tmp_path / "abcd-1234-5678"
+    seg.mkdir()
+    (seg / "data_level0.bin").write_bytes(b"\0" * _HNSW_MISSING_METADATA_DATA_FLOOR)
+
+    assert _segment_appears_healthy(str(seg))
+
+
+def test_quarantine_stale_hnsw_renames_missing_metadata_with_nontrivial_data(tmp_path):
+    """Regression for #1274: missing pickle + non-trivial data must quarantine."""
+
+    now = 1_700_000_000.0
+    palace, seg = _make_palace_with_segment(
+        tmp_path,
+        hnsw_mtime=now - 7200,
+        sqlite_mtime=now,
+        meta_bytes=None,
+    )
+    (seg / "data_level0.bin").write_bytes(b"\0" * (_HNSW_MISSING_METADATA_DATA_FLOOR + 1))
+    os.utime(seg / "data_level0.bin", (now - 7200, now - 7200))
+
+    moved = quarantine_stale_hnsw(str(palace), stale_seconds=3600.0)
+
+    assert len(moved) == 1
+    assert ".drift-" in moved[0]
+    assert not seg.exists()
+
+    drift_dirs = [p for p in palace.iterdir() if ".drift-" in p.name]
+    assert len(drift_dirs) == 1
+    assert (drift_dirs[0] / "data_level0.bin").exists()
 
 
 def test_quarantine_stale_hnsw_renames_truncated_metadata(tmp_path):

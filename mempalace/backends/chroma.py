@@ -55,6 +55,13 @@ _HNSW_BLOAT_GUARD = {
     "hnsw:sync_threshold": 50_000,
 }
 
+# Missing index_metadata.pickle is normal only while a segment is still fresh
+# or effectively empty. Once data_level0.bin has non-trivial payload, a
+# missing metadata pickle means the segment was interrupted after writing HNSW
+# data but before writing its metadata. Letting Chroma open that shape can
+# segfault or hang in native HNSW code.
+_HNSW_MISSING_METADATA_DATA_FLOOR = 1024
+
 
 def _validate_where(where: Optional[dict]) -> None:
     """Scan a where-clause for unknown operators and raise ``UnsupportedFilterError``.
@@ -85,16 +92,13 @@ def _segment_appears_healthy(seg_dir: str) -> bool:
     parsing it. ChromaDB writes that file after a successful HNSW flush;
     a complete write starts with byte ``0x80`` and ends with byte
     ``0x2e`` (the protocol/terminator byte sequence chromadb serializes
-    with). If both bytes are present and the file is non-trivially sized,
-    chromadb will load the segment cleanly even when its on-disk mtime
-    trails ``chroma.sqlite3`` — which is the *steady state* under
-    chromadb 1.5.x's async batched flush, not corruption.
+    with).
 
-    A missing metadata file is treated as "fresh / never-flushed" and
-    considered healthy. Renaming an empty dir orphans nothing, and a
-    real corruption case manifests as a present-but-malformed file or a
-    chromadb load error caught downstream by palace-daemon's
-    ``_auto_repair`` retry path.
+    Missing metadata is healthy only while the segment still looks fresh or
+    empty. If ``data_level0.bin`` already has non-trivial payload but
+    ``index_metadata.pickle`` is missing, the segment is partially flushed:
+    Chroma wrote vector data without the metadata it needs to reopen the
+    HNSW reader safely.
 
     Deliberately format-sniffs only; never deserializes. Deserialization
     can execute arbitrary code, and the byte-sniff is sufficient to
@@ -105,13 +109,24 @@ def _segment_appears_healthy(seg_dir: str) -> bool:
     chromadb writes today; if a future chromadb version emits protocol
     0/1 segments, this check would start returning False on healthy
     files and quarantine_stale_hnsw would conservatively rename them
-    out of the way (lazy rebuild on next open recovers).
+    out of the way.
     """
+
     meta_path = os.path.join(seg_dir, "index_metadata.pickle")
     if not os.path.isfile(meta_path):
-        # No metadata file yet — segment hasn't flushed (fresh / empty).
-        # Renaming would orphan nothing; consider healthy.
+        data_path = os.path.join(seg_dir, "data_level0.bin")
+        try:
+            if (
+                os.path.isfile(data_path)
+                and os.path.getsize(data_path) > _HNSW_MISSING_METADATA_DATA_FLOOR
+            ):
+                return False
+        except OSError:
+            return False
+
+        # No metadata and no meaningful vector payload yet: fresh/empty segment.
         return True
+
     try:
         size = os.path.getsize(meta_path)
         # A real chromadb metadata file is at least tens of bytes; a
