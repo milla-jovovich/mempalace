@@ -682,3 +682,69 @@ def test_max_seq_id_rollback_on_verification_failure(tmp_path, monkeypatch):
     # A backup file is still present — caller can roll back from it.
     leftover = [fn for fn in os.listdir(palace) if "max-seq-id-backup-" in fn]
     assert leftover
+
+
+def test_max_seq_id_preflight_preserves_embeddings_queue(tmp_path):
+    """#1295: default repair preflight must not drop queued writes."""
+
+    palace = str(tmp_path / "palace")
+    seg = _seed_poisoned_max_seq_id(
+        palace,
+        drawers_meta_max=102,
+        closets_meta_max=11,
+    )
+    db_path = os.path.join(palace, "chroma.sqlite3")
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            "INSERT INTO embeddings_queue(seq_id, topic, id) VALUES (?, ?, ?)",
+            [
+                (seq_id, "persistent://default/default/mempalace_drawers", f"queued-{seq_id}")
+                for seq_id in range(103, 123)
+            ],
+        )
+        conn.commit()
+
+    result = repair.maybe_repair_poisoned_max_seq_id_before_rebuild(
+        palace,
+        assume_yes=True,
+    )
+
+    assert result is not None
+    assert result["segment_repaired"]
+
+    with sqlite3.connect(db_path) as conn:
+        max_seq_rows = dict(conn.execute("SELECT segment_id, seq_id FROM max_seq_id"))
+        queue_count = conn.execute("SELECT COUNT(*) FROM embeddings_queue").fetchone()[0]
+
+    assert max_seq_rows[seg["drawers_vec"]] == seg["drawers_meta_max"]
+    assert max_seq_rows[seg["drawers_meta"]] == seg["drawers_meta_max"]
+    assert max_seq_rows[seg["closets_vec"]] == seg["closets_meta_max"]
+    assert max_seq_rows[seg["closets_meta"]] == seg["closets_meta_max"]
+
+    # The old legacy rebuild path can discard queued writes. The preflight
+    # repair must leave them on disk for Chroma to drain after the bookmark is
+    # unpoisoned.
+    assert queue_count == 20
+
+
+def test_rebuild_index_repairs_poisoned_max_seq_id_before_collection_rebuild(tmp_path, capsys):
+    """A poisoned bookmark should short-circuit before the legacy rebuild path."""
+
+    palace = str(tmp_path / "palace")
+    _seed_poisoned_max_seq_id(palace)
+
+    with patch("mempalace.repair.ChromaBackend") as mock_backend:
+        repair.rebuild_index(palace)
+
+    out = capsys.readouterr().out
+    backend = mock_backend.return_value
+
+    # repair_max_seq_id may instantiate ChromaBackend to close cached clients
+    # after editing sqlite directly. That is safe. The important thing is that
+    # rebuild_index must not continue into the legacy Chroma collection read /
+    # count / rebuild path after the max_seq_id preflight handles the issue.
+    backend.get_collection.assert_not_called()
+
+    assert "Detected poisoned max_seq_id rows" in out
+    assert "non-destructive max_seq_id repair" in out

@@ -654,7 +654,11 @@ def cmd_repair(args):
     import shutil
     from .backends.chroma import ChromaBackend
     from .migrate import confirm_destructive_action, contains_palace_database
-    from .repair import TruncationDetected, check_extraction_safety
+    from .repair import (
+        TruncationDetected,
+        check_extraction_safety,
+        maybe_repair_poisoned_max_seq_id_before_rebuild,
+    )
 
     palace_path = os.path.abspath(
         os.path.expanduser(args.palace) if args.palace else MempalaceConfig().palace_path
@@ -679,11 +683,20 @@ def cmd_repair(args):
         print(f"\n  No palace found at {palace_path}")
         return
     if not contains_palace_database(palace_path):
-        print(f"\n  No palace database found at {db_path}")
+        print(f"\n No palace database found at {db_path}")
+        return
+
+    preflight = maybe_repair_poisoned_max_seq_id_before_rebuild(
+        palace_path,
+        backup=getattr(args, "backup", True),
+        dry_run=getattr(args, "dry_run", False),
+        assume_yes=getattr(args, "yes", False),
+    )
+    if preflight is not None:
         return
 
     print(f"\n{'=' * 55}")
-    print("  MemPalace Repair")
+    print(" MemPalace Repair")
     print(f"{'=' * 55}\n")
     print(f"  Palace: {palace_path}")
 

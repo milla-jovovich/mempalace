@@ -330,6 +330,56 @@ def sqlite_drawer_count(palace_path: str) -> "int | None":
         return None
 
 
+def maybe_repair_poisoned_max_seq_id_before_rebuild(
+    palace_path: str,
+    *,
+    backup: bool = True,
+    dry_run: bool = False,
+    assume_yes: bool = False,
+) -> "dict | None":
+    """Run non-destructive max_seq_id repair before a rebuild if needed.
+
+    A poisoned ``max_seq_id`` row can make Chroma believe it has already
+    consumed every row in ``embeddings_queue``. Writes then report success
+    because they land in the queue, but they never become visible in
+    ``embeddings``.
+
+    If this precise corruption is present, do the narrow bookmark repair and
+    stop instead of continuing into the legacy rebuild path. The rebuild path
+    extracts only already-visible embeddings and can discard queued writes.
+    """
+
+    db_path = os.path.join(palace_path, "chroma.sqlite3")
+    if not os.path.isfile(db_path):
+        return None
+
+    try:
+        poisoned = _detect_poisoned_max_seq_ids(db_path)
+    except Exception:
+        return None
+
+    if not poisoned:
+        return None
+
+    print("\n Detected poisoned max_seq_id rows before repair rebuild.")
+    print(
+        " This can make writes report success while embeddings_queue grows "
+        "and embeddings stay static."
+    )
+    print(" Running the non-destructive max_seq_id repair instead of rebuilding " "the collection.")
+    print(
+        " Queued writes remain in chroma.sqlite3 for Chroma to drain after "
+        "the bookmark is unpoisoned."
+    )
+
+    return repair_max_seq_id(
+        palace_path,
+        backup=backup,
+        dry_run=dry_run,
+        assume_yes=assume_yes,
+    )
+
+
 def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     """Rebuild the HNSW index from scratch.
 
@@ -353,7 +403,14 @@ def rebuild_index(palace_path=None, confirm_truncation_ok: bool = False):
     print(f"\n{'=' * 55}")
     print("  MemPalace Repair — Index Rebuild")
     print(f"{'=' * 55}\n")
-    print(f"  Palace: {palace_path}")
+    print(f" Palace: {palace_path}")
+
+    preflight = maybe_repair_poisoned_max_seq_id_before_rebuild(
+        palace_path,
+        assume_yes=True,
+    )
+    if preflight is not None:
+        return
 
     backend = ChromaBackend()
     try:
