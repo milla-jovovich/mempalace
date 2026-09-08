@@ -1833,6 +1833,7 @@ _taxonomy_cache = None
 _taxonomy_cache_time = 0.0
 _TAXONOMY_CACHE_TTL = 5.0  # seconds — same idea as the palace-graph cache
 _MAX_RESULTS = 100  # upper bound for search/list limit params
+_DIARY_READ_PAGE_SIZE = 1000
 
 
 def _invalidate_overview_caches():
@@ -4429,35 +4430,54 @@ def tool_diary_read(agent_name: str, last_n: int = 10, wing: str = ""):
         conditions.insert(0, {"wing": wing})
 
     try:
-        results = col.get(
-            where={"$and": conditions},
-            include=["documents", "metadatas"],
-            limit=10000,
-        )
-
-        if not results["ids"]:
-            return {"agent": agent_name, "entries": [], "message": "No diary entries yet."}
-
-        # Combine and sort by timestamp
+        where = {"$and": conditions}
         entries = []
-        for doc, meta in zip(results["documents"], results["metadatas"]):
-            meta = _safe_meta(meta)
-            entries.append(
-                {
-                    "date": meta.get("date", ""),
-                    "timestamp": meta.get("filed_at", ""),
-                    "topic": meta.get("topic", ""),
-                    "content": doc,
-                }
-            )
+        total = 0
+        offset = 0
 
-        entries.sort(key=lambda x: x["timestamp"], reverse=True)
-        entries = entries[:last_n]
+        while True:
+            results = col.get(
+                where=where,
+                include=["documents", "metadatas"],
+                limit=_DIARY_READ_PAGE_SIZE,
+                offset=offset,
+            )
+            batch_ids = _chroma_field(results, "ids", []) or []
+            if not batch_ids:
+                break
+
+            documents = _chroma_field(results, "documents", []) or []
+            metadatas = _chroma_field(results, "metadatas", []) or []
+            total += len(batch_ids)
+
+            for index in range(len(batch_ids)):
+                doc = documents[index] if index < len(documents) else ""
+                meta = _safe_meta(metadatas[index] if index < len(metadatas) else None)
+                entries.append(
+                    {
+                        "date": meta.get("date", ""),
+                        "timestamp": meta.get("filed_at", ""),
+                        "topic": meta.get("topic", ""),
+                        "content": doc,
+                    }
+                )
+
+            # Keep memory bounded while scanning: only candidates for the
+            # final newest-N result need to survive into the next page.
+            entries.sort(key=lambda x: x["timestamp"], reverse=True)
+            del entries[last_n:]
+
+            offset += len(batch_ids)
+            if len(batch_ids) < _DIARY_READ_PAGE_SIZE:
+                break
+
+        if total == 0:
+            return {"agent": agent_name, "entries": [], "message": "No diary entries yet."}
 
         return {
             "agent": agent_name,
             "entries": entries,
-            "total": len(results["ids"]),
+            "total": total,
             "showing": len(entries),
         }
     except Exception:
