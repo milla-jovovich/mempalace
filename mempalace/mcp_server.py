@@ -79,6 +79,7 @@ from .backends.chroma import (  # noqa: E402
     reset_hnsw_capacity_cache,
 )
 from .backends import BackendMismatchError, PalaceRef, detect_backend_for_path  # noqa: E402
+from .backends.base import BaseCollection  # noqa: E402
 from .date_window import filed_at_in_window, parse_date_bound  # noqa: E402
 from .query_sanitizer import sanitize_query  # noqa: E402
 from .searcher import (  # noqa: E402
@@ -2976,6 +2977,19 @@ def _fetch_drawer_rows(col, where=None, page_size: int = 1000, include=None):
     offset = 0
     want_docs = "documents" in include
     want_meta = "metadatas" in include
+
+    # Let the backend walk its own cursor once (#2452): the offset loop below
+    # is O(n^2) on backends whose get(limit=, offset=) re-scans from the start,
+    # the same trap _fetch_all_metadata() avoids through get_all_metadata().
+    if isinstance(col, BaseCollection):
+        result = col.get_all_rows(where=where, include=include)
+        ids = list(_chroma_field(result, "ids", []) or [])
+        all_docs = _chroma_field(result, "documents", []) or []
+        all_metas = _chroma_field(result, "metadatas", []) or []
+        for idx in range(len(ids)):
+            documents.append(all_docs[idx] if want_docs and idx < len(all_docs) else "")
+            metadatas.append(all_metas[idx] if want_meta and idx < len(all_metas) else {})
+        return ids, documents, metadatas
 
     while True:
         kwargs = {
