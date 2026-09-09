@@ -1,3 +1,4 @@
+import logging
 import os
 import sqlite3
 import subprocess
@@ -1531,3 +1532,37 @@ def test_detached_kwargs_windows(tmp_path, monkeypatch):
         assert "start_new_session" not in kwargs
     finally:
         fh.close()
+
+
+def test_run_server_logs_lifecycle_events(tmp_path, monkeypatch, caplog):
+    """A supervisor capturing the foreground daemon's stderr must see lifecycle lines (#2475)."""
+    caplog.set_level(logging.INFO, logger="mempalace.daemon")
+    client, thread, palace, holders = _start_server(
+        tmp_path, monkeypatch, lambda k, p: {"success": True}
+    )
+    try:
+        listening = [r for r in caplog.records if "daemon listening on http://" in r.getMessage()]
+        assert listening, [r.getMessage() for r in caplog.records]
+        assert str(palace) in listening[0].getMessage()
+        assert f"pid {os.getpid()}" in listening[0].getMessage()
+    finally:
+        _stop_server(client, thread, holders)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith("daemon stopping") for m in messages), messages
+    assert any(m.startswith("daemon stopped") for m in messages), messages
+
+
+def test_configure_foreground_logging_is_idempotent(monkeypatch):
+    logger = logging.getLogger("mempalace.daemon")
+    before = list(logger.handlers)
+    try:
+        daemon.configure_foreground_logging()
+        daemon.configure_foreground_logging()
+        added = [h for h in logger.handlers if h not in before]
+        assert len(added) == 1
+        assert isinstance(added[0], logging.StreamHandler)
+        assert logger.level == logging.INFO
+    finally:
+        for h in logger.handlers:
+            if h not in before:
+                logger.removeHandler(h)
